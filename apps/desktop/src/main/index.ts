@@ -9,7 +9,7 @@ import {
   shell,
 } from "electron";
 import path from "node:path";
-import type { ChatHead } from "../shared/types";
+import type { ChatHead, InfoSession } from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
@@ -278,7 +278,11 @@ function showInfo(index: number): void {
 
 function hideInfo(): void {
   selectedHeadId = null;
-  if (infoWindow && !infoWindow.isDestroyed()) infoWindow.hide();
+  if (infoWindow && !infoWindow.isDestroyed()) {
+    // Renderer pauses its session poll when it sees an empty head.
+    infoWindow.webContents.send("info:hide");
+    infoWindow.hide();
+  }
 }
 
 function repositionInfoIfVisible(): void {
@@ -462,6 +466,24 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
     win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
   }
 });
+
+ipcMain.handle(
+  "sessions:forHead",
+  async (_e, headId: string): Promise<InfoSession[]> => {
+    const login = rail.parseUserHeadId(headId);
+    if (!login) return [];
+    const state = backend.getAuthState();
+    if (!state.signedIn) return [];
+    try {
+      if (state.user.githubLogin === login) {
+        return await backend.listOwnSessions();
+      }
+      return await backend.listFeedSessionsForUser(login);
+    } catch {
+      return [];
+    }
+  },
+);
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());

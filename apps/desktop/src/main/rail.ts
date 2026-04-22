@@ -21,9 +21,21 @@ const changes = createEmitter<ChatHead[]>();
 export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
 
+const USER_HEAD_PREFIX = "user:";
+
+export function userHeadId(login: string): string {
+  return `${USER_HEAD_PREFIX}${login}`;
+}
+
+export function parseUserHeadId(headId: string): string | null {
+  return headId.startsWith(USER_HEAD_PREFIX)
+    ? headId.slice(USER_HEAD_PREFIX.length)
+    : null;
+}
+
 function headForUser(login: string, avatarUrl: string): ChatHead {
   return {
-    id: `user:${login}`,
+    id: userHeadId(login),
     label: login,
     tint: "transparent",
     avatar: { type: "remote", value: avatarUrl },

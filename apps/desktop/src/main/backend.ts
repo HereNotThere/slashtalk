@@ -14,8 +14,10 @@ import http from "node:http";
 import os from "node:os";
 import type { AddressInfo } from "node:net";
 import type {
+  FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
+  SessionSnapshot,
   SyncStateEntry,
 } from "@slashtalk/shared";
 import type {
@@ -313,6 +315,17 @@ export async function listTeammates(): Promise<TeammateSummary[]> {
     activeSessions: r.active_sessions,
     repos: r.repos,
   }));
+}
+
+export function listOwnSessions(): Promise<SessionSnapshot[]> {
+  return jsonFetch<SessionSnapshot[]>("/api/sessions", { method: "GET" });
+}
+
+export function listFeedSessionsForUser(
+  login: string,
+): Promise<FeedSessionSnapshot[]> {
+  const qs = new URLSearchParams({ user: login });
+  return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
 
 export function postDeviceRepos(payload: {

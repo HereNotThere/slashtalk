@@ -1,6 +1,12 @@
 // Shared types used by main, preload, and all renderer windows.
 // Any IPC contract lives here, so changes are caught by the compiler on both sides.
 
+import type { FeedSessionSnapshot, SessionSnapshot } from "@slashtalk/shared";
+
+// Sessions surfaced to the info window: own sessions (SessionSnapshot) and
+// peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
+export type InfoSession = SessionSnapshot | FeedSessionSnapshot;
+
 export type Avatar =
   | { type: 'emoji'; value: string }
   | { type: 'remote'; value: string };
@@ -68,6 +74,11 @@ export interface ChatHeadsBridge {
 
   // Info window (main → info renderer)
   onInfoShow: (cb: (payload: { head: ChatHead }) => void) => Unsubscribe;
+  onInfoHide: (cb: () => void) => Unsubscribe;
+
+  // Fetch sessions for a given chat head (signed-in user's own or a peer's
+  // that share a claimed repo with you).
+  listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
 
   // Tray popup actions
   openMain: () => Promise<void>;

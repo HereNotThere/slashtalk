@@ -5,11 +5,12 @@ import type {
   AgentSessionRow,
   FeedSessionSnapshot,
   SessionSnapshot,
+  SpotifyPresence,
 } from "@slashtalk/shared";
 
 // Re-export for convenience: renderers import from this module, not from
 // @slashtalk/shared directly.
-export type { AgentSessionRow };
+export type { AgentSessionRow, SpotifyPresence };
 
 // Sessions surfaced to the info window: own sessions (SessionSnapshot) and
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
@@ -380,16 +381,23 @@ export interface ChatHeadsBridge {
   dragEnd: () => Promise<void>;
 
   // Info window (main → info renderer). Sessions are prefetched in main so
-  // the renderer can paint in one pass at the correct height.
+  // the renderer can paint in one pass at the correct height. `spotify` is
+  // whatever the main-process peerPresence poller last saw for this head.
   onInfoShow: (
     cb: (payload: {
       head: ChatHead;
       sessions: InfoSession[] | null;
       /** Session the caller wants auto-expanded on open (e.g. from a chat card click). */
       expandSessionId?: string | null;
+      spotify: SpotifyPresence | null;
     }) => void,
   ) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
+  /** Pushed from main when the currently-shown head's Spotify presence
+   *  changes between polls. Scoped to the visible head already. */
+  onInfoPresence: (
+    cb: (payload: { login: string; spotify: SpotifyPresence | null }) => void,
+  ) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
   // Fetch sessions for a given chat head (user: own or a peer's; repo: all
@@ -397,6 +405,9 @@ export interface ChatHeadsBridge {
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
   listAgentSessionsForAgent: (agentId: string) => Promise<AgentSessionRow[]>;
+
+  /** Latest cached Spotify presence for `login` from the main-process poller. */
+  getSpotifyForLogin: (login: string) => Promise<SpotifyPresence | null>;
 
   // Tray popup actions
   openMain: () => Promise<void>;

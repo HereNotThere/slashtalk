@@ -21,6 +21,7 @@ import type {
   FeedUser,
   IngestResponse,
   SessionSnapshot,
+  SpotifyPresence,
   SyncStateEntry,
 } from "@slashtalk/shared";
 import type {
@@ -531,5 +532,23 @@ export function sendHeartbeat(body: {
     method: "POST",
     body,
     auth: "apiKey",
+  });
+}
+
+// ---------- Spotify presence ----------
+
+export function postSpotifyPresence(
+  track: Omit<SpotifyPresence, "updatedAt"> | null,
+): Promise<{ ok: true }> {
+  return jsonFetch("/v1/presence/spotify", {
+    method: "POST",
+    body: { track },
+    auth: "apiKey",
+  });
+}
+
+export function listPeerPresence(): Promise<Record<string, SpotifyPresence>> {
+  return jsonFetch<Record<string, SpotifyPresence>>("/api/presence/peers", {
+    method: "GET",
   });
 }

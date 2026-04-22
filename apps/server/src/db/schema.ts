@@ -179,7 +179,10 @@ export const events = pgTable(
     payload: jsonb("payload").notNull(),
     ingestedAt: timestamp("ingested_at", { withTimezone: true }).defaultNow(),
   },
-  (t) => [index("events_session_ts_idx").on(t.sessionId, t.ts)]
+  (t) => [
+    index("events_session_ts_idx").on(t.sessionId, t.ts),
+    index("events_user_project_ts_idx").on(t.userId, t.project, t.ts),
+  ]
 );
 
 export const heartbeats = pgTable("heartbeats", {

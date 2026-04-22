@@ -72,7 +72,7 @@ export function App(): JSX.Element {
   }, []);
 
   return (
-    <div ref={rootRef}>
+    <div ref={rootRef} className="bg-card rounded-lg">
       <Header head={head} />
       <Divider />
       <SessionsSection sessions={sessions} />

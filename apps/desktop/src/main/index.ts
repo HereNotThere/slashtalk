@@ -63,6 +63,10 @@ let selectedHeadId: string | null = null;
 
 let dragOffset: { dx: number; dy: number } | null = null;
 let dragTicker: ReturnType<typeof setInterval> | null = null;
+let resizeAnimations: Map<
+  BrowserWindow,
+  { target: number; ticker: ReturnType<typeof setInterval> }
+> = new Map();
 
 // electron-vite sets ELECTRON_RENDERER_URL in dev mode (pointing at the Vite
 // dev server) so we can reuse the same BrowserWindow code for dev + packaged.
@@ -260,8 +264,8 @@ function positionInfo(index: number): void {
     : visualLeft - INFO_GAP - INFO_WIDTH;
 
   const cell = BUBBLE_SIZE + SPACING;
-  const bubbleMidY = stackBounds.y + PADDING + index * cell + BUBBLE_SIZE / 2;
-  const infoY = Math.round(bubbleMidY - infoCurrentHeight / 2);
+  const avatarTopY = stackBounds.y + PADDING + index * cell;
+  const infoY = Math.round(avatarTopY - 16);
 
   // setBounds (vs setPosition) so we apply the latest tracked height atomically.
   infoWindow.setBounds({
@@ -661,6 +665,44 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
 });
 
+function animateWindowHeight(
+  win: BrowserWindow,
+  targetHeight: number,
+  durationMs: number = 200,
+): void {
+  if (win.isDestroyed()) return;
+
+  const animation = resizeAnimations.get(win);
+  if (animation) clearInterval(animation.ticker);
+
+  const start = win.getBounds().height;
+  const startTime = Date.now();
+
+  const animate = (): void => {
+    if (win.isDestroyed()) {
+      resizeAnimations.delete(win);
+      return;
+    }
+
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / durationMs, 1);
+    // easeOut cubic: 1 - (1-t)^3
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const current = Math.round(start + (targetHeight - start) * eased);
+
+    const b = win.getBounds();
+    win.setBounds({ x: b.x, y: b.y, width: b.width, height: current });
+
+    if (progress >= 1) {
+      resizeAnimations.delete(win);
+    }
+  };
+
+  const ticker = setInterval(animate, 16);
+  resizeAnimations.set(win, { target: targetHeight, ticker });
+  animate();
+}
+
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!win || win.isDestroyed()) return;
@@ -673,14 +715,13 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
     repositionInfoIfVisible();
     // If not currently visible, still reflect the new height so next show is correct.
     if (!selectedHeadId) {
-      const b = win.getBounds();
-      win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+      animateWindowHeight(win, h);
     }
   } else if (win === trayPopup) {
     const b = win.getBounds();
     if (h === b.height) return;
-    // Tray popup is anchored at top (under the menu bar item) — height grows downward.
-    win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+    // Tray popup is anchored at top — height grows downward.
+    animateWindowHeight(win, h);
   }
 });
 

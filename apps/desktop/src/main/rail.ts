@@ -74,10 +74,12 @@ function apply(next: ChatHead[]): void {
 async function refresh(): Promise<void> {
   const self = selfHead();
   if (!self) {
+    console.log("[rail] refresh skipped — not signed in");
     lastSnapshot = { at: Date.now(), peers: null, error: "not signed in" };
     apply([]);
     return;
   }
+  console.log(`[rail] refresh as ${self.label}`);
   try {
     // Fetch the peer list and the recent session feed in parallel. Each peer's
     // "last activity" is just the timestamp of their most recent session in

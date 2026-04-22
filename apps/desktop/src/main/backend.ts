@@ -393,6 +393,7 @@ export function claimRepo(fullName: string): Promise<RepoSummary> {
 }
 
 export async function listTeammates(): Promise<TeammateSummary[]> {
+  console.log("[rail] GET /api/feed/users …");
   const raw = await jsonFetch<FeedUser[]>("/api/feed/users", { method: "GET" });
   console.log(`[rail] /api/feed/users → ${JSON.stringify(raw)}`);
   return raw.map((r) => ({

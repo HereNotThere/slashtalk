@@ -12,6 +12,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "bun run typecheck:node && bun run typecheck:web",
+    "test": "bun test",
     "lint": "eslint ."
   },
   "trustedDependencies": ["electron", "esbuild"],

@@ -9,11 +9,11 @@ import {
   shell,
 } from "electron";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import type { ChatHead, NewChatHead } from "../shared/types";
+import type { ChatHead } from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
+import * as rail from "./rail";
 
 // Single source of truth, mirrors ChatHeadWindow.swift constants.
 const BUBBLE_SIZE = 48;
@@ -35,7 +35,6 @@ const RESIZE_MAX = 900;
 // resize/reposition the window each time it changes.
 let infoCurrentHeight = INFO_INITIAL_HEIGHT;
 
-const HEADS_KEY = "heads";
 const POSITION_KEY = "overlayPosition";
 
 let mainWindow: BrowserWindow | null = null;
@@ -372,45 +371,22 @@ function createTray(): void {
 
 // -------- IPC --------
 
-function persistHeads(): void {
-  store.set(HEADS_KEY, heads);
-}
+ipcMain.handle("heads:list", (): ChatHead[] => heads);
 
-ipcMain.handle("heads:spawn", (_e, head: NewChatHead): ChatHead => {
-  const withId: ChatHead = { id: randomUUID(), ...head };
-  heads.push(withId);
-  persistHeads();
-  ensureOverlay();
-  resizeOverlay();
-  broadcastHeads();
-  return withId;
-});
-
-ipcMain.handle("heads:close", (_e, id: string): void => {
-  const idx = heads.findIndex((h) => h.id === id);
-  if (idx === -1) return;
-  if (selectedHeadId === id) hideInfo();
-  heads.splice(idx, 1);
-  persistHeads();
+rail.onChange((next) => {
+  heads = next;
+  // Drop info-window selection if the targeted head left the graph.
+  if (selectedHeadId && !heads.some((h) => h.id === selectedHeadId)) {
+    hideInfo();
+  }
   if (heads.length === 0) {
     overlayWindow?.close();
     overlayWindow = null;
   } else {
+    ensureOverlay();
     resizeOverlay();
     repositionInfoIfVisible();
   }
-  broadcastHeads();
-});
-
-ipcMain.handle("heads:list", (): ChatHead[] => heads);
-
-ipcMain.handle("heads:closeAll", (): void => {
-  heads = [];
-  selectedHeadId = null;
-  hideInfo();
-  overlayWindow?.close();
-  overlayWindow = null;
-  persistHeads();
   broadcastHeads();
 });
 
@@ -511,22 +487,12 @@ localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
 
 // -------- Lifecycle --------
 
-function restoreHeads(): void {
-  const saved = store.get<ChatHead[]>(HEADS_KEY);
-  if (Array.isArray(saved) && saved.length > 0) {
-    heads = saved;
-    ensureOverlay();
-    resizeOverlay();
-    broadcastHeads();
-  }
-}
-
 app.whenReady().then(() => {
   backend.restore();
   localRepos.restore();
   createMainWindow();
   createTray();
-  restoreHeads();
+  rail.start();
 });
 
 // Keep the app alive when all windows close — the mere presence of a

@@ -13,10 +13,12 @@ import { shell } from "electron";
 import http from "node:http";
 import os from "node:os";
 import type { AddressInfo } from "node:net";
+import type { FeedUser } from "@slashtalk/shared";
 import type {
   BackendAuthState,
   BackendUser,
   RepoSummary,
+  TeammateSummary,
 } from "../shared/types";
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
@@ -287,6 +289,17 @@ export function claimRepo(fullName: string): Promise<RepoSummary> {
     method: "POST",
     body: { fullName },
   });
+}
+
+export async function listTeammates(): Promise<TeammateSummary[]> {
+  const raw = await jsonFetch<FeedUser[]>("/api/feed/users", { method: "GET" });
+  return raw.map((r) => ({
+    githubLogin: r.github_login,
+    avatarUrl: r.avatar_url ?? "",
+    totalSessions: r.total_sessions,
+    activeSessions: r.active_sessions,
+    repos: r.repos,
+  }));
 }
 
 export function postDeviceRepos(payload: {

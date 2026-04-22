@@ -85,7 +85,7 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
         void window.chatheads.close(head.id);
       }}
       className="
-        relative w-12 h-12 rounded-full cursor-pointer
+        relative w-14 h-14 rounded-full cursor-pointer
         flex items-center justify-center text-[28px]
         bg-bubble
         backdrop-blur-[18px] backdrop-saturate-[1.4]
@@ -95,12 +95,14 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
         hover:scale-105
       "
     >
-      <div
-        className="absolute inset-0 rounded-full opacity-[0.28] pointer-events-none"
-        style={{ background: head.tint }}
-      />
       {head.avatar.type === 'emoji' ? (
-        <span className="relative z-[1] leading-none pointer-events-none">{head.avatar.value}</span>
+        <>
+          <div
+            className="absolute inset-0 rounded-full opacity-[0.28] pointer-events-none"
+            style={{ background: head.tint }}
+          />
+          <span className="relative z-[1] leading-none pointer-events-none">{head.avatar.value}</span>
+        </>
       ) : (
         <img
           src={head.avatar.value}

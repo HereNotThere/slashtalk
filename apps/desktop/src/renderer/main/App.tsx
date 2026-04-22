@@ -1,6 +1,6 @@
 import { PRESETS } from '../shared/presets';
 import { useHeads } from '../shared/useHeads';
-import { GitHubSection } from './GitHubSection';
+import { SlashtalkSection } from './SlashtalkSection';
 import type { ChatHead } from '../../shared/types';
 
 export function App(): JSX.Element {
@@ -28,7 +28,7 @@ export function App(): JSX.Element {
         ))}
       </div>
 
-      <GitHubSection />
+      <SlashtalkSection />
 
       <SectionHeading>Active ({heads.length})</SectionHeading>
       <div className="flex flex-col gap-1.5">

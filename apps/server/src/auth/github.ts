@@ -9,39 +9,59 @@ import {
   setupTokens,
   devices,
   apiKeys,
-  userRepos,
 } from "../db/schema";
 import {
   generateApiKey,
   hashToken,
   encryptGithubToken,
 } from "./tokens";
-import { syncUserRepos } from "../social/github-sync";
 
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_USER_URL = "https://api.github.com/user";
-const SCOPES = "read:user read:org repo";
+// Read-only identity scopes. We deliberately do NOT request `repo` — repo
+// access is opted into by the user at the app layer (they add local clones
+// via the desktop app, which uses the local .git/config to establish repo
+// identity). See CLAUDE.md "Repo claims vs. sync".
+const SCOPES = "read:user read:org";
 
 /** OAuth + session routes under /auth */
 export const githubAuth = (db: Database) =>
   new Elysia({ prefix: "/auth", name: "auth/github" })
     .use(jwt({ name: "jwt", secret: config.jwtSecret }))
 
-    // GET /auth/github — redirect to GitHub authorize
-    .get("/github", ({ redirect }) => {
-      const params = new URLSearchParams({
-        client_id: config.githubClientId,
-        redirect_uri: `${config.baseUrl}/auth/github/callback`,
-        scope: SCOPES,
-      });
-      return redirect(`${GITHUB_AUTHORIZE_URL}?${params}`);
-    })
+    // GET /auth/github — redirect to GitHub authorize.
+    // Optional ?desktop_port=NNNN lets an Electron loopback listener receive
+    // the credentials directly instead of relying on cookies.
+    .get(
+      "/github",
+      ({ query, redirect }) => {
+        const params = new URLSearchParams({
+          client_id: config.githubClientId,
+          redirect_uri: `${config.baseUrl}/auth/github/callback`,
+          scope: SCOPES,
+        });
+        if (query.desktop_port) {
+          const port = Number(query.desktop_port);
+          if (Number.isInteger(port) && port > 0 && port < 65536) {
+            params.set("state", `desktop:${port}`);
+          }
+        }
+        return redirect(`${GITHUB_AUTHORIZE_URL}?${params}`);
+      },
+      { query: t.Object({ desktop_port: t.Optional(t.String()) }) }
+    )
 
     // GET /auth/github/callback — handle OAuth callback
     .get(
       "/github/callback",
-      async ({ query, jwt, cookie: { session, refresh: refreshCookie }, set }) => {
+      async ({
+        query,
+        jwt,
+        cookie: { session, refresh: refreshCookie },
+        redirect,
+        set,
+      }) => {
         const tokenRes = await fetch(GITHUB_TOKEN_URL, {
           method: "POST",
           headers: {
@@ -118,7 +138,20 @@ export const githubAuth = (db: Database) =>
 
         const isSecure = config.baseUrl.startsWith("https");
 
-        // Set JWT session cookie (1h)
+        // Desktop (loopback) branch: redirect credentials to 127.0.0.1:<port>.
+        // Restricted to loopback to keep raw tokens off arbitrary hosts.
+        const desktopMatch = query.state?.match(/^desktop:(\d+)$/);
+        if (desktopMatch) {
+          const port = Number(desktopMatch[1]);
+          const params = new URLSearchParams({
+            jwt: token,
+            refreshToken,
+            login: user.githubLogin,
+          });
+          return redirect(`http://127.0.0.1:${port}/callback?${params}`);
+        }
+
+        // Browser branch: httpOnly cookies.
         session.set({
           value: token,
           httpOnly: true,
@@ -128,7 +161,6 @@ export const githubAuth = (db: Database) =>
           path: "/",
         });
 
-        // Set refresh token cookie (30d)
         refreshCookie.set({
           value: refreshToken,
           httpOnly: true,
@@ -138,23 +170,14 @@ export const githubAuth = (db: Database) =>
           path: "/auth",
         });
 
-        // Auto-sync repos on first login (no user_repos yet)
-        const existingRepos = await db
-          .select()
-          .from(userRepos)
-          .where(eq(userRepos.userId, user.id))
-          .limit(1);
-        if (existingRepos.length === 0) {
-          try {
-            await syncUserRepos(db, user);
-          } catch {
-            // Non-fatal — user can manually sync later
-          }
-        }
-
         return { ok: true, user: { id: user.id, login: user.githubLogin } };
       },
-      { query: t.Object({ code: t.String() }) }
+      {
+        query: t.Object({
+          code: t.String(),
+          state: t.Optional(t.String()),
+        }),
+      }
     )
 
     // POST /auth/refresh — exchange refresh token cookie for new JWT
@@ -193,7 +216,9 @@ export const githubAuth = (db: Database) =>
           path: "/",
         });
 
-        return { ok: true };
+        // Also return in body so non-browser clients (desktop) don't have to
+        // parse Set-Cookie to recover the raw JWT.
+        return { ok: true, jwt: token };
       }
     )
 

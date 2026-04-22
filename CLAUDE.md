@@ -8,14 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The backend in this repo makes that possible: a CLI watcher on each device tails Claude Code's `~/.claude/projects/*/*.jsonl` event streams and POSTs NDJSON chunks; the server aggregates them, matches sessions to GitHub repos (social graph = repo co-membership), computes live/busy/idle state at read time, and fans updates out over WebSockets. Authoritative design in `specs/backend.spec.md` and `specs/upload.spec.md` — consult before changing API shape, auth, the event pipeline, or state classification.
 
-The desktop/web UI that renders chat heads is not built yet (`apps/desktop` is an empty stub).
+The desktop UI shell (`apps/desktop`) exists — Electron + React + Tailwind v4, floating overlay/tray windows — but only the backend sign-in and "add local repo" flow is wired to the server. The teammate rail, live session peek, and Fork Session are not built.
 
 ## Repo layout
 
 Bun workspace monorepo:
 
-- `apps/server` — ElysiaJS backend, the only real code today. Entry `src/index.ts` composes `githubAuth`, `ingestRoutes`, `socialRoutes`, `sessionRoutes`, `userRoutes`, `wsHandler`.
-- `apps/desktop` — placeholder (`package.json` only).
+- `apps/server` — ElysiaJS backend. Entry `src/index.ts` composes `githubAuth`, `cliAuth`, `ingestRoutes`, `socialRoutes`, `sessionRoutes`, `userRoutes`, `deviceReposRoutes`, `wsHandler`.
+- `apps/desktop` — Electron app (`@slashtalk/electron`), tailwind v4, 4 BrowserWindows (main/overlay/info/statusbar). Talks to the backend via an HTTP client in `src/main/backend.ts` plus IPC to renderers. Sign-in opens the system browser to `${BACKEND}/auth/github?desktop_port=NNNN` and receives the callback on a loopback listener on port NNNN.
 - `packages/shared` — source-only TS types (`SessionSnapshot`, `SessionState`, `TokenUsage`, …). No build; consumers import via tsconfig `paths`.
 - `specs/` — authoritative design docs; the code lags them materially (see "Implementation status").
 
@@ -42,9 +42,13 @@ bun run typecheck
 ## Architecture that matters
 
 **Two auth plugins, mutually exclusive routes** (`src/auth/middleware.ts`):
-- `jwtAuth` — httpOnly `session` cookie, browser routes (`/auth/*`, `/api/*`). Derives `{ user }`.
+- `jwtAuth` — httpOnly `session` cookie (or raw JWT in the `Cookie` header from the desktop app), browser routes (`/auth/*`, `/api/*`). Derives `{ user }`.
 - `apiKeyAuth` — `Authorization: Bearer <key>`, SHA-256 compared to `api_keys.key_hash`, CLI routes (`/v1/*`). Derives `{ user, device }`.
 - WS upgrade (`ws/handler.ts`) accepts either via `?token=...` — tries JWT first, then API key.
+
+**OAuth is read-only / identity-only.** `/auth/github` requests **`read:user read:org` only** — no `repo` scope. That means we **cannot** call `/user/repos` or read private repo contents server-side. Instead, repos are **claimed** on demand: the desktop app reads a local clone's `.git/config`, extracts `owner/name`, and calls `POST /api/me/repos { fullName }` which upserts the `repos` row (by unique `full_name`) and the `user_repos` tracking row. The user proves repo possession by being able to clone it locally — GitHub already gated access at clone time. `repos.github_id` is therefore nullable; if you ever add a code path that can fetch it, backfill it, don't treat its absence as a bug. The old `syncUserRepos` / `POST /api/me/sync-repos` are gone.
+
+**Desktop auth flow** — the Electron app is both a JWT session holder and a registered device. On sign-in it: (1) opens the browser to `${BACKEND}/auth/github?desktop_port=NNNN`, (2) `/auth/github/callback` redirects to `http://127.0.0.1:NNNN/callback?jwt=…&refreshToken=…&login=…` instead of setting cookies, (3) desktop calls `POST /api/me/setup-token` then `POST /v1/auth/exchange` to get a device API key. JWT is sent to `/api/me/*` as a `Cookie: session=…` header from main; API key is sent to `/v1/devices/:id/repos`. Both live in `safeStorage`.
 
 **Session state is computed, never stored** (`sessions/state.ts`). `classifySessionState({heartbeatUpdatedAt, inTurn, lastTs})` → `BUSY | ACTIVE | IDLE | RECENT | ENDED`. Thresholds: heartbeat fresh < 30s, active < 10s since last event, recent < 1h. `in_turn` is the *only* reliable signal during a silent thinking block (tens of seconds with zero JSONL events) — by design it flips on at user prompt / queued command and off at assistant `stop_reason == "end_turn"`. Don't collapse this to "just use lastTs"; `specs/upload.spec.md` "Busy is computed, not observed" calls this out.
 
@@ -64,8 +68,8 @@ The spec is substantially ahead of the code. The backend skeleton exists, but se
 - **`in_turn` is read but never written.** `classifySessionState` reads it; nothing sets it. Until ingest parses events, every session will classify as `ACTIVE`/`IDLE` (based on `lastTs`), never `BUSY`.
 - **Nothing publishes to Redis.** No call to `redis.publish()` exists. WS clients connect and receive only the 30s ping — no `session_updated` messages.
 - **Session → repo matching is absent.** `sessions.repo_id` is never set on insert, so `/api/feed` (`inArray(sessions.repoId, repoIds)`) always returns `[]`.
-- **Repo sync is a TODO.** `POST /api/me/sync-repos` returns a stub. Nothing populates `repos` or `user_repos`, so the social graph is empty by default — which also means `/api/feed/users` always returns `[]`.
-- **`install.sh` endpoint is missing.** Spec §1.2/§6 describe `GET /install.sh`; only the back half (`POST /auth/exchange`) exists.
+- **Repo population path is the desktop app's "Add local repo" button** (`POST /api/me/repos`) — no auto-sync, by design. Social graph stays empty until a user claims a repo; `/api/feed/users` reflects only those claims.
+- **`install.sh` endpoint is missing.** Spec §1.2/§6 describe `GET /install.sh`; only the back half (`POST /v1/auth/exchange`) exists. The desktop app covers the same ground for macOS today.
 - **`/api/feed/users` has N+1 queries.** Loops over peers issuing 3 queries each. Fine for demo; rework for real data.
 
 When adding a feature, check whether its upstream dependency is one of the above before assuming the plumbing works end-to-end.

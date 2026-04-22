@@ -12,7 +12,9 @@ import {
   deviceRepoPaths,
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { syncUserRepos } from "../social/github-sync";
+
+// "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
+const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 
 export const userRoutes = (db: Database) =>
   new Elysia({ prefix: "/api/me", name: "user" })
@@ -57,13 +59,7 @@ export const userRoutes = (db: Database) =>
       { params: t.Object({ id: t.String() }) },
     )
 
-    // POST /api/me/sync-repos — trigger GitHub repo sync
-    .post("/sync-repos", async ({ user }) => {
-      const result = await syncUserRepos(db, user);
-      return { ok: true, synced: result.synced, removed: result.removed };
-    })
-
-    // GET /api/me/repos — list user's repos
+    // GET /api/me/repos — list repos the user has claimed
     .get("/repos", async ({ user }) => {
       return await db
         .select({
@@ -79,6 +75,78 @@ export const userRoutes = (db: Database) =>
         .innerJoin(repos, eq(repos.id, userRepos.repoId))
         .where(eq(userRepos.userId, user.id));
     })
+
+    // POST /api/me/repos — claim a repo by "owner/name". Upserts into the
+    // repos table and asserts the calling user tracks it. No GitHub API call
+    // happens here — under read-only OAuth we can't verify repo access
+    // server-side, so the client proves possession another way (e.g. the
+    // desktop app only offers repos it found via a local .git/config).
+    .post(
+      "/repos",
+      async ({ user, body, set }) => {
+        const fullName = body.fullName.trim();
+        if (!FULL_NAME.test(fullName)) {
+          set.status = 400;
+          return { error: "fullName must be in owner/name form" };
+        }
+        const [ownerLogin, name] = fullName.split("/");
+
+        const [repo] = await db
+          .insert(repos)
+          .values({ fullName, owner: ownerLogin, name, private: body.private ?? false })
+          .onConflictDoUpdate({
+            target: repos.fullName,
+            // touch so returning() always yields the row
+            set: { owner: ownerLogin, name },
+          })
+          .returning();
+
+        await db
+          .insert(userRepos)
+          .values({
+            userId: user.id,
+            repoId: repo.id,
+            permission: "claimed",
+            syncedAt: new Date(),
+          })
+          .onConflictDoNothing({
+            target: [userRepos.userId, userRepos.repoId],
+          });
+
+        return {
+          repoId: repo.id,
+          fullName: repo.fullName,
+          owner: repo.owner,
+          name: repo.name,
+          private: repo.private ?? false,
+          permission: "claimed",
+          syncedAt: new Date().toISOString(),
+        };
+      },
+      {
+        body: t.Object({
+          fullName: t.String({ minLength: 3, maxLength: 140 }),
+          private: t.Optional(t.Boolean()),
+        }),
+      }
+    )
+
+    // DELETE /api/me/repos/:repoId — stop tracking a repo
+    .delete(
+      "/repos/:repoId",
+      async ({ user, params }) => {
+        await db
+          .delete(userRepos)
+          .where(
+            and(
+              eq(userRepos.userId, user.id),
+              eq(userRepos.repoId, Number(params.repoId))
+            )
+          );
+        return { ok: true };
+      },
+      { params: t.Object({ repoId: t.String() }) }
+    )
 
     // POST /api/me/setup-token — generate a new setup token
     .post("/setup-token", async ({ user }) => {

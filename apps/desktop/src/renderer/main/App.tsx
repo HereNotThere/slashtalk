@@ -1,4 +1,3 @@
-import { PRESETS } from '../shared/presets';
 import { useHeads } from '../shared/useHeads';
 import { SlashtalkSection } from './SlashtalkSection';
 import type { ChatHead } from '../../shared/types';
@@ -10,23 +9,6 @@ export function App(): JSX.Element {
     <>
       <h1 className="m-0 mb-1 text-[28px]">Chat Heads</h1>
       <div className="text-subtle mb-5">Floating bubbles that stay on top of everything.</div>
-
-      <SectionHeading>Presets</SectionHeading>
-      <div className="flex gap-2 flex-wrap">
-        {PRESETS.map((p) => (
-          <button
-            key={p.label}
-            onClick={() => window.chatheads.spawn(p)}
-            className="
-              bg-button border border-border text-fg
-              rounded-md px-3.5 py-2 text-[13px] cursor-pointer
-              hover:bg-button-hover
-            "
-          >
-            {p.avatar.type === 'emoji' ? p.avatar.value : null} {p.label}
-          </button>
-        ))}
-      </div>
 
       <SlashtalkSection />
 

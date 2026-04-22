@@ -77,8 +77,10 @@ export const setupTokens = pgTable("setup_tokens", {
 
 export const repos = pgTable("repos", {
   id: serial("id").primaryKey(),
-  githubId: bigint("github_id", { mode: "number" }).unique().notNull(),
-  fullName: text("full_name").notNull(),
+  // githubId is only populated if we have push/repo scope — with read-only
+  // OAuth (read:user read:org) we identify repos by full_name instead.
+  githubId: bigint("github_id", { mode: "number" }).unique(),
+  fullName: text("full_name").unique().notNull(),
   owner: text("owner").notNull(),
   name: text("name").notNull(),
   private: boolean("private").default(false),

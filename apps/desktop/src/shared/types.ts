@@ -14,30 +14,34 @@ export interface ChatHead {
 
 export type NewChatHead = Omit<ChatHead, 'id'>;
 
-// GitHub auth state — mirrors GitHubAuth.State in Swift.
-export type GitHubState =
-  | { kind: 'signedOut' }
-  | { kind: 'awaitingUserCode'; userCode: string; verificationURL: string }
-  | { kind: 'signedIn' };
-
-export interface GitHubPayload {
-  state: GitHubState;
-  errorMessage: string | null;
-}
-
-export interface GitHubOrg {
-  id: number;
-  login: string;
-  avatarURL: string;
-}
-
-export interface GitHubUser {
-  id: number;
-  login: string;
-  avatarURL: string;
-}
-
 export type Unsubscribe = () => void;
+
+// slashtalk backend types
+export interface BackendUser {
+  githubLogin: string;
+  avatarUrl: string;
+  displayName: string | null;
+}
+
+export type BackendAuthState =
+  | { signedIn: false }
+  | { signedIn: true; user: BackendUser };
+
+export interface RepoSummary {
+  repoId: number;
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  permission: string;
+  syncedAt: string | null;
+}
+
+export interface TrackedRepo {
+  repoId: number;
+  fullName: string;
+  localPath: string;
+}
 
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
@@ -67,15 +71,22 @@ export interface ChatHeadsBridge {
   copyText: (text: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
 
-  // GitHub
-  github: {
-    getState: () => Promise<GitHubPayload>;
-    startDeviceFlow: () => Promise<void>;
-    cancelDeviceFlow: () => Promise<void>;
+  // slashtalk backend
+  backend: {
+    getAuthState: () => Promise<BackendAuthState>;
+    signIn: () => Promise<void>;
+    cancelSignIn: () => Promise<void>;
     signOut: () => Promise<void>;
-    listOrgs: () => Promise<GitHubOrg[]>;
-    listMembers: (org: string) => Promise<GitHubUser[]>;
-    onState: (cb: (payload: GitHubPayload) => void) => Unsubscribe;
+    onAuthState: (cb: (state: BackendAuthState) => void) => Unsubscribe;
+
+    listRepos: () => Promise<RepoSummary[]>;
+
+    listTrackedRepos: () => Promise<TrackedRepo[]>;
+    /** Opens a folder picker, claims + tracks. Resolves `null` if cancelled;
+     *  rejects with a user-facing message on any other failure. */
+    addLocalRepo: () => Promise<TrackedRepo | null>;
+    removeLocalRepo: (repoId: number) => Promise<TrackedRepo[]>;
+    onTrackedReposChange: (cb: (repos: TrackedRepo[]) => void) => Unsubscribe;
   };
 }
 

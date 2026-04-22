@@ -1,11 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  BackendAuthState,
   ChatHead,
   ChatHeadsBridge,
-  GitHubOrg,
-  GitHubPayload,
-  GitHubUser,
   NewChatHead,
+  RepoSummary,
+  TrackedRepo,
   Unsubscribe,
 } from "../shared/types";
 
@@ -42,19 +42,29 @@ const bridge: ChatHeadsBridge = {
   openExternal: (url) =>
     ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
 
-  github: {
-    getState: () =>
-      ipcRenderer.invoke("github:getState") as Promise<GitHubPayload>,
-    startDeviceFlow: () =>
-      ipcRenderer.invoke("github:startDeviceFlow") as Promise<void>,
-    cancelDeviceFlow: () =>
-      ipcRenderer.invoke("github:cancelDeviceFlow") as Promise<void>,
-    signOut: () => ipcRenderer.invoke("github:signOut") as Promise<void>,
-    listOrgs: () =>
-      ipcRenderer.invoke("github:listOrgs") as Promise<GitHubOrg[]>,
-    listMembers: (org) =>
-      ipcRenderer.invoke("github:listMembers", org) as Promise<GitHubUser[]>,
-    onState: (cb) => subscribe<GitHubPayload>("github:state", cb),
+  backend: {
+    getAuthState: () =>
+      ipcRenderer.invoke("backend:getAuthState") as Promise<BackendAuthState>,
+    signIn: () => ipcRenderer.invoke("backend:signIn") as Promise<void>,
+    cancelSignIn: () =>
+      ipcRenderer.invoke("backend:cancelSignIn") as Promise<void>,
+    signOut: () => ipcRenderer.invoke("backend:signOut") as Promise<void>,
+    onAuthState: (cb) => subscribe<BackendAuthState>("backend:authState", cb),
+
+    listRepos: () =>
+      ipcRenderer.invoke("backend:listRepos") as Promise<RepoSummary[]>,
+
+    listTrackedRepos: () =>
+      ipcRenderer.invoke("backend:listTrackedRepos") as Promise<TrackedRepo[]>,
+    addLocalRepo: () =>
+      ipcRenderer.invoke("backend:addLocalRepo") as Promise<TrackedRepo | null>,
+    removeLocalRepo: (repoId) =>
+      ipcRenderer.invoke(
+        "backend:removeLocalRepo",
+        repoId,
+      ) as Promise<TrackedRepo[]>,
+    onTrackedReposChange: (cb) =>
+      subscribe<TrackedRepo[]>("backend:trackedRepos", cb),
   },
 };
 

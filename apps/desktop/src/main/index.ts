@@ -12,7 +12,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ChatHead, NewChatHead } from "../shared/types";
 import * as store from "./store";
-import * as github from "./github";
+import * as backend from "./backend";
+import * as localRepos from "./localRepos";
 
 // Single source of truth, mirrors ChatHeadWindow.swift constants.
 const BUBBLE_SIZE = 48;
@@ -440,21 +441,30 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
 });
 
-// GitHub
-ipcMain.handle("github:getState", () => github.getState());
-ipcMain.handle("github:startDeviceFlow", () => github.startDeviceFlow());
-ipcMain.handle("github:cancelDeviceFlow", () => github.cancelDeviceFlow());
-ipcMain.handle("github:signOut", () => github.signOut());
-ipcMain.handle("github:listOrgs", () => github.listOrgs());
-ipcMain.handle("github:listMembers", (_e, org: string) =>
-  github.listMembers(org),
+// slashtalk backend
+ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
+ipcMain.handle("backend:signIn", () => backend.signIn());
+ipcMain.handle("backend:cancelSignIn", () => backend.cancelSignIn());
+ipcMain.handle("backend:signOut", async () => {
+  await backend.signOut();
+  localRepos.clearOnSignOut();
+});
+ipcMain.handle("backend:listRepos", () => backend.listRepos());
+
+ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());
+ipcMain.handle("backend:addLocalRepo", () => localRepos.addLocalRepo());
+ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>
+  localRepos.removeLocalRepo(repoId),
 );
 
-github.onChange((payload) => {
+function broadcastToMain(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("github:state", payload);
+    mainWindow.webContents.send(channel, payload);
   }
-});
+}
+
+backend.onChange((state) => broadcastToMain("backend:authState", state));
+localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
 
 // -------- Lifecycle --------
 
@@ -469,7 +479,8 @@ function restoreHeads(): void {
 }
 
 app.whenReady().then(() => {
-  github.restore();
+  backend.restore();
+  localRepos.restore();
   createMainWindow();
   createTray();
   restoreHeads();

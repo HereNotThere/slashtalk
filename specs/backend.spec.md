@@ -308,16 +308,18 @@ select s.*
 from sessions s
 join user_repos ur on s.repo_id = ur.repo_id
 where ur.user_id = :me
-order by
-  case s.state
-    when 'busy' then 0
-    when 'active' then 1
-    when 'idle' then 2
-    when 'recent' then 3
-    else 4
-  end,
-  s.last_ts desc;
+order by s.last_ts desc nulls last
+limit 200;
 ```
+
+`state` is not a stored column (see §10 — it's classified per row from
+`heartbeats.updated_at`, `in_turn`, and `last_ts` at read time). The
+handler in `src/social/routes.ts` fetches rows ordered by `last_ts`,
+computes each session's state via `classifySessionState`, and then sorts
+the result set in application code (BUSY → ACTIVE → IDLE → RECENT →
+ENDED, ties broken by `last_ts desc`). Do not add a `state` column to
+`sessions` — it would go stale between ingests and diverge from the
+computed classification.
 
 ### 4.3 Privacy Model
 

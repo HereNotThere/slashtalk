@@ -32,11 +32,11 @@ import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 // `MAIN_VITE_SLASHTALK_API_URL` in apps/desktop/.env is baked in at build time
 // by electron-vite (the MAIN_VITE_ prefix is what makes it visible to the main
 // process). Runtime `SLASHTALK_API_URL` still works as an override for ad-hoc
-// local testing. Unset → localhost default.
+// local testing. Unset → hosted default.
 const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as
   | string
   | undefined;
-const DEFAULT_BASE_URL = "http://localhost:10000";
+const DEFAULT_BASE_URL = "https://slashtalk.onrender.com";
 const CREDS_KEY = "backendCredsEnc";
 
 interface StoredCreds {

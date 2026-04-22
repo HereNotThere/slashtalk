@@ -164,7 +164,8 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
                 db,
                 user.id,
                 updates.cwd,
-                query.project
+                query.project,
+                device?.id
               );
               if (repoId) {
                 await db

@@ -172,6 +172,15 @@ export async function resetDatabase() {
   `);
 
   await db.execute(sql`
+    CREATE TABLE device_repo_paths (
+      device_id       INT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      repo_id         INT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+      local_path      TEXT NOT NULL,
+      PRIMARY KEY (device_id, repo_id)
+    )
+  `);
+
+  await db.execute(sql`
     CREATE TABLE sessions (
       session_id      UUID PRIMARY KEY,
       user_id         INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

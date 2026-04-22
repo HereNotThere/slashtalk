@@ -9,6 +9,7 @@ import {
   setupTokens,
   apiKeys,
   deviceExcludedRepos,
+  deviceRepoPaths,
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { syncUserRepos } from "../social/github-sync";
@@ -145,7 +146,7 @@ export const deviceReposRoutes = (db: Database) =>
       )
     )
 
-    // POST /v1/devices/:id/repos — set excluded repos for a device
+    // POST /v1/devices/:id/repos — set repo paths and exclusions for a device
     .post(
       "/:id/repos",
       async ({ params, body, user, device, set }) => {
@@ -163,12 +164,28 @@ export const deviceReposRoutes = (db: Database) =>
           return { error: "Device not found" };
         }
 
-        // Clear existing exclusions
+        // Store local path → repo mappings (from install-time discovery)
+        if (body.repoPaths && body.repoPaths.length > 0) {
+          await db
+            .delete(deviceRepoPaths)
+            .where(eq(deviceRepoPaths.deviceId, deviceId));
+
+          await db.insert(deviceRepoPaths).values(
+            body.repoPaths.map(
+              (rp: { repoId: number; localPath: string }) => ({
+                deviceId,
+                repoId: rp.repoId,
+                localPath: rp.localPath,
+              })
+            )
+          );
+        }
+
+        // Store exclusions
         await db
           .delete(deviceExcludedRepos)
           .where(eq(deviceExcludedRepos.deviceId, deviceId));
 
-        // Insert new exclusions
         if (body.excludedRepoIds && body.excludedRepoIds.length > 0) {
           await db.insert(deviceExcludedRepos).values(
             body.excludedRepoIds.map((repoId: number) => ({
@@ -183,7 +200,12 @@ export const deviceReposRoutes = (db: Database) =>
       {
         params: t.Object({ id: t.String() }),
         body: t.Object({
-          excludedRepoIds: t.Array(t.Number()),
+          repoPaths: t.Optional(
+            t.Array(
+              t.Object({ repoId: t.Number(), localPath: t.String() })
+            )
+          ),
+          excludedRepoIds: t.Optional(t.Array(t.Number())),
         }),
       }
     );

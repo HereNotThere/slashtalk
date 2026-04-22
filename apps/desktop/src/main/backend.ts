@@ -64,6 +64,16 @@ export function getAuthState(): BackendAuthState {
   return { signedIn: true, user: creds.user };
 }
 
+/** Current JWT — used by the WS client to authenticate the upgrade. May rotate
+ *  on refresh, so callers should re-read on reconnect rather than caching. */
+export function getJwt(): string | null {
+  return creds?.jwt ?? null;
+}
+
+export function getBaseUrl(): string {
+  return baseUrl();
+}
+
 function persistCreds(): void {
   if (creds) saveEncrypted(CREDS_KEY, creds);
   else clearEncrypted(CREDS_KEY);

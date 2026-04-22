@@ -17,6 +17,13 @@ function toProjectSlug(path: string): string {
   return path.replaceAll("/", "-");
 }
 
+/** Canonical form for repos.full_name / repos.name / repos.owner. GitHub is
+ *  case-insensitive; we store and compare lowercased so that `.git/config`
+ *  casing differences don't split the social graph. */
+export function normalizeFullName(s: string): string {
+  return s.toLowerCase();
+}
+
 async function isRepoExcludedForDevice(
   db: Database,
   deviceId: number | null | undefined,
@@ -98,9 +105,11 @@ export async function matchSessionRepo(
 
   if (userRepoRows.length === 0) return null;
 
+  const projectLower = normalizeFullName(project);
+
   // Strategy 2: walk UP the cwd path, trying owner/name then name at each level
   if (cwdOrNull) {
-    const parts = cwdOrNull.split("/").filter(Boolean);
+    const parts = normalizeFullName(cwdOrNull).split("/").filter(Boolean);
     for (let i = parts.length; i >= 1; i--) {
       const dirName = parts[i - 1];
       if (i >= 2) {
@@ -115,7 +124,10 @@ export async function matchSessionRepo(
 
   // Strategy 3: project slug fallback
   for (const row of userRepoRows) {
-    if (project.endsWith(row.name) || project.endsWith(`-${row.name}`)) {
+    if (
+      projectLower.endsWith(row.name) ||
+      projectLower.endsWith(`-${row.name}`)
+    ) {
       return await acceptRepoCandidate(db, deviceId, row.repoId);
     }
   }

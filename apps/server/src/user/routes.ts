@@ -13,7 +13,7 @@ import {
   sessions,
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { matchSessionRepo } from "../social/github-sync";
+import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 
 // "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
 const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
@@ -86,11 +86,12 @@ export const userRoutes = (db: Database) =>
     .post(
       "/repos",
       async ({ user, body, set }) => {
-        const fullName = body.fullName.trim();
-        if (!FULL_NAME.test(fullName)) {
+        const raw = body.fullName.trim();
+        if (!FULL_NAME.test(raw)) {
           set.status = 400;
           return { error: "fullName must be in owner/name form" };
         }
+        const fullName = normalizeFullName(raw);
         const [ownerLogin, name] = fullName.split("/");
 
         const [repo] = await db
@@ -257,7 +258,7 @@ export const deviceReposRoutes = (db: Database) =>
 
           const fullName = input.fullName ?? input.repoFullName;
           if (fullName) {
-            return repoIdByFullName.get(fullName) ?? null;
+            return repoIdByFullName.get(normalizeFullName(fullName)) ?? null;
           }
 
           return null;
@@ -312,7 +313,7 @@ export const deviceReposRoutes = (db: Database) =>
           }
         }
         for (const fullName of body.excludedRepos ?? []) {
-          const repoId = repoIdByFullName.get(fullName);
+          const repoId = repoIdByFullName.get(normalizeFullName(fullName));
           if (repoId) {
             excludedRepoIds.add(repoId);
           } else {
@@ -320,7 +321,7 @@ export const deviceReposRoutes = (db: Database) =>
           }
         }
         for (const fullName of body.excludedRepoFullNames ?? []) {
-          const repoId = repoIdByFullName.get(fullName);
+          const repoId = repoIdByFullName.get(normalizeFullName(fullName));
           if (repoId) {
             excludedRepoIds.add(repoId);
           } else {

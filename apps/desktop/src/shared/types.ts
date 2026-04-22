@@ -71,6 +71,9 @@ export interface ChatHeadsBridge {
   copyText: (text: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
 
+  // Auto-size the calling window to the renderer's content height
+  requestResize: (height: number) => Promise<void>;
+
   // slashtalk backend
   backend: {
     getAuthState: () => Promise<BackendAuthState>;

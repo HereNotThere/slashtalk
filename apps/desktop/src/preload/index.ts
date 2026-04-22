@@ -42,6 +42,9 @@ const bridge: ChatHeadsBridge = {
   openExternal: (url) =>
     ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
 
+  requestResize: (height) =>
+    ipcRenderer.invoke("window:requestResize", height) as Promise<void>,
+
   backend: {
     getAuthState: () =>
       ipcRenderer.invoke("backend:getAuthState") as Promise<BackendAuthState>,

@@ -10,16 +10,16 @@ from everyone who shares repo access with them.
 
 ## Tech Stack
 
-| Layer          | Choice                                      |
-|----------------|---------------------------------------------|
-| Runtime        | Bun                                         |
-| Framework      | ElysiaJS                                     |
-| API docs       | `@elysiajs/openapi` (auto-generated)         |
-| ORM            | Drizzle ORM + `drizzle-typebox`              |
-| Database       | Managed PostgreSQL (Render)                  |
-| Pub/Sub        | Managed Redis / Valkey (Render Key Value)    |
-| Auth           | GitHub OAuth2 (`read:org`, `repo` scopes)    |
-| Deployment     | Render.com web service (native Bun runtime)  |
+| Layer      | Choice                                      |
+| ---------- | ------------------------------------------- |
+| Runtime    | Bun                                         |
+| Framework  | ElysiaJS                                    |
+| API docs   | `@elysiajs/openapi` (auto-generated)        |
+| ORM        | Drizzle ORM + `drizzle-typebox`             |
+| Database   | Managed PostgreSQL (Render)                 |
+| Pub/Sub    | Managed Redis / Valkey (Render Key Value)   |
+| Auth       | GitHub OAuth2 (`read:org`, `repo` scopes)   |
+| Deployment | Render.com web service (native Bun runtime) |
 
 ---
 
@@ -346,32 +346,33 @@ as OpenAPI definitions via `drizzle-typebox`.
 
 ### 5.1 Auth
 
-| Method | Path                      | Auth   | Description                              |
-|--------|---------------------------|--------|------------------------------------------|
-| GET    | `/auth/github`            | none   | Redirect to GitHub OAuth authorize URL   |
-| GET    | `/auth/github/callback`   | none   | Handle OAuth callback, issue JWT + refresh |
-| POST   | `/auth/refresh`           | cookie | Exchange refresh token for new JWT       |
-| POST   | `/auth/logout`            | cookie | Revoke refresh token                     |
-| POST   | `/v1/auth/exchange`       | none   | Exchange setup token for API key         |
+| Method | Path                    | Auth   | Description                                |
+| ------ | ----------------------- | ------ | ------------------------------------------ |
+| GET    | `/auth/github`          | none   | Redirect to GitHub OAuth authorize URL     |
+| GET    | `/auth/github/callback` | none   | Handle OAuth callback, issue JWT + refresh |
+| POST   | `/auth/refresh`         | cookie | Exchange refresh token for new JWT         |
+| POST   | `/auth/logout`          | cookie | Revoke refresh token                       |
+| POST   | `/v1/auth/exchange`     | none   | Exchange setup token for API key           |
 
 ### 5.2 User & Settings
 
-| Method | Path                      | Auth   | Description                              |
-|--------|---------------------------|--------|------------------------------------------|
-| GET    | `/api/me`                 | jwt    | Current user profile                     |
-| GET    | `/api/me/devices`         | jwt    | List user's devices                      |
-| DELETE | `/api/me/devices/:id`     | jwt    | Remove a device + its API key            |
-| POST   | `/api/me/sync-repos`      | jwt    | Trigger GitHub repo sync                 |
-| GET    | `/api/me/repos`           | jwt    | List user's repos (with excluded status) |
-| POST   | `/api/me/setup-token`     | jwt    | Generate a new setup token               |
+| Method | Path                  | Auth | Description                              |
+| ------ | --------------------- | ---- | ---------------------------------------- |
+| GET    | `/api/me`             | jwt  | Current user profile                     |
+| GET    | `/api/me/devices`     | jwt  | List user's devices                      |
+| DELETE | `/api/me/devices/:id` | jwt  | Remove a device + its API key            |
+| POST   | `/api/me/sync-repos`  | jwt  | Trigger GitHub repo sync                 |
+| GET    | `/api/me/repos`       | jwt  | List user's repos (with excluded status) |
+| POST   | `/api/me/setup-token` | jwt  | Generate a new setup token               |
 
 ### 5.3 Ingest (CLI → Server)
 
-| Method | Path                      | Auth    | Description                             |
-|--------|---------------------------|---------|-----------------------------------------|
-| POST   | `/v1/ingest`              | api_key | Upload JSONL event chunk                |
-| GET    | `/v1/sync-state`          | api_key | Get server-side sync state for resume   |
-| POST   | `/v1/heartbeat`           | api_key | Session heartbeat (every ~5s)           |
+| Method | Path                    | Auth    | Description                                      |
+| ------ | ----------------------- | ------- | ------------------------------------------------ |
+| POST   | `/v1/ingest`            | api_key | Upload JSONL event chunk                         |
+| GET    | `/v1/sync-state`        | api_key | Get server-side sync state for resume            |
+| POST   | `/v1/heartbeat`         | api_key | Session heartbeat (every ~5s)                    |
+| POST   | `/v1/devices/:id/repos` | api_key | Replace device repo-path mappings and exclusions |
 
 **`POST /v1/ingest`** — as defined in `upload.spec.md`:
 
@@ -389,15 +390,40 @@ as OpenAPI definitions via `drizzle-typebox`.
 - Updates `heartbeats` table.
 - If heartbeat changes session state (e.g. idle→busy), publish update.
 
+**`POST /v1/devices/:id/repos`**:
+
+- Headers: `Authorization: Bearer <api_key>`
+- Body:
+
+```json
+{
+  "repoPaths": [
+    {
+      "fullName": "org/repo-a",
+      "localPath": "/Users/alice/src/repo-a"
+    }
+  ],
+  "excludedRepos": ["org/repo-b"]
+}
+```
+
+- `repoPaths` is the authoritative set of local checkout paths for repos
+  the device should watch.
+- `excludedRepos` is the authoritative set of GitHub repos the user
+  explicitly deselected during install.
+- The server resolves each `fullName` against the authenticated user's
+  synced `user_repos` membership before storing `device_repo_paths` and
+  `device_excluded_repos`.
+
 ### 5.4 Dashboard (Social Feed)
 
-| Method | Path                        | Auth | Description                                  |
-|--------|-----------------------------|------|----------------------------------------------|
-| GET    | `/api/feed`                 | jwt  | Sessions from user's social graph            |
-| GET    | `/api/feed/users`           | jwt  | Users in social graph with session counts     |
-| GET    | `/api/sessions`             | jwt  | User's own sessions (compat with upload spec) |
-| GET    | `/api/session/:id`          | jwt  | Full session snapshot                        |
-| GET    | `/api/session/:id/events`   | jwt  | Paginated event list for a session           |
+| Method | Path                      | Auth | Description                                   |
+| ------ | ------------------------- | ---- | --------------------------------------------- |
+| GET    | `/api/feed`               | jwt  | Sessions from user's social graph             |
+| GET    | `/api/feed/users`         | jwt  | Users in social graph with session counts     |
+| GET    | `/api/sessions`           | jwt  | User's own sessions (compat with upload spec) |
+| GET    | `/api/session/:id`        | jwt  | Full session snapshot                         |
+| GET    | `/api/session/:id/events` | jwt  | Paginated event list for a session            |
 
 **`GET /api/feed`**
 
@@ -443,9 +469,9 @@ by `ts`. Used for the session detail view to browse individual events.
 
 ### 5.5 Install Script
 
-| Method | Path            | Auth | Description                         |
-|--------|-----------------|------|-------------------------------------|
-| GET    | `/install.sh`   | none | Serve the install shell script      |
+| Method | Path          | Auth | Description                    |
+| ------ | ------------- | ---- | ------------------------------ |
+| GET    | `/install.sh` | none | Serve the install shell script |
 
 The script is a static shell script served with `Content-Type: text/plain`.
 The setup token is passed as an argument by the user, not baked into the
@@ -453,9 +479,9 @@ script URL.
 
 ### 5.6 WebSocket
 
-| Path  | Auth        | Description                    |
-|-------|-------------|--------------------------------|
-| `/ws` | query token | Real-time session update feed  |
+| Path  | Auth        | Description                   |
+| ----- | ----------- | ----------------------------- |
+| `/ws` | query token | Real-time session update feed |
 
 **Protocol:**
 
@@ -514,8 +540,22 @@ The script is a POSIX-compatible shell script that:
 5. Display a numbered list of discovered repos with checkboxes
    (all selected by default). User can deselect by number.
 6. Send the selected/deselected list to
-   `POST /v1/devices/:id/repos` so the server records
-   `device_excluded_repos`.
+   `POST /v1/devices/:id/repos` as:
+
+```json
+{
+  "repoPaths": [
+    {
+      "fullName": "org/repo-a",
+      "localPath": "/Users/alice/src/repo-a"
+    }
+  ],
+  "excludedRepos": ["org/repo-b"]
+}
+```
+
+so the server records `device_repo_paths` and
+`device_excluded_repos`.
 
 ### 6.3 Initial Upload
 
@@ -599,11 +639,11 @@ Single "Sign in with GitHub" button.
 
 ### 8.1 Services
 
-| Service            | Type           | Notes                                  |
-|--------------------|----------------|----------------------------------------|
-| `slashtalk-web`    | Web Service    | Bun runtime, port 10000               |
-| `slashtalk-db`     | PostgreSQL     | Managed, starter plan                  |
-| `slashtalk-redis`  | Key Value      | Managed Valkey, for pub/sub            |
+| Service           | Type        | Notes                       |
+| ----------------- | ----------- | --------------------------- |
+| `slashtalk-web`   | Web Service | Bun runtime, port 10000     |
+| `slashtalk-db`    | PostgreSQL  | Managed, starter plan       |
+| `slashtalk-redis` | Key Value   | Managed Valkey, for pub/sub |
 
 ### 8.2 Environment Variables
 

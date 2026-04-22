@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "../src/db";
-import { users, repos, userRepos, sessions } from "../src/db/schema";
+import {
+  users,
+  repos,
+  userRepos,
+  sessions,
+  deviceRepoPaths,
+  deviceExcludedRepos,
+} from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import {
@@ -46,6 +53,7 @@ describe("social feed integration", () => {
   let aliceApiKey: string;
   let aliceUserId: number;
   let bobUserId: number;
+  let aliceDeviceId: number;
   let repoAId: number;
   let repoBId: number;
   let commonRepoId: number;
@@ -53,16 +61,14 @@ describe("social feed integration", () => {
   it("authenticates two users via mock GitHub OAuth", async () => {
     // Alice logs in
     const aliceRes = await fetch(
-      `${baseUrl}/auth/github/callback?code=alice_code`
+      `${baseUrl}/auth/github/callback?code=alice_code`,
     );
     expect(aliceRes.status).toBe(200);
     aliceCookie = getCookie(aliceRes, "session")!;
     expect(aliceCookie).toBeTruthy();
 
     // Bob logs in
-    const bobRes = await fetch(
-      `${baseUrl}/auth/github/callback?code=bob_code`
-    );
+    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
     expect(bobRes.status).toBe(200);
     bobCookie = getCookie(bobRes, "session")!;
     expect(bobCookie).toBeTruthy();
@@ -117,20 +123,16 @@ describe("social feed integration", () => {
     commonRepoId = repoCommon.id;
 
     // Alice -> repo-a, repo-common
-    await db
-      .insert(userRepos)
-      .values([
-        { userId: aliceUserId, repoId: repoAId, permission: "push" },
-        { userId: aliceUserId, repoId: commonRepoId, permission: "push" },
-      ]);
+    await db.insert(userRepos).values([
+      { userId: aliceUserId, repoId: repoAId, permission: "push" },
+      { userId: aliceUserId, repoId: commonRepoId, permission: "push" },
+    ]);
 
     // Bob -> repo-b, repo-common
-    await db
-      .insert(userRepos)
-      .values([
-        { userId: bobUserId, repoId: repoBId, permission: "push" },
-        { userId: bobUserId, repoId: commonRepoId, permission: "push" },
-      ]);
+    await db.insert(userRepos).values([
+      { userId: bobUserId, repoId: repoBId, permission: "push" },
+      { userId: bobUserId, repoId: commonRepoId, permission: "push" },
+    ]);
   });
 
   it("Alice gets an API key via setup token exchange", async () => {
@@ -161,6 +163,7 @@ describe("social feed integration", () => {
       deviceId: number;
     };
     aliceApiKey = exchangeData.apiKey;
+    aliceDeviceId = exchangeData.deviceId;
     expect(aliceApiKey).toBeTruthy();
 
     // Pre-create sessions linked to repos
@@ -176,12 +179,99 @@ describe("social feed integration", () => {
       {
         sessionId: REPO_A_SESSION_ID,
         userId: aliceUserId,
-        deviceId: exchangeData.deviceId,
+        deviceId: aliceDeviceId,
         source: "claude",
         project: "test-project-a",
         repoId: repoAId,
       },
     ]);
+  });
+
+  it("stores device repo selections by GitHub full name and clears them on empty updates", async () => {
+    const setReposRes = await fetch(
+      `${baseUrl}/v1/devices/${aliceDeviceId}/repos`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${aliceApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          repoPaths: [
+            {
+              fullName: "shared-org/repo-common",
+              localPath: "/Users/alice/src/repo-common",
+            },
+            {
+              fullName: "missing-org/repo-missing",
+              localPath: "/Users/alice/src/repo-missing",
+            },
+          ],
+          excludedRepos: ["alice-org/repo-a"],
+        }),
+      },
+    );
+    expect(setReposRes.status).toBe(200);
+    expect(await setReposRes.json()).toEqual({
+      ok: true,
+      repoPathsStored: 1,
+      excludedReposStored: 1,
+      skippedRepos: ["missing-org/repo-missing"],
+    });
+
+    const storedPaths = await db
+      .select()
+      .from(deviceRepoPaths)
+      .where(eq(deviceRepoPaths.deviceId, aliceDeviceId));
+    expect(storedPaths).toEqual([
+      {
+        deviceId: aliceDeviceId,
+        repoId: commonRepoId,
+        localPath: "/Users/alice/src/repo-common",
+      },
+    ]);
+
+    const storedExclusions = await db
+      .select()
+      .from(deviceExcludedRepos)
+      .where(eq(deviceExcludedRepos.deviceId, aliceDeviceId));
+    expect(storedExclusions).toEqual([
+      {
+        deviceId: aliceDeviceId,
+        repoId: repoAId,
+      },
+    ]);
+
+    const clearReposRes = await fetch(
+      `${baseUrl}/v1/devices/${aliceDeviceId}/repos`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${aliceApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ repoPaths: [], excludedRepos: [] }),
+      },
+    );
+    expect(clearReposRes.status).toBe(200);
+    expect(await clearReposRes.json()).toEqual({
+      ok: true,
+      repoPathsStored: 0,
+      excludedReposStored: 0,
+      skippedRepos: [],
+    });
+
+    const clearedPaths = await db
+      .select()
+      .from(deviceRepoPaths)
+      .where(eq(deviceRepoPaths.deviceId, aliceDeviceId));
+    expect(clearedPaths).toEqual([]);
+
+    const clearedExclusions = await db
+      .select()
+      .from(deviceExcludedRepos)
+      .where(eq(deviceExcludedRepos.deviceId, aliceDeviceId));
+    expect(clearedExclusions).toEqual([]);
   });
 
   it("Bob receives WebSocket push when Alice ingests to shared repo", async () => {
@@ -242,7 +332,7 @@ describe("social feed integration", () => {
           Authorization: `Bearer ${aliceApiKey}`,
         },
         body: makeNdjson(commonEvents),
-      }
+      },
     );
     expect(ingestRes.status).toBe(200);
     const ingestData = (await ingestRes.json()) as {
@@ -255,9 +345,7 @@ describe("social feed integration", () => {
 
     // Bob should have received the session_updated message
     expect(messages.length).toBeGreaterThanOrEqual(1);
-    const sessionUpdate = messages.find(
-      (m) => m.type === "session_updated"
-    );
+    const sessionUpdate = messages.find((m) => m.type === "session_updated");
     expect(sessionUpdate).toBeTruthy();
     expect(sessionUpdate.session_id).toBe(COMMON_SESSION_ID);
 
@@ -279,7 +367,7 @@ describe("social feed integration", () => {
           Authorization: `Bearer ${aliceApiKey}`,
         },
         body: makeNdjson(repoAEvents),
-      }
+      },
     );
 
     // Wait and confirm Bob did NOT get notified about repo-a

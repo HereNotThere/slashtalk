@@ -16,6 +16,39 @@ CONFIG_FILE="$CONFIG_DIR/slashtalk.json"
 SYNC_FILE="$CONFIG_DIR/slashtalk-sync.json"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+github_full_name() {
+  case "$1" in
+    git@github.com:*)
+      FULL_NAME=${1#git@github.com:}
+      ;;
+    ssh://git@github.com/*)
+      FULL_NAME=${1#ssh://git@github.com/}
+      ;;
+    https://github.com/*)
+      FULL_NAME=${1#https://github.com/}
+      ;;
+    http://github.com/*)
+      FULL_NAME=${1#http://github.com/}
+      ;;
+    git://github.com/*)
+      FULL_NAME=${1#git://github.com/}
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  FULL_NAME=${FULL_NAME%.git}
+  case "$FULL_NAME" in
+    */*) printf '%s\n' "$FULL_NAME" ;;
+    *) return 1 ;;
+  esac
+}
+
 # ── 1. Token exchange ────────────────────────────────────────
 
 printf "Device name [$(hostname)]: "
@@ -52,8 +85,9 @@ echo "Saved config to $CONFIG_FILE"
 
 echo ""
 echo "Scanning for git repos..."
-REPOS=""
 REPO_DIRS=$(find "$HOME" -maxdepth 2 -name .git -type d 2>/dev/null || true)
+REPO_META_FILE=$(mktemp)
+trap 'rm -f "$REPO_META_FILE"' EXIT HUP INT TERM
 
 if [ -z "$REPO_DIRS" ]; then
   printf "No repos found under ~. Enter a path to scan (or Enter to skip): "
@@ -75,21 +109,59 @@ fi
 
 # Build repo list
 I=1
-REPO_LIST=""
+FOUND_REPOS=0
 echo ""
 echo "Discovered repos:"
-echo "$REPO_DIRS" | while IFS= read -r GIT_DIR; do
+while IFS= read -r GIT_DIR; do
   [ -z "$GIT_DIR" ] && continue
   REPO_DIR=$(dirname "$GIT_DIR")
   REMOTE=$(cd "$REPO_DIR" && git remote get-url origin 2>/dev/null || echo "")
-  NAME=$(basename "$REPO_DIR")
-  echo "  [$I] [x] $NAME  ($REMOTE)"
+  FULL_NAME=$(github_full_name "$REMOTE" 2>/dev/null || true)
+  [ -z "$FULL_NAME" ] && continue
+  printf '%s\t%s\n' "$REPO_DIR" "$FULL_NAME" >> "$REPO_META_FILE"
+  echo "  [$I] [x] $FULL_NAME  ($REPO_DIR)"
   I=$((I + 1))
-done
+  FOUND_REPOS=$((FOUND_REPOS + 1))
+done <<EOF
+$REPO_DIRS
+EOF
+
+if [ "$FOUND_REPOS" -eq 0 ]; then
+  echo "  (no GitHub repos found in scanned directories)"
+fi
 
 echo ""
 echo "All repos selected by default. Enter numbers to deselect (comma-separated), or Enter to continue:"
 read -r DESELECT
+
+echo ""
+echo "Syncing device repo selections..."
+DESELECT=$(echo "$DESELECT" | tr -d ' ')
+REPO_PATHS_JSON=""
+EXCLUDED_JSON=""
+I=1
+while IFS='	' read -r REPO_DIR FULL_NAME; do
+  [ -z "$REPO_DIR" ] && continue
+  ESCAPED_PATH=$(json_escape "$REPO_DIR")
+  ESCAPED_NAME=$(json_escape "$FULL_NAME")
+  case ",$DESELECT," in
+    *,"$I",*)
+      [ -n "$EXCLUDED_JSON" ] && EXCLUDED_JSON="${EXCLUDED_JSON},"
+      EXCLUDED_JSON="${EXCLUDED_JSON}\"$ESCAPED_NAME\""
+      ;;
+    *)
+      [ -n "$REPO_PATHS_JSON" ] && REPO_PATHS_JSON="${REPO_PATHS_JSON},"
+      REPO_PATHS_JSON="${REPO_PATHS_JSON}{\"fullName\":\"$ESCAPED_NAME\",\"localPath\":\"$ESCAPED_PATH\"}"
+      ;;
+  esac
+  I=$((I + 1))
+done < "$REPO_META_FILE"
+
+REPOS_PAYLOAD="{\"repoPaths\":[${REPO_PATHS_JSON}],\"excludedRepos\":[${EXCLUDED_JSON}]}"
+curl -sf -X POST "$SERVER/v1/devices/$DEVICE_ID/repos" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$REPOS_PAYLOAD" > /dev/null || echo "Warning: failed to sync device repo selections."
 
 # ── 3. Initial upload ────────────────────────────────────────
 

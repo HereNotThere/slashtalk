@@ -9,13 +9,37 @@ export const SessionState = {
 
 export type SessionState = (typeof SessionState)[keyof typeof SessionState];
 
-/** Token usage bucket */
+/** Source of a session's JSONL events */
+export const SOURCES = ["claude", "codex"] as const;
+export type EventSource = (typeof SOURCES)[number];
+
+/** LLM provider a session's model belongs to */
+export const PROVIDERS = ["anthropic", "openai"] as const;
+export type Provider = (typeof PROVIDERS)[number];
+
+/** Normalized event kind — source-agnostic vocabulary for queries */
+export const EVENT_KINDS = [
+  "user_msg",
+  "assistant_msg",
+  "reasoning",
+  "tool_call",
+  "tool_result",
+  "turn_start",
+  "turn_end",
+  "token_usage",
+  "system",
+  "meta",
+  "unknown",
+] as const;
+export type EventKind = (typeof EVENT_KINDS)[number];
+
+/** Token usage bucket — provider-agnostic */
 export interface TokenUsage {
   in: number;
-  cw5: number;
-  cw1: number;
-  cr: number;
   out: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reasoning: number;
 }
 
 /** Queued command entry */
@@ -92,15 +116,14 @@ export interface FeedUser {
 
 /** Ingest response */
 export interface IngestResponse {
-  acceptedBytes: number;
   acceptedEvents: number;
   duplicateEvents: number;
-  serverOffset: number;
+  serverLineSeq: number;
 }
 
 /** Sync state entry */
 export interface SyncStateEntry {
-  serverOffset: number;
+  serverLineSeq: number;
   prefixHash: string | null;
 }
 

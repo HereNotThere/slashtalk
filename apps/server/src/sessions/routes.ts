@@ -1,9 +1,12 @@
 import { Elysia, t } from "elysia";
-import { eq, sql, and, lt } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
+import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessions, events, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { classifySessionState } from "./state";
+
+const SESSION_STATE_VALUES = Object.values(SessionState);
 
 export const sessionRoutes = (db: Database) =>
   new Elysia({ prefix: "/api", name: "sessions" })
@@ -13,7 +16,7 @@ export const sessionRoutes = (db: Database) =>
     .get(
       "/sessions",
       async ({ user, query }) => {
-        let rows = await db
+        const rows = await db
           .select()
           .from(sessions)
           .where(eq(sessions.userId, user.id))
@@ -51,7 +54,9 @@ export const sessionRoutes = (db: Database) =>
       {
         query: t.Object({
           project: t.Optional(t.String()),
-          state: t.Optional(t.String()),
+          state: t.Optional(
+            t.Union(SESSION_STATE_VALUES.map((s) => t.Literal(s)))
+          ),
         }),
       }
     )
@@ -115,24 +120,17 @@ export const sessionRoutes = (db: Database) =>
         }
 
         const limit = Math.min(Number(query.limit ?? 50), 100);
-        let q = db
+        const cursor = query.cursor ? Number(query.cursor) : null;
+        const q = db
           .select()
           .from(events)
           .where(
             and(
               eq(events.sessionId, params.id),
-              query.cursor
-                ? lt(
-                    events.ts,
-                    db
-                      .select({ ts: events.ts })
-                      .from(events)
-                      .where(eq(events.uuid, query.cursor))
-                  )
-                : undefined
+              cursor != null ? sql`${events.lineSeq} > ${cursor}` : undefined
             )
           )
-          .orderBy(sql`${events.ts} asc`)
+          .orderBy(sql`${events.lineSeq} asc`)
           .limit(limit);
 
         return await q;

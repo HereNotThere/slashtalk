@@ -13,7 +13,11 @@ import { shell } from "electron";
 import http from "node:http";
 import os from "node:os";
 import type { AddressInfo } from "node:net";
-import type { FeedUser } from "@slashtalk/shared";
+import type {
+  FeedUser,
+  IngestResponse,
+  SyncStateEntry,
+} from "@slashtalk/shared";
 import type {
   BackendAuthState,
   BackendUser,
@@ -319,6 +323,60 @@ export function postDeviceRepos(payload: {
   return jsonFetch(`/v1/devices/${creds.deviceId}/repos`, {
     method: "POST",
     body: payload,
+    auth: "apiKey",
+  });
+}
+
+// ---------- Ingest / heartbeat ----------
+
+export async function ingestChunk(args: {
+  session: string;
+  project: string;
+  fromLineSeq: number;
+  prefixHash: string;
+  body: string;
+}): Promise<IngestResponse> {
+  if (!creds) throw new Error("Not signed in");
+  const qs = new URLSearchParams({
+    project: args.project,
+    session: args.session,
+    fromLineSeq: String(args.fromLineSeq),
+    prefixHash: args.prefixHash,
+  });
+  const res = await fetch(`${baseUrl()}/v1/ingest?${qs.toString()}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${creds.apiKey}`,
+      "Content-Type": "application/x-ndjson",
+    },
+    body: args.body,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`POST /v1/ingest failed (${res.status}): ${text}`);
+  }
+  return (await res.json()) as IngestResponse;
+}
+
+export function fetchSyncState(): Promise<Record<string, SyncStateEntry>> {
+  return jsonFetch<Record<string, SyncStateEntry>>("/v1/sync-state", {
+    method: "GET",
+    auth: "apiKey",
+  });
+}
+
+export function sendHeartbeat(body: {
+  sessionId: string;
+  pid?: number;
+  kind?: string;
+  cwd?: string;
+  version?: string;
+  startedAt?: string;
+}): Promise<{ ok: true }> {
+  return jsonFetch("/v1/heartbeat", {
+    method: "POST",
+    body,
     auth: "apiKey",
   });
 }

@@ -24,9 +24,9 @@ export function App(): JSX.Element {
       {/* Content */}
       <div className="flex-1 overflow-auto px-lg py-lg space-y-lg">
         {message && (
-          <div className="flex justify-end">
-            <div className="max-w-xs px-4 py-2 rounded-2xl bg-surface text-fg">
-              <p className="text-sm">{message}</p>
+          <div className="flex justify-end mb-lg">
+            <div className="max-w-sm px-4 py-2.5 rounded-2xl bg-surface text-fg shadow-sm">
+              <p className="text-sm leading-relaxed">{message}</p>
             </div>
           </div>
         )}

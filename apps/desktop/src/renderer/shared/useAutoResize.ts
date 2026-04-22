@@ -6,15 +6,13 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
  * Measures `#root.getBoundingClientRect().height` after every React render
  * (useLayoutEffect, no deps) AND on async size changes via ResizeObserver
  * (font/image loads). All sends are coalesced into a single rAF tick so a burst
- * of state updates produces at most one IPC call per frame. Throttled to at most
- * one resize every 100ms to avoid rapid successive window resizes.
+ * of state updates produces at most one IPC call per frame.
  *
  * Assumes the body is transparent and the root div is intrinsically sized
  * (no `h-full` on outer wrappers).
  */
 export function useAutoResize(): void {
   const lastSent = useRef(0);
-  const lastSentTime = useRef(0);
   const pending = useRef<number | null>(null);
 
   const flush = useRef<() => void>(() => {});
@@ -25,11 +23,7 @@ export function useAutoResize(): void {
     const h = Math.ceil(root.getBoundingClientRect().height);
     if (h <= 0 || h === lastSent.current) return;
 
-    const now = Date.now();
-    if (now - lastSentTime.current < 100) return;
-
     lastSent.current = h;
-    lastSentTime.current = now;
     void window.chatheads.requestResize(h);
   };
 

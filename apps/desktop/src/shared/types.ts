@@ -97,14 +97,18 @@ export interface ChatHeadsBridge {
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;
 
-  // Info window (main → info renderer)
-  onInfoShow: (cb: (payload: { head: ChatHead }) => void) => Unsubscribe;
+  // Info window (main → info renderer). Sessions are prefetched in main so
+  // the renderer can paint in one pass at the correct height.
+  onInfoShow: (
+    cb: (payload: { head: ChatHead; sessions: InfoSession[] }) => void,
+  ) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
   // Fetch sessions for a given chat head (signed-in user's own or a peer's
   // that share a claimed repo with you).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
+  preloadSessions: (headId: string) => Promise<void>;
 
   // Tray popup actions
   openMain: () => Promise<void>;

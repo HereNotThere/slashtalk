@@ -351,6 +351,10 @@ export function listOwnSessions(): Promise<SessionSnapshot[]> {
   return jsonFetch<SessionSnapshot[]>("/api/sessions", { method: "GET" });
 }
 
+export function listFeedSessions(): Promise<FeedSessionSnapshot[]> {
+  return jsonFetch<FeedSessionSnapshot[]>("/api/feed", { method: "GET" });
+}
+
 export function listFeedSessionsForUser(
   login: string,
 ): Promise<FeedSessionSnapshot[]> {

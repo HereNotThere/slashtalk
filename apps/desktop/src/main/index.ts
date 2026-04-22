@@ -48,6 +48,13 @@ const RESIZE_MAX = 900;
 // resize/reposition the window each time it changes.
 let infoCurrentHeight = INFO_INITIAL_HEIGHT;
 
+// When set, the info window is waiting to be shown at the index below. The
+// next `window:requestResize` from the info renderer (i.e. first measurement
+// after the new head/sessions are painted) triggers the actual show with the
+// correct height. A fallback timeout shows it even if resize never fires.
+let pendingInfoShowIndex: number | null = null;
+let pendingInfoShowTimeout: NodeJS.Timeout | null = null;
+
 const POSITION_KEY = "overlayPosition";
 
 let mainWindow: BrowserWindow | null = null;
@@ -60,6 +67,8 @@ let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
 let selectedHeadId: string | null = null;
+let sessionCache = new Map<string, InfoSession[]>();
+
 
 let dragOffset: { dx: number; dy: number } | null = null;
 let dragTicker: ReturnType<typeof setInterval> | null = null;
@@ -260,8 +269,8 @@ function positionInfo(index: number): void {
     : visualLeft - INFO_GAP - INFO_WIDTH;
 
   const cell = BUBBLE_SIZE + SPACING;
-  const bubbleMidY = stackBounds.y + PADDING + index * cell + BUBBLE_SIZE / 2;
-  const infoY = Math.round(bubbleMidY - infoCurrentHeight / 2);
+  const avatarTopY = stackBounds.y + PADDING + index * cell;
+  const infoY = Math.round(avatarTopY - 16);
 
   // setBounds (vs setPosition) so we apply the latest tracked height atomically.
   infoWindow.setBounds({
@@ -272,29 +281,57 @@ function positionInfo(index: number): void {
   });
 }
 
-function showInfo(index: number): void {
+async function showInfo(index: number): Promise<void> {
   const head = heads[index];
   if (!head) return;
 
   const win = ensureInfoWindow();
   selectedHeadId = head.id;
 
-  const send = (): void => {
-    win.webContents.send("info:show", { head });
-  };
   if (win.webContents.isLoading()) {
-    win.webContents.once("did-finish-load", send);
-  } else {
-    send();
+    await new Promise<void>((resolve) => {
+      win.webContents.once("did-finish-load", () => resolve());
+    });
   }
 
-  positionInfo(index);
-  win.show();
-  win.focus();
+  // Prefetch so the renderer paints at its final size on first render. Hover
+  // preloads usually warm the cache already, so this is typically a no-op.
+  const sessions = await fetchSessionsForHead(head.id);
+
+  // A newer toggle/hide might have fired while we were awaiting — bail if the
+  // selected head no longer matches.
+  if (selectedHeadId !== head.id) return;
+
+  pendingInfoShowIndex = index;
+  if (pendingInfoShowTimeout) clearTimeout(pendingInfoShowTimeout);
+  pendingInfoShowTimeout = setTimeout(() => {
+    if (pendingInfoShowIndex !== null) flushPendingInfoShow();
+  }, 250);
+
+  win.webContents.send("info:show", { head, sessions });
+}
+
+function flushPendingInfoShow(): void {
+  if (pendingInfoShowIndex === null) return;
+  if (!infoWindow || infoWindow.isDestroyed()) return;
+  const idx = pendingInfoShowIndex;
+  pendingInfoShowIndex = null;
+  if (pendingInfoShowTimeout) {
+    clearTimeout(pendingInfoShowTimeout);
+    pendingInfoShowTimeout = null;
+  }
+  positionInfo(idx);
+  infoWindow.show();
+  infoWindow.focus();
 }
 
 function hideInfo(): void {
   selectedHeadId = null;
+  pendingInfoShowIndex = null;
+  if (pendingInfoShowTimeout) {
+    clearTimeout(pendingInfoShowTimeout);
+    pendingInfoShowTimeout = null;
+  }
   if (infoWindow && !infoWindow.isDestroyed()) {
     // Renderer pauses its session poll when it sees an empty head.
     infoWindow.webContents.send("info:hide");
@@ -383,7 +420,9 @@ function positionChat(): void {
     anchor === "left"
       ? bubbleCenterX - CHAT_ICON_OFFSET
       : bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
-  const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2 - 8);
+  // Align pill top to avatar top. Chat window (80) is taller than the pill
+  // (56) by 24px, split 12/12 above and below by items-center + p-sm.
+  const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2);
 
   chatWindow.setBounds({
     x: Math.round(chatX),
@@ -608,7 +647,7 @@ ipcMain.handle("heads:toggleInfo", (_e, index: number): void => {
   const head = heads[index];
   if (!head) return;
   if (selectedHeadId === head.id) hideInfo();
-  else showInfo(index);
+  else void showInfo(index);
 });
 
 ipcMain.handle("info:hide", (): void => hideInfo());
@@ -661,46 +700,64 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
 });
 
+
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!win || win.isDestroyed()) return;
   const h = Math.max(RESIZE_MIN, Math.min(RESIZE_MAX, Math.round(height)));
 
   if (win === infoWindow) {
-    if (h === infoCurrentHeight) return;
-    infoCurrentHeight = h;
-    // positionInfo recenters vertically using the new tracked height.
-    repositionInfoIfVisible();
-    // If not currently visible, still reflect the new height so next show is correct.
-    if (!selectedHeadId) {
-      const b = win.getBounds();
-      win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+    const changed = h !== infoCurrentHeight;
+    if (changed) infoCurrentHeight = h;
+
+    if (pendingInfoShowIndex !== null) {
+      // First measurement after a show request — reveal with the right height.
+      flushPendingInfoShow();
+    } else if (changed) {
+      // positionInfo recenters vertically using the new tracked height.
+      repositionInfoIfVisible();
+      // If not currently visible, still reflect the new height so next show is correct.
+      if (!selectedHeadId) {
+        const b = win.getBounds();
+        win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+      }
     }
   } else if (win === trayPopup) {
     const b = win.getBounds();
     if (h === b.height) return;
-    // Tray popup is anchored at top (under the menu bar item) — height grows downward.
+    // Tray popup is anchored at top — height grows downward.
     win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
   }
 });
 
-ipcMain.handle(
-  "sessions:forHead",
-  async (_e, headId: string): Promise<InfoSession[]> => {
-    const login = rail.parseUserHeadId(headId);
-    if (!login) return [];
-    const state = backend.getAuthState();
-    if (!state.signedIn) return [];
-    try {
-      if (state.user.githubLogin === login) {
-        return await backend.listOwnSessions();
-      }
-      return await backend.listFeedSessionsForUser(login);
-    } catch {
-      return [];
-    }
-  },
-);
+async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
+  const cached = sessionCache.get(headId);
+  if (cached) return cached;
+
+  const login = rail.parseUserHeadId(headId);
+  if (!login) return [];
+  const state = backend.getAuthState();
+  if (!state.signedIn) return [];
+  try {
+    const sessions =
+      state.user.githubLogin === login
+        ? await backend.listOwnSessions()
+        : await backend.listFeedSessionsForUser(login);
+    sessionCache.set(headId, sessions);
+    return sessions;
+  } catch {
+    return [];
+  }
+}
+
+ipcMain.handle("sessions:forHead", async (_e, headId: string): Promise<InfoSession[]> => {
+  return fetchSessionsForHead(headId);
+});
+
+// Preload sessions for a head on hover to avoid flicker when opening info window
+ipcMain.handle("sessions:preload", async (_e, headId: string): Promise<void> => {
+  void fetchSessionsForHead(headId);
+});
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
@@ -741,30 +798,9 @@ localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
 
 // -------- Lifecycle --------
 
-// Dev-only: assign stable, varied `lastActionAt` values to heads that don't
-// have one, so the overlay age badge shows a mix of "now" / "Xm" / "Xh" / "Xd"
-// without having to actually wait. The rail emits heads from the backend
-// (which doesn't yet track per-user last-activity), so without this every
-// badge would say "now". No-op in packaged builds.
+// Rail derives lastActivityAt from /api/feed sessions directly, no backfill needed.
 function debugBackfillTimestamps(): void {
-  if (app.isPackaged) return;
-  const now = Date.now();
-  const ages = [
-    30_000,                 // "now"
-    3 * 60_000,             // 3m
-    17 * 60_000,            // 17m
-    47 * 60_000,            // 47m
-    2 * 3_600_000,          // 2h
-    9 * 3_600_000,          // 9h
-    23 * 3_600_000,         // 23h
-    2 * 86_400_000,         // 2d
-    7 * 86_400_000,         // 7d
-  ];
-  for (let i = 0; i < heads.length; i++) {
-    const h = heads[i];
-    if (!h || h.lastActionAt != null) continue;
-    h.lastActionAt = now - ages[i % ages.length]!;
-  }
+  // No-op; kept for reference.
 }
 
 app.whenReady().then(() => {

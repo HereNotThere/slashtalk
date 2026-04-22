@@ -22,7 +22,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     const offShow = window.chatheads.onInfoShow((p) => {
       setHead(p.head);
-      setSessions(null);
+      setSessions(p.sessions);
     });
     const offHide = window.chatheads.onInfoHide(() => setHead(null));
     return () => {
@@ -42,7 +42,7 @@ export function App(): JSX.Element {
         if (!cancelled) setSessions([]);
       }
     };
-    void load();
+    // Initial payload is already sent by main; only refresh on interval.
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
       cancelled = true;
@@ -72,7 +72,7 @@ export function App(): JSX.Element {
   }, []);
 
   return (
-    <div ref={rootRef}>
+    <div ref={rootRef} className="bg-card rounded-lg">
       <Header head={head} />
       <Divider />
       <SessionsSection sessions={sessions} />
@@ -86,18 +86,19 @@ function Divider(): JSX.Element {
 
 function Header({ head }: { head: ChatHead | null }): JSX.Element {
   const name = head?.label ?? "—";
+  const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   return (
     <div className="flex items-start gap-md px-lg pt-lg pb-md">
       <Avatar head={head} />
       <div className="flex-1 min-w-0">
         <div className="text-[19px] font-bold leading-tight truncate">{name}</div>
-        <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted">
-          <span className="text-warning">☀︎</span>
-          <span>San Francisco</span>
-          <span className="text-subtle">·</span>
-          <span>8:47 AM</span>
-          <span className="text-subtle">·</span>
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-success/15 text-success text-[11px] font-medium">
+        <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted whitespace-nowrap min-w-0">
+          <span className="text-warning shrink-0">☀︎</span>
+          <span className="truncate">New York</span>
+          <span className="text-subtle shrink-0">·</span>
+          <span className="shrink-0">{time}</span>
+          <span className="text-subtle shrink-0">·</span>
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-success/15 text-success text-[11px] font-medium shrink-0">
             <Dot color="bg-success" />
             active
           </span>
@@ -199,22 +200,22 @@ function SessionRow({ session }: { session: InfoSession }): JSX.Element {
     <div>
       <div className="flex items-center gap-2">
         <Dot color={DOT_COLOR[session.state]} />
-        <div className="text-[14px] font-semibold text-fg flex-1 truncate">
+        <div className="text-[14px] text-fg flex-1 truncate">
           {title}
         </div>
         <Chevron />
       </div>
-      <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-muted flex-wrap">
+      <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
         {(repo || session.branch) && (
-          <span className="inline-flex items-center gap-1.5 font-mono bg-code rounded-md px-1.5 py-0.5 text-fg/85">
+          <span className="inline-flex items-center gap-1.5 font-mono bg-code rounded-md px-1.5 py-0.5 text-fg/85 min-w-0 max-w-full whitespace-nowrap overflow-hidden">
             <BranchIcon />
-            {repo && <span>{repo}</span>}
-            {repo && session.branch && <span className="text-subtle">·</span>}
-            {session.branch && <span>{session.branch}</span>}
+            {repo && <span className="truncate">{repo}</span>}
+            {repo && session.branch && <span className="text-subtle shrink-0">·</span>}
+            {session.branch && <span className="truncate">{session.branch}</span>}
           </span>
         )}
-        <span className="text-subtle">·</span>
-        <span className="inline-flex items-center gap-1">
+        <span className="text-subtle shrink-0">·</span>
+        <span className="inline-flex items-center gap-1 shrink-0">
           <span className="text-subtle">✦</span>
           <span>{toolLabel(session.kind, session.model)}</span>
         </span>

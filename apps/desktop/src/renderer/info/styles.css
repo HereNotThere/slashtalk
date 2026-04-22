@@ -5,12 +5,12 @@
  * panel reads cleanly. Dark theme keeps vibrancy. */
 @layer base {
   :root.theme-light body {
-    background: var(--color-bg);
+    background: var(--color-card);
   }
 
   @media (prefers-color-scheme: light) {
     :root:not(.theme-dark):not(.theme-light) body {
-      background: var(--color-bg);
+      background: var(--color-card);
     }
   }
 }

@@ -3,18 +3,27 @@ import { eq } from "drizzle-orm";
 import type { Database } from "../db";
 import { sessions, events, heartbeats } from "../db/schema";
 import { apiKeyAuth } from "../auth/middleware";
+import type { RedisBridge } from "../ws/redis-bridge";
 
-export const ingestRoutes = (db: Database) =>
+export const ingestRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/v1", name: "ingest" })
     .use(apiKeyAuth)
+    // Parse application/x-ndjson as text
+    .onParse({ as: "local" }, async ({ request, contentType }) => {
+      if (
+        contentType === "application/x-ndjson" ||
+        contentType === "text/plain"
+      ) {
+        return await request.text();
+      }
+    })
 
     // POST /v1/ingest — upload NDJSON event chunk
     .post(
       "/ingest",
       async ({ body, query, user, device }) => {
-        const lines = (body as string)
-          .split("\n")
-          .filter((l) => l.trim().length > 0);
+        const text = typeof body === "string" ? body : String(body);
+        const lines = text.split("\n").filter((l) => l.trim().length > 0);
 
         let acceptedEvents = 0;
         let duplicateEvents = 0;
@@ -47,7 +56,7 @@ export const ingestRoutes = (db: Database) =>
         }
 
         // Upsert session record
-        const bodyBytes = new TextEncoder().encode(body as string).length;
+        const bodyBytes = new TextEncoder().encode(text).length;
         const newOffset = Number(query.fromOffset) + bodyBytes;
 
         await db
@@ -68,6 +77,25 @@ export const ingestRoutes = (db: Database) =>
             },
           });
 
+        // Publish to Redis if session is linked to a repo
+        if (acceptedEvents > 0) {
+          const [session] = await db
+            .select({ repoId: sessions.repoId })
+            .from(sessions)
+            .where(eq(sessions.sessionId, query.session))
+            .limit(1);
+
+          if (session?.repoId) {
+            await redis.publish(`repo:${session.repoId}`, {
+              type: "session_updated",
+              session_id: query.session,
+              user_id: user.id,
+              github_login: user.githubLogin,
+              repo_id: session.repoId,
+            });
+          }
+        }
+
         return {
           acceptedBytes: bodyBytes,
           acceptedEvents,
@@ -76,7 +104,6 @@ export const ingestRoutes = (db: Database) =>
         };
       },
       {
-        type: "text",
         query: t.Object({
           project: t.String(),
           session: t.String(),

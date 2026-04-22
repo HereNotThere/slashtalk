@@ -1,0 +1,5 @@
+[test]
+preload = ["./test/preload.ts"]
+
+# Run test files sequentially to avoid database conflicts
+shard = "1/1"

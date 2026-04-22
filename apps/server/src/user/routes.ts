@@ -29,10 +29,7 @@ export const userRoutes = (db: Database) =>
 
     // GET /api/me/devices — list user's devices
     .get("/devices", async ({ user }) => {
-      return await db
-        .select()
-        .from(devices)
-        .where(eq(devices.userId, user.id));
+      return await db.select().from(devices).where(eq(devices.userId, user.id));
     })
 
     // DELETE /api/me/devices/:id — remove a device + its API key
@@ -43,7 +40,7 @@ export const userRoutes = (db: Database) =>
           .select()
           .from(devices)
           .where(
-            and(eq(devices.id, Number(params.id)), eq(devices.userId, user.id))
+            and(eq(devices.id, Number(params.id)), eq(devices.userId, user.id)),
           )
           .limit(1);
 
@@ -57,7 +54,7 @@ export const userRoutes = (db: Database) =>
 
         return { ok: true };
       },
-      { params: t.Object({ id: t.String() }) }
+      { params: t.Object({ id: t.String() }) },
     )
 
     // POST /api/me/sync-repos — trigger GitHub repo sync
@@ -142,14 +139,14 @@ export const deviceReposRoutes = (db: Database) =>
             .where(eq(devices.id, apiKey.deviceId))
             .limit(1);
           return { user, device: device ?? null };
-        }
-      )
+        },
+      ),
     )
 
     // POST /v1/devices/:id/repos — set repo paths and exclusions for a device
     .post(
       "/:id/repos",
-      async ({ params, body, user, device, set }) => {
+      async ({ params, body, user, set }) => {
         const deviceId = Number(params.id);
 
         // Verify device belongs to user
@@ -164,21 +161,65 @@ export const deviceReposRoutes = (db: Database) =>
           return { error: "Device not found" };
         }
 
+        const visibleRepos = await db
+          .select({ repoId: repos.id, fullName: repos.fullName })
+          .from(userRepos)
+          .innerJoin(repos, eq(repos.id, userRepos.repoId))
+          .where(eq(userRepos.userId, user.id));
+
+        const repoIdByFullName = new Map(
+          visibleRepos.map((repo) => [repo.fullName, repo.repoId]),
+        );
+        const visibleRepoIds = new Set(visibleRepos.map((repo) => repo.repoId));
+        const skippedRepos: string[] = [];
+
+        const resolveRepoId = (input: {
+          repoId?: number;
+          fullName?: string;
+        }): number | null => {
+          if (
+            typeof input.repoId === "number" &&
+            visibleRepoIds.has(input.repoId)
+          ) {
+            return input.repoId;
+          }
+          if (input.fullName) {
+            return repoIdByFullName.get(input.fullName) ?? null;
+          }
+          return null;
+        };
+
         // Store local path → repo mappings (from install-time discovery)
-        if (body.repoPaths && body.repoPaths.length > 0) {
+        let repoPathsStored = 0;
+        if (body.repoPaths !== undefined) {
           await db
             .delete(deviceRepoPaths)
             .where(eq(deviceRepoPaths.deviceId, deviceId));
 
-          await db.insert(deviceRepoPaths).values(
-            body.repoPaths.map(
-              (rp: { repoId: number; localPath: string }) => ({
-                deviceId,
-                repoId: rp.repoId,
-                localPath: rp.localPath,
-              })
-            )
-          );
+          const repoPathsByRepoId = new Map<number, string>();
+          for (const repoPath of body.repoPaths) {
+            const repoId = resolveRepoId(repoPath);
+            if (!repoId) {
+              skippedRepos.push(
+                repoPath.fullName ?? `repoId:${repoPath.repoId ?? "unknown"}`,
+              );
+              continue;
+            }
+            repoPathsByRepoId.set(repoId, repoPath.localPath);
+          }
+
+          const normalizedRepoPaths = Array.from(
+            repoPathsByRepoId.entries(),
+          ).map(([repoId, localPath]) => ({
+            deviceId,
+            repoId,
+            localPath,
+          }));
+
+          repoPathsStored = normalizedRepoPaths.length;
+          if (normalizedRepoPaths.length > 0) {
+            await db.insert(deviceRepoPaths).values(normalizedRepoPaths);
+          }
         }
 
         // Store exclusions
@@ -186,26 +227,54 @@ export const deviceReposRoutes = (db: Database) =>
           .delete(deviceExcludedRepos)
           .where(eq(deviceExcludedRepos.deviceId, deviceId));
 
-        if (body.excludedRepoIds && body.excludedRepoIds.length > 0) {
+        const excludedRepoIds = new Set<number>();
+        for (const repoId of body.excludedRepoIds ?? []) {
+          if (visibleRepoIds.has(repoId)) {
+            excludedRepoIds.add(repoId);
+          } else {
+            skippedRepos.push(`repoId:${repoId}`);
+          }
+        }
+        for (const fullName of body.excludedRepos ?? []) {
+          const repoId = repoIdByFullName.get(fullName);
+          if (repoId) {
+            excludedRepoIds.add(repoId);
+          } else {
+            skippedRepos.push(fullName);
+          }
+        }
+
+        const excludedReposStored = excludedRepoIds.size;
+        if (excludedReposStored > 0) {
           await db.insert(deviceExcludedRepos).values(
-            body.excludedRepoIds.map((repoId: number) => ({
+            Array.from(excludedRepoIds).map((repoId) => ({
               deviceId,
               repoId,
-            }))
+            })),
           );
         }
 
-        return { ok: true };
+        return {
+          ok: true,
+          repoPathsStored,
+          excludedReposStored,
+          skippedRepos,
+        };
       },
       {
         params: t.Object({ id: t.String() }),
         body: t.Object({
           repoPaths: t.Optional(
             t.Array(
-              t.Object({ repoId: t.Number(), localPath: t.String() })
-            )
+              t.Object({
+                repoId: t.Optional(t.Number()),
+                fullName: t.Optional(t.String()),
+                localPath: t.String(),
+              }),
+            ),
           ),
           excludedRepoIds: t.Optional(t.Array(t.Number())),
+          excludedRepos: t.Optional(t.Array(t.String())),
         }),
-      }
+      },
     );

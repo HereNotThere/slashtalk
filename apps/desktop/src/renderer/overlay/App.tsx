@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatHead } from '../../shared/types';
 import { useHeads } from '../shared/useHeads';
+import { useActivityBadgeUpdate } from '../shared/useActivityBadgeUpdate';
 import { SearchIcon } from '../shared/icons';
 
 const DRAG_THRESHOLD = 4;
-const TICK_MS = 30_000;
 
 // Compact "time since" — "now" / "5m" / "3h" / "2d".
 function formatAge(ms: number): string {
@@ -17,22 +17,12 @@ function formatAge(ms: number): string {
   return `${Math.floor(hr / 24)}d`;
 }
 
-// Forces a re-render every interval so age badges stay current without IPC.
-function useTick(intervalMs: number): void {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-}
-
 // Click-vs-drag discrimination + toggle-info, mirrors DraggableHostingView.swift.
 // Below threshold on mouseUp = click (toggleInfo); above = start IPC-driven drag.
 export function App(): JSX.Element {
   const heads = useHeads();
   const stackRef = useRef<HTMLDivElement>(null);
   const [chatOpen, setChatOpen] = useState(false);
-  useTick(TICK_MS);
 
   useEffect(() => {
     return window.chatheads.onChatState(({ visible }) => setChatOpen(visible));
@@ -134,10 +124,17 @@ function ChatBubble({ hidden }: { hidden: boolean }): JSX.Element {
 }
 
 function Bubble({ head }: { head: ChatHead }): JSX.Element {
+  useActivityBadgeUpdate(head.lastActionAt ?? null);
+
+  const handleMouseEnter = (): void => {
+    void window.chatheads.preloadSessions(head.id);
+  };
+
   return (
     <div
       data-bubble
       title={head.label}
+      onMouseEnter={handleMouseEnter}
       className="
         relative w-14 h-14 rounded-full cursor-pointer
         flex items-center justify-center text-[28px]
@@ -170,6 +167,7 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
             absolute -bottom-0.5 -right-0.5 z-[2]
             px-1.5 py-px rounded-full
             bg-gray-700/85 text-white text-[9px] font-light leading-none
+            border border-gray-600/60
             pointer-events-none
           "
         >

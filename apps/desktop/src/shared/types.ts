@@ -56,6 +56,7 @@ export interface TeammateSummary {
   totalSessions: number;
   activeSessions: number;
   repos: string[];
+  lastActivityAt: number | null;
 }
 
 /** Diagnostic snapshot of the rail's last `/api/feed/users` attempt. */
@@ -105,6 +106,7 @@ export interface ChatHeadsBridge {
   // Fetch sessions for a given chat head (signed-in user's own or a peer's
   // that share a claimed repo with you).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
+  preloadSessions: (headId: string) => Promise<void>;
 
   // Tray popup actions
   openMain: () => Promise<void>;

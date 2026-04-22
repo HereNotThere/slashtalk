@@ -50,6 +50,9 @@ const bridge: ChatHeadsBridge = {
   listSessionsForHead: (headId) =>
     ipcRenderer.invoke("sessions:forHead", headId) as Promise<InfoSession[]>,
 
+  preloadSessions: (headId) =>
+    ipcRenderer.invoke("sessions:preload", headId) as Promise<void>,
+
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,
 

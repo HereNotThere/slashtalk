@@ -111,6 +111,7 @@ export interface FeedUser {
   total_sessions: number;
   active_sessions: number;
   repos: string[];
+  last_activity_at: number | null;
 }
 
 /** Ingest response */

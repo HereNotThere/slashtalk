@@ -60,13 +60,11 @@ let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
 let selectedHeadId: string | null = null;
+let sessionCache = new Map<string, InfoSession[]>();
+
 
 let dragOffset: { dx: number; dy: number } | null = null;
 let dragTicker: ReturnType<typeof setInterval> | null = null;
-let resizeAnimations: Map<
-  BrowserWindow,
-  { target: number; ticker: ReturnType<typeof setInterval> }
-> = new Map();
 
 // electron-vite sets ELECTRON_RENDERER_URL in dev mode (pointing at the Vite
 // dev server) so we can reuse the same BrowserWindow code for dev + packaged.
@@ -665,43 +663,6 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
 });
 
-function animateWindowHeight(
-  win: BrowserWindow,
-  targetHeight: number,
-  durationMs: number = 200,
-): void {
-  if (win.isDestroyed()) return;
-
-  const animation = resizeAnimations.get(win);
-  if (animation) clearInterval(animation.ticker);
-
-  const start = win.getBounds().height;
-  const startTime = Date.now();
-
-  const animate = (): void => {
-    if (win.isDestroyed()) {
-      resizeAnimations.delete(win);
-      return;
-    }
-
-    const elapsed = Date.now() - startTime;
-    const progress = Math.min(elapsed / durationMs, 1);
-    // easeOut cubic: 1 - (1-t)^3
-    const eased = 1 - Math.pow(1 - progress, 3);
-    const current = Math.round(start + (targetHeight - start) * eased);
-
-    const b = win.getBounds();
-    win.setBounds({ x: b.x, y: b.y, width: b.width, height: current });
-
-    if (progress >= 1) {
-      resizeAnimations.delete(win);
-    }
-  };
-
-  const ticker = setInterval(animate, 16);
-  resizeAnimations.set(win, { target: targetHeight, ticker });
-  animate();
-}
 
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
@@ -715,33 +676,45 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
     repositionInfoIfVisible();
     // If not currently visible, still reflect the new height so next show is correct.
     if (!selectedHeadId) {
-      animateWindowHeight(win, h);
+      const b = win.getBounds();
+      win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
     }
   } else if (win === trayPopup) {
     const b = win.getBounds();
     if (h === b.height) return;
     // Tray popup is anchored at top — height grows downward.
-    animateWindowHeight(win, h);
+    win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
   }
 });
 
-ipcMain.handle(
-  "sessions:forHead",
-  async (_e, headId: string): Promise<InfoSession[]> => {
-    const login = rail.parseUserHeadId(headId);
-    if (!login) return [];
-    const state = backend.getAuthState();
-    if (!state.signedIn) return [];
-    try {
-      if (state.user.githubLogin === login) {
-        return await backend.listOwnSessions();
-      }
-      return await backend.listFeedSessionsForUser(login);
-    } catch {
-      return [];
-    }
-  },
-);
+async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
+  const cached = sessionCache.get(headId);
+  if (cached) return cached;
+
+  const login = rail.parseUserHeadId(headId);
+  if (!login) return [];
+  const state = backend.getAuthState();
+  if (!state.signedIn) return [];
+  try {
+    const sessions =
+      state.user.githubLogin === login
+        ? await backend.listOwnSessions()
+        : await backend.listFeedSessionsForUser(login);
+    sessionCache.set(headId, sessions);
+    return sessions;
+  } catch {
+    return [];
+  }
+}
+
+ipcMain.handle("sessions:forHead", async (_e, headId: string): Promise<InfoSession[]> => {
+  return fetchSessionsForHead(headId);
+});
+
+// Preload sessions for a head on hover to avoid flicker when opening info window
+ipcMain.handle("sessions:preload", async (_e, headId: string): Promise<void> => {
+  void fetchSessionsForHead(headId);
+});
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
@@ -782,30 +755,9 @@ localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
 
 // -------- Lifecycle --------
 
-// Dev-only: assign stable, varied `lastActionAt` values to heads that don't
-// have one, so the overlay age badge shows a mix of "now" / "Xm" / "Xh" / "Xd"
-// without having to actually wait. The rail emits heads from the backend
-// (which doesn't yet track per-user last-activity), so without this every
-// badge would say "now". No-op in packaged builds.
+// Backend now provides real lastActivityAt via /api/feed/users, so no debug backfill needed.
 function debugBackfillTimestamps(): void {
-  if (app.isPackaged) return;
-  const now = Date.now();
-  const ages = [
-    30_000,                 // "now"
-    3 * 60_000,             // 3m
-    17 * 60_000,            // 17m
-    47 * 60_000,            // 47m
-    2 * 3_600_000,          // 2h
-    9 * 3_600_000,          // 9h
-    23 * 3_600_000,         // 23h
-    2 * 86_400_000,         // 2d
-    7 * 86_400_000,         // 7d
-  ];
-  for (let i = 0; i < heads.length; i++) {
-    const h = heads[i];
-    if (!h || h.lastActionAt != null) continue;
-    h.lastActionAt = now - ages[i % ages.length]!;
-  }
+  // No-op; kept for reference.
 }
 
 app.whenReady().then(() => {

@@ -39,12 +39,17 @@ export function parseUserHeadId(headId: string): string | null {
     : null;
 }
 
-function headForUser(login: string, avatarUrl: string): ChatHead {
+function headForUser(
+  login: string,
+  avatarUrl: string,
+  lastActivityAt?: number | null,
+): ChatHead {
   return {
     id: userHeadId(login),
     label: login,
     tint: "transparent",
     avatar: { type: "remote", value: avatarUrl },
+    ...(lastActivityAt != null && { lastActionAt: lastActivityAt }),
   };
 }
 
@@ -83,7 +88,7 @@ async function refresh(): Promise<void> {
     apply([
       self,
       ...peers.map((t: TeammateSummary) =>
-        headForUser(t.githubLogin, t.avatarUrl),
+        headForUser(t.githubLogin, t.avatarUrl, t.lastActivityAt),
       ),
     ]);
   } catch (err) {

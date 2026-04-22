@@ -178,6 +178,11 @@ export const socialRoutes = (db: Database) =>
             )
           );
 
+        const lastActivity = await db
+          .select({ lastTs: sql<Date | null>`max(${sessions.lastTs})` })
+          .from(sessions)
+          .where(eq(sessions.userId, peer.id));
+
         const peerRepos = await db
           .select({ fullName: repos.fullName })
           .from(userRepos)
@@ -190,6 +195,7 @@ export const socialRoutes = (db: Database) =>
           total_sessions: sessionCount[0]?.count ?? 0,
           active_sessions: activeCount[0]?.count ?? 0,
           repos: peerRepos.map((r) => r.fullName),
+          last_activity_at: lastActivity[0]?.lastTs?.getTime() ?? null,
         });
       }
 

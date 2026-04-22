@@ -344,6 +344,7 @@ export async function listTeammates(): Promise<TeammateSummary[]> {
     totalSessions: r.total_sessions,
     activeSessions: r.active_sessions,
     repos: r.repos,
+    lastActivityAt: r.last_activity_at ?? null,
   }));
 }
 

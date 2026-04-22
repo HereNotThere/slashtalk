@@ -1,0 +1,12 @@
+@import "../shared/tailwind.css";
+
+/* main window is a normal opaque chrome window, not a vibrancy popover */
+@layer base {
+  body {
+    padding: var(--spacing-xl);
+    background: var(--color-bg);
+    overflow: auto;
+    cursor: auto;
+    user-select: auto;
+  }
+}

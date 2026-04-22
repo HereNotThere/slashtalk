@@ -19,11 +19,19 @@ export function isPathTracked(cwd: string | null | undefined): boolean {
   for (const r of tracked) {
     const root = path.resolve(r.localPath);
     const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-    if (absWithSep.startsWith(prefix)) return true;
+    if (absWithSep.startsWith(prefix)) {
+      console.log(`[isPathTracked] hit prefix cwd=${abs} root=${root}`);
+      return true;
+    }
   }
   const mainRepo = resolveWorktreeMainRepo(abs);
-  if (!mainRepo) return false;
-  return tracked.some((r) => path.resolve(r.localPath) === mainRepo);
+  const hit =
+    !!mainRepo && tracked.some((r) => path.resolve(r.localPath) === mainRepo);
+  console.log(
+    `[isPathTracked] cwd=${abs} mainRepo=${mainRepo} ` +
+      `tracked=${JSON.stringify(tracked.map((r) => r.localPath))} hit=${hit}`,
+  );
+  return hit;
 }
 
 // A linked worktree's `.git` is a file: `gitdir: <main>/.git/worktrees/<name>`.

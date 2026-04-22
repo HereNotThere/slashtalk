@@ -9,18 +9,21 @@ import {
   setupTokens,
   devices,
   apiKeys,
+  userRepos,
 } from "../db/schema";
 import {
   generateApiKey,
   hashToken,
   encryptGithubToken,
 } from "./tokens";
+import { syncUserRepos } from "../social/github-sync";
 
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_USER_URL = "https://api.github.com/user";
 const SCOPES = "read:user read:org repo";
 
+/** OAuth + session routes under /auth */
 export const githubAuth = (db: Database) =>
   new Elysia({ prefix: "/auth", name: "auth/github" })
     .use(jwt({ name: "jwt", secret: config.jwtSecret }))
@@ -39,7 +42,6 @@ export const githubAuth = (db: Database) =>
     .get(
       "/github/callback",
       async ({ query, jwt, cookie: { session }, set }) => {
-        // Exchange code for GitHub access token
         const tokenRes = await fetch(GITHUB_TOKEN_URL, {
           method: "POST",
           headers: {
@@ -62,7 +64,6 @@ export const githubAuth = (db: Database) =>
           return { error: "GitHub OAuth failed", message: tokenData.error };
         }
 
-        // Fetch GitHub user profile
         const userRes = await fetch(GITHUB_USER_URL, {
           headers: { Authorization: `Bearer ${tokenData.access_token}` },
         });
@@ -73,7 +74,6 @@ export const githubAuth = (db: Database) =>
           name: string | null;
         };
 
-        // Encrypt the GitHub token
         const encryptedToken = await encryptGithubToken(
           tokenData.access_token,
           config.encryptionKey
@@ -104,7 +104,7 @@ export const githubAuth = (db: Database) =>
         // Issue JWT
         const token = await jwt.sign({
           sub: String(user.id),
-          exp: Math.floor(Date.now() / 1000) + 3600, // 1h
+          exp: Math.floor(Date.now() / 1000) + 3600,
         });
 
         // Issue refresh token
@@ -113,7 +113,7 @@ export const githubAuth = (db: Database) =>
         await db.insert(refreshTokens).values({
           userId: user.id,
           tokenHash: refreshHash,
-          expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000), // 30d
+          expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000),
         });
 
         // Set session cookie
@@ -125,6 +125,20 @@ export const githubAuth = (db: Database) =>
           maxAge: 3600,
           path: "/",
         });
+
+        // Auto-sync repos on first login (no user_repos yet)
+        const existingRepos = await db
+          .select()
+          .from(userRepos)
+          .where(eq(userRepos.userId, user.id))
+          .limit(1);
+        if (existingRepos.length === 0) {
+          try {
+            await syncUserRepos(db, user);
+          } catch {
+            // Non-fatal — user can manually sync later
+          }
+        }
 
         return { ok: true, user: { id: user.id, login: user.githubLogin } };
       },
@@ -179,7 +193,11 @@ export const githubAuth = (db: Database) =>
         return { ok: true };
       },
       { body: t.Object({ refreshToken: t.String() }) }
-    )
+    );
+
+/** CLI token exchange — mounted at /v1/auth to match spec */
+export const cliAuth = (db: Database) =>
+  new Elysia({ prefix: "/v1/auth", name: "auth/cli" })
 
     // POST /v1/auth/exchange — exchange setup token for API key
     .post(
@@ -201,13 +219,11 @@ export const githubAuth = (db: Database) =>
           return { error: "Invalid or expired setup token" };
         }
 
-        // Mark redeemed
         await db
           .update(setupTokens)
           .set({ redeemed: true })
           .where(eq(setupTokens.id, st.id));
 
-        // Create device
         const [device] = await db
           .insert(devices)
           .values({
@@ -218,7 +234,6 @@ export const githubAuth = (db: Database) =>
           })
           .returning();
 
-        // Create API key
         const rawKey = generateApiKey();
         const keyHash = await hashToken(rawKey);
         await db.insert(apiKeys).values({

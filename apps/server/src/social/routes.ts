@@ -3,7 +3,7 @@ import { eq, sql, and, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { classifySessionState } from "../sessions/state";
+import { toSnapshot, sortByStateThenTime } from "../sessions/snapshot";
 
 export const socialRoutes = (db: Database) =>
   new Elysia({ prefix: "/api", name: "social" })
@@ -28,7 +28,39 @@ export const socialRoutes = (db: Database) =>
           .from(sessions)
           .where(inArray(sessions.repoId, repoIds))
           .orderBy(sql`${sessions.lastTs} desc nulls last`)
-          .limit(100);
+          .limit(200);
+
+        // Apply user filter
+        if (query.user) {
+          const [filterUser] = await db
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.githubLogin, query.user))
+            .limit(1);
+          if (filterUser) {
+            sessionRows = sessionRows.filter(
+              (s) => s.userId === filterUser.id
+            );
+          } else {
+            return [];
+          }
+        }
+
+        // Apply repo filter
+        if (query.repo) {
+          const [filterRepo] = await db
+            .select({ id: repos.id })
+            .from(repos)
+            .where(eq(repos.fullName, query.repo))
+            .limit(1);
+          if (filterRepo) {
+            sessionRows = sessionRows.filter(
+              (s) => s.repoId === filterRepo.id
+            );
+          } else {
+            return [];
+          }
+        }
 
         // Get heartbeats for state classification
         const sessionIds = sessionRows.map((s) => s.sessionId);
@@ -41,22 +73,56 @@ export const socialRoutes = (db: Database) =>
             : [];
         const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
 
-        // Classify states and filter if requested
-        const enriched = sessionRows.map((s) => {
-          const hb = hbMap.get(s.sessionId);
-          const state = classifySessionState({
-            heartbeatUpdatedAt: hb?.updatedAt ?? null,
-            inTurn: s.inTurn ?? false,
-            lastTs: s.lastTs,
-          });
-          return { ...s, state };
+        // Get user info for augmentation
+        const userIds = [...new Set(sessionRows.map((s) => s.userId))];
+        const userRows =
+          userIds.length > 0
+            ? await db
+                .select({
+                  id: users.id,
+                  githubLogin: users.githubLogin,
+                  avatarUrl: users.avatarUrl,
+                })
+                .from(users)
+                .where(inArray(users.id, userIds))
+            : [];
+        const userMap = new Map(userRows.map((u) => [u.id, u]));
+
+        // Get repo info for augmentation
+        const repoIdSet = [
+          ...new Set(
+            sessionRows.map((s) => s.repoId).filter(Boolean) as number[]
+          ),
+        ];
+        const repoRows =
+          repoIdSet.length > 0
+            ? await db
+                .select({ id: repos.id, fullName: repos.fullName })
+                .from(repos)
+                .where(inArray(repos.id, repoIdSet))
+            : [];
+        const repoMap = new Map(repoRows.map((r) => [r.id, r]));
+
+        // Build augmented snapshots
+        let snapshots = sessionRows.map((s) => {
+          const hb = hbMap.get(s.sessionId) ?? null;
+          const snapshot = toSnapshot(s, hb);
+          const u = userMap.get(s.userId);
+          const r = s.repoId ? repoMap.get(s.repoId) : null;
+          return {
+            ...snapshot,
+            github_login: u?.githubLogin ?? "unknown",
+            avatar_url: u?.avatarUrl ?? null,
+            repo_full_name: r?.fullName ?? null,
+          };
         });
 
+        // Apply state filter
         if (query.state) {
-          return enriched.filter((s) => s.state === query.state);
+          snapshots = snapshots.filter((s) => s.state === query.state);
         }
 
-        return enriched;
+        return sortByStateThenTime(snapshots);
       },
       {
         query: t.Object({
@@ -70,7 +136,6 @@ export const socialRoutes = (db: Database) =>
 
     // GET /api/feed/users — users in social graph with session counts
     .get("/feed/users", async ({ user }) => {
-      // Get distinct users who share repos with me
       const peerUserIds = await db
         .selectDistinct({ userId: userRepos.userId })
         .from(userRepos)
@@ -94,7 +159,6 @@ export const socialRoutes = (db: Database) =>
         .from(users)
         .where(inArray(users.id, userIds));
 
-      // Build response with session counts
       const result = [];
       for (const peer of peerUsers) {
         const sessionCount = await db

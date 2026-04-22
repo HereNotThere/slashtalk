@@ -146,7 +146,7 @@ describe("social feed integration", () => {
     expect(setupToken).toBeTruthy();
 
     // Exchange for API key
-    const exchangeRes = await fetch(`${baseUrl}/auth/exchange`, {
+    const exchangeRes = await fetch(`${baseUrl}/v1/auth/exchange`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -191,7 +191,7 @@ describe("social feed integration", () => {
     const { token: bobSetupToken } = (await bobSetupRes.json()) as {
       token: string;
     };
-    const bobExchangeRes = await fetch(`${baseUrl}/auth/exchange`, {
+    const bobExchangeRes = await fetch(`${baseUrl}/v1/auth/exchange`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -295,9 +295,9 @@ describe("social feed integration", () => {
       headers: { Cookie: bobCookie },
     });
     expect(feedRes.status).toBe(200);
-    const feed = (await feedRes.json()) as { sessionId: string }[];
+    const feed = (await feedRes.json()) as { id: string }[];
 
-    const sessionIds = feed.map((s) => s.sessionId);
+    const sessionIds = feed.map((s) => s.id);
     expect(sessionIds).toContain(COMMON_SESSION_ID);
     expect(sessionIds).not.toContain(REPO_A_SESSION_ID);
   });

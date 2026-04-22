@@ -232,6 +232,7 @@ export async function resetDatabase() {
     )
   `);
   await db.execute(sql`CREATE INDEX ON events (session_id, ts)`);
+  await db.execute(sql`CREATE INDEX ON events (user_id, project, ts DESC)`);
 
   await db.execute(sql`
     CREATE TABLE heartbeats (

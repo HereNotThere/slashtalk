@@ -205,11 +205,15 @@ export function cancelSignIn(reason = "Cancelled"): void {
   pendingSignIn?.cancel(reason);
 }
 
-export async function signOut(): Promise<void> {
-  const current = creds;
+function clearLocalSession(): void {
   creds = null;
   persistCreds();
   authChanges.emit(getAuthState());
+}
+
+export async function signOut(): Promise<void> {
+  const current = creds;
+  clearLocalSession();
   if (current) {
     try {
       await jsonFetch("/auth/logout", {
@@ -253,7 +257,15 @@ function logHttp(
   else console[level](prefix);
 }
 
-async function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
+function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
+  return doJsonFetch<T>(path, opts, false);
+}
+
+async function doJsonFetch<T>(
+  path: string,
+  opts: FetchOpts,
+  retried: boolean,
+): Promise<T> {
   const auth: Auth = opts.auth ?? "session";
   const url = `${baseUrl()}${path}`;
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -283,10 +295,10 @@ async function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
   }
   const ms = Date.now() - started;
 
-  if (res.status === 401 && auth === "session" && creds) {
+  if (res.status === 401 && auth === "session" && creds && !retried) {
     logHttp("warn", opts.method, path, "401", ms, "— refreshing");
     const refreshed = await tryRefresh();
-    if (refreshed) return jsonFetch<T>(path, opts);
+    if (refreshed) return doJsonFetch<T>(path, opts, true);
   }
 
   if (!res.ok) {
@@ -304,23 +316,67 @@ async function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
-async function tryRefresh(): Promise<boolean> {
-  if (!creds) return false;
+// Single-flight guard: concurrent 401s (rail poll + repo list + heartbeat
+// firing together at the ~1h expiry mark) must share one refresh attempt.
+// Since each refresh rotates the stored token, parallel calls with the
+// stale token would race and all-but-one would permanently fail.
+let refreshInFlight: Promise<boolean> | null = null;
+
+function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  const p = doRefresh().finally(() => {
+    if (refreshInFlight === p) refreshInFlight = null;
+  });
+  refreshInFlight = p;
+  return p;
+}
+
+async function doRefresh(): Promise<boolean> {
+  const current = creds;
+  if (!current) return false;
+  const started = Date.now();
+  let res: Response;
   try {
-    const res = await fetch(`${baseUrl()}/auth/refresh`, {
+    res = await fetch(`${baseUrl()}/auth/refresh`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ refreshToken: creds.refreshToken }),
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ refreshToken: current.refreshToken }),
     });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { jwt?: string };
-    if (!data.jwt) return false;
-    creds = { ...creds, jwt: data.jwt };
-    persistCreds();
-    return true;
-  } catch {
+  } catch (err) {
+    logHttp("warn", "POST", "/auth/refresh", "network-error", Date.now() - started, err);
+    return false; // transient — keep creds, retry on next 401
+  }
+  const ms = Date.now() - started;
+
+  if (res.status === 401 || res.status === 403) {
+    // Refresh token is gone for good (expired, revoked, or already rotated).
+    // Clear creds so the UI flips to signed-out instead of looping forever.
+    logHttp("warn", "POST", "/auth/refresh", String(res.status), ms, "— signing out");
+    clearLocalSession();
     return false;
   }
+
+  if (!res.ok) {
+    logHttp("warn", "POST", "/auth/refresh", String(res.status), ms, "— transient");
+    return false;
+  }
+
+  const data = (await res.json().catch(() => null)) as
+    | { jwt?: string; refreshToken?: string }
+    | null;
+  if (!data?.jwt || !data.refreshToken) {
+    logHttp("error", "POST", "/auth/refresh", "200", ms, "— malformed response");
+    return false;
+  }
+
+  // Re-read creds: signOut() may have run while we were awaiting.
+  if (!creds) return false;
+  creds = { ...creds, jwt: data.jwt, refreshToken: data.refreshToken };
+  persistCreds();
+  return true;
 }
 
 // ---------- Public API ----------

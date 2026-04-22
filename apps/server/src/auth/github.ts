@@ -5,7 +5,6 @@ import { config } from "../config";
 import type { Database } from "../db";
 import {
   users,
-  refreshTokens,
   setupTokens,
   devices,
   apiKeys,
@@ -15,6 +14,14 @@ import {
   hashToken,
   encryptGithubToken,
 } from "./tokens";
+import {
+  issueSessionTokens,
+  rotateSessionTokens,
+  revokeRefreshToken,
+  setSessionCookies,
+  clearSessionCookies,
+  presentedRefreshToken,
+} from "./sessions";
 
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
@@ -99,7 +106,6 @@ export const githubAuth = (db: Database) =>
           config.encryptionKey
         );
 
-        // Upsert user
         const [user] = await db
           .insert(users)
           .values({
@@ -121,22 +127,7 @@ export const githubAuth = (db: Database) =>
           })
           .returning();
 
-        // Issue JWT
-        const token = await jwt.sign({
-          sub: String(user.id),
-          exp: Math.floor(Date.now() / 1000) + 3600,
-        });
-
-        // Issue refresh token
-        const refreshToken = crypto.randomUUID();
-        const refreshHash = await hashToken(refreshToken);
-        await db.insert(refreshTokens).values({
-          userId: user.id,
-          tokenHash: refreshHash,
-          expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000),
-        });
-
-        const isSecure = config.baseUrl.startsWith("https");
+        const tokens = await issueSessionTokens(db, jwt, user.id);
 
         // Desktop (loopback) branch: redirect credentials to 127.0.0.1:<port>.
         // Restricted to loopback to keep raw tokens off arbitrary hosts.
@@ -144,32 +135,14 @@ export const githubAuth = (db: Database) =>
         if (desktopMatch) {
           const port = Number(desktopMatch[1]);
           const params = new URLSearchParams({
-            jwt: token,
-            refreshToken,
+            jwt: tokens.jwt,
+            refreshToken: tokens.refreshToken,
             login: user.githubLogin,
           });
           return redirect(`http://127.0.0.1:${port}/callback?${params}`);
         }
 
-        // Browser branch: httpOnly cookies.
-        session.set({
-          value: token,
-          httpOnly: true,
-          secure: isSecure,
-          sameSite: "lax",
-          maxAge: 3600,
-          path: "/",
-        });
-
-        refreshCookie.set({
-          value: refreshToken,
-          httpOnly: true,
-          secure: isSecure,
-          sameSite: "lax",
-          maxAge: 30 * 24 * 3600,
-          path: "/auth",
-        });
-
+        setSessionCookies({ session, refresh: refreshCookie }, tokens);
         return { ok: true, user: { id: user.id, login: user.githubLogin } };
       },
       {
@@ -180,63 +153,69 @@ export const githubAuth = (db: Database) =>
       }
     )
 
-    // POST /auth/refresh — exchange refresh token cookie for new JWT
+    // POST /auth/refresh — rotate refresh token, issue new JWT.
+    // Accepts the refresh token from either the `refresh` cookie (browser)
+    // or the JSON body (desktop / non-browser clients).
     .post(
       "/refresh",
-      async ({ jwt, cookie: { session, refresh: refreshCookie }, set }) => {
-        const refreshToken = refreshCookie?.value;
-        if (!refreshToken) {
+      async ({
+        jwt,
+        cookie: { session, refresh: refreshCookie },
+        body,
+        set,
+      }) => {
+        const presented = presentedRefreshToken(refreshCookie?.value, body);
+        if (!presented) {
           set.status = 401;
           return { error: "No refresh token" };
         }
 
-        const hash = await hashToken(refreshToken as string);
-        const [rt] = await db
-          .select()
-          .from(refreshTokens)
-          .where(eq(refreshTokens.tokenHash, hash))
-          .limit(1);
-
-        if (!rt || rt.expiresAt < new Date()) {
+        const rotated = await rotateSessionTokens(db, jwt, presented);
+        if (!rotated) {
+          clearSessionCookies({ session, refresh: refreshCookie });
           set.status = 401;
           return { error: "Invalid or expired refresh token" };
         }
 
-        const token = await jwt.sign({
-          sub: String(rt.userId),
-          exp: Math.floor(Date.now() / 1000) + 3600,
-        });
+        setSessionCookies(
+          { session, refresh: refreshCookie },
+          { jwt: rotated.jwt, refreshToken: rotated.refreshToken },
+        );
 
-        session.set({
-          value: token,
-          httpOnly: true,
-          secure: config.baseUrl.startsWith("https"),
-          sameSite: "lax",
-          maxAge: 3600,
-          path: "/",
-        });
-
-        // Also return in body so non-browser clients (desktop) don't have to
-        // parse Set-Cookie to recover the raw JWT.
-        return { ok: true, jwt: token };
+        // Also return tokens in body for non-browser clients (desktop) that
+        // don't have a cookie jar.
+        return {
+          ok: true,
+          jwt: rotated.jwt,
+          refreshToken: rotated.refreshToken,
+        };
+      },
+      {
+        body: t.Optional(
+          t.Object({ refreshToken: t.Optional(t.String()) }),
+        ),
       }
     )
 
-    // POST /auth/logout — revoke refresh token cookie and clear session
+    // POST /auth/logout — revoke the presented refresh token and clear
+    // cookies. Accepts the token from cookie or body, same as /refresh.
     .post(
       "/logout",
-      async ({ cookie: { session, refresh: refreshCookie } }) => {
-        const refreshToken = refreshCookie?.value;
-        if (refreshToken) {
-          const hash = await hashToken(refreshToken as string);
-          await db
-            .delete(refreshTokens)
-            .where(eq(refreshTokens.tokenHash, hash));
+      async ({
+        cookie: { session, refresh: refreshCookie },
+        body,
+      }) => {
+        const presented = presentedRefreshToken(refreshCookie?.value, body);
+        if (presented) {
+          await revokeRefreshToken(db, presented);
         }
-
-        session.remove();
-        refreshCookie.remove();
+        clearSessionCookies({ session, refresh: refreshCookie });
         return { ok: true };
+      },
+      {
+        body: t.Optional(
+          t.Object({ refreshToken: t.Optional(t.String()) }),
+        ),
       }
     );
 

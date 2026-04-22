@@ -56,7 +56,6 @@ export interface TeammateSummary {
   totalSessions: number;
   activeSessions: number;
   repos: string[];
-  lastActivityAt: number | null;
 }
 
 /** Diagnostic snapshot of the rail's last `/api/feed/users` attempt. */

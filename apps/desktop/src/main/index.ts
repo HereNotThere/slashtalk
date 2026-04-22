@@ -798,7 +798,7 @@ localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
 
 // -------- Lifecycle --------
 
-// Backend now provides real lastActivityAt via /api/feed/users, so no debug backfill needed.
+// Rail derives lastActivityAt from /api/feed sessions directly, no backfill needed.
 function debugBackfillTimestamps(): void {
   // No-op; kept for reference.
 }

@@ -5,11 +5,7 @@
 // with you. Refreshed on auth changes, on local-repo changes, and on a 30s
 // poll as a fallback until WebSocket user_updated events are wired.
 
-import type {
-  ChatHead,
-  RailDebugSnapshot,
-  TeammateSummary,
-} from "../shared/types";
+import type { ChatHead, RailDebugSnapshot } from "../shared/types";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import { createEmitter } from "./emitter";
@@ -83,12 +79,31 @@ async function refresh(): Promise<void> {
     return;
   }
   try {
-    const peers = await backend.listTeammates();
+    // Fetch the peer list and the recent session feed in parallel. Each peer's
+    // "last activity" is just the timestamp of their most recent session in
+    // the feed — no dedicated backend field needed.
+    const [peers, feedSessions] = await Promise.all([
+      backend.listTeammates(),
+      backend.listFeedSessions(),
+    ]);
+
+    const latestByLogin = new Map<string, number>();
+    for (const s of feedSessions) {
+      if (!s.lastTs) continue;
+      const ts = new Date(s.lastTs).getTime();
+      const prev = latestByLogin.get(s.github_login) ?? 0;
+      if (ts > prev) latestByLogin.set(s.github_login, ts);
+    }
+
     lastSnapshot = { at: Date.now(), peers, error: null };
     apply([
       self,
-      ...peers.map((t: TeammateSummary) =>
-        headForUser(t.githubLogin, t.avatarUrl, t.lastActivityAt),
+      ...peers.map((t) =>
+        headForUser(
+          t.githubLogin,
+          t.avatarUrl,
+          latestByLogin.get(t.githubLogin) ?? null,
+        ),
       ),
     ]);
   } catch (err) {

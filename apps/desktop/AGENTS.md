@@ -12,8 +12,7 @@ Electron app for slashtalk. Built with `electron-vite` (main + preload + multi-w
 - `src/renderer/shared/tailwind.css` — single Tailwind v4 entrypoint (theme + base resets) imported by every window's `styles.css`
 - `src/shared/` — types shared across processes
 - `out/` — build output (gitignored)
-- `resources/` — runtime assets (e.g. `trayTemplate.png`/`@2x` for the macOS menu-bar icon). Loaded relative to `__dirname` from main process.
-- `scripts/gen-tray-icon.ts` — one-off generator for the tray PNGs (no deps; pure-JS PNG encoder). Re-run with `bun run scripts/gen-tray-icon.ts` if the icon shape changes.
+- `resources/` — runtime assets (e.g. `trayTemplate.png`/`@2x` for the macOS menu-bar icon). Loaded relative to `__dirname` from main process. Template PNGs use grayscale + alpha so macOS auto-tints to match the menu bar.
 
 ## Styling
 

@@ -142,6 +142,13 @@ create table user_repos (
   primary key (user_id, repo_id)
 );
 create index on user_repos (repo_id);
+
+create table device_repo_paths (
+  device_id       int references devices(id) on delete cascade,
+  repo_id         int references repos(id) on delete cascade,
+  local_path      text not null,
+  primary key (device_id, repo_id)
+);
 ```
 
 ### 2.3 Session & Event Storage
@@ -154,7 +161,7 @@ create table sessions (
   session_id      uuid primary key,
   user_id         int references users(id) on delete cascade,
   device_id       int references devices(id),
-  project         text not null,          -- slugified cwd
+  project         text not null,          -- slugified cwd; not a stable repo identifier
   repo_id         int references repos(id), -- matched repo, nullable
   -- derived aggregates (updated on ingest)
   title           text,
@@ -222,8 +229,19 @@ When a session is ingested, the server attempts to match the session's
 
 1. Extracting the git remote URL from the session events (if available
    in the payload), OR
-2. Matching the `project` slug against known repo paths from the
-   device's repo list (sent during install setup — see §6).
+2. Looking up the device's positive repo inventory in
+   `device_repo_paths` and taking the longest-prefix match against
+   either:
+   - the session `cwd`, or
+   - the session `project` slug when `cwd` is missing on the latest
+     chunk, OR
+3. Falling back to heuristics over the user's accessible repos
+   (directory walk on `cwd`, then repo-name suffix match on `project`).
+
+The install flow MUST send a positive repo inventory, not just
+exclusions. `project` is only a slugified working directory, so it
+cannot reliably identify the repo for worktrees, arbitrary clone
+directory names, or sessions started from subdirectories.
 
 The `repo_id` on the session is what connects it to the social graph.
 Sessions without a matched repo are visible only to their owner.
@@ -327,8 +345,9 @@ computed classification.
   to that repo.
 - Sessions with no matched repo are visible only to their owner.
 - During CLI install, users can deselect repos per-device. Deselected
-  repos are stored in `device_excluded_repos` and their sessions are
-  not uploaded.
+  repos are stored in `device_excluded_repos`. The server MUST also
+  enforce those exclusions during matching/rematching so a client-side
+  upload mistake does not leak a deselected repo into the shared feed.
 
 ```sql
 create table device_excluded_repos (
@@ -337,6 +356,9 @@ create table device_excluded_repos (
   primary key (device_id, repo_id)
 );
 ```
+
+`POST /v1/devices/:id/repos` also writes selected repo roots to
+`device_repo_paths`, keyed by `repo_id` plus `local_path`.
 
 ---
 
@@ -543,6 +565,7 @@ The script is a POSIX-compatible shell script that:
    (all selected by default). User can deselect by number.
 6. Send the selected/deselected list to
    `POST /v1/devices/:id/repos` as:
+   `POST /v1/devices/:id/repos` as:
 
 ```json
 {
@@ -558,13 +581,16 @@ The script is a POSIX-compatible shell script that:
 
 so the server records `device_repo_paths` and
 `device_excluded_repos`.
+7. After repo registration, the server rematches any existing
+   owner-only sessions for that device using the newly stored
+   `device_repo_paths`.
 
 ### 6.3 Initial Upload
 
-1. For each selected repo, find matching `.claude/projects/<slug>/`
-   directories by converting the repo path to the Claude slug format
-   (replace `/` with `-`).
-2. Upload all `*.jsonl` files via `POST /v1/ingest` in chunks.
+1. Register device repo paths before uploading any historical sessions.
+2. Upload `*.jsonl` files via `POST /v1/ingest` in chunks. The server
+   uses `cwd`/`project` plus `device_repo_paths` to recover the repo for
+   subdirectory sessions and worktrees.
 3. Show progress.
 
 ### 6.4 Watch Mode

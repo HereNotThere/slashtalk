@@ -42,6 +42,9 @@ const bridge: ChatHeadsBridge = {
   openExternal: (url) =>
     ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
 
+  requestResize: (height) =>
+    ipcRenderer.invoke("window:requestResize", height) as Promise<void>,
+
   github: {
     getState: () =>
       ipcRenderer.invoke("github:getState") as Promise<GitHubPayload>,

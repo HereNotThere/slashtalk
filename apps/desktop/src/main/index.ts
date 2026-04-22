@@ -21,11 +21,18 @@ const PADDING = 22;
 const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING * 2;
 
 const INFO_WIDTH = 340;
-const INFO_HEIGHT = 260;
+const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
 const INFO_GAP = 10;
 
 const TRAY_POPUP_WIDTH = 320;
-const TRAY_POPUP_HEIGHT = 420;
+const TRAY_POPUP_INITIAL_HEIGHT = 80;
+
+const RESIZE_MIN = 60;
+const RESIZE_MAX = 900;
+
+// Tracked dynamically — renderer reports its content height via IPC and we
+// resize/reposition the window each time it changes.
+let infoCurrentHeight = INFO_INITIAL_HEIGHT;
 
 const HEADS_KEY = "heads";
 const POSITION_KEY = "overlayPosition";
@@ -186,7 +193,7 @@ function ensureInfoWindow(): BrowserWindow {
 
   infoWindow = new BrowserWindow({
     width: INFO_WIDTH,
-    height: INFO_HEIGHT,
+    height: INFO_INITIAL_HEIGHT,
     frame: false,
     alwaysOnTop: true,
     resizable: false,
@@ -236,9 +243,15 @@ function positionInfo(index: number): void {
 
   const cell = BUBBLE_SIZE + SPACING;
   const bubbleMidY = stackBounds.y + PADDING + index * cell + BUBBLE_SIZE / 2;
-  const infoY = Math.round(bubbleMidY - INFO_HEIGHT / 2);
+  const infoY = Math.round(bubbleMidY - infoCurrentHeight / 2);
 
-  infoWindow.setPosition(Math.round(infoX), infoY);
+  // setBounds (vs setPosition) so we apply the latest tracked height atomically.
+  infoWindow.setBounds({
+    x: Math.round(infoX),
+    y: infoY,
+    width: INFO_WIDTH,
+    height: infoCurrentHeight,
+  });
 }
 
 function showInfo(index: number): void {
@@ -280,7 +293,7 @@ function ensureTrayPopup(): BrowserWindow {
 
   trayPopup = new BrowserWindow({
     width: TRAY_POPUP_WIDTH,
-    height: TRAY_POPUP_HEIGHT,
+    height: TRAY_POPUP_INITIAL_HEIGHT,
     frame: false,
     resizable: false,
     movable: false,
@@ -342,8 +355,15 @@ function hideTrayPopup(): void {
 }
 
 function createTray(): void {
-  tray = new Tray(nativeImage.createEmpty());
-  tray.setTitle("💬");
+  // resources/ lives at apps/desktop/resources/, alongside out/. __dirname is
+  // out/main at runtime in both dev and packaged builds.
+  const iconPath = path.join(__dirname, "../../resources/trayTemplate.png");
+  const icon = nativeImage.createFromPath(iconPath);
+  // Template image: macOS auto-tints to match menu bar (dark/light, focused).
+  // Only the alpha channel is used — gray values are ignored.
+  icon.setTemplateImage(true);
+
+  tray = new Tray(icon);
   tray.setToolTip("ChatHeads");
   tray.on("click", (_e, bounds) => toggleTrayPopup(bounds));
   tray.on("right-click", (_e, bounds) => toggleTrayPopup(bounds));
@@ -438,6 +458,29 @@ ipcMain.handle("clipboard:writeText", (_e, text: string): void =>
 );
 ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
+});
+
+ipcMain.handle("window:requestResize", (e, height: number): void => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win || win.isDestroyed()) return;
+  const h = Math.max(RESIZE_MIN, Math.min(RESIZE_MAX, Math.round(height)));
+
+  if (win === infoWindow) {
+    if (h === infoCurrentHeight) return;
+    infoCurrentHeight = h;
+    // positionInfo recenters vertically using the new tracked height.
+    repositionInfoIfVisible();
+    // If not currently visible, still reflect the new height so next show is correct.
+    if (!selectedHeadId) {
+      const b = win.getBounds();
+      win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+    }
+  } else if (win === trayPopup) {
+    const b = win.getBounds();
+    if (h === b.height) return;
+    // Tray popup is anchored at top (under the menu bar item) — height grows downward.
+    win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+  }
 });
 
 // GitHub

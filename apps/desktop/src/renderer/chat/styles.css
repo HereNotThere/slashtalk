@@ -1,0 +1,10 @@
+@import "../shared/tailwind.css";
+
+/* Chat input wants normal cursors + text selection inside the field — the base
+ * `user-select: none` rule lives in the shared tailwind base. */
+@layer base {
+  input {
+    user-select: text;
+    cursor: text;
+  }
+}

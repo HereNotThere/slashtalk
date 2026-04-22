@@ -17,15 +17,26 @@ import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
 
-// Single source of truth, mirrors ChatHeadWindow.swift constants.
-const BUBBLE_SIZE = 48;
+// Must stay in sync with the overlay renderer's Tailwind classes:
+// BUBBLE_SIZE ↔ `w-14 h-14` on Bubble/ChatBubble (56px),
+// SPACING ↔ `gap-sm` on the stack (8px),
+// PADDING ↔ `p-xl` on the stack (24px). Drift here = popovers misalign.
+const BUBBLE_SIZE = 56;
 const SPACING = 8;
-const PADDING = 22;
+const PADDING = 24;
 const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING * 2;
 
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
 const INFO_GAP = 10;
+
+const CHAT_WIDTH = 560;
+const CHAT_HEIGHT = 80; // transparent window; pill + breathing room for CSS shadow
+// Distance from the chat window's left edge to the center of the leading icon
+// circle inside the pill — container p-sm (8) + inner pl-2 (8) + half icon (20).
+// Used to align the pill's icon over the chat bubble's position. Keep in sync
+// with the pill layout in renderer/chat/App.tsx.
+const CHAT_ICON_OFFSET = 36;
 
 const TRAY_POPUP_WIDTH = 320;
 const TRAY_POPUP_INITIAL_HEIGHT = 80;
@@ -42,6 +53,8 @@ const POSITION_KEY = "overlayPosition";
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
 let infoWindow: BrowserWindow | null = null;
+let chatWindow: BrowserWindow | null = null;
+let responseWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let trayPopup: BrowserWindow | null = null;
 
@@ -55,7 +68,7 @@ let dragTicker: ReturnType<typeof setInterval> | null = null;
 // dev server) so we can reuse the same BrowserWindow code for dev + packaged.
 function loadRenderer(
   win: BrowserWindow,
-  entry: "main" | "overlay" | "info" | "statusbar",
+  entry: "main" | "overlay" | "info" | "chat" | "response" | "statusbar",
 ): void {
   const devServer = process.env["ELECTRON_RENDERER_URL"];
   if (!app.isPackaged && devServer) {
@@ -88,8 +101,9 @@ function createMainWindow(): void {
 
 // -------- Overlay (bubbles) --------
 
+// Overlay always renders heads plus the chat bubble at the bottom, so add 1.
 function overlayHeight(count: number): number {
-  const n = Math.max(count, 1);
+  const n = count + 1;
   return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING * 2;
 }
 
@@ -164,6 +178,7 @@ function ensureOverlay(): BrowserWindow {
   overlayWindow.on("closed", () => {
     overlayWindow = null;
     hideInfo();
+    hideChat();
   });
 
   return overlayWindow;
@@ -201,7 +216,6 @@ function ensureInfoWindow(): BrowserWindow {
     resizable: false,
     movable: false,
     skipTaskbar: true,
-    focusable: false,
     show: false,
     vibrancy: "popover",
     visualEffectState: "active",
@@ -214,10 +228,12 @@ function ensureInfoWindow(): BrowserWindow {
 
   infoWindow.setAlwaysOnTop(true, "floating");
   infoWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  infoWindow.setIgnoreMouseEvents(true);
 
   loadRenderer(infoWindow, "info");
 
+  infoWindow.on("blur", () => {
+    if (infoWindow && !infoWindow.isDestroyed()) infoWindow.hide();
+  });
   infoWindow.on("closed", () => {
     infoWindow = null;
   });
@@ -273,7 +289,8 @@ function showInfo(index: number): void {
   }
 
   positionInfo(index);
-  win.showInactive();
+  win.show();
+  win.focus();
 }
 
 function hideInfo(): void {
@@ -290,6 +307,192 @@ function repositionInfoIfVisible(): void {
   const idx = heads.findIndex((h) => h.id === selectedHeadId);
   if (idx === -1) return;
   positionInfo(idx);
+}
+
+// -------- Chat input popover --------
+//
+// Transparent window anchored on the chat bubble (the last cell in the rail).
+// The chat renderer paints its own pill + shadow; we just size + position the
+// frame.
+
+let lastSentChatAnchor: "left" | "right" | null = null;
+
+function ensureChatWindow(): BrowserWindow {
+  if (chatWindow && !chatWindow.isDestroyed()) return chatWindow;
+
+  chatWindow = new BrowserWindow({
+    width: CHAT_WIDTH,
+    height: CHAT_HEIGHT,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    alwaysOnTop: true,
+    resizable: false,
+    movable: false,
+    skipTaskbar: true,
+    show: false,
+    hasShadow: false,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+    },
+  });
+
+  chatWindow.setAlwaysOnTop(true, "floating");
+  chatWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  loadRenderer(chatWindow, "chat");
+
+  chatWindow.on("blur", () => hideChat());
+  chatWindow.on("closed", () => {
+    chatWindow = null;
+  });
+
+  return chatWindow;
+}
+
+// Which side of the pill the leading search-icon circle sits on. Determined by
+// overlay position: rail on left half → pill extends right, icon on left side
+// of pill. Rail on right half → mirror so the pill extends inward.
+type ChatAnchor = "left" | "right";
+
+function chatAnchorFromOverlay(): ChatAnchor {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return "left";
+  const stackBounds = overlayWindow.getBounds();
+  const display = screen.getDisplayMatching(stackBounds);
+  const screenMidX = display.workArea.x + display.workArea.width / 2;
+  const stackMidX = stackBounds.x + stackBounds.width / 2;
+  return stackMidX < screenMidX ? "left" : "right";
+}
+
+function positionChat(): void {
+  if (!chatWindow || chatWindow.isDestroyed()) return;
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+
+  const stackBounds = overlayWindow.getBounds();
+  const anchor = chatAnchorFromOverlay();
+
+  // Chat bubble sits at the last rail cell — index === heads.length. Its center
+  // on screen is the target we align the pill's leading icon to.
+  const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
+  const cell = BUBBLE_SIZE + SPACING;
+  const bubbleCenterY =
+    stackBounds.y + PADDING + heads.length * cell + BUBBLE_SIZE / 2;
+
+  const chatX =
+    anchor === "left"
+      ? bubbleCenterX - CHAT_ICON_OFFSET
+      : bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
+  const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2 - 8);
+
+  chatWindow.setBounds({
+    x: Math.round(chatX),
+    y: chatY,
+    width: CHAT_WIDTH,
+    height: CHAT_HEIGHT,
+  });
+}
+
+function broadcastChatVisible(visible: boolean): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send("chat:state", { visible });
+}
+
+function sendChatConfig(): void {
+  if (!chatWindow || chatWindow.isDestroyed()) return;
+  const anchor = chatAnchorFromOverlay();
+  if (anchor === lastSentChatAnchor) return;
+  lastSentChatAnchor = anchor;
+  const send = (): void => {
+    chatWindow?.webContents.send("chat:config", { anchor });
+  };
+  if (chatWindow.webContents.isLoading()) {
+    chatWindow.webContents.once("did-finish-load", send);
+  } else {
+    send();
+  }
+}
+
+function showChat(): void {
+  const win = ensureChatWindow();
+  sendChatConfig();
+  positionChat();
+  win.show();
+  win.focus();
+  broadcastChatVisible(true);
+}
+
+function hideChat(): void {
+  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
+    chatWindow.hide();
+  }
+  broadcastChatVisible(false);
+}
+
+function toggleChat(): void {
+  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
+    hideChat();
+  } else {
+    showChat();
+  }
+}
+
+function repositionChatIfVisible(): void {
+  if (!chatWindow || chatWindow.isDestroyed() || !chatWindow.isVisible()) return;
+  // Anchor may flip if the rail crossed the screen midline during a drag.
+  sendChatConfig();
+  positionChat();
+}
+
+// -------- Response window --------
+
+function ensureResponseWindow(): BrowserWindow {
+  if (responseWindow && !responseWindow.isDestroyed()) return responseWindow;
+
+  responseWindow = new BrowserWindow({
+    width: 460,
+    height: 600,
+    minWidth: 400,
+    minHeight: 300,
+    frame: true,
+    transparent: false,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+    },
+  });
+
+  responseWindow.setAlwaysOnTop(true, "floating");
+  responseWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  loadRenderer(responseWindow, "response");
+
+  responseWindow.on("closed", () => {
+    responseWindow = null;
+    hideChat();
+  });
+
+  return responseWindow;
+}
+
+function showResponse(message: string): void {
+  const win = ensureResponseWindow();
+  const send = (): void => {
+    win.webContents.send("response:open", { message });
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once("did-finish-load", send);
+  } else {
+    send();
+  }
+  win.show();
+  win.focus();
+}
+
+function hideResponse(): void {
+  if (responseWindow && !responseWindow.isDestroyed()) responseWindow.hide();
 }
 
 // -------- Tray + popup --------
@@ -396,6 +599,7 @@ rail.onChange((next) => {
     ensureOverlay();
     resizeOverlay();
     repositionInfoIfVisible();
+    repositionChatIfVisible();
   }
   broadcastHeads();
 });
@@ -405,6 +609,15 @@ ipcMain.handle("heads:toggleInfo", (_e, index: number): void => {
   if (!head) return;
   if (selectedHeadId === head.id) hideInfo();
   else showInfo(index);
+});
+
+ipcMain.handle("info:hide", (): void => hideInfo());
+
+ipcMain.handle("chat:toggle", (): void => toggleChat());
+ipcMain.handle("chat:hide", (): void => hideChat());
+
+ipcMain.handle("response:open", (_e, message: string): void => {
+  showResponse(message);
 });
 
 ipcMain.handle("drag:start", (): void => {
@@ -419,6 +632,7 @@ ipcMain.handle("drag:start", (): void => {
     const p = screen.getCursorScreenPoint();
     overlayWindow.setPosition(p.x - dragOffset.dx, p.y - dragOffset.dy);
     repositionInfoIfVisible();
+    repositionChatIfVisible();
   }, 16);
 });
 

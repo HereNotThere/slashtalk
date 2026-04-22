@@ -33,6 +33,8 @@ export default defineConfig({
           main: resolve(__dirname, 'src/renderer/main/index.html'),
           overlay: resolve(__dirname, 'src/renderer/overlay/index.html'),
           info: resolve(__dirname, 'src/renderer/info/index.html'),
+          chat: resolve(__dirname, 'src/renderer/chat/index.html'),
+          response: resolve(__dirname, 'src/renderer/response/index.html'),
           statusbar: resolve(__dirname, 'src/renderer/statusbar/index.html'),
         },
       },

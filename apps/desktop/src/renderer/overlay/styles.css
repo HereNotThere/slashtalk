@@ -1,0 +1,66 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  height: 100%;
+  user-select: none;
+  cursor: default;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px;
+  box-sizing: border-box;
+}
+
+.bubble {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  position: relative;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.15);
+  transition: transform 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+
+  outline: 1px solid rgba(255, 255, 255, 0.45);
+  outline-offset: -1px;
+  cursor: pointer;
+}
+
+.bubble:hover { transform: scale(1.05); }
+
+.bubble .tint {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.bubble .emoji {
+  position: relative;
+  z-index: 1;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.bubble img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  pointer-events: none;
+}

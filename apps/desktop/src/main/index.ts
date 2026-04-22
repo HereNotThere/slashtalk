@@ -479,7 +479,14 @@ function ensureResponseWindow(): BrowserWindow {
 
 function showResponse(message: string): void {
   const win = ensureResponseWindow();
-  win.webContents.send("response:open", { message });
+  const send = (): void => {
+    win.webContents.send("response:open", { message });
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once("did-finish-load", send);
+  } else {
+    send();
+  }
   win.show();
   win.focus();
 }

@@ -47,7 +47,7 @@ from everyone who shares repo access with them.
 
 1. User clicks "Generate Install Token" in web UI.
 2. Server creates a row in `setup_tokens` table:
-   `{token: crypto.randomUUID(), user_id, device_name: null, expires_at: now + 10min, redeemed: false}`.
+   `{token: crypto.randomUUID(), user_id, expires_at: now + 10min, redeemed: false}`.
 3. UI shows: `curl <baseurl>/install.sh | sh -s <token>`.
 4. The install script (see §6) calls `POST /v1/auth/exchange` with the
    setup token.
@@ -93,15 +93,6 @@ create table refresh_tokens (
   created_at      timestamptz default now()
 );
 
-create table api_keys (
-  id              serial primary key,
-  user_id         int references users(id) on delete cascade,
-  device_id       int references devices(id) on delete cascade,
-  key_hash        text unique not null,   -- SHA-256 of the API key
-  last_used_at    timestamptz,
-  created_at      timestamptz default now()
-);
-
 create table setup_tokens (
   id              serial primary key,
   user_id         int references users(id) on delete cascade,
@@ -118,6 +109,15 @@ create table devices (
   os              text,                   -- darwin, linux, etc.
   created_at      timestamptz default now(),
   last_seen_at    timestamptz
+);
+
+create table api_keys (
+  id              serial primary key,
+  user_id         int references users(id) on delete cascade,
+  device_id       int references devices(id) on delete cascade,
+  key_hash        text unique not null,   -- SHA-256 of the API key
+  last_used_at    timestamptz,
+  created_at      timestamptz default now()
 );
 ```
 

@@ -27,7 +27,7 @@ const bridge: ChatHeadsBridge = {
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 
-  onInfoShow: (cb) => subscribe<{ label: string }>("info:show", cb),
+  onInfoShow: (cb) => subscribe<{ head: ChatHead }>("info:show", cb),
 
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,

@@ -36,6 +36,8 @@
   /* status */
   --color-danger: #ff6d6d;
   --color-success: #37c76a;
+  --color-warning: #e0a550;
+  --color-info: #a78bdc;
 
   /* translucent surfaces (used over vibrancy popover) */
   --color-surface: rgba(255, 255, 255, 0.06);
@@ -89,6 +91,8 @@
 
     --color-danger: #d32f2f;
     --color-success: #2e8b4f;
+    --color-warning: #c48930;
+    --color-info: #8b6fc0;
 
     --color-surface: rgba(0, 0, 0, 0.05);
     --color-surface-hover: rgba(0, 0, 0, 0.08);
@@ -126,6 +130,8 @@
 
       --color-danger: #d32f2f;
       --color-success: #2e8b4f;
+      --color-warning: #c48930;
+      --color-info: #8b6fc0;
 
       --color-surface: rgba(0, 0, 0, 0.05);
       --color-surface-hover: rgba(0, 0, 0, 0.08);

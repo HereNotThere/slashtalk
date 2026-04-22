@@ -262,7 +262,7 @@ function showInfo(index: number): void {
   selectedHeadId = head.id;
 
   const send = (): void => {
-    win.webContents.send("info:show", { label: head.label });
+    win.webContents.send("info:show", { head });
   };
   if (win.webContents.isLoading()) {
     win.webContents.once("did-finish-load", send);
@@ -379,6 +379,7 @@ rail.onChange((next) => {
   if (selectedHeadId && !heads.some((h) => h.id === selectedHeadId)) {
     hideInfo();
   }
+  debugBackfillTimestamps();
   if (heads.length === 0) {
     overlayWindow?.close();
     overlayWindow = null;
@@ -486,6 +487,32 @@ backend.onChange((state) => broadcastToMain("backend:authState", state));
 localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
 
 // -------- Lifecycle --------
+
+// Dev-only: assign stable, varied `lastActionAt` values to heads that don't
+// have one, so the overlay age badge shows a mix of "now" / "Xm" / "Xh" / "Xd"
+// without having to actually wait. The rail emits heads from the backend
+// (which doesn't yet track per-user last-activity), so without this every
+// badge would say "now". No-op in packaged builds.
+function debugBackfillTimestamps(): void {
+  if (app.isPackaged) return;
+  const now = Date.now();
+  const ages = [
+    30_000,                 // "now"
+    3 * 60_000,             // 3m
+    17 * 60_000,            // 17m
+    47 * 60_000,            // 47m
+    2 * 3_600_000,          // 2h
+    9 * 3_600_000,          // 9h
+    23 * 3_600_000,         // 23h
+    2 * 86_400_000,         // 2d
+    7 * 86_400_000,         // 7d
+  ];
+  for (let i = 0; i < heads.length; i++) {
+    const h = heads[i];
+    if (!h || h.lastActionAt != null) continue;
+    h.lastActionAt = now - ages[i % ages.length]!;
+  }
+}
 
 app.whenReady().then(() => {
   backend.restore();

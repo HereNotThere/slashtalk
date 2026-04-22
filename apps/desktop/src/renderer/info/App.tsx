@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAutoResize } from "../shared/useAutoResize";
 
 // Sessions are hard-coded placeholders — mirrors the SwiftUI stub. Real data
 // comes from a future GitHub activity pass.
@@ -18,6 +19,7 @@ const SESSIONS = [
 
 export function App(): JSX.Element {
   const [label, setLabel] = useState("—");
+  useAutoResize();
 
   useEffect(() => {
     return window.chatheads.onInfoShow(({ label }) => setLabel(label));

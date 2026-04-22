@@ -1,40 +1,16 @@
 import type { ChatHead } from '../../shared/types';
-import { PRESETS } from '../shared/presets';
 import { useHeads } from '../shared/useHeads';
+import { useAutoResize } from '../shared/useAutoResize';
 
 export function App(): JSX.Element {
   const heads = useHeads();
+  useAutoResize();
 
   return (
-    <div className="box-border h-full p-lg flex flex-col gap-md">
-      <div className="flex items-center gap-2 font-bold text-sm">💬 Chat Heads</div>
-      <Divider />
-
-      <SectionLabel>Spawn</SectionLabel>
-      <div className="grid grid-cols-2 gap-2">
-        {PRESETS.map((p) => (
-          <button
-            key={p.label}
-            onClick={() => window.chatheads.spawn(p)}
-            className="
-              flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer
-              text-fg bg-surface border-none [font:inherit] text-left
-              hover:bg-surface-hover
-            "
-          >
-            <span className="text-base">
-              {p.avatar.type === 'emoji' ? p.avatar.value : null}
-            </span>
-            <span>{p.label}</span>
-          </button>
-        ))}
-      </div>
-
-      <Divider />
-
-      <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+    <div className="box-border p-lg flex flex-col gap-md">
+      <div className="flex flex-col gap-1.5">
         <SectionLabel>Active ({heads.length})</SectionLabel>
-        <div className="overflow-y-auto flex flex-col gap-1">
+        <div className="flex flex-col gap-1">
           {heads.map((h) => (
             <ActiveRow key={h.id} head={h} />
           ))}
@@ -44,7 +20,7 @@ export function App(): JSX.Element {
       <Divider />
 
       <div className="flex gap-2">
-        <FooterButton onClick={() => window.chatheads.openMain()}>Open window</FooterButton>
+        <FooterButton onClick={() => window.chatheads.openMain()}>Open</FooterButton>
         <FooterButton
           onClick={() => window.chatheads.closeAll()}
           disabled={heads.length === 0}

@@ -48,6 +48,13 @@ const RESIZE_MAX = 900;
 // resize/reposition the window each time it changes.
 let infoCurrentHeight = INFO_INITIAL_HEIGHT;
 
+// When set, the info window is waiting to be shown at the index below. The
+// next `window:requestResize` from the info renderer (i.e. first measurement
+// after the new head/sessions are painted) triggers the actual show with the
+// correct height. A fallback timeout shows it even if resize never fires.
+let pendingInfoShowIndex: number | null = null;
+let pendingInfoShowTimeout: NodeJS.Timeout | null = null;
+
 const POSITION_KEY = "overlayPosition";
 
 let mainWindow: BrowserWindow | null = null;
@@ -274,29 +281,57 @@ function positionInfo(index: number): void {
   });
 }
 
-function showInfo(index: number): void {
+async function showInfo(index: number): Promise<void> {
   const head = heads[index];
   if (!head) return;
 
   const win = ensureInfoWindow();
   selectedHeadId = head.id;
 
-  const send = (): void => {
-    win.webContents.send("info:show", { head });
-  };
   if (win.webContents.isLoading()) {
-    win.webContents.once("did-finish-load", send);
-  } else {
-    send();
+    await new Promise<void>((resolve) => {
+      win.webContents.once("did-finish-load", () => resolve());
+    });
   }
 
-  positionInfo(index);
-  win.show();
-  win.focus();
+  // Prefetch so the renderer paints at its final size on first render. Hover
+  // preloads usually warm the cache already, so this is typically a no-op.
+  const sessions = await fetchSessionsForHead(head.id);
+
+  // A newer toggle/hide might have fired while we were awaiting — bail if the
+  // selected head no longer matches.
+  if (selectedHeadId !== head.id) return;
+
+  pendingInfoShowIndex = index;
+  if (pendingInfoShowTimeout) clearTimeout(pendingInfoShowTimeout);
+  pendingInfoShowTimeout = setTimeout(() => {
+    if (pendingInfoShowIndex !== null) flushPendingInfoShow();
+  }, 250);
+
+  win.webContents.send("info:show", { head, sessions });
+}
+
+function flushPendingInfoShow(): void {
+  if (pendingInfoShowIndex === null) return;
+  if (!infoWindow || infoWindow.isDestroyed()) return;
+  const idx = pendingInfoShowIndex;
+  pendingInfoShowIndex = null;
+  if (pendingInfoShowTimeout) {
+    clearTimeout(pendingInfoShowTimeout);
+    pendingInfoShowTimeout = null;
+  }
+  positionInfo(idx);
+  infoWindow.show();
+  infoWindow.focus();
 }
 
 function hideInfo(): void {
   selectedHeadId = null;
+  pendingInfoShowIndex = null;
+  if (pendingInfoShowTimeout) {
+    clearTimeout(pendingInfoShowTimeout);
+    pendingInfoShowTimeout = null;
+  }
   if (infoWindow && !infoWindow.isDestroyed()) {
     // Renderer pauses its session poll when it sees an empty head.
     infoWindow.webContents.send("info:hide");
@@ -612,7 +647,7 @@ ipcMain.handle("heads:toggleInfo", (_e, index: number): void => {
   const head = heads[index];
   if (!head) return;
   if (selectedHeadId === head.id) hideInfo();
-  else showInfo(index);
+  else void showInfo(index);
 });
 
 ipcMain.handle("info:hide", (): void => hideInfo());
@@ -672,14 +707,20 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
   const h = Math.max(RESIZE_MIN, Math.min(RESIZE_MAX, Math.round(height)));
 
   if (win === infoWindow) {
-    if (h === infoCurrentHeight) return;
-    infoCurrentHeight = h;
-    // positionInfo recenters vertically using the new tracked height.
-    repositionInfoIfVisible();
-    // If not currently visible, still reflect the new height so next show is correct.
-    if (!selectedHeadId) {
-      const b = win.getBounds();
-      win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+    const changed = h !== infoCurrentHeight;
+    if (changed) infoCurrentHeight = h;
+
+    if (pendingInfoShowIndex !== null) {
+      // First measurement after a show request — reveal with the right height.
+      flushPendingInfoShow();
+    } else if (changed) {
+      // positionInfo recenters vertically using the new tracked height.
+      repositionInfoIfVisible();
+      // If not currently visible, still reflect the new height so next show is correct.
+      if (!selectedHeadId) {
+        const b = win.getBounds();
+        win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+      }
     }
   } else if (win === trayPopup) {
     const b = win.getBounds();

@@ -98,8 +98,11 @@ export interface ChatHeadsBridge {
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;
 
-  // Info window (main → info renderer)
-  onInfoShow: (cb: (payload: { head: ChatHead }) => void) => Unsubscribe;
+  // Info window (main → info renderer). Sessions are prefetched in main so
+  // the renderer can paint in one pass at the correct height.
+  onInfoShow: (
+    cb: (payload: { head: ChatHead; sessions: InfoSession[] }) => void,
+  ) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
   hideInfo: () => Promise<void>;
 

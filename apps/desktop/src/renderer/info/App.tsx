@@ -22,7 +22,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     const offShow = window.chatheads.onInfoShow((p) => {
       setHead(p.head);
-      setSessions(null);
+      setSessions(p.sessions);
     });
     const offHide = window.chatheads.onInfoHide(() => setHead(null));
     return () => {
@@ -42,7 +42,7 @@ export function App(): JSX.Element {
         if (!cancelled) setSessions([]);
       }
     };
-    void load();
+    // Initial payload is already sent by main; only refresh on interval.
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
       cancelled = true;
@@ -200,7 +200,7 @@ function SessionRow({ session }: { session: InfoSession }): JSX.Element {
     <div>
       <div className="flex items-center gap-2">
         <Dot color={DOT_COLOR[session.state]} />
-        <div className="text-[14px] font-semibold text-fg flex-1 truncate">
+        <div className="text-[14px] text-fg flex-1 truncate">
           {title}
         </div>
         <Chevron />

@@ -81,6 +81,27 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
         let duplicateEvents = 0;
         const acceptedPayloads: unknown[] = [];
 
+        // Ensure the parent session row exists before inserting child events.
+        // Some callers upload a brand-new session without a prior session upsert.
+        await db
+          .insert(sessions)
+          .values({
+            sessionId: query.session,
+            userId: user.id,
+            deviceId: device?.id ?? null,
+            source,
+            project: query.project,
+            serverLineSeq: nextLineSeq,
+            prefixHash: query.prefixHash ?? null,
+          })
+          .onConflictDoUpdate({
+            target: sessions.sessionId,
+            set: {
+              serverLineSeq: nextLineSeq,
+              prefixHash: query.prefixHash ?? undefined,
+            },
+          });
+
         if (parsed.length > 0) {
           const rows = parsed.map(({ lineSeq, event }) => {
             const n = classifyEvent(source, event);
@@ -118,26 +139,6 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             if (acceptedSet.has(lineSeq)) acceptedPayloads.push(event);
           }
         }
-
-        // source is immutable after first insert — only update mutable fields.
-        await db
-          .insert(sessions)
-          .values({
-            sessionId: query.session,
-            userId: user.id,
-            deviceId: device?.id ?? null,
-            source,
-            project: query.project,
-            serverLineSeq: nextLineSeq,
-            prefixHash: query.prefixHash ?? null,
-          })
-          .onConflictDoUpdate({
-            target: sessions.sessionId,
-            set: {
-              serverLineSeq: nextLineSeq,
-              prefixHash: query.prefixHash ?? undefined,
-            },
-          });
 
         // Aggregate accepted events into session aggregates. The aggregator
         // currently only understands Claude's event shape; Codex normalization

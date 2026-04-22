@@ -130,7 +130,8 @@ its output over the network with a multi-user-capable storage layer.
 - Each line is one JSON object representing one event; files live at
   `~/.claude/projects/<slugified-cwd>/<sessionId>.jsonl`. The slug is
   derived from the working directory (e.g. `/Users/foo/dev/x` →
-  `-Users-foo-dev-x`). `<sessionId>` is a UUID.
+  `-Users-foo-dev-x`). `<sessionId>` is a UUID. This slug is an opaque
+  session key, not a reliable repo identifier.
 
 ## JSONL event schema (what to ingest)
 
@@ -151,6 +152,9 @@ Common top-level fields:
 - `sessionId`: UUID matching the filename stem.
 - `cwd`, `gitBranch`, `version`: environment metadata, present on most
   events. Take the latest non-null for the session.
+- Repo matching should prefer `cwd`; `project` is only a slugified copy
+  of that path and is insufficient on its own for worktrees or
+  arbitrary clone directory names.
 - `isSidechain`: true for subagent-internal events.
 - `isMeta`: true for machinery events that should not count as user
   messages.
@@ -412,4 +416,3 @@ auth layer.
 - Backfill of history files older than sync-state bootstrap — the
   client will send everything from offset 0 on first run and your UUID
   dedup absorbs any overlap.
-

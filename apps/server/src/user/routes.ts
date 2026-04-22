@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import type { Database } from "../db";
 import {
   users,
@@ -10,8 +10,10 @@ import {
   apiKeys,
   deviceExcludedRepos,
   deviceRepoPaths,
+  sessions,
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
+import { matchSessionRepo } from "../social/github-sync";
 
 // "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
 const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
@@ -244,6 +246,7 @@ export const deviceReposRoutes = (db: Database) =>
         const resolveRepoId = (input: {
           repoId?: number;
           fullName?: string;
+          repoFullName?: string;
         }): number | null => {
           if (
             typeof input.repoId === "number" &&
@@ -251,25 +254,30 @@ export const deviceReposRoutes = (db: Database) =>
           ) {
             return input.repoId;
           }
-          if (input.fullName) {
-            return repoIdByFullName.get(input.fullName) ?? null;
+
+          const fullName = input.fullName ?? input.repoFullName;
+          if (fullName) {
+            return repoIdByFullName.get(fullName) ?? null;
           }
+
           return null;
         };
 
         // Store local path → repo mappings (from install-time discovery)
         let repoPathsStored = 0;
-        if (body.repoPaths !== undefined) {
-          await db
-            .delete(deviceRepoPaths)
-            .where(eq(deviceRepoPaths.deviceId, deviceId));
+        await db
+          .delete(deviceRepoPaths)
+          .where(eq(deviceRepoPaths.deviceId, deviceId));
 
+        if (body.repoPaths !== undefined) {
           const repoPathsByRepoId = new Map<number, string>();
           for (const repoPath of body.repoPaths) {
             const repoId = resolveRepoId(repoPath);
             if (!repoId) {
               skippedRepos.push(
-                repoPath.fullName ?? `repoId:${repoPath.repoId ?? "unknown"}`,
+                repoPath.fullName ??
+                  repoPath.repoFullName ??
+                  `repoId:${repoPath.repoId ?? "unknown"}`,
               );
               continue;
             }
@@ -311,6 +319,14 @@ export const deviceReposRoutes = (db: Database) =>
             skippedRepos.push(fullName);
           }
         }
+        for (const fullName of body.excludedRepoFullNames ?? []) {
+          const repoId = repoIdByFullName.get(fullName);
+          if (repoId) {
+            excludedRepoIds.add(repoId);
+          } else {
+            skippedRepos.push(fullName);
+          }
+        }
 
         const excludedReposStored = excludedRepoIds.size;
         if (excludedReposStored > 0) {
@@ -320,6 +336,57 @@ export const deviceReposRoutes = (db: Database) =>
               repoId,
             })),
           );
+        }
+
+        if (excludedRepoIds.size > 0) {
+          const excludedSessions = await db
+            .select({ sessionId: sessions.sessionId })
+            .from(sessions)
+            .where(
+              and(
+                eq(sessions.userId, user.id),
+                eq(sessions.deviceId, deviceId),
+                inArray(sessions.repoId, Array.from(excludedRepoIds)),
+              ),
+            );
+
+          for (const session of excludedSessions) {
+            await db
+              .update(sessions)
+              .set({ repoId: null })
+              .where(eq(sessions.sessionId, session.sessionId));
+          }
+        }
+
+        const unmatchedSessions = await db
+          .select({
+            sessionId: sessions.sessionId,
+            cwd: sessions.cwd,
+            project: sessions.project,
+          })
+          .from(sessions)
+          .where(
+            and(
+              eq(sessions.userId, user.id),
+              eq(sessions.deviceId, deviceId),
+              isNull(sessions.repoId),
+            ),
+          );
+
+        for (const session of unmatchedSessions) {
+          const repoId = await matchSessionRepo(
+            db,
+            user.id,
+            session.cwd,
+            session.project,
+            deviceId,
+          );
+          if (!repoId) continue;
+
+          await db
+            .update(sessions)
+            .set({ repoId })
+            .where(eq(sessions.sessionId, session.sessionId));
         }
 
         return {
@@ -337,12 +404,14 @@ export const deviceReposRoutes = (db: Database) =>
               t.Object({
                 repoId: t.Optional(t.Number()),
                 fullName: t.Optional(t.String()),
+                repoFullName: t.Optional(t.String()),
                 localPath: t.String(),
               }),
             ),
           ),
           excludedRepoIds: t.Optional(t.Array(t.Number())),
           excludedRepos: t.Optional(t.Array(t.String())),
+          excludedRepoFullNames: t.Optional(t.Array(t.String())),
         }),
       },
     );

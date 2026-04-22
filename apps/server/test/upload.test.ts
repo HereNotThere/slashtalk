@@ -4,6 +4,8 @@ import type { IngestResponse, SyncStateEntry } from "@slashtalk/shared";
 import { db } from "../src/db";
 import {
   users,
+  repos,
+  userRepos,
   sessions,
   setupTokens,
   heartbeats,
@@ -329,6 +331,79 @@ describe("sync state", () => {
     const sessionId = "b0000000-0000-0000-0000-000000000001";
     expect(state[sessionId]).toBeTruthy();
     expect(state[sessionId].serverLineSeq).toBeGreaterThan(0);
+  });
+});
+
+describe("device repo registration", () => {
+  it("rematches owner-only sessions when repo paths are registered", async () => {
+    const [repo] = await db
+      .insert(repos)
+      .values({
+        githubId: 3001,
+        fullName: "shared-org/platform",
+        owner: "shared-org",
+        name: "platform",
+      })
+      .returning();
+
+    await db.insert(userRepos).values({
+      userId: aliceUserId,
+      repoId: repo.id,
+      permission: "push",
+    });
+
+    const sessionId = "a0000000-0000-0000-0000-0000000000aa";
+    const repoRoot = "/Users/alice/work/client-monorepo";
+    const cwd = `${repoRoot}/apps/web`;
+    const project = "-Users-alice-work-client-monorepo-apps-web";
+
+    const ingestRes = await fetch(
+      `${baseUrl}/v1/ingest?project=${project}&session=${sessionId}&fromLineSeq=0`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          Authorization: `Bearer ${aliceApiKey}`,
+        },
+        body: makeNdjson([
+          {
+            ...makeEvent({
+              sessionId,
+              timestamp: new Date().toISOString(),
+            }),
+            cwd,
+          },
+        ]),
+      }
+    );
+    expect(ingestRes.status).toBe(200);
+
+    let [session] = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.sessionId, sessionId));
+    expect(session.repoId).toBeNull();
+
+    const registerRes = await fetch(
+      `${baseUrl}/v1/devices/${aliceDeviceId}/repos`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${aliceApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          repoPaths: [{ repoFullName: "shared-org/platform", localPath: repoRoot }],
+        }),
+      }
+    );
+    expect(registerRes.status).toBe(200);
+
+    [session] = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.sessionId, sessionId));
+    expect(session.repoId).toBe(repo.id);
   });
 });
 

@@ -450,7 +450,7 @@ function ensureResponseWindow(): BrowserWindow {
   if (responseWindow && !responseWindow.isDestroyed()) return responseWindow;
 
   responseWindow = new BrowserWindow({
-    width: 720,
+    width: 460,
     height: 600,
     minWidth: 400,
     minHeight: 300,

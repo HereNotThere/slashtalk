@@ -14,6 +14,7 @@ Electron app for slashtalk. Built with `electron-vite` (main + preload + multi-w
 - `out/` — build output (gitignored)
 - `dist/` — packaged installers from `electron-builder` (gitignored)
 - `resources/` — runtime assets (e.g. `trayTemplate.png`/`@2x` for the macOS menu-bar icon). Loaded relative to `__dirname` from main process. Template PNGs use grayscale + alpha so macOS auto-tints to match the menu bar. Inside a packaged build, these are included in `app.asar` at the same relative path (`../../resources/…` from `out/main/`).
+- `build/` — brand + packaging sources. `icon.svg` / `icon.png` are the Slashtalk logo source; `icon.iconset/` + `icon.icns` are generated from the SVG (`rsvg-convert` per-size → `iconutil -c icns`) and picked up automatically by electron-builder for the app/dock/Finder/DMG icons. `trayTemplate.svg` is the mono source for `resources/trayTemplate*.png` (rendered at 22px / 44px). Not shipped at runtime — only `resources/**` goes into `app.asar`.
 
 ## Styling
 
@@ -55,7 +56,7 @@ Install deps from repo root: `bun install` (this is a workspace package, do not 
 
 ## Packaging (electron-builder)
 
-Config is inline in `package.json` under the `build` key. macOS output is an unsigned `.dmg` (`identity: null`); no Apple Developer cert wired up. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). Add an app icon by dropping `build/icon.icns` and removing the default-icon warning.
+Config is inline in `package.json` under the `build` key. macOS output is an unsigned `.dmg` (`identity: null`); no Apple Developer cert wired up. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). App icon lives at `build/icon.icns` (auto-picked by electron-builder) — regenerate from `build/icon.svg` via the `rsvg-convert` + `iconutil` steps noted in Layout if the logo changes.
 
 ## Before committing
 

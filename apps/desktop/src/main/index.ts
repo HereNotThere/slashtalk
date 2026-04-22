@@ -9,13 +9,16 @@ import {
   shell,
 } from "electron";
 import path from "node:path";
-import type { ChatHead, InfoSession } from "../shared/types";
+import type { ChatHead, InfoSession, McpTarget } from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
+import * as installMcp from "./installMcp";
+import * as presence from "./presence";
+import type { PresenceUser } from "./presence";
 
 // Single source of truth, mirrors ChatHeadWindow.swift constants.
 const BUBBLE_SIZE = 48;
@@ -46,6 +49,8 @@ let tray: Tray | null = null;
 let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
+let railHeads: ChatHead[] = [];
+let presenceUsers: PresenceUser[] = [];
 let selectedHeadId: string | null = null;
 
 let dragOffset: { dx: number; dy: number } | null = null;
@@ -379,9 +384,45 @@ function createTray(): void {
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
 
-rail.onChange((next) => {
-  heads = next;
-  // Drop info-window selection if the targeted head left the graph.
+// Merge rail (social graph) with presence (users currently in an MCP session).
+// Presence uses the same `user:<login>` head-id format so clicks into the info
+// window keep working via rail.parseUserHeadId. Presence-only users (not in
+// your social graph yet) get added below the rail heads.
+function computeMergedHeads(): ChatHead[] {
+  const presenceByLogin = new Map(
+    presenceUsers.map((u) => [u.userId, u] as const),
+  );
+  const merged: ChatHead[] = [];
+  const seen = new Set<string>();
+
+  for (const rh of railHeads) {
+    const login = rail.parseUserHeadId(rh.id);
+    const p = login ? presenceByLogin.get(login) : undefined;
+    merged.push({
+      ...rh,
+      lastActionAt: p?.lastActivity ?? rh.lastActionAt,
+    });
+    if (login) seen.add(login);
+  }
+
+  for (const u of presenceUsers) {
+    if (seen.has(u.userId)) continue;
+    merged.push({
+      id: rail.userHeadId(u.userId),
+      label: u.name ?? u.userId,
+      tint: "transparent",
+      avatar: u.avatar
+        ? { type: "remote", value: u.avatar }
+        : { type: "emoji", value: "🟢" },
+      lastActionAt: u.lastActivity,
+    });
+  }
+
+  return merged;
+}
+
+function recomputeHeads(): void {
+  heads = computeMergedHeads();
   if (selectedHeadId && !heads.some((h) => h.id === selectedHeadId)) {
     hideInfo();
   }
@@ -395,6 +436,16 @@ rail.onChange((next) => {
     repositionInfoIfVisible();
   }
   broadcastHeads();
+}
+
+rail.onChange((next) => {
+  railHeads = next;
+  recomputeHeads();
+});
+
+presence.onChange((users) => {
+  presenceUsers = users;
+  recomputeHeads();
 });
 
 ipcMain.handle("heads:toggleInfo", (_e, index: number): void => {
@@ -485,6 +536,11 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle("mcp:install", (_e, target: McpTarget) => installMcp.install(target));
+ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) => installMcp.uninstall(target));
+ipcMain.handle("mcp:status", () => installMcp.status());
+ipcMain.handle("mcp:url", () => installMcp.mcpUrl());
+
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
 ipcMain.handle("backend:signIn", () => backend.signIn());
@@ -556,6 +612,7 @@ app.whenReady().then(() => {
   createMainWindow();
   createTray();
   rail.start();
+  presence.start();
   applySyncForAuth(backend.getAuthState().signedIn);
 });
 

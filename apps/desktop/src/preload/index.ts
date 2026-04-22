@@ -4,6 +4,9 @@ import type {
   ChatHead,
   ChatHeadsBridge,
   InfoSession,
+  McpInstallStatus,
+  McpTarget,
+  McpTargetState,
   RepoSummary,
   TrackedRepo,
   Unsubscribe,
@@ -19,6 +22,16 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 }
 
 const bridge: ChatHeadsBridge = {
+  mcp: {
+    install: (target: McpTarget) =>
+      ipcRenderer.invoke("mcp:install", target) as Promise<McpTargetState>,
+    uninstall: (target: McpTarget) =>
+      ipcRenderer.invoke("mcp:uninstall", target) as Promise<McpTargetState>,
+    status: () =>
+      ipcRenderer.invoke("mcp:status") as Promise<McpInstallStatus>,
+    url: () => ipcRenderer.invoke("mcp:url") as Promise<string>,
+  },
+
   list: () => ipcRenderer.invoke("heads:list") as Promise<ChatHead[]>,
   onUpdate: (cb) => subscribe<ChatHead[]>("heads:update", cb),
 

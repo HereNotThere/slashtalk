@@ -58,10 +58,31 @@ export interface TeammateSummary {
   repos: string[];
 }
 
+// Chatheads MCP install targets — only Claude Code's config is programmatically
+// writeable; Claude Desktop and claude.ai require manual UI add (copy URL).
+export type McpTarget = 'claude-code';
+
+export interface McpTargetState {
+  installed: boolean;
+  path: string;
+}
+
+export interface McpInstallStatus {
+  claudeCode: McpTargetState;
+}
+
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
 export interface ChatHeadsBridge {
-  // Head state — derived from the social graph, not user-managed.
+  // Chatheads MCP install (into external AI clients)
+  mcp: {
+    install: (target: McpTarget) => Promise<McpTargetState>;
+    uninstall: (target: McpTarget) => Promise<McpTargetState>;
+    status: () => Promise<McpInstallStatus>;
+    url: () => Promise<string>;
+  };
+
+  // Head state — derived from the social graph + MCP presence, not user-managed.
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
 

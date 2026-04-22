@@ -1,6 +1,12 @@
 import { useHeads } from '../shared/useHeads';
 import { SlashtalkSection } from './SlashtalkSection';
+import { InstallSection } from './InstallSection';
 import type { ChatHead } from '../../shared/types';
+
+// Hides the slashtalk backend sign-in panel. Chatheads presence is independent
+// of the slashtalk service, so this defaults off for the demo. Flip to `true`
+// (or set VITE_SHOW_SLASHTALK=true) to show it.
+const SHOW_SLASHTALK = import.meta.env.VITE_SHOW_SLASHTALK === 'true';
 
 export function App(): JSX.Element {
   const heads = useHeads();
@@ -10,7 +16,9 @@ export function App(): JSX.Element {
       <h1 className="m-0 mb-1 text-[28px]">Chat Heads</h1>
       <div className="text-subtle mb-5">Floating bubbles that stay on top of everything.</div>
 
-      <SlashtalkSection />
+      <InstallSection />
+
+      {SHOW_SLASHTALK && <SlashtalkSection />}
 
       <SectionHeading>Active ({heads.length})</SectionHeading>
       <div className="flex flex-col gap-1.5">

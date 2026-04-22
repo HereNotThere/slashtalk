@@ -5,10 +5,9 @@
 import type { SpotifyPresence } from "@slashtalk/shared";
 import * as backend from "./backend";
 import { createEmitter } from "./emitter";
+import { diffPresence, type PresenceMap } from "./peerPresenceDiff";
 
 const POLL_MS = 15_000;
-
-type PresenceMap = Record<string, SpotifyPresence>;
 
 let map: PresenceMap = {};
 let running = false;
@@ -21,15 +20,6 @@ export function get(login: string): SpotifyPresence | null {
   return map[login] ?? null;
 }
 
-function sameEntry(
-  a: SpotifyPresence | undefined,
-  b: SpotifyPresence | undefined,
-): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  return a.trackId === b.trackId && a.isPlaying === b.isPlaying;
-}
-
 async function refresh(): Promise<void> {
   if (!running) return;
   let next: PresenceMap;
@@ -39,13 +29,10 @@ async function refresh(): Promise<void> {
     console.warn("[peerPresence] refresh failed", err);
     return;
   }
-  const logins = new Set([...Object.keys(map), ...Object.keys(next)]);
   const prev = map;
   map = next;
-  for (const login of logins) {
-    if (!sameEntry(prev[login], next[login])) {
-      changes.emit({ login, presence: next[login] ?? null });
-    }
+  for (const change of diffPresence(prev, next)) {
+    changes.emit(change);
   }
 }
 
@@ -65,7 +52,7 @@ export function stop(): void {
   }
   const prev = map;
   map = {};
-  for (const login of Object.keys(prev)) {
-    changes.emit({ login, presence: null });
+  for (const change of diffPresence(prev, map)) {
+    changes.emit(change);
   }
 }

@@ -4,8 +4,8 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { SpotifyPresence } from "@slashtalk/shared";
 import * as backend from "./backend";
+import { parseSpotifyOutput, type Track } from "./spotifyParse";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,8 +36,6 @@ tell application "Spotify"
 end tell
 `;
 
-type Track = Omit<SpotifyPresence, "updatedAt">;
-
 let timer: NodeJS.Timeout | null = null;
 let running = false;
 let lastSentId: string | null = null;
@@ -48,25 +46,7 @@ async function read(): Promise<Track | null> {
     const { stdout } = await execFileAsync("osascript", ["-e", SCRIPT], {
       timeout: OSASCRIPT_TIMEOUT_MS,
     });
-    const raw = stdout.trim();
-    if (!raw || raw === "not-running" || raw === "stopped" || raw === "error") {
-      return null;
-    }
-    const [state, uri, name, artist] = raw.split("\t");
-    if (!uri || !name || !artist) return null;
-    const m = /^spotify:track:(.+)$/.exec(uri);
-    if (!m) return null;
-    const trackId = m[1]!;
-    const isPlaying = state === "playing";
-    // V1: only broadcast when actively playing. Paused → clear.
-    if (!isPlaying) return null;
-    return {
-      trackId,
-      name,
-      artist,
-      url: `https://open.spotify.com/track/${trackId}`,
-      isPlaying: true,
-    };
+    return parseSpotifyOutput(stdout.trim());
   } catch {
     // macOS Automation permission denied, Spotify hung past timeout, or
     // AppleScript bridge refused — treat as "no track".

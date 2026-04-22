@@ -80,6 +80,7 @@ export function mockGitHubAuth(): () => void {
 // ── Database Schema ──────────────────────────────────────────
 
 export async function resetDatabase() {
+  await db.execute(sql`SET client_min_messages = WARNING`);
   await db.execute(sql`DROP SCHEMA IF EXISTS public CASCADE`);
   await db.execute(sql`CREATE SCHEMA public`);
 

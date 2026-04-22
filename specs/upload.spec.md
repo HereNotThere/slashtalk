@@ -215,7 +215,9 @@ hash changes, the client re-uploads from offset 0.
 1. `POST /v1/ingest`
    - Query/headers: `user` (authenticated identity), `project` (slug),
      `session` (UUID), `fromOffset` (int, bytes in source file where this
-     chunk starts), `prefixHash` (hex).
+     chunk starts), `prefixHash` (hex). No device header is part of the
+     protocol — device identity is derived from the authenticated
+     credential, not from a client-supplied header.
    - Body: `Content-Type: application/x-ndjson` — raw JSONL bytes.
    - Server behavior:
      - Split on `\n`; ignore blank lines; parse each as JSON.

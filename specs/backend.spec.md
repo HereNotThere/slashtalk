@@ -378,8 +378,8 @@ as OpenAPI definitions via `drizzle-typebox`.
 - Headers: `Authorization: Bearer <api_key>`
 - Query: `project`, `session`, `fromOffset`, `prefixHash`
 - Body: `application/x-ndjson`
-- Additionally sends `X-Device-Id` header so the server tracks which
-  device uploaded the session.
+- The server derives `device_id` from the authenticated API key
+  (`api_keys.device_id`); no separate device header is sent or accepted.
 - On successful ingest of new events, publish `session_updated` to the
   session's repo channel in Redis.
 

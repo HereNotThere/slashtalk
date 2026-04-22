@@ -385,7 +385,9 @@ function positionChat(): void {
     anchor === "left"
       ? bubbleCenterX - CHAT_ICON_OFFSET
       : bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
-  const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2 - 8);
+  // Align pill top to avatar top. Chat window (80) is taller than the pill
+  // (56) by 24px, split 12/12 above and below by items-center + p-sm.
+  const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2);
 
   chatWindow.setBounds({
     x: Math.round(chatX),

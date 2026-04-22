@@ -6,6 +6,11 @@
  * ──────────────────────────────────────────────────────────────────────────── */
 
 @theme {
+  /* Pin Tailwind's numeric spacing scale (w-14, p-4, gap-2, …) to 4px per unit
+   * so it stays consistent even though the app sets html font-size: 13px below.
+   * Without this, 1rem = 13px and `w-14` renders at 45.5px instead of 56px. */
+  --spacing: 4px;
+
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 

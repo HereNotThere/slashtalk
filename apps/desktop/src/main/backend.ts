@@ -9,7 +9,7 @@
 // redirect) and the second by calling /api/me/setup-token -> /v1/auth/exchange
 // on top of that session.
 
-import { shell } from "electron";
+import { app, shell } from "electron";
 import http from "node:http";
 import os from "node:os";
 import type { AddressInfo } from "node:net";
@@ -237,6 +237,22 @@ interface FetchOpts {
   auth?: Auth;
 }
 
+function logHttp(
+  level: "log" | "warn" | "error",
+  method: string,
+  path: string,
+  status: string,
+  ms: number,
+  detail?: string | unknown,
+): void {
+  // Stay quiet in packaged builds to avoid shipping request bodies to the
+  // system logger; dev/unpackaged gets full visibility.
+  if (app.isPackaged) return;
+  const prefix = `[http] ${method} ${path} ${status} in ${ms}ms`;
+  if (detail !== undefined) console[level](prefix, detail);
+  else console[level](prefix);
+}
+
 async function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
   const auth: Auth = opts.auth ?? "session";
   const url = `${baseUrl()}${path}`;
@@ -257,20 +273,34 @@ async function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
     body = JSON.stringify(opts.body);
   }
 
-  const res = await fetch(url, { method: opts.method, headers, body });
+  const started = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(url, { method: opts.method, headers, body });
+  } catch (err) {
+    logHttp("error", opts.method, path, "network-error", Date.now() - started, err);
+    throw err;
+  }
+  const ms = Date.now() - started;
 
   if (res.status === 401 && auth === "session" && creds) {
+    logHttp("warn", opts.method, path, "401", ms, "— refreshing");
     const refreshed = await tryRefresh();
     if (refreshed) return jsonFetch<T>(path, opts);
   }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    logHttp("error", opts.method, path, String(res.status), ms, text.slice(0, 500));
     throw new Error(`${opts.method} ${path} failed (${res.status}): ${text}`);
   }
 
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) {
+    logHttp("log", opts.method, path, "204", ms);
+    return undefined as T;
+  }
   const text = await res.text();
+  logHttp("log", opts.method, path, String(res.status), ms, `${text.length}B ${text.slice(0, 200)}`);
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 

@@ -58,6 +58,17 @@ export interface TeammateSummary {
   repos: string[];
 }
 
+/** Diagnostic snapshot of the rail's last `/api/feed/users` attempt. */
+export interface RailDebugSnapshot {
+  /** ms since epoch of the last refresh attempt; null if never attempted. */
+  at: number | null;
+  /** Peers returned on the last successful fetch. Empty array means the
+   *  server returned zero peers; null means the last attempt failed. */
+  peers: TeammateSummary[] | null;
+  /** Error message from the last failed attempt, or null on success. */
+  error: string | null;
+}
+
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
 export interface ChatHeadsBridge {
@@ -107,6 +118,11 @@ export interface ChatHeadsBridge {
     addLocalRepo: () => Promise<TrackedRepo | null>;
     removeLocalRepo: (repoId: number) => Promise<TrackedRepo[]>;
     onTrackedReposChange: (cb: (repos: TrackedRepo[]) => void) => Unsubscribe;
+  };
+
+  debug: {
+    railSnapshot: () => Promise<RailDebugSnapshot>;
+    refreshRail: () => Promise<RailDebugSnapshot>;
   };
 }
 

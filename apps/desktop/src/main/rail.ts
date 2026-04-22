@@ -5,7 +5,11 @@
 // with you. Refreshed on auth changes, on local-repo changes, and on a 30s
 // poll as a fallback until WebSocket user_updated events are wired.
 
-import type { ChatHead, TeammateSummary } from "../shared/types";
+import type {
+  ChatHead,
+  RailDebugSnapshot,
+  TeammateSummary,
+} from "../shared/types";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import { createEmitter } from "./emitter";
@@ -17,6 +21,8 @@ const REFRESH_DEBOUNCE_MS = 200;
 let heads: ChatHead[] = [];
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 const changes = createEmitter<ChatHead[]>();
+
+let lastSnapshot: RailDebugSnapshot = { at: null, peers: null, error: null };
 
 export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
@@ -67,21 +73,39 @@ function apply(next: ChatHead[]): void {
 async function refresh(): Promise<void> {
   const self = selfHead();
   if (!self) {
+    lastSnapshot = { at: Date.now(), peers: null, error: "not signed in" };
     apply([]);
     return;
   }
   try {
     const peers = await backend.listTeammates();
+    lastSnapshot = { at: Date.now(), peers, error: null };
     apply([
       self,
       ...peers.map((t: TeammateSummary) =>
         headForUser(t.githubLogin, t.avatarUrl),
       ),
     ]);
-  } catch {
-    // Network or auth hiccup — keep showing self so the rail doesn't flash.
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    lastSnapshot = { at: Date.now(), peers: null, error: message };
+    console.error("[rail] listTeammates failed:", err);
+    // Keep showing self so the rail doesn't flash.
     apply([self]);
   }
+}
+
+export function getDebugSnapshot(): RailDebugSnapshot {
+  return lastSnapshot;
+}
+
+export async function forceRefresh(): Promise<RailDebugSnapshot> {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+  await refresh();
+  return lastSnapshot;
 }
 
 function scheduleRefresh(): void {

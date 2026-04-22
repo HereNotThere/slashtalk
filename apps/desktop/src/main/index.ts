@@ -379,6 +379,9 @@ function createTray(): void {
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
 
+ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
+ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
+
 rail.onChange((next) => {
   heads = next;
   // Drop info-window selection if the targeted head left the graph.

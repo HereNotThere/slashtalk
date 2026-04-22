@@ -8,7 +8,7 @@ Electron app for slashtalk. Built with `electron-vite` (main + preload + multi-w
 
 - `src/main/` — Electron main process (Node)
 - `src/preload/` — preload bridge (built as CJS — see `electron.vite.config.ts`)
-- `src/renderer/{main,overlay,info,statusbar}/` — four renderer windows, each with its own `index.html`
+- `src/renderer/{main,overlay,info,chat,response,statusbar}/` — six renderer windows, each with its own `index.html`. `chat` is a transparent pill-shaped "ask" popover anchored to the chat bubble at the bottom of the overlay rail; `response` is the result window that opens when you send a message
 - `src/renderer/shared/tailwind.css` — single Tailwind v4 entrypoint (theme + base resets) imported by every window's `styles.css`
 - `src/shared/` — types shared across processes
 - `out/` — build output (gitignored)

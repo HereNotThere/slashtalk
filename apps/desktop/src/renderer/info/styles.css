@@ -1,1 +1,16 @@
 @import "../shared/tailwind.css";
+
+/* In light theme the macOS popover vibrancy goes washed-out grey over a bright
+ * desktop. Force an opaque background that matches our token palette so the
+ * panel reads cleanly. Dark theme keeps vibrancy. */
+@layer base {
+  :root.theme-light body {
+    background: var(--color-bg);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not(.theme-dark):not(.theme-light) body {
+      background: var(--color-bg);
+    }
+  }
+}

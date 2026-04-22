@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SessionState } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
@@ -16,6 +16,7 @@ const DOT_COLOR: Record<SessionState, string> = {
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   useAutoResize();
 
   useEffect(() => {
@@ -49,12 +50,33 @@ export function App(): JSX.Element {
     };
   }, [head?.id]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        void window.chatheads.hideInfo();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent): void => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        void window.chatheads.hideInfo();
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
+
   return (
-    <>
+    <div ref={rootRef}>
       <Header head={head} />
       <Divider />
       <SessionsSection sessions={sessions} />
-    </>
+    </div>
   );
 }
 
@@ -81,9 +103,13 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
           </span>
         </div>
       </div>
-      <div className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0">
+      <button
+        onClick={() => window.chatheads.hideInfo()}
+        className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
+        aria-label="Close"
+      >
         ✕
-      </div>
+      </button>
     </div>
   );
 }

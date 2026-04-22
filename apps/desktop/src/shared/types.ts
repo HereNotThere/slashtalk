@@ -79,6 +79,20 @@ export interface ChatHeadsBridge {
   // Info box (overlay → main)
   toggleInfo: (index: number) => Promise<void>;
 
+  // Chat input (overlay ↔ main, chat renderer → main)
+  toggleChat: () => Promise<void>;
+  hideChat: () => Promise<void>;
+  /** Overlay subscribes so it can hide the chat bubble while the pill is open. */
+  onChatState: (cb: (state: { visible: boolean }) => void) => Unsubscribe;
+  /** Chat renderer subscribes so it can mirror layout based on rail side. */
+  onChatConfig: (
+    cb: (cfg: { anchor: "left" | "right" }) => void,
+  ) => Unsubscribe;
+
+  // Response window (chat → main → response)
+  openResponse: (message: string) => Promise<void>;
+  onResponseOpen: (cb: (payload: { message: string }) => void) => Unsubscribe;
+
   // Drag (overlay → main)
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;
@@ -86,6 +100,7 @@ export interface ChatHeadsBridge {
   // Info window (main → info renderer)
   onInfoShow: (cb: (payload: { head: ChatHead }) => void) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
+  hideInfo: () => Promise<void>;
 
   // Fetch sessions for a given chat head (signed-in user's own or a peer's
   // that share a claimed repo with you).

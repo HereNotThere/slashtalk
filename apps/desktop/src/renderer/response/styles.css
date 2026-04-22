@@ -1,0 +1,8 @@
+@import "../shared/tailwind.css";
+
+@layer base {
+  input {
+    user-select: text;
+    cursor: text;
+  }
+}

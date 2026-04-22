@@ -30,18 +30,25 @@ function useTick(intervalMs: number): void {
 export function App(): JSX.Element {
   const heads = useHeads();
   const stackRef = useRef<HTMLDivElement>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   useTick(TICK_MS);
+
+  useEffect(() => {
+    return window.chatheads.onChatState(({ visible }) => setChatOpen(visible));
+  }, []);
 
   useEffect(() => {
     let downPos: { x: number; y: number } | null = null;
     let downBubbleIndex: number | null = null;
+    let downIsChat = false;
     let dragging = false;
 
     const onDown = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       downPos = { x: e.screenX, y: e.screenY };
       const target = e.target instanceof Element ? e.target.closest('[data-bubble]') : null;
-      downBubbleIndex = target && stackRef.current
+      downIsChat = target?.hasAttribute('data-chat') ?? false;
+      downBubbleIndex = target && !downIsChat && stackRef.current
         ? Array.prototype.indexOf.call(stackRef.current.children, target)
         : null;
       dragging = false;
@@ -60,9 +67,11 @@ export function App(): JSX.Element {
     const onUp = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       if (dragging) void window.chatheads.dragEnd();
+      else if (downIsChat) void window.chatheads.toggleChat();
       else if (downBubbleIndex !== null) void window.chatheads.toggleInfo(downBubbleIndex);
       downPos = null;
       downBubbleIndex = null;
+      downIsChat = false;
       dragging = false;
     };
 
@@ -70,6 +79,7 @@ export function App(): JSX.Element {
       if (dragging) void window.chatheads.dragEnd();
       downPos = null;
       downBubbleIndex = null;
+      downIsChat = false;
       dragging = false;
     };
 
@@ -93,6 +103,44 @@ export function App(): JSX.Element {
       {heads.map((h) => (
         <Bubble key={h.id} head={h} />
       ))}
+      <ChatBubble hidden={chatOpen} />
+    </div>
+  );
+}
+
+function ChatBubble({ hidden }: { hidden: boolean }): JSX.Element {
+  return (
+    <div
+      data-bubble
+      data-chat
+      title="Ask your team"
+      className={`
+        relative w-14 h-14 rounded-full cursor-pointer
+        flex items-center justify-center
+        bg-chat text-white
+        outline outline-1 -outline-offset-1 outline-bubble-outline
+        shadow-[0_2px_3px_rgba(0,0,0,0.15)]
+        transition-transform duration-150 ease-out
+        hover:scale-[1.03] hover:bg-chat-hover
+        ${hidden ? "invisible" : ""}
+      `}
+    >
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 20 20"
+        fill="none"
+        className="pointer-events-none"
+        aria-hidden
+      >
+        <circle cx="9" cy="9" r="5.5" stroke="currentColor" strokeWidth="1.8" />
+        <path
+          d="M13 13 L17 17"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+      </svg>
     </div>
   );
 }
@@ -109,8 +157,8 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
         backdrop-blur-[18px] backdrop-saturate-[1.4]
         outline outline-1 -outline-offset-1 outline-bubble-outline
         shadow-[0_2px_3px_rgba(0,0,0,0.15)]
-        transition-transform duration-[180ms] ease-[cubic-bezier(0.2,0.9,0.3,1.2)]
-        hover:scale-105
+        transition-transform duration-150 ease-out
+        hover:scale-[1.03]
       "
     >
       {head.avatar.type === 'emoji' ? (

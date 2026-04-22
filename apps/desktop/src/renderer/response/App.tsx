@@ -1,0 +1,119 @@
+import { useEffect, useState } from "react";
+
+export function App(): JSX.Element {
+  const [message, setMessage] = useState("");
+  const [followUp, setFollowUp] = useState("");
+
+  useEffect(() => {
+    return window.chatheads.onResponseOpen(({ message }) => {
+      setMessage(message);
+      setFollowUp("");
+    });
+  }, []);
+
+  const handleFollowUpSend = (): void => {
+    if (followUp.trim()) {
+      console.log("Follow-up:", followUp);
+      setFollowUp("");
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-bg">
+      {/* Header */}
+      <div className="flex-none px-lg pt-lg pb-md border-b border-divider">
+        <div className="flex items-center gap-md">
+          <h1 className="text-lg font-semibold text-fg">Ask</h1>
+          <span className="flex-1 text-sm text-muted truncate">
+            Synthesizing across your team's logs
+          </span>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto px-lg py-lg space-y-lg">
+        {message && (
+          <div className="flex justify-end">
+            <div className="max-w-xs px-4 py-2 rounded-2xl bg-chat text-white">
+              <p className="text-sm">{message}</p>
+            </div>
+          </div>
+        )}
+        <p className="text-base leading-relaxed text-fg/90">
+          Three people. Fei opened feat/auth-cleanup 1h ago and has a live
+          session scaffolding the /signup route and OAuth buttons. PF is on
+          the same branch renaming design tokens, with an active overlap in
+          OAuthButtons.tsx. MJ closed the Auth0 → Firebase swap an hour
+          ago; the token refresh path is the relevant piece for you.
+        </p>
+
+        {/* Contributors */}
+        <div className="mt-lg flex flex-wrap gap-md">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-surface">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-sm font-semibold shrink-0">
+              F
+            </div>
+            <span className="text-sm text-fg font-medium">
+              Fei · feat/auth-cleanup
+            </span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-surface">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-semibold shrink-0">
+              PF
+            </div>
+            <span className="text-sm text-fg font-medium">
+              PF · feat/auth-cleanup
+            </span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-surface">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-700 to-amber-900 flex items-center justify-center text-white text-sm font-semibold shrink-0">
+              M
+            </div>
+            <span className="text-sm text-fg font-medium">
+              MJ · mj/firebase-migrate
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer - Follow-up input */}
+      <div className="flex-none px-lg py-lg border-t border-divider">
+        <div className="flex items-center gap-md">
+          <input
+            value={followUp}
+            onChange={(e) => setFollowUp(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleFollowUpSend();
+              }
+            }}
+            placeholder="Ask a follow-up..."
+            className="flex-1 bg-surface px-4 py-3 rounded-full border border-divider outline-none text-fg text-sm placeholder:text-muted focus:border-subtle transition-colors"
+          />
+          <button
+            onClick={handleFollowUpSend}
+            className="w-12 h-12 rounded-full bg-chat flex items-center justify-center text-white hover:opacity-90 transition-opacity shrink-0"
+            aria-label="Send"
+          >
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M3 8 L13 8"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              <path
+                d="M9 4 L13 8 L9 12"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -25,9 +25,6 @@ export function App(): JSX.Element {
       <div className="flex-none px-lg pt-lg pb-md border-b border-divider">
         <div className="flex items-center gap-md">
           <h1 className="text-lg font-semibold text-fg">Ask</h1>
-          <span className="flex-1 text-sm text-muted truncate">
-            Synthesizing across your team's logs
-          </span>
         </div>
       </div>
 
@@ -35,7 +32,7 @@ export function App(): JSX.Element {
       <div className="flex-1 overflow-auto px-lg py-lg space-y-lg">
         {message && (
           <div className="flex justify-end">
-            <div className="max-w-xs px-4 py-2 rounded-2xl bg-chat text-white">
+            <div className="max-w-xs px-4 py-2 rounded-2xl bg-surface text-fg">
               <p className="text-sm">{message}</p>
             </div>
           </div>

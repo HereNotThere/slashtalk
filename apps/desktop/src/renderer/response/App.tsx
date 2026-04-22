@@ -21,13 +21,6 @@ export function App(): JSX.Element {
 
   return (
     <div className="flex flex-col h-screen bg-bg">
-      {/* Header */}
-      <div className="flex-none px-lg pt-lg pb-md border-b border-divider">
-        <div className="flex items-center gap-md">
-          <h1 className="text-lg font-semibold text-fg">Ask</h1>
-        </div>
-      </div>
-
       {/* Content */}
       <div className="flex-1 overflow-auto px-lg py-lg space-y-lg">
         {message && (

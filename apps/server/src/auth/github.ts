@@ -248,6 +248,9 @@ export const cliAuth = (db: Database) =>
           .set({ redeemed: true })
           .where(eq(setupTokens.id, st.id));
 
+        // Upsert by (userId, deviceName): a second sign-in on the same
+        // machine reuses the existing device row so device_repo_paths and
+        // sessions linked to that device survive sign-out/in cycles.
         const [device] = await db
           .insert(devices)
           .values({
@@ -256,7 +259,15 @@ export const cliAuth = (db: Database) =>
             os: body.os ?? null,
             lastSeenAt: new Date(),
           })
+          .onConflictDoUpdate({
+            target: [devices.userId, devices.deviceName],
+            set: { os: body.os ?? null, lastSeenAt: new Date() },
+          })
           .returning();
+
+        // One active API key per device. Revoke any prior keys before issuing
+        // the new one so an old machine-captured key can't outlive a sign-in.
+        await db.delete(apiKeys).where(eq(apiKeys.deviceId, device.id));
 
         const rawKey = generateApiKey();
         const keyHash = await hashToken(rawKey);

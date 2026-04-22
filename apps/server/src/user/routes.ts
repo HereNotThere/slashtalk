@@ -214,6 +214,35 @@ export const deviceReposRoutes = (db: Database) =>
       ),
     )
 
+    // GET /v1/devices/:id/repos — the paths this device has registered.
+    // Used by the desktop on sign-in to rehydrate its tracked-repo list.
+    .get(
+      "/:id/repos",
+      async ({ params, user, set }) => {
+        const deviceId = Number(params.id);
+        const [dev] = await db
+          .select({ id: devices.id })
+          .from(devices)
+          .where(and(eq(devices.id, deviceId), eq(devices.userId, user.id)))
+          .limit(1);
+        if (!dev) {
+          set.status = 404;
+          return { error: "Device not found" };
+        }
+        const rows = await db
+          .select({
+            repoId: repos.id,
+            fullName: repos.fullName,
+            localPath: deviceRepoPaths.localPath,
+          })
+          .from(deviceRepoPaths)
+          .innerJoin(repos, eq(repos.id, deviceRepoPaths.repoId))
+          .where(eq(deviceRepoPaths.deviceId, deviceId));
+        return rows;
+      },
+      { params: t.Object({ id: t.String() }) },
+    )
+
     // POST /v1/devices/:id/repos — set repo paths and exclusions for a device
     .post(
       "/:id/repos",

@@ -19,19 +19,11 @@ export function isPathTracked(cwd: string | null | undefined): boolean {
   for (const r of tracked) {
     const root = path.resolve(r.localPath);
     const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-    if (absWithSep.startsWith(prefix)) {
-      console.log(`[isPathTracked] hit prefix cwd=${abs} root=${root}`);
-      return true;
-    }
+    if (absWithSep.startsWith(prefix)) return true;
   }
   const mainRepo = resolveWorktreeMainRepo(abs);
-  const hit =
-    !!mainRepo && tracked.some((r) => path.resolve(r.localPath) === mainRepo);
-  console.log(
-    `[isPathTracked] cwd=${abs} mainRepo=${mainRepo} ` +
-      `tracked=${JSON.stringify(tracked.map((r) => r.localPath))} hit=${hit}`,
-  );
-  return hit;
+  if (!mainRepo) return false;
+  return tracked.some((r) => path.resolve(r.localPath) === mainRepo);
 }
 
 // A linked worktree's `.git` is a file: `gitdir: <main>/.git/worktrees/<name>`.
@@ -75,6 +67,43 @@ const changes = createEmitter<TrackedRepo[]>();
 export function restore(): void {
   const saved = store.get<TrackedRepo[]>(TRACKED_KEY);
   if (Array.isArray(saved)) tracked = saved;
+  backend.onChange((state) => {
+    if (state.signedIn) void rehydrateFromServer();
+  });
+  if (backend.getAuthState().signedIn) void rehydrateFromServer();
+}
+
+// Pulls the device's registered paths from the server and adopts them as the
+// local tracked list. Runs on sign-in and at cold-start if already signed in.
+// Server-wins is safe because every local add/remove already round-trips to
+// `POST /v1/devices/:id/repos`, so the server is at least as fresh as local.
+let rehydrating = false;
+async function rehydrateFromServer(): Promise<void> {
+  if (rehydrating) return;
+  rehydrating = true;
+  try {
+    const rows = await backend.listDeviceRepos();
+    const next: TrackedRepo[] = rows.map((r) => ({
+      repoId: r.repoId,
+      fullName: r.fullName,
+      localPath: r.localPath,
+    }));
+    if (!sameTracked(tracked, next)) apply(next);
+  } catch (err) {
+    console.warn(
+      "[localRepos] rehydrate failed:",
+      (err as Error).message,
+    );
+  } finally {
+    rehydrating = false;
+  }
+}
+
+function sameTracked(a: TrackedRepo[], b: TrackedRepo[]): boolean {
+  if (a.length !== b.length) return false;
+  const key = (r: TrackedRepo): string => `${r.repoId}|${r.localPath}`;
+  const aKeys = new Set(a.map(key));
+  return b.every((r) => aKeys.has(key(r)));
 }
 
 export function list(): TrackedRepo[] {

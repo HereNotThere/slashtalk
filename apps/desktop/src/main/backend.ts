@@ -420,6 +420,16 @@ export function listFeedSessionsForUser(
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
 
+export function listDeviceRepos(): Promise<
+  Array<{ repoId: number; fullName: string; localPath: string }>
+> {
+  if (!creds) throw new Error("Not signed in");
+  return jsonFetch(`/v1/devices/${creds.deviceId}/repos`, {
+    method: "GET",
+    auth: "apiKey",
+  });
+}
+
 export function postDeviceRepos(payload: {
   repoPaths: { repoId: number; localPath: string }[];
   excludedRepoIds: number[];

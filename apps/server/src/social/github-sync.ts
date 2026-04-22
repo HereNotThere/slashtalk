@@ -4,7 +4,7 @@
 
 import { eq, and, notInArray } from "drizzle-orm";
 import type { Database } from "../db";
-import { repos, userRepos, users } from "../db/schema";
+import { repos, userRepos, users, deviceRepoPaths } from "../db/schema";
 import { config } from "../config";
 import { decryptGithubToken } from "../auth/tokens";
 
@@ -115,16 +115,39 @@ export async function syncUserRepos(
 
 /**
  * Try to match a session's cwd/project to a known repo.
- * Returns the matched repo_id or null.
+ *
+ * Strategy (most specific first):
+ *   1. Device repo paths — check if cwd is inside a known local clone path
+ *      reported during install (handles subdirectories)
+ *   2. Walk up cwd — try owner/name then name at every directory level
+ *   3. Project slug fallback — check if slug ends with a repo name
  */
 export async function matchSessionRepo(
   db: Database,
   userId: number,
   cwdOrNull: string | null,
-  project: string
+  project: string,
+  deviceId?: number | null
 ): Promise<number | null> {
   if (!cwdOrNull && !project) return null;
 
+  // Strategy 1: device_repo_paths (most accurate, handles subdirs)
+  if (deviceId && cwdOrNull) {
+    const paths = await db
+      .select({ repoId: deviceRepoPaths.repoId, localPath: deviceRepoPaths.localPath })
+      .from(deviceRepoPaths)
+      .where(eq(deviceRepoPaths.deviceId, deviceId));
+
+    // Longest-prefix match so /Users/a/org/repo wins over /Users/a
+    const sorted = paths.sort((a, b) => b.localPath.length - a.localPath.length);
+    for (const p of sorted) {
+      if (cwdOrNull === p.localPath || cwdOrNull.startsWith(p.localPath + "/")) {
+        return p.repoId;
+      }
+    }
+  }
+
+  // Load user's repos for strategies 2 & 3
   const userRepoRows = await db
     .select({ repoId: repos.id, name: repos.name, fullName: repos.fullName })
     .from(userRepos)
@@ -133,22 +156,25 @@ export async function matchSessionRepo(
 
   if (userRepoRows.length === 0) return null;
 
-  // Try matching cwd path components against repo names
+  // Strategy 2: walk UP the cwd path, trying owner/name then name at each level
   if (cwdOrNull) {
     const parts = cwdOrNull.split("/").filter(Boolean);
-    if (parts.length >= 2) {
-      const ownerRepo = `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-      const match = userRepoRows.find((r) => r.fullName === ownerRepo);
-      if (match) return match.repoId;
-    }
-    if (parts.length >= 1) {
-      const repoName = parts[parts.length - 1];
-      const match = userRepoRows.find((r) => r.name === repoName);
+    // Start from the full path and walk toward root
+    for (let i = parts.length; i >= 1; i--) {
+      const dirName = parts[i - 1];
+      // Try owner/name (e.g. "shared-org/repo-common")
+      if (i >= 2) {
+        const ownerRepo = `${parts[i - 2]}/${dirName}`;
+        const match = userRepoRows.find((r) => r.fullName === ownerRepo);
+        if (match) return match.repoId;
+      }
+      // Try name-only
+      const match = userRepoRows.find((r) => r.name === dirName);
       if (match) return match.repoId;
     }
   }
 
-  // Try matching project slug (e.g. "-Users-alice-dev-repo" contains "repo")
+  // Strategy 3: project slug fallback
   for (const row of userRepoRows) {
     if (project.endsWith(row.name) || project.endsWith(`-${row.name}`)) {
       return row.repoId;

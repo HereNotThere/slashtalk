@@ -116,6 +116,20 @@ export const deviceExcludedRepos = pgTable(
   (t) => [primaryKey({ columns: [t.deviceId, t.repoId] })]
 );
 
+export const deviceRepoPaths = pgTable(
+  "device_repo_paths",
+  {
+    deviceId: integer("device_id")
+      .references(() => devices.id, { onDelete: "cascade" })
+      .notNull(),
+    repoId: integer("repo_id")
+      .references(() => repos.id, { onDelete: "cascade" })
+      .notNull(),
+    localPath: text("local_path").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.deviceId, t.repoId] })]
+);
+
 // ── Sessions & Events ───────────────────────────────────────
 
 export const sessions = pgTable(

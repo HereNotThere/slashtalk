@@ -41,7 +41,7 @@ export const githubAuth = (db: Database) =>
     // GET /auth/github/callback — handle OAuth callback
     .get(
       "/github/callback",
-      async ({ query, jwt, cookie: { session }, set }) => {
+      async ({ query, jwt, cookie: { session, refresh: refreshCookie }, set }) => {
         const tokenRes = await fetch(GITHUB_TOKEN_URL, {
           method: "POST",
           headers: {
@@ -116,14 +116,26 @@ export const githubAuth = (db: Database) =>
           expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000),
         });
 
-        // Set session cookie
+        const isSecure = config.baseUrl.startsWith("https");
+
+        // Set JWT session cookie (1h)
         session.set({
           value: token,
           httpOnly: true,
-          secure: config.baseUrl.startsWith("https"),
+          secure: isSecure,
           sameSite: "lax",
           maxAge: 3600,
           path: "/",
+        });
+
+        // Set refresh token cookie (30d)
+        refreshCookie.set({
+          value: refreshToken,
+          httpOnly: true,
+          secure: isSecure,
+          sameSite: "lax",
+          maxAge: 30 * 24 * 3600,
+          path: "/auth",
         });
 
         // Auto-sync repos on first login (no user_repos yet)
@@ -145,11 +157,17 @@ export const githubAuth = (db: Database) =>
       { query: t.Object({ code: t.String() }) }
     )
 
-    // POST /auth/refresh — exchange refresh token for new JWT
+    // POST /auth/refresh — exchange refresh token cookie for new JWT
     .post(
       "/refresh",
-      async ({ body, jwt, cookie: { session }, set }) => {
-        const hash = await hashToken(body.refreshToken);
+      async ({ jwt, cookie: { session, refresh: refreshCookie }, set }) => {
+        const refreshToken = refreshCookie?.value;
+        if (!refreshToken) {
+          set.status = 401;
+          return { error: "No refresh token" };
+        }
+
+        const hash = await hashToken(refreshToken as string);
         const [rt] = await db
           .select()
           .from(refreshTokens)
@@ -176,23 +194,25 @@ export const githubAuth = (db: Database) =>
         });
 
         return { ok: true };
-      },
-      { body: t.Object({ refreshToken: t.String() }) }
+      }
     )
 
-    // POST /auth/logout — revoke refresh token
+    // POST /auth/logout — revoke refresh token cookie and clear session
     .post(
       "/logout",
-      async ({ body, cookie: { session } }) => {
-        const hash = await hashToken(body.refreshToken);
-        await db
-          .delete(refreshTokens)
-          .where(eq(refreshTokens.tokenHash, hash));
+      async ({ cookie: { session, refresh: refreshCookie } }) => {
+        const refreshToken = refreshCookie?.value;
+        if (refreshToken) {
+          const hash = await hashToken(refreshToken as string);
+          await db
+            .delete(refreshTokens)
+            .where(eq(refreshTokens.tokenHash, hash));
+        }
 
         session.remove();
+        refreshCookie.remove();
         return { ok: true };
-      },
-      { body: t.Object({ refreshToken: t.String() }) }
+      }
     );
 
 /** CLI token exchange — mounted at /v1/auth to match spec */

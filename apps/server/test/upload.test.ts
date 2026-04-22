@@ -69,7 +69,7 @@ beforeAll(async () => {
     token: string;
   };
 
-  const exchangeRes = await fetch(`${baseUrl}/auth/exchange`, {
+  const exchangeRes = await fetch(`${baseUrl}/v1/auth/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -205,7 +205,7 @@ describe("setup token exchange", () => {
       redeemed: false,
     });
 
-    const res = await fetch(`${baseUrl}/auth/exchange`, {
+    const res = await fetch(`${baseUrl}/v1/auth/exchange`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -226,7 +226,7 @@ describe("setup token exchange", () => {
       redeemed: true,
     });
 
-    const res = await fetch(`${baseUrl}/auth/exchange`, {
+    const res = await fetch(`${baseUrl}/v1/auth/exchange`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

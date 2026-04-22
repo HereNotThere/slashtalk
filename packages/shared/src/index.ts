@@ -86,7 +86,6 @@ export interface SessionSnapshot {
   toolErrors: number;
   events: number;
   tokens: TokenUsage;
-  cost: number;
   cacheHitRate: number | null;
   burnPerMin: number | null;
   lastUserPrompt: string | null;

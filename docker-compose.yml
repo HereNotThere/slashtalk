@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: slashtalk-postgres
+    environment:
+      POSTGRES_USER: slashtalk
+      POSTGRES_PASSWORD: slashtalk
+      POSTGRES_DB: slashtalk_test
+    ports:
+      - "5442:5432"
+    volumes:
+      - slashtalk_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slashtalk -d slashtalk_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: slashtalk-redis
+    ports:
+      - "6389:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  slashtalk_pg:

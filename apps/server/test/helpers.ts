@@ -80,6 +80,7 @@ export function mockGitHubAuth(): () => void {
 // ── Database Schema ──────────────────────────────────────────
 
 export async function resetDatabase() {
+  await db.execute(sql`SET client_min_messages = WARNING`);
   await db.execute(sql`DROP SCHEMA IF EXISTS public CASCADE`);
   await db.execute(sql`CREATE SCHEMA public`);
 
@@ -234,6 +235,7 @@ export async function resetDatabase() {
     )
   `);
   await db.execute(sql`CREATE INDEX ON events (session_id, ts)`);
+  await db.execute(sql`CREATE INDEX ON events (user_id, project, ts DESC)`);
   await db.execute(
     sql`CREATE INDEX ON events (session_id, call_id) WHERE call_id IS NOT NULL`
   );

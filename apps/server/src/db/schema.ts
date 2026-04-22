@@ -192,6 +192,7 @@ export const events = pgTable(
   (t) => [
     primaryKey({ columns: [t.sessionId, t.lineSeq] }),
     index("events_session_ts_idx").on(t.sessionId, t.ts),
+    index("events_user_project_ts_idx").on(t.userId, t.project, t.ts),
     index("events_call_idx")
       .on(t.sessionId, t.callId)
       .where(sql`call_id is not null`),

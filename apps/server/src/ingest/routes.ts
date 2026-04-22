@@ -11,6 +11,9 @@ import { sessions, events, heartbeats } from "../db/schema";
 import { apiKeyAuth } from "../auth/middleware";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { classifyEvent } from "./classifier";
+import { processEvents, type EventPayload } from "./aggregator";
+import { matchSessionRepo } from "../social/github-sync";
+import { classifySessionState } from "../sessions/state";
 
 interface ParsedLine {
   lineSeq: number;
@@ -67,11 +70,16 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
         const { parsed, nextLineSeq } = parseChunk(text, fromLineSeq);
 
         if (nextLineSeq === fromLineSeq) {
-          return { acceptedEvents: 0, duplicateEvents: 0, serverLineSeq: fromLineSeq };
+          return {
+            acceptedEvents: 0,
+            duplicateEvents: 0,
+            serverLineSeq: fromLineSeq,
+          };
         }
 
         let acceptedEvents = 0;
         let duplicateEvents = 0;
+        const acceptedPayloads: unknown[] = [];
 
         if (parsed.length > 0) {
           const rows = parsed.map(({ lineSeq, event }) => {
@@ -102,10 +110,17 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             .returning({ lineSeq: events.lineSeq });
           acceptedEvents = inserted.length;
           duplicateEvents = rows.length - acceptedEvents;
+
+          // Correlate returned line_seqs back to the raw payloads so the
+          // aggregator only sees events that actually inserted.
+          const acceptedSet = new Set(inserted.map((r) => r.lineSeq));
+          for (const { lineSeq, event } of parsed) {
+            if (acceptedSet.has(lineSeq)) acceptedPayloads.push(event);
+          }
         }
 
         // source is immutable after first insert — only update mutable fields.
-        const [sessionRow] = await db
+        await db
           .insert(sessions)
           .values({
             sessionId: query.session,
@@ -122,17 +137,65 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
               serverLineSeq: nextLineSeq,
               prefixHash: query.prefixHash ?? undefined,
             },
-          })
-          .returning({ repoId: sessions.repoId });
-
-        if (acceptedEvents > 0 && sessionRow?.repoId) {
-          await redis.publish(`repo:${sessionRow.repoId}`, {
-            type: "session_updated",
-            session_id: query.session,
-            user_id: user.id,
-            github_login: user.githubLogin,
-            repo_id: sessionRow.repoId,
           });
+
+        // Aggregate accepted events into session aggregates. The aggregator
+        // currently only understands Claude's event shape; Codex normalization
+        // will be added in a follow-up PR.
+        if (source === "claude" && acceptedPayloads.length > 0) {
+          const [currentSession] = await db
+            .select()
+            .from(sessions)
+            .where(eq(sessions.sessionId, query.session))
+            .limit(1);
+
+          if (currentSession) {
+            const updates = processEvents(
+              currentSession,
+              acceptedPayloads as EventPayload[]
+            );
+            await db
+              .update(sessions)
+              .set(updates)
+              .where(eq(sessions.sessionId, query.session));
+
+            if (!currentSession.repoId && updates.cwd) {
+              const repoId = await matchSessionRepo(
+                db,
+                user.id,
+                updates.cwd,
+                query.project
+              );
+              if (repoId) {
+                await db
+                  .update(sessions)
+                  .set({ repoId })
+                  .where(eq(sessions.sessionId, query.session));
+              }
+            }
+          }
+        }
+
+        if (acceptedEvents > 0) {
+          const [finalSession] = await db
+            .select({
+              repoId: sessions.repoId,
+              lastTs: sessions.lastTs,
+            })
+            .from(sessions)
+            .where(eq(sessions.sessionId, query.session))
+            .limit(1);
+
+          if (finalSession?.repoId) {
+            await redis.publish(`repo:${finalSession.repoId}`, {
+              type: "session_updated",
+              session_id: query.session,
+              user_id: user.id,
+              github_login: user.githubLogin,
+              repo_id: finalSession.repoId,
+              last_ts: finalSession.lastTs?.toISOString(),
+            });
+          }
         }
 
         return {
@@ -180,6 +243,30 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
     .post(
       "/heartbeat",
       async ({ body, user, device }) => {
+        const [prevHb] = await db
+          .select()
+          .from(heartbeats)
+          .where(eq(heartbeats.sessionId, body.sessionId))
+          .limit(1);
+
+        const [session] = await db
+          .select({
+            inTurn: sessions.inTurn,
+            lastTs: sessions.lastTs,
+            repoId: sessions.repoId,
+          })
+          .from(sessions)
+          .where(eq(sessions.sessionId, body.sessionId))
+          .limit(1);
+
+        const prevState = session
+          ? classifySessionState({
+              heartbeatUpdatedAt: prevHb?.updatedAt ?? null,
+              inTurn: session.inTurn ?? false,
+              lastTs: session.lastTs,
+            })
+          : null;
+
         await db
           .insert(heartbeats)
           .values({
@@ -198,6 +285,25 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
               updatedAt: new Date(),
             },
           });
+
+        if (session) {
+          const newState = classifySessionState({
+            heartbeatUpdatedAt: new Date(),
+            inTurn: session.inTurn ?? false,
+            lastTs: session.lastTs,
+          });
+
+          if (newState !== prevState && session.repoId) {
+            await redis.publish(`repo:${session.repoId}`, {
+              type: "session_updated",
+              session_id: body.sessionId,
+              user_id: user.id,
+              github_login: user.githubLogin,
+              repo_id: session.repoId,
+              state: newState,
+            });
+          }
+        }
 
         return { ok: true };
       },

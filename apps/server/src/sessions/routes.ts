@@ -1,10 +1,10 @@
 import { Elysia, t } from "elysia";
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql, and, inArray } from "drizzle-orm";
 import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { sessions, events, heartbeats } from "../db/schema";
+import { sessions, events, heartbeats, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { classifySessionState } from "./state";
+import { toSnapshot, sortByStateThenTime } from "./snapshot";
 
 const SESSION_STATE_VALUES = Object.values(SessionState);
 
@@ -23,33 +23,29 @@ export const sessionRoutes = (db: Database) =>
           .orderBy(sql`${sessions.lastTs} desc nulls last`)
           .limit(100);
 
-        // Get heartbeats for state classification
         const sessionIds = rows.map((s) => s.sessionId);
         const hbRows =
           sessionIds.length > 0
             ? await db
                 .select()
                 .from(heartbeats)
-                .where(
-                  sql`${heartbeats.sessionId} = ANY(${sessionIds})`
-                )
+                .where(inArray(heartbeats.sessionId, sessionIds))
             : [];
         const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
 
-        const enriched = rows.map((s) => {
-          const hb = hbMap.get(s.sessionId);
-          const state = classifySessionState({
-            heartbeatUpdatedAt: hb?.updatedAt ?? null,
-            inTurn: s.inTurn ?? false,
-            lastTs: s.lastTs,
-          });
-          return { ...s, state };
+        let snapshots = rows.map((s) => {
+          const hb = hbMap.get(s.sessionId) ?? null;
+          return toSnapshot(s, hb);
         });
 
         if (query.state) {
-          return enriched.filter((s) => s.state === query.state);
+          snapshots = snapshots.filter((s) => s.state === query.state);
         }
-        return enriched;
+        if (query.project) {
+          snapshots = snapshots.filter((s) => s.project === query.project);
+        }
+
+        return sortByStateThenTime(snapshots);
       },
       {
         query: t.Object({
@@ -61,24 +57,41 @@ export const sessionRoutes = (db: Database) =>
       }
     )
 
-    // GET /api/session/:id — full session snapshot
+    // GET /api/session/:id — full session snapshot (own or shared repo)
     .get(
       "/session/:id",
       async ({ params, user, set }) => {
         const [session] = await db
           .select()
           .from(sessions)
-          .where(
-            and(
-              eq(sessions.sessionId, params.id),
-              eq(sessions.userId, user.id)
-            )
-          )
+          .where(eq(sessions.sessionId, params.id))
           .limit(1);
 
         if (!session) {
           set.status = 404;
           return { error: "Session not found" };
+        }
+
+        // Access control: user owns session OR session is in a shared repo
+        if (session.userId !== user.id) {
+          if (!session.repoId) {
+            set.status = 404;
+            return { error: "Session not found" };
+          }
+          const [access] = await db
+            .select()
+            .from(userRepos)
+            .where(
+              and(
+                eq(userRepos.userId, user.id),
+                eq(userRepos.repoId, session.repoId)
+              )
+            )
+            .limit(1);
+          if (!access) {
+            set.status = 404;
+            return { error: "Session not found" };
+          }
         }
 
         const [hb] = await db
@@ -87,13 +100,7 @@ export const sessionRoutes = (db: Database) =>
           .where(eq(heartbeats.sessionId, params.id))
           .limit(1);
 
-        const state = classifySessionState({
-          heartbeatUpdatedAt: hb?.updatedAt ?? null,
-          inTurn: session.inTurn ?? false,
-          lastTs: session.lastTs,
-        });
-
-        return { ...session, state };
+        return toSnapshot(session, hb ?? null);
       },
       { params: t.Object({ id: t.String() }) }
     )
@@ -102,21 +109,41 @@ export const sessionRoutes = (db: Database) =>
     .get(
       "/session/:id/events",
       async ({ params, query, user, set }) => {
-        // Verify session belongs to user
+        // Verify access (own session or shared repo)
         const [session] = await db
-          .select({ sessionId: sessions.sessionId })
+          .select({
+            sessionId: sessions.sessionId,
+            userId: sessions.userId,
+            repoId: sessions.repoId,
+          })
           .from(sessions)
-          .where(
-            and(
-              eq(sessions.sessionId, params.id),
-              eq(sessions.userId, user.id)
-            )
-          )
+          .where(eq(sessions.sessionId, params.id))
           .limit(1);
 
         if (!session) {
           set.status = 404;
           return { error: "Session not found" };
+        }
+
+        if (session.userId !== user.id) {
+          if (!session.repoId) {
+            set.status = 404;
+            return { error: "Session not found" };
+          }
+          const [access] = await db
+            .select()
+            .from(userRepos)
+            .where(
+              and(
+                eq(userRepos.userId, user.id),
+                eq(userRepos.repoId, session.repoId)
+              )
+            )
+            .limit(1);
+          if (!access) {
+            set.status = 404;
+            return { error: "Session not found" };
+          }
         }
 
         const limit = Math.min(Number(query.limit ?? 50), 100);

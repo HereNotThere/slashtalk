@@ -80,10 +80,6 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
     <div
       data-bubble
       title={head.label}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        void window.chatheads.close(head.id);
-      }}
       className="
         relative w-14 h-14 rounded-full cursor-pointer
         flex items-center justify-center text-[28px]

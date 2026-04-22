@@ -12,8 +12,6 @@ export interface ChatHead {
   avatar: Avatar;
 }
 
-export type NewChatHead = Omit<ChatHead, 'id'>;
-
 export type Unsubscribe = () => void;
 
 // slashtalk backend types
@@ -43,12 +41,18 @@ export interface TrackedRepo {
   localPath: string;
 }
 
+export interface TeammateSummary {
+  githubLogin: string;
+  avatarUrl: string;
+  totalSessions: number;
+  activeSessions: number;
+  repos: string[];
+}
+
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
 export interface ChatHeadsBridge {
-  // Head state
-  spawn: (head: NewChatHead) => Promise<ChatHead>;
-  close: (id: string) => Promise<void>;
+  // Head state — derived from the social graph, not user-managed.
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
 
@@ -63,7 +67,6 @@ export interface ChatHeadsBridge {
   onInfoShow: (cb: (payload: { label: string }) => void) => Unsubscribe;
 
   // Tray popup actions
-  closeAll: () => Promise<void>;
   openMain: () => Promise<void>;
   quit: () => Promise<void>;
 

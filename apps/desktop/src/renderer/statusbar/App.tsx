@@ -21,12 +21,6 @@ export function App(): JSX.Element {
 
       <div className="flex gap-2">
         <FooterButton onClick={() => window.chatheads.openMain()}>Open</FooterButton>
-        <FooterButton
-          onClick={() => window.chatheads.closeAll()}
-          disabled={heads.length === 0}
-        >
-          Close all
-        </FooterButton>
         <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
       </div>
     </div>
@@ -47,12 +41,6 @@ function ActiveRow({ head }: { head: ChatHead }): JSX.Element {
         )}
       </span>
       <span className="flex-1 text-[13px]">{head.label}</span>
-      <button
-        onClick={() => window.chatheads.close(head.id)}
-        className="bg-transparent border-none text-fg/50 cursor-pointer text-[13px] hover:text-fg"
-      >
-        ✕
-      </button>
     </div>
   );
 }

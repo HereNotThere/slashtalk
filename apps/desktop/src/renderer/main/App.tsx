@@ -44,12 +44,6 @@ function ActiveRow({ head }: { head: ChatHead }): JSX.Element {
         )}
       </span>
       <span>{head.label}</span>
-      <button
-        onClick={() => window.chatheads.close(head.id)}
-        className="ml-auto bg-transparent border-none text-subtle cursor-pointer hover:text-fg"
-      >
-        ✕
-      </button>
     </div>
   );
 }

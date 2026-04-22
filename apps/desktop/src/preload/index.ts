@@ -3,7 +3,6 @@ import type {
   BackendAuthState,
   ChatHead,
   ChatHeadsBridge,
-  NewChatHead,
   RepoSummary,
   TrackedRepo,
   Unsubscribe,
@@ -19,9 +18,6 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 }
 
 const bridge: ChatHeadsBridge = {
-  spawn: (head: NewChatHead) =>
-    ipcRenderer.invoke("heads:spawn", head) as Promise<ChatHead>,
-  close: (id) => ipcRenderer.invoke("heads:close", id) as Promise<void>,
   list: () => ipcRenderer.invoke("heads:list") as Promise<ChatHead[]>,
   onUpdate: (cb) => subscribe<ChatHead[]>("heads:update", cb),
 
@@ -33,7 +29,6 @@ const bridge: ChatHeadsBridge = {
 
   onInfoShow: (cb) => subscribe<{ label: string }>("info:show", cb),
 
-  closeAll: () => ipcRenderer.invoke("heads:closeAll") as Promise<void>,
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,
 

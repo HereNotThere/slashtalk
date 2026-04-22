@@ -393,7 +393,9 @@ export function claimRepo(fullName: string): Promise<RepoSummary> {
 }
 
 export async function listTeammates(): Promise<TeammateSummary[]> {
+  console.log("[rail] GET /api/feed/users …");
   const raw = await jsonFetch<FeedUser[]>("/api/feed/users", { method: "GET" });
+  console.log(`[rail] /api/feed/users → ${JSON.stringify(raw)}`);
   return raw.map((r) => ({
     githubLogin: r.github_login,
     avatarUrl: r.avatar_url ?? "",
@@ -416,6 +418,16 @@ export function listFeedSessionsForUser(
 ): Promise<FeedSessionSnapshot[]> {
   const qs = new URLSearchParams({ user: login });
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
+}
+
+export function listDeviceRepos(): Promise<
+  Array<{ repoId: number; fullName: string; localPath: string }>
+> {
+  if (!creds) throw new Error("Not signed in");
+  return jsonFetch(`/v1/devices/${creds.deviceId}/repos`, {
+    method: "GET",
+    auth: "apiKey",
+  });
 }
 
 export function postDeviceRepos(payload: {

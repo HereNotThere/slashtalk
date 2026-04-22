@@ -107,6 +107,10 @@ export async function resetDatabase() {
       last_seen_at    TIMESTAMPTZ
     )
   `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX devices_user_name_unique
+      ON devices (user_id, device_name)
+  `);
 
   await db.execute(sql`
     CREATE TABLE refresh_tokens (

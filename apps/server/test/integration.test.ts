@@ -274,6 +274,86 @@ describe("social feed integration", () => {
     expect(clearedExclusions).toEqual([]);
   });
 
+  it("GET /v1/devices/:id/repos returns the device's registered paths", async () => {
+    // Seed one path for alice's device.
+    await fetch(`${baseUrl}/v1/devices/${aliceDeviceId}/repos`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        repoPaths: [
+          {
+            fullName: "shared-org/repo-common",
+            localPath: "/Users/alice/src/repo-common",
+          },
+        ],
+        excludedRepos: [],
+      }),
+    });
+
+    const getRes = await fetch(
+      `${baseUrl}/v1/devices/${aliceDeviceId}/repos`,
+      { headers: { Authorization: `Bearer ${aliceApiKey}` } },
+    );
+    expect(getRes.status).toBe(200);
+    const paths = (await getRes.json()) as Array<{
+      repoId: number;
+      fullName: string;
+      localPath: string;
+    }>;
+    expect(paths).toEqual([
+      {
+        repoId: commonRepoId,
+        fullName: "shared-org/repo-common",
+        localPath: "/Users/alice/src/repo-common",
+      },
+    ]);
+  });
+
+  it("re-exchanging with the same deviceName reuses the device row", async () => {
+    // A fresh sign-in cycle on the same laptop: new setup token, same device.
+    const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: aliceCookie },
+    });
+    const { token: setupToken } = (await setupRes.json()) as { token: string };
+
+    const exchangeRes = await fetch(`${baseUrl}/v1/auth/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: setupToken,
+        deviceName: "alice-laptop",
+        os: "darwin",
+      }),
+    });
+    expect(exchangeRes.status).toBe(200);
+    const { apiKey: newApiKey, deviceId: newDeviceId } =
+      (await exchangeRes.json()) as { apiKey: string; deviceId: number };
+    expect(newDeviceId).toBe(aliceDeviceId);
+    expect(newApiKey).not.toBe(aliceApiKey);
+
+    // Paths registered before the re-exchange should still be readable.
+    const getRes = await fetch(
+      `${baseUrl}/v1/devices/${newDeviceId}/repos`,
+      { headers: { Authorization: `Bearer ${newApiKey}` } },
+    );
+    expect(getRes.status).toBe(200);
+    const paths = (await getRes.json()) as Array<unknown>;
+    expect(paths.length).toBeGreaterThan(0);
+
+    // The old API key is revoked.
+    const oldKeyRes = await fetch(
+      `${baseUrl}/v1/devices/${newDeviceId}/repos`,
+      { headers: { Authorization: `Bearer ${aliceApiKey}` } },
+    );
+    expect(oldKeyRes.status).toBe(401);
+
+    aliceApiKey = newApiKey;
+  });
+
   it("Bob receives WebSocket push when Alice ingests to shared repo", async () => {
     // Bob gets API key for WebSocket auth
     const bobSetupRes = await fetch(`${baseUrl}/api/me/setup-token`, {

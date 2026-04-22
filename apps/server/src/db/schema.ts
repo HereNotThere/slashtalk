@@ -38,16 +38,20 @@ export const refreshTokens = pgTable("refresh_tokens", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-export const devices = pgTable("devices", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id")
-    .references(() => users.id, { onDelete: "cascade" })
-    .notNull(),
-  deviceName: text("device_name").notNull(),
-  os: text("os"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
-});
+export const devices = pgTable(
+  "devices",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    deviceName: text("device_name").notNull(),
+    os: text("os"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("devices_user_name_unique").on(t.userId, t.deviceName)],
+);
 
 export const apiKeys = pgTable("api_keys", {
   id: serial("id").primaryKey(),

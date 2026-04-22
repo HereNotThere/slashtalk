@@ -22,15 +22,15 @@ export function App(): JSX.Element {
   return (
     <div className="flex flex-col h-screen bg-bg">
       {/* Content */}
-      <div className="flex-1 overflow-auto px-lg py-lg space-y-lg">
+      <div className="flex-1 overflow-auto px-lg py-lg space-y-lg min-w-0">
         {message && (
           <div className="flex justify-end mb-lg">
-            <div className="max-w-sm px-4 py-2.5 rounded-2xl bg-surface text-fg shadow-sm">
+            <div className="px-4 py-2.5 rounded-2xl bg-surface text-fg shadow-sm">
               <p className="text-sm leading-relaxed">{message}</p>
             </div>
           </div>
         )}
-        <p className="text-base leading-relaxed text-fg/90">
+        <p className="text-base leading-relaxed text-fg/90 break-words">
           Three people. Fei opened feat/auth-cleanup 1h ago and has a live
           session scaffolding the /signup route and OAuth buttons. PF is on
           the same branch renaming design tokens, with an active overlap in
@@ -39,7 +39,7 @@ export function App(): JSX.Element {
         </p>
 
         {/* Contributors */}
-        <div className="mt-lg flex flex-wrap gap-md">
+        <div className="flex flex-wrap gap-md">
           <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-surface">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-sm font-semibold shrink-0">
               F

@@ -1,7 +1,7 @@
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||
-  "postgres://slashtalk:slashtalk@localhost:5432/slashtalk_test";
-process.env.REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+  "postgres://slashtalk:slashtalk@localhost:5442/slashtalk_test";
+process.env.REDIS_URL = process.env.REDIS_URL || "redis://localhost:6389";
 process.env.GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || "test_client_id";
 process.env.GITHUB_CLIENT_SECRET =
   process.env.GITHUB_CLIENT_SECRET || "test_client_secret";

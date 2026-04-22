@@ -176,6 +176,8 @@ export async function resetDatabase() {
       session_id      UUID PRIMARY KEY,
       user_id         INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       device_id       INT REFERENCES devices(id),
+      source          TEXT NOT NULL,
+      provider        TEXT,
       project         TEXT NOT NULL,
       repo_id         INT REFERENCES repos(id),
       title           TEXT,
@@ -187,16 +189,16 @@ export async function resetDatabase() {
       tool_errors     INT DEFAULT 0,
       events          INT DEFAULT 0,
       tokens_in       BIGINT DEFAULT 0,
-      tokens_cw5      BIGINT DEFAULT 0,
-      tokens_cw1      BIGINT DEFAULT 0,
-      tokens_cr       BIGINT DEFAULT 0,
       tokens_out      BIGINT DEFAULT 0,
-      cost_usd        NUMERIC(12,4) DEFAULT 0,
+      tokens_cache_read  BIGINT DEFAULT 0,
+      tokens_cache_write BIGINT DEFAULT 0,
+      tokens_reasoning   BIGINT DEFAULT 0,
       model           TEXT,
       version         TEXT,
       branch          TEXT,
       cwd             TEXT,
       in_turn         BOOLEAN DEFAULT FALSE,
+      current_turn_id TEXT,
       last_boundary_ts TIMESTAMPTZ,
       outstanding_tools JSONB DEFAULT '{}',
       last_user_prompt TEXT,
@@ -206,33 +208,43 @@ export async function resetDatabase() {
       tool_use_names   JSONB DEFAULT '{}',
       queued           JSONB DEFAULT '[]',
       recent_events    JSONB DEFAULT '[]',
-      server_offset    BIGINT DEFAULT 0,
+      server_line_seq  BIGINT DEFAULT 0,
       prefix_hash      TEXT
     )
   `);
-  await db.execute(
-    sql`CREATE INDEX ON sessions (user_id, last_ts DESC)`
-  );
-  await db.execute(
-    sql`CREATE INDEX ON sessions (repo_id, last_ts DESC)`
-  );
+  await db.execute(sql`CREATE INDEX ON sessions (user_id, last_ts DESC)`);
+  await db.execute(sql`CREATE INDEX ON sessions (repo_id, last_ts DESC)`);
 
   await db.execute(sql`
     CREATE TABLE events (
-      uuid            UUID PRIMARY KEY,
-      user_id         INT NOT NULL,
       session_id      UUID NOT NULL REFERENCES sessions(session_id),
+      line_seq        BIGINT NOT NULL,
+      user_id         INT NOT NULL,
       project         TEXT NOT NULL,
+      source          TEXT NOT NULL,
       ts              TIMESTAMPTZ NOT NULL,
-      type            TEXT NOT NULL,
-      parent_uuid     UUID,
-      byte_offset     BIGINT,
+      raw_type        TEXT NOT NULL,
+      kind            TEXT NOT NULL,
+      turn_id         TEXT,
+      call_id         TEXT,
+      event_id        TEXT,
+      parent_id       TEXT,
       payload         JSONB NOT NULL,
-      ingested_at     TIMESTAMPTZ DEFAULT NOW()
+      ingested_at     TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (session_id, line_seq)
     )
   `);
   await db.execute(sql`CREATE INDEX ON events (session_id, ts)`);
   await db.execute(sql`CREATE INDEX ON events (user_id, project, ts DESC)`);
+  await db.execute(
+    sql`CREATE INDEX ON events (session_id, call_id) WHERE call_id IS NOT NULL`
+  );
+  await db.execute(
+    sql`CREATE INDEX ON events (session_id, turn_id) WHERE turn_id IS NOT NULL`
+  );
+  await db.execute(
+    sql`CREATE UNIQUE INDEX ON events (event_id) WHERE event_id IS NOT NULL`
+  );
 
   await db.execute(sql`
     CREATE TABLE heartbeats (

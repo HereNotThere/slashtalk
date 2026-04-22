@@ -22,11 +22,10 @@ interface SessionRow {
   toolErrors: number | null;
   events: number | null;
   tokensIn: number | null;
-  tokensCw5: number | null;
-  tokensCw1: number | null;
-  tokensCr: number | null;
   tokensOut: number | null;
-  costUsd: string | null;
+  tokensCacheRead: number | null;
+  tokensCacheWrite: number | null;
+  tokensReasoning: number | null;
   inTurn: boolean | null;
   lastBoundaryTs: Date | null;
   outstandingTools: unknown;
@@ -88,14 +87,14 @@ export function buildSnapshot(
 
   const tokens = {
     in: session.tokensIn ?? 0,
-    cw5: session.tokensCw5 ?? 0,
-    cw1: session.tokensCw1 ?? 0,
-    cr: session.tokensCr ?? 0,
     out: session.tokensOut ?? 0,
+    cacheRead: session.tokensCacheRead ?? 0,
+    cacheWrite: session.tokensCacheWrite ?? 0,
+    reasoning: session.tokensReasoning ?? 0,
   };
 
-  const totalInput = tokens.in + tokens.cw5 + tokens.cw1 + tokens.cr;
-  const cacheHitRate = totalInput > 0 ? tokens.cr / totalInput : null;
+  const totalInput = tokens.in + tokens.cacheRead + tokens.cacheWrite;
+  const cacheHitRate = totalInput > 0 ? tokens.cacheRead / totalInput : null;
 
   const durationMin = durationS ? durationS / 60 : null;
   const burnPerMin =
@@ -145,7 +144,6 @@ export function buildSnapshot(
     toolErrors: session.toolErrors ?? 0,
     events: session.events ?? 0,
     tokens,
-    cost: parseFloat(session.costUsd ?? "0"),
     cacheHitRate,
     burnPerMin,
     lastUserPrompt: session.lastUserPrompt,

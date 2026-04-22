@@ -1,17 +1,55 @@
 import { Elysia, t } from "elysia";
 import { eq } from "drizzle-orm";
+import {
+  SOURCES,
+  type EventSource,
+  type IngestResponse,
+  type SyncStateEntry,
+} from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessions, events, heartbeats } from "../db/schema";
 import { apiKeyAuth } from "../auth/middleware";
 import type { RedisBridge } from "../ws/redis-bridge";
+import { classifyEvent } from "./classifier";
 import { processEvents, type EventPayload } from "./aggregator";
 import { matchSessionRepo } from "../social/github-sync";
 import { classifySessionState } from "../sessions/state";
 
+interface ParsedLine {
+  lineSeq: number;
+  event: unknown;
+}
+
+/**
+ * Parse an NDJSON chunk into numbered lines starting at `fromLineSeq`. Every
+ * `\n`-delimited line consumes one seq; blank and malformed lines are dropped
+ * but still consume their seq so client and server stay aligned on retries.
+ */
+function parseChunk(
+  text: string,
+  fromLineSeq: number
+): { parsed: ParsedLine[]; nextLineSeq: number } {
+  if (text.length === 0) return { parsed: [], nextLineSeq: fromLineSeq };
+
+  const rawLines = text.split("\n");
+  if (rawLines[rawLines.length - 1] === "") rawLines.pop();
+
+  const parsed: ParsedLine[] = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    if (line.trim().length === 0) continue;
+    try {
+      parsed.push({ lineSeq: fromLineSeq + i, event: JSON.parse(line) });
+    } catch {
+      // intentional: don't fail the batch on a mid-flush partial line
+    }
+  }
+  return { parsed, nextLineSeq: fromLineSeq + rawLines.length };
+}
+
 export const ingestRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/v1", name: "ingest" })
     .use(apiKeyAuth)
-    // Parse application/x-ndjson as text
     .onParse({ as: "local" }, async ({ request, contentType }) => {
       if (
         contentType === "application/x-ndjson" ||
@@ -24,82 +62,87 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
     // POST /v1/ingest — upload NDJSON event chunk
     .post(
       "/ingest",
-      async ({ body, query, user, device }) => {
-        const text = typeof body === "string" ? body : String(body);
-        const lines = text.split("\n").filter((l) => l.trim().length > 0);
+      async ({ body, query, user, device }): Promise<IngestResponse> => {
+        const source: EventSource = query.source ?? "claude";
+        // onParse above returns the chunk as a string already.
+        const text = body as string;
+        const fromLineSeq = Number(query.fromLineSeq);
+        const { parsed, nextLineSeq } = parseChunk(text, fromLineSeq);
+
+        if (nextLineSeq === fromLineSeq) {
+          return {
+            acceptedEvents: 0,
+            duplicateEvents: 0,
+            serverLineSeq: fromLineSeq,
+          };
+        }
 
         let acceptedEvents = 0;
         let duplicateEvents = 0;
-        const acceptedPayloads: EventPayload[] = [];
+        const acceptedPayloads: unknown[] = [];
 
-        for (const line of lines) {
-          const event = JSON.parse(line) as EventPayload;
-
-          const result = await db
-            .insert(events)
-            .values({
-              uuid: event.uuid,
-              userId: user.id,
+        if (parsed.length > 0) {
+          const rows = parsed.map(({ lineSeq, event }) => {
+            const n = classifyEvent(source, event);
+            return {
               sessionId: query.session,
+              lineSeq,
+              userId: user.id,
               project: query.project,
-              ts: new Date(event.timestamp),
-              type: event.type,
-              parentUuid: event.parentUuid ?? null,
-              byteOffset: Number(query.fromOffset) ?? null,
+              source,
+              ts: n.ts,
+              rawType: n.rawType,
+              kind: n.kind,
+              turnId: n.turnId,
+              callId: n.callId,
+              eventId: n.eventId,
+              parentId: n.parentId,
               payload: event,
+            };
+          });
+
+          const inserted = await db
+            .insert(events)
+            .values(rows)
+            .onConflictDoNothing({
+              target: [events.sessionId, events.lineSeq],
             })
-            .onConflictDoNothing({ target: events.uuid })
-            .returning();
+            .returning({ lineSeq: events.lineSeq });
+          acceptedEvents = inserted.length;
+          duplicateEvents = rows.length - acceptedEvents;
 
-          if (result.length > 0) {
-            acceptedEvents++;
-            acceptedPayloads.push(event);
-          } else {
-            duplicateEvents++;
+          // Correlate returned line_seqs back to the raw payloads so the
+          // aggregator only sees events that actually inserted.
+          const acceptedSet = new Set(inserted.map((r) => r.lineSeq));
+          for (const { lineSeq, event } of parsed) {
+            if (acceptedSet.has(lineSeq)) acceptedPayloads.push(event);
           }
         }
 
-        const bodyBytes = new TextEncoder().encode(text).length;
-        const newOffset = Number(query.fromOffset) + bodyBytes;
-
-        // Prefix hash validation: if hash changed, reset offset
-        let finalOffset = newOffset;
-        if (query.prefixHash) {
-          const [existing] = await db
-            .select({ prefixHash: sessions.prefixHash })
-            .from(sessions)
-            .where(eq(sessions.sessionId, query.session))
-            .limit(1);
-          if (
-            existing?.prefixHash &&
-            existing.prefixHash !== query.prefixHash
-          ) {
-            // File was replaced/truncated — reset
-            finalOffset = bodyBytes;
-          }
-        }
-
-        // Upsert session record
+        // source is immutable after first insert — only update mutable fields.
         await db
           .insert(sessions)
           .values({
             sessionId: query.session,
             userId: user.id,
             deviceId: device?.id ?? null,
+            source,
             project: query.project,
-            serverOffset: finalOffset,
+            serverLineSeq: nextLineSeq,
             prefixHash: query.prefixHash ?? null,
           })
           .onConflictDoUpdate({
             target: sessions.sessionId,
             set: {
-              serverOffset: finalOffset,
+              serverLineSeq: nextLineSeq,
               prefixHash: query.prefixHash ?? undefined,
             },
           });
 
-        // Aggregate accepted events into session
-        if (acceptedPayloads.length > 0) {
+        // Aggregate accepted events into session aggregates. The aggregator
+        // currently only understands Claude's event shape; Codex normalization
+        // will be added in a follow-up PR.
+        if (source === "claude" && acceptedPayloads.length > 0) {
           const [currentSession] = await db
             .select()
             .from(sessions)
@@ -107,13 +150,15 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             .limit(1);
 
           if (currentSession) {
-            const updates = processEvents(currentSession, acceptedPayloads);
+            const updates = processEvents(
+              currentSession,
+              acceptedPayloads as EventPayload[]
+            );
             await db
               .update(sessions)
               .set(updates)
               .where(eq(sessions.sessionId, query.session));
 
-            // Repo matching: if session has no repo_id, try to match
             if (!currentSession.repoId && updates.cwd) {
               const repoId = await matchSessionRepo(
                 db,
@@ -128,73 +173,76 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
                   .where(eq(sessions.sessionId, query.session));
               }
             }
+          }
+        }
 
-            // Publish to Redis
-            const [refreshed] = await db
-              .select({ repoId: sessions.repoId })
-              .from(sessions)
-              .where(eq(sessions.sessionId, query.session))
-              .limit(1);
+        if (acceptedEvents > 0) {
+          const [finalSession] = await db
+            .select({
+              repoId: sessions.repoId,
+              lastTs: sessions.lastTs,
+            })
+            .from(sessions)
+            .where(eq(sessions.sessionId, query.session))
+            .limit(1);
 
-            if (refreshed?.repoId) {
-              await redis.publish(`repo:${refreshed.repoId}`, {
-                type: "session_updated",
-                session_id: query.session,
-                user_id: user.id,
-                github_login: user.githubLogin,
-                repo_id: refreshed.repoId,
-                last_ts: updates.lastTs?.toISOString(),
-              });
-            }
+          if (finalSession?.repoId) {
+            await redis.publish(`repo:${finalSession.repoId}`, {
+              type: "session_updated",
+              session_id: query.session,
+              user_id: user.id,
+              github_login: user.githubLogin,
+              repo_id: finalSession.repoId,
+              last_ts: finalSession.lastTs?.toISOString(),
+            });
           }
         }
 
         return {
-          acceptedBytes: bodyBytes,
           acceptedEvents,
           duplicateEvents,
-          serverOffset: finalOffset,
+          serverLineSeq: nextLineSeq,
         };
       },
       {
         query: t.Object({
           project: t.String(),
           session: t.String(),
-          fromOffset: t.String(),
+          fromLineSeq: t.String(),
           prefixHash: t.Optional(t.String()),
+          source: t.Optional(t.Union(SOURCES.map((s) => t.Literal(s)))),
         }),
       }
     )
 
     // GET /v1/sync-state — get server-side sync state for resume
-    .get("/sync-state", async ({ user }) => {
-      const rows = await db
-        .select({
-          sessionId: sessions.sessionId,
-          serverOffset: sessions.serverOffset,
-          prefixHash: sessions.prefixHash,
-        })
-        .from(sessions)
-        .where(eq(sessions.userId, user.id));
+    .get(
+      "/sync-state",
+      async ({ user }): Promise<Record<string, SyncStateEntry>> => {
+        const rows = await db
+          .select({
+            sessionId: sessions.sessionId,
+            serverLineSeq: sessions.serverLineSeq,
+            prefixHash: sessions.prefixHash,
+          })
+          .from(sessions)
+          .where(eq(sessions.userId, user.id));
 
-      const state: Record<
-        string,
-        { serverOffset: number; prefixHash: string | null }
-      > = {};
-      for (const row of rows) {
-        state[row.sessionId] = {
-          serverOffset: row.serverOffset ?? 0,
-          prefixHash: row.prefixHash,
-        };
+        const state: Record<string, SyncStateEntry> = {};
+        for (const row of rows) {
+          state[row.sessionId] = {
+            serverLineSeq: row.serverLineSeq ?? 0,
+            prefixHash: row.prefixHash,
+          };
+        }
+        return state;
       }
-      return state;
-    })
+    )
 
     // POST /v1/heartbeat — session heartbeat
     .post(
       "/heartbeat",
       async ({ body, user, device }) => {
-        // Get previous state for change detection
         const [prevHb] = await db
           .select()
           .from(heartbeats)
@@ -202,7 +250,11 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
           .limit(1);
 
         const [session] = await db
-          .select({ inTurn: sessions.inTurn, lastTs: sessions.lastTs, repoId: sessions.repoId })
+          .select({
+            inTurn: sessions.inTurn,
+            lastTs: sessions.lastTs,
+            repoId: sessions.repoId,
+          })
           .from(sessions)
           .where(eq(sessions.sessionId, body.sessionId))
           .limit(1);
@@ -215,7 +267,6 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             })
           : null;
 
-        // Upsert heartbeat
         await db
           .insert(heartbeats)
           .values({
@@ -235,7 +286,6 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             },
           });
 
-        // Check for state change → publish
         if (session) {
           const newState = classifySessionState({
             heartbeatUpdatedAt: new Date(),

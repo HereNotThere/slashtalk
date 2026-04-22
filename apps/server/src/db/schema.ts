@@ -7,11 +7,13 @@ import {
   timestamp,
   integer,
   uuid,
-  numeric,
   jsonb,
   primaryKey,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import type { EventKind, EventSource, Provider } from "@slashtalk/shared";
 
 // ── Users & Auth ────────────────────────────────────────────
 
@@ -124,6 +126,8 @@ export const sessions = pgTable(
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
     deviceId: integer("device_id").references(() => devices.id),
+    source: text("source").$type<EventSource>().notNull(),
+    provider: text("provider").$type<Provider>(),
     project: text("project").notNull(),
     repoId: integer("repo_id").references(() => repos.id),
     title: text("title"),
@@ -135,16 +139,18 @@ export const sessions = pgTable(
     toolErrors: integer("tool_errors").default(0),
     events: integer("events").default(0),
     tokensIn: bigint("tokens_in", { mode: "number" }).default(0),
-    tokensCw5: bigint("tokens_cw5", { mode: "number" }).default(0),
-    tokensCw1: bigint("tokens_cw1", { mode: "number" }).default(0),
-    tokensCr: bigint("tokens_cr", { mode: "number" }).default(0),
     tokensOut: bigint("tokens_out", { mode: "number" }).default(0),
-    costUsd: numeric("cost_usd", { precision: 12, scale: 4 }).default("0"),
+    tokensCacheRead: bigint("tokens_cache_read", { mode: "number" }).default(0),
+    tokensCacheWrite: bigint("tokens_cache_write", {
+      mode: "number",
+    }).default(0),
+    tokensReasoning: bigint("tokens_reasoning", { mode: "number" }).default(0),
     model: text("model"),
     version: text("version"),
     branch: text("branch"),
     cwd: text("cwd"),
     inTurn: boolean("in_turn").default(false),
+    currentTurnId: text("current_turn_id"),
     lastBoundaryTs: timestamp("last_boundary_ts", { withTimezone: true }),
     outstandingTools: jsonb("outstanding_tools").default({}),
     lastUserPrompt: text("last_user_prompt"),
@@ -154,7 +160,7 @@ export const sessions = pgTable(
     toolUseNames: jsonb("tool_use_names").default({}),
     queued: jsonb("queued").default([]),
     recentEvents: jsonb("recent_events").default([]),
-    serverOffset: bigint("server_offset", { mode: "number" }).default(0),
+    serverLineSeq: bigint("server_line_seq", { mode: "number" }).default(0),
     prefixHash: text("prefix_hash"),
   },
   (t) => [
@@ -166,22 +172,36 @@ export const sessions = pgTable(
 export const events = pgTable(
   "events",
   {
-    uuid: uuid("uuid").primaryKey(),
-    userId: integer("user_id").notNull(),
     sessionId: uuid("session_id")
       .references(() => sessions.sessionId)
       .notNull(),
+    lineSeq: bigint("line_seq", { mode: "number" }).notNull(),
+    userId: integer("user_id").notNull(),
     project: text("project").notNull(),
+    source: text("source").$type<EventSource>().notNull(),
     ts: timestamp("ts", { withTimezone: true }).notNull(),
-    type: text("type").notNull(),
-    parentUuid: uuid("parent_uuid"),
-    byteOffset: bigint("byte_offset", { mode: "number" }),
+    rawType: text("raw_type").notNull(),
+    kind: text("kind").$type<EventKind>().notNull(),
+    turnId: text("turn_id"),
+    callId: text("call_id"),
+    eventId: text("event_id"),
+    parentId: text("parent_id"),
     payload: jsonb("payload").notNull(),
     ingestedAt: timestamp("ingested_at", { withTimezone: true }).defaultNow(),
   },
   (t) => [
+    primaryKey({ columns: [t.sessionId, t.lineSeq] }),
     index("events_session_ts_idx").on(t.sessionId, t.ts),
     index("events_user_project_ts_idx").on(t.userId, t.project, t.ts),
+    index("events_call_idx")
+      .on(t.sessionId, t.callId)
+      .where(sql`call_id is not null`),
+    index("events_turn_idx")
+      .on(t.sessionId, t.turnId)
+      .where(sql`turn_id is not null`),
+    uniqueIndex("events_event_id_idx")
+      .on(t.eventId)
+      .where(sql`event_id is not null`),
   ]
 );
 

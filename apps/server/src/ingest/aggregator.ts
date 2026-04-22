@@ -1,23 +1,9 @@
 /**
- * Session aggregate computation from JSONL events.
+ * Session aggregate computation from Claude JSONL events.
  * Replicates the server.py _ingest() logic for the hosted backend.
+ *
+ * Codex event aggregation is TBD; this module currently handles Claude only.
  */
-
-// ── Pricing table (per 1M tokens) ───────────────────────────
-
-const PRICING = {
-  opus: { in: 15.0, cw5: 18.75, cw1: 30.0, cr: 1.5, out: 75.0 },
-  sonnet: { in: 3.0, cw5: 3.75, cw1: 6.0, cr: 0.3, out: 15.0 },
-  haiku: { in: 0.8, cw5: 1.0, cw1: 1.6, cr: 0.08, out: 4.0 },
-} as const;
-
-type ModelFamily = keyof typeof PRICING;
-
-function getModelFamily(model: string): ModelFamily {
-  if (model.includes("opus")) return "opus";
-  if (model.includes("haiku")) return "haiku";
-  return "sonnet";
-}
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -71,11 +57,10 @@ export interface SessionUpdates {
   toolErrors: number;
   events: number;
   tokensIn: number;
-  tokensCw5: number;
-  tokensCw1: number;
-  tokensCr: number;
   tokensOut: number;
-  costUsd: string;
+  tokensCacheRead: number;
+  tokensCacheWrite: number;
+  tokensReasoning: number;
   model: string | null;
   version: string | null;
   branch: string | null;
@@ -104,11 +89,10 @@ interface CurrentSession {
   toolErrors: number | null;
   events: number | null;
   tokensIn: number | null;
-  tokensCw5: number | null;
-  tokensCw1: number | null;
-  tokensCr: number | null;
   tokensOut: number | null;
-  costUsd: string | null;
+  tokensCacheRead: number | null;
+  tokensCacheWrite: number | null;
+  tokensReasoning: number | null;
   model: string | null;
   version: string | null;
   branch: string | null;
@@ -200,11 +184,10 @@ export function processEvents(
   let toolErrors = current.toolErrors ?? 0;
   let eventCount = current.events ?? 0;
   let tokensIn = current.tokensIn ?? 0;
-  let tokensCw5 = current.tokensCw5 ?? 0;
-  let tokensCw1 = current.tokensCw1 ?? 0;
-  let tokensCr = current.tokensCr ?? 0;
   let tokensOut = current.tokensOut ?? 0;
-  let costUsd = parseFloat(current.costUsd ?? "0");
+  let tokensCacheRead = current.tokensCacheRead ?? 0;
+  let tokensCacheWrite = current.tokensCacheWrite ?? 0;
+  const tokensReasoning = current.tokensReasoning ?? 0; // Claude doesn't emit
   let model = current.model;
   let version = current.version;
   let branch = current.branch;
@@ -292,39 +275,19 @@ export function processEvents(
       // Update model
       if (msg?.model) model = msg.model;
 
-      // Token accounting
+      // Token accounting — Claude 5m/1h cache writes both roll into
+      // tokensCacheWrite. Pricing (which needs the split) is deferred.
       if (msg?.usage) {
         const u = msg.usage;
-        const dIn = u.input_tokens ?? 0;
-        const dOut = u.output_tokens ?? 0;
-        const dCr = u.cache_read_input_tokens ?? 0;
-        let dCw5 = 0;
-        let dCw1 = 0;
-
+        tokensIn += u.input_tokens ?? 0;
+        tokensOut += u.output_tokens ?? 0;
+        tokensCacheRead += u.cache_read_input_tokens ?? 0;
         if (u.cache_creation) {
-          dCw5 = u.cache_creation.ephemeral_5m_input_tokens ?? 0;
-          dCw1 = u.cache_creation.ephemeral_1h_input_tokens ?? 0;
+          tokensCacheWrite +=
+            (u.cache_creation.ephemeral_5m_input_tokens ?? 0) +
+            (u.cache_creation.ephemeral_1h_input_tokens ?? 0);
         } else if (u.cache_creation_input_tokens) {
-          dCw5 = u.cache_creation_input_tokens;
-        }
-
-        tokensIn += dIn;
-        tokensOut += dOut;
-        tokensCr += dCr;
-        tokensCw5 += dCw5;
-        tokensCw1 += dCw1;
-
-        // Cost
-        if (msg.model) {
-          const family = getModelFamily(msg.model);
-          const p = PRICING[family];
-          costUsd +=
-            (dIn * p.in +
-              dCw5 * p.cw5 +
-              dCw1 * p.cw1 +
-              dCr * p.cr +
-              dOut * p.out) /
-            1e6;
+          tokensCacheWrite += u.cache_creation_input_tokens;
         }
       }
 
@@ -387,11 +350,10 @@ export function processEvents(
     toolErrors,
     events: eventCount,
     tokensIn,
-    tokensCw5,
-    tokensCw1,
-    tokensCr,
     tokensOut,
-    costUsd: costUsd.toFixed(4),
+    tokensCacheRead,
+    tokensCacheWrite,
+    tokensReasoning,
     model,
     version,
     branch,

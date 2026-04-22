@@ -169,6 +169,7 @@ describe("social feed integration", () => {
         sessionId: COMMON_SESSION_ID,
         userId: aliceUserId,
         deviceId: exchangeData.deviceId,
+        source: "claude",
         project: "test-project-common",
         repoId: commonRepoId,
       },
@@ -176,6 +177,7 @@ describe("social feed integration", () => {
         sessionId: REPO_A_SESSION_ID,
         userId: aliceUserId,
         deviceId: exchangeData.deviceId,
+        source: "claude",
         project: "test-project-a",
         repoId: repoAId,
       },
@@ -232,7 +234,7 @@ describe("social feed integration", () => {
       }),
     ];
     const ingestRes = await fetch(
-      `${baseUrl}/v1/ingest?project=test-project-common&session=${COMMON_SESSION_ID}&fromOffset=0`,
+      `${baseUrl}/v1/ingest?project=test-project-common&session=${COMMON_SESSION_ID}&fromLineSeq=0`,
       {
         method: "POST",
         headers: {
@@ -269,7 +271,7 @@ describe("social feed integration", () => {
     ];
     const prevMessageCount = messages.length;
     await fetch(
-      `${baseUrl}/v1/ingest?project=test-project-a&session=${REPO_A_SESSION_ID}&fromOffset=0`,
+      `${baseUrl}/v1/ingest?project=test-project-a&session=${REPO_A_SESSION_ID}&fromLineSeq=0`,
       {
         method: "POST",
         headers: {

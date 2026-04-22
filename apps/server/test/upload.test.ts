@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
+import type { IngestResponse, SyncStateEntry } from "@slashtalk/shared";
 import { db } from "../src/db";
 import {
   users,
@@ -248,6 +249,7 @@ describe("NDJSON ingest", () => {
       sessionId: SESSION_ID,
       userId: aliceUserId,
       deviceId: aliceDeviceId,
+      source: "claude",
       project: "upload-test",
     });
   });
@@ -260,7 +262,7 @@ describe("NDJSON ingest", () => {
     ];
 
     const res = await fetch(
-      `${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromOffset=0`,
+      `${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromLineSeq=0`,
       {
         method: "POST",
         headers: {
@@ -272,27 +274,20 @@ describe("NDJSON ingest", () => {
     );
     expect(res.status).toBe(200);
 
-    const data = (await res.json()) as {
-      acceptedEvents: number;
-      duplicateEvents: number;
-      acceptedBytes: number;
-      serverOffset: number;
-    };
+    const data = (await res.json()) as IngestResponse;
     expect(data.acceptedEvents).toBe(3);
     expect(data.duplicateEvents).toBe(0);
-    expect(data.serverOffset).toBeGreaterThan(0);
+    expect(data.serverLineSeq).toBe(3);
   });
 
-  it("deduplicates events on re-ingest", async () => {
-    // Use a known UUID so we can re-send it
+  it("deduplicates events on re-ingest from the same line seq", async () => {
     const eventUuid = "c0000000-0000-0000-0000-000000000099";
     const events = [
       makeEvent({ uuid: eventUuid, sessionId: SESSION_ID, type: "user" }),
     ];
 
-    // First ingest
     await fetch(
-      `${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromOffset=100`,
+      `${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromLineSeq=100`,
       {
         method: "POST",
         headers: {
@@ -303,9 +298,8 @@ describe("NDJSON ingest", () => {
       }
     );
 
-    // Second ingest with same event UUID
     const res = await fetch(
-      `${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromOffset=200`,
+      `${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromLineSeq=100`,
       {
         method: "POST",
         headers: {
@@ -315,10 +309,7 @@ describe("NDJSON ingest", () => {
         body: makeNdjson(events),
       }
     );
-    const data = (await res.json()) as {
-      acceptedEvents: number;
-      duplicateEvents: number;
-    };
+    const data = (await res.json()) as IngestResponse;
     expect(data.acceptedEvents).toBe(0);
     expect(data.duplicateEvents).toBe(1);
   });
@@ -327,20 +318,17 @@ describe("NDJSON ingest", () => {
 // ── Sync State ───────────────────────────────────────────────
 
 describe("sync state", () => {
-  it("returns server offset after ingest", async () => {
+  it("returns server line seq after ingest", async () => {
     const res = await fetch(`${baseUrl}/v1/sync-state`, {
       headers: { Authorization: `Bearer ${aliceApiKey}` },
     });
     expect(res.status).toBe(200);
-    const state = (await res.json()) as Record<
-      string,
-      { serverOffset: number; prefixHash: string | null }
-    >;
+    const state = (await res.json()) as Record<string, SyncStateEntry>;
 
     // Should have the session from the ingest tests
     const sessionId = "b0000000-0000-0000-0000-000000000001";
     expect(state[sessionId]).toBeTruthy();
-    expect(state[sessionId].serverOffset).toBeGreaterThan(0);
+    expect(state[sessionId].serverLineSeq).toBeGreaterThan(0);
   });
 });
 
@@ -354,6 +342,7 @@ describe("heartbeat", () => {
       sessionId: HB_SESSION_ID,
       userId: aliceUserId,
       deviceId: aliceDeviceId,
+      source: "claude",
       project: "heartbeat-test",
     });
   });

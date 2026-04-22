@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatHead } from '../../shared/types';
 import { useHeads } from '../shared/useHeads';
+import { SearchIcon } from '../shared/icons';
 
 const DRAG_THRESHOLD = 4;
 const TICK_MS = 30_000;
@@ -125,22 +126,9 @@ function ChatBubble({ hidden }: { hidden: boolean }): JSX.Element {
         ${hidden ? "invisible" : ""}
       `}
     >
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 20 20"
-        fill="none"
-        className="pointer-events-none"
-        aria-hidden
-      >
-        <circle cx="9" cy="9" r="5.5" stroke="currentColor" strokeWidth="1.8" />
-        <path
-          d="M13 13 L17 17"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-        />
-      </svg>
+      <div className="pointer-events-none scale-125">
+        <SearchIcon />
+      </div>
     </div>
   );
 }

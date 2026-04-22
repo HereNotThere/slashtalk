@@ -315,6 +315,8 @@ function repositionInfoIfVisible(): void {
 // The chat renderer paints its own pill + shadow; we just size + position the
 // frame.
 
+let lastSentChatAnchor: "left" | "right" | null = null;
+
 function ensureChatWindow(): BrowserWindow {
   if (chatWindow && !chatWindow.isDestroyed()) return chatWindow;
 
@@ -399,6 +401,8 @@ function broadcastChatVisible(visible: boolean): void {
 function sendChatConfig(): void {
   if (!chatWindow || chatWindow.isDestroyed()) return;
   const anchor = chatAnchorFromOverlay();
+  if (anchor === lastSentChatAnchor) return;
+  lastSentChatAnchor = anchor;
   const send = (): void => {
     chatWindow?.webContents.send("chat:config", { anchor });
   };

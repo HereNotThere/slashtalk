@@ -23,6 +23,13 @@ import type {
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 
+// `MAIN_VITE_SLASHTALK_API_URL` in apps/desktop/.env is baked in at build time
+// by electron-vite (the MAIN_VITE_ prefix is what makes it visible to the main
+// process). Runtime `SLASHTALK_API_URL` still works as an override for ad-hoc
+// local testing. Unset → localhost default.
+const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as
+  | string
+  | undefined;
 const DEFAULT_BASE_URL = "http://localhost:10000";
 const CREDS_KEY = "backendCredsEnc";
 
@@ -39,7 +46,9 @@ let pendingSignIn: { cancel: (reason: string) => void } | null = null;
 const authChanges = createEmitter<BackendAuthState>();
 
 function baseUrl(): string {
-  return process.env["SLASHTALK_API_URL"] ?? DEFAULT_BASE_URL;
+  return (
+    process.env["SLASHTALK_API_URL"] ?? BAKED_BASE_URL ?? DEFAULT_BASE_URL
+  );
 }
 
 export const onChange = authChanges.on;

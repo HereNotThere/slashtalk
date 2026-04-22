@@ -12,7 +12,8 @@ Electron app for slashtalk. Built with `electron-vite` (main + preload + multi-w
 - `src/renderer/shared/tailwind.css` — single Tailwind v4 entrypoint (theme + base resets) imported by every window's `styles.css`
 - `src/shared/` — types shared across processes
 - `out/` — build output (gitignored)
-- `resources/` — runtime assets (e.g. `trayTemplate.png`/`@2x` for the macOS menu-bar icon). Loaded relative to `__dirname` from main process. Template PNGs use grayscale + alpha so macOS auto-tints to match the menu bar.
+- `dist/` — packaged installers from `electron-builder` (gitignored)
+- `resources/` — runtime assets (e.g. `trayTemplate.png`/`@2x` for the macOS menu-bar icon). Loaded relative to `__dirname` from main process. Template PNGs use grayscale + alpha so macOS auto-tints to match the menu bar. Inside a packaged build, these are included in `app.asar` at the same relative path (`../../resources/…` from `out/main/`).
 
 ## Styling
 
@@ -39,6 +40,8 @@ Run from `apps/desktop/`:
 bun run dev          # electron-vite dev (HMR for renderers, restarts main)
 bun run build        # electron-vite build → ./out
 bun run start        # electron-vite preview (run the built app)
+bun run dist         # build + package via electron-builder → ./dist (host platform)
+bun run dist:mac     # build + package .dmg for macOS → ./dist
 
 bun run lint         # eslint .
 bun run typecheck    # tsc --noEmit for node + web projects
@@ -49,6 +52,10 @@ bun run typecheck:web
 From repo root you can also do `bun --filter @slashtalk/electron <script>`.
 
 Install deps from repo root: `bun install` (this is a workspace package, do not run install inside `apps/desktop/`).
+
+## Packaging (electron-builder)
+
+Config is inline in `package.json` under the `build` key. macOS output is an unsigned `.dmg` (`identity: null`); no Apple Developer cert wired up. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). Add an app icon by dropping `build/icon.icns` and removing the default-icon warning.
 
 ## Before committing
 

@@ -18,7 +18,7 @@ export function App(): JSX.Element {
     const onDown = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       downPos = { x: e.screenX, y: e.screenY };
-      const target = e.target instanceof Element ? e.target.closest('.bubble') : null;
+      const target = e.target instanceof Element ? e.target.closest('[data-bubble]') : null;
       downBubbleIndex = target && stackRef.current
         ? Array.prototype.indexOf.call(stackRef.current.children, target)
         : null;
@@ -64,7 +64,10 @@ export function App(): JSX.Element {
   }, []);
 
   return (
-    <div ref={stackRef} className="stack">
+    <div
+      ref={stackRef}
+      className="flex flex-col items-center gap-sm p-xl box-border"
+    >
       {heads.map((h) => (
         <Bubble key={h.id} head={h} />
       ))}
@@ -75,18 +78,35 @@ export function App(): JSX.Element {
 function Bubble({ head }: { head: ChatHead }): JSX.Element {
   return (
     <div
-      className="bubble"
+      data-bubble
       title={head.label}
       onContextMenu={(e) => {
         e.preventDefault();
         void window.chatheads.close(head.id);
       }}
+      className="
+        relative w-12 h-12 rounded-full cursor-pointer
+        flex items-center justify-center text-[28px]
+        bg-bubble
+        backdrop-blur-[18px] backdrop-saturate-[1.4]
+        outline outline-1 -outline-offset-1 outline-bubble-outline
+        shadow-[0_2px_3px_rgba(0,0,0,0.15)]
+        transition-transform duration-[180ms] ease-[cubic-bezier(0.2,0.9,0.3,1.2)]
+        hover:scale-105
+      "
     >
-      <div className="tint" style={{ background: head.tint }} />
+      <div
+        className="absolute inset-0 rounded-full opacity-[0.28] pointer-events-none"
+        style={{ background: head.tint }}
+      />
       {head.avatar.type === 'emoji' ? (
-        <span className="emoji">{head.avatar.value}</span>
+        <span className="relative z-[1] leading-none pointer-events-none">{head.avatar.value}</span>
       ) : (
-        <img src={head.avatar.value} alt="" />
+        <img
+          src={head.avatar.value}
+          alt=""
+          className="w-full h-full rounded-full object-cover pointer-events-none"
+        />
       )}
     </div>
   );

@@ -81,17 +81,24 @@ export function GitHubSection(): JSX.Element {
 
   return (
     <>
-      <div className="gh-header">
-        <h2>GitHub</h2>
-        <div className="right">
+      <div className="flex items-center gap-2 mt-5 mb-2">
+        <h2 className="m-0 text-[14px] text-muted uppercase tracking-[0.5px]">GitHub</h2>
+        <div className="ml-auto">
           {payload.state.kind === 'signedIn' && (
-            <button className="link" onClick={signOut}>Sign out</button>
+            <LinkButton onClick={signOut}>Sign out</LinkButton>
           )}
         </div>
       </div>
 
       {payload.state.kind === 'signedOut' && (
-        <button className="primary" onClick={() => window.chatheads.github.startDeviceFlow()}>
+        <button
+          onClick={() => window.chatheads.github.startDeviceFlow()}
+          className="
+            self-start bg-accent border border-accent text-accent-fg
+            rounded-md px-3.5 py-2 text-[13px] cursor-pointer
+            hover:bg-accent-hover
+          "
+        >
           →  Sign in with GitHub
         </button>
       )}
@@ -105,12 +112,12 @@ export function GitHubSection(): JSX.Element {
 
       {payload.state.kind === 'signedIn' && (
         <>
-          <div className="gh-row">
-            <span className="label">Organization</span>
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs text-subtle">Organization</span>
             {loadingOrgs ? (
-              <span className="muted">loading…</span>
+              <span className="text-xs text-subtle">loading…</span>
             ) : orgs.length === 0 ? (
-              <span className="muted">No orgs found</span>
+              <span className="text-xs text-subtle">No orgs found</span>
             ) : (
               <select
                 value={selectedOrg ?? ''}
@@ -119,6 +126,10 @@ export function GitHubSection(): JSX.Element {
                   setSelectedOrg(login);
                   if (login) localStorage.setItem(SELECTED_ORG_KEY, login);
                 }}
+                className="
+                  bg-button text-fg border border-border
+                  rounded-md px-2 py-1 [font:inherit] max-w-[240px]
+                "
               >
                 <option value="">Select…</option>
                 {orgs.map((org) => (
@@ -128,16 +139,15 @@ export function GitHubSection(): JSX.Element {
             )}
           </div>
 
-          {loadError && <div className="error">{loadError}</div>}
+          {loadError && <ErrorText>{loadError}</ErrorText>}
 
           {loadingMembers ? (
-            <div className="muted">Loading members…</div>
+            <div className="text-xs text-subtle">Loading members…</div>
           ) : members.length > 0 ? (
-            <div className="members">
+            <div className="grid grid-cols-4 gap-2 max-h-[260px] overflow-y-auto p-0.5">
               {members.map((member) => (
                 <button
                   key={member.id}
-                  className="member"
                   onClick={() =>
                     window.chatheads.spawn({
                       label: member.login,
@@ -145,21 +155,28 @@ export function GitHubSection(): JSX.Element {
                       avatar: { type: 'remote', value: member.avatarURL },
                     })
                   }
+                  className="
+                    flex flex-col items-center gap-1 px-1 py-2 rounded-lg cursor-pointer
+                    bg-tile border-none text-fg [font:inherit]
+                    hover:bg-tile-hover
+                  "
                 >
-                  <img src={member.avatarURL} alt={member.login} />
-                  <div className="login">{member.login}</div>
+                  <img src={member.avatarURL} alt={member.login} className="w-12 h-12 rounded-full object-cover" />
+                  <div className="text-[11px] max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                    {member.login}
+                  </div>
                 </button>
               ))}
             </div>
           ) : selectedOrg ? (
-            <div className="muted">
+            <div className="text-xs text-subtle">
               No members visible (org may be private or you may lack read:org).
             </div>
           ) : null}
         </>
       )}
 
-      {payload.errorMessage && <div className="error">{payload.errorMessage}</div>}
+      {payload.errorMessage && <ErrorText>{payload.errorMessage}</ErrorText>}
     </>
   );
 }
@@ -172,14 +189,47 @@ function DeviceFlow({
   verificationURL: string;
 }): JSX.Element {
   return (
-    <div className="device-flow">
-      <div className="hint">Enter this code at {verificationURL}</div>
-      <div className="actions">
-        <div className="code-box">{userCode}</div>
-        <button onClick={() => window.chatheads.copyText(userCode)}>Copy</button>
-        <button onClick={() => window.chatheads.openExternal(verificationURL)}>Open browser</button>
-        <button className="link" onClick={() => window.chatheads.github.cancelDeviceFlow()}>Cancel</button>
+    <div className="flex flex-col gap-2">
+      <div className="text-[11px] text-subtle">Enter this code at {verificationURL}</div>
+      <div className="flex gap-2 items-center">
+        <div className="inline-block font-mono text-xl font-bold px-3.5 py-2 bg-code rounded-lg select-text">
+          {userCode}
+        </div>
+        <button
+          onClick={() => window.chatheads.copyText(userCode)}
+          className="bg-button border border-border text-fg rounded-md px-3.5 py-2 text-[13px] cursor-pointer hover:bg-button-hover"
+        >
+          Copy
+        </button>
+        <button
+          onClick={() => window.chatheads.openExternal(verificationURL)}
+          className="bg-button border border-border text-fg rounded-md px-3.5 py-2 text-[13px] cursor-pointer hover:bg-button-hover"
+        >
+          Open browser
+        </button>
+        <LinkButton onClick={() => window.chatheads.github.cancelDeviceFlow()}>Cancel</LinkButton>
       </div>
     </div>
   );
+}
+
+function LinkButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      className="bg-transparent border-none text-link px-1.5 py-1 cursor-pointer hover:text-link-hover hover:bg-transparent"
+    >
+      {children}
+    </button>
+  );
+}
+
+function ErrorText({ children }: { children: React.ReactNode }): JSX.Element {
+  return <div className="text-danger text-xs">{children}</div>;
 }

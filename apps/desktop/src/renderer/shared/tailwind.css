@@ -1,0 +1,156 @@
+@import "tailwindcss";
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Design tokens. Defined as CSS variables so themes swap without re-rendering.
+ * Default values = dark theme. Light theme overrides live below.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* opaque surfaces */
+  --color-bg: #1e1e1e;
+  --color-card: #242424;
+
+  /* text */
+  --color-fg: #eee;
+  --color-muted: #bbb;
+  --color-subtle: #888;
+  --color-link: #aaa;
+  --color-link-hover: #fff;
+
+  /* borders / dividers */
+  --color-border: #3a3a3a;
+  --color-divider: rgba(255, 255, 255, 0.1);
+
+  /* opaque buttons (main window) */
+  --color-button: #2a2a2a;
+  --color-button-hover: #333;
+
+  /* brand */
+  --color-accent: #2f6df1;
+  --color-accent-hover: #2560db;
+  --color-accent-fg: #eee;
+
+  /* status */
+  --color-danger: #ff6d6d;
+  --color-success: #37c76a;
+
+  /* translucent surfaces (used over vibrancy popover) */
+  --color-surface: rgba(255, 255, 255, 0.06);
+  --color-surface-hover: rgba(255, 255, 255, 0.12);
+  --color-surface-strong: rgba(255, 255, 255, 0.08);
+  --color-surface-strong-hover: rgba(255, 255, 255, 0.15);
+  --color-tile: rgba(255, 255, 255, 0.04);
+  --color-tile-hover: rgba(255, 255, 255, 0.09);
+  --color-code: rgba(255, 255, 255, 0.07);
+
+  /* overlay bubble */
+  --color-bubble: rgba(255, 255, 255, 0.18);
+  --color-bubble-outline: rgba(255, 255, 255, 0.45);
+
+  /* spacing — t-shirt scale (works with p-/m-/gap-/space-x-/space-y-) */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+}
+
+/* Light theme — applied either by explicit class or by OS preference when no
+ * explicit override is set. */
+@layer base {
+  :root.theme-light,
+  :root:where(:not(.theme-dark):not(.theme-light)) {
+    /* fall through — dark stays as defined in @theme */
+  }
+
+  :root.theme-light {
+    --color-bg: #f5f5f5;
+    --color-card: #ffffff;
+
+    --color-fg: #1a1a1a;
+    --color-muted: #555;
+    --color-subtle: #777;
+    --color-link: #555;
+    --color-link-hover: #000;
+
+    --color-border: #d0d0d0;
+    --color-divider: rgba(0, 0, 0, 0.1);
+
+    --color-button: #ececec;
+    --color-button-hover: #dcdcdc;
+
+    --color-accent: #2f6df1;
+    --color-accent-hover: #2560db;
+    --color-accent-fg: #ffffff;
+
+    --color-danger: #d32f2f;
+    --color-success: #2e8b4f;
+
+    --color-surface: rgba(0, 0, 0, 0.05);
+    --color-surface-hover: rgba(0, 0, 0, 0.08);
+    --color-surface-strong: rgba(0, 0, 0, 0.06);
+    --color-surface-strong-hover: rgba(0, 0, 0, 0.1);
+    --color-tile: rgba(0, 0, 0, 0.04);
+    --color-tile-hover: rgba(0, 0, 0, 0.07);
+    --color-code: rgba(0, 0, 0, 0.06);
+
+    --color-bubble: rgba(255, 255, 255, 0.85);
+    --color-bubble-outline: rgba(0, 0, 0, 0.2);
+  }
+
+  /* OS = light, no explicit override → use light palette */
+  @media (prefers-color-scheme: light) {
+    :root:not(.theme-dark):not(.theme-light) {
+      --color-bg: #f5f5f5;
+      --color-card: #ffffff;
+
+      --color-fg: #1a1a1a;
+      --color-muted: #555;
+      --color-subtle: #777;
+      --color-link: #555;
+      --color-link-hover: #000;
+
+      --color-border: #d0d0d0;
+      --color-divider: rgba(0, 0, 0, 0.1);
+
+      --color-button: #ececec;
+      --color-button-hover: #dcdcdc;
+
+      --color-accent: #2f6df1;
+      --color-accent-hover: #2560db;
+      --color-accent-fg: #ffffff;
+
+      --color-danger: #d32f2f;
+      --color-success: #2e8b4f;
+
+      --color-surface: rgba(0, 0, 0, 0.05);
+      --color-surface-hover: rgba(0, 0, 0, 0.08);
+      --color-surface-strong: rgba(0, 0, 0, 0.06);
+      --color-surface-strong-hover: rgba(0, 0, 0, 0.1);
+      --color-tile: rgba(0, 0, 0, 0.04);
+      --color-tile-hover: rgba(0, 0, 0, 0.07);
+      --color-code: rgba(0, 0, 0, 0.06);
+
+      --color-bubble: rgba(255, 255, 255, 0.85);
+      --color-bubble-outline: rgba(0, 0, 0, 0.2);
+    }
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    user-select: none;
+    cursor: default;
+    background: transparent;
+    font-family: var(--font-sans);
+    color: var(--color-fg);
+    font-size: 13px;
+  }
+}

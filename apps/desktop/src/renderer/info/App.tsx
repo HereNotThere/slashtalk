@@ -25,44 +25,52 @@ export function App(): JSX.Element {
 
   return (
     <>
-      <div className="header">
-        <div className="label">{label}</div>
-        <div className="status-row">
-          <span className="icon" style={{ color: "#ff8c1a" }}>
-            🔥
-          </span>
-          <span>4 sessions running</span>
-        </div>
-        <div className="status-row">
-          <span className="icon" style={{ color: "#ffd84d" }}>
-            ☀️
-          </span>
-          <span>San Francisco · 2:31 PM</span>
-        </div>
-        <div className="status-row">
-          <span className="icon" style={{ color: "#37c76a" }}>
-            🎵
-          </span>
-          <span>(Sittin&apos; on) the dock of the bay</span>
-        </div>
+      <div className="px-lg pt-lg pb-3.5">
+        <div className="text-xl font-bold mb-2.5">{label}</div>
+        <StatusRow color="#ff8c1a" icon="🔥">4 sessions running</StatusRow>
+        <StatusRow color="#ffd84d" icon="☀️">San Francisco · 2:31 PM</StatusRow>
+        <StatusRow color="#37c76a" icon="🎵">(Sittin&apos; on) the dock of the bay</StatusRow>
       </div>
 
-      <div className="divider" />
+      <div className="h-px bg-divider" />
 
-      <div className="sessions">
+      <div className="py-1.5">
         {SESSIONS.map((s) => (
-          <div key={s.title} className="session-row">
+          <div key={s.title} className="flex items-center px-lg py-sm gap-2.5">
             <div>
-              <div className="session-title">
+              <div className="text-[13px] font-semibold flex items-center gap-1.5">
                 {s.title}{" "}
-                <span className={`dot ${s.active ? "active" : "inactive"}`} />
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    s.active ? "bg-success" : "bg-subtle/60"
+                  }`}
+                />
               </div>
-              <div className="subtitle">{s.subtitle}</div>
+              <div className="text-[11px] text-fg/60 mt-0.5">{s.subtitle}</div>
             </div>
-            <div className="chev">›</div>
+            <div className="ml-auto text-fg/35 text-[11px] font-bold">›</div>
           </div>
         ))}
       </div>
     </>
+  );
+}
+
+function StatusRow({
+  color,
+  icon,
+  children,
+}: {
+  color: string;
+  icon: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-2 text-[13px] leading-[1.4] text-fg/75">
+      <span className="w-4 text-center" style={{ color }}>
+        {icon}
+      </span>
+      <span>{children}</span>
+    </div>
   );
 }

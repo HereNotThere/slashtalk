@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { eq, sql, and, inArray } from "drizzle-orm";
+import { eq, sql, and, gt, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
@@ -174,7 +174,7 @@ export const socialRoutes = (db: Database) =>
           .where(
             and(
               eq(sessions.userId, peer.id),
-              sql`${sessions.lastTs} > ${fifteenMinAgo}`
+              gt(sessions.lastTs, fifteenMinAgo)
             )
           );
 

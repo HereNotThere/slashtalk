@@ -4,6 +4,7 @@ import type {
   ChatHead,
   ChatHeadsBridge,
   InfoSession,
+  RailDebugSnapshot,
   RepoSummary,
   TrackedRepo,
   Unsubscribe,
@@ -72,6 +73,13 @@ const bridge: ChatHeadsBridge = {
       ) as Promise<TrackedRepo[]>,
     onTrackedReposChange: (cb) =>
       subscribe<TrackedRepo[]>("backend:trackedRepos", cb),
+  },
+
+  debug: {
+    railSnapshot: () =>
+      ipcRenderer.invoke("debug:railSnapshot") as Promise<RailDebugSnapshot>,
+    refreshRail: () =>
+      ipcRenderer.invoke("debug:refreshRail") as Promise<RailDebugSnapshot>,
   },
 };
 

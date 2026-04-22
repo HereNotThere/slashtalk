@@ -3,6 +3,7 @@ import type {
   BackendAuthState,
   ChatHead,
   ChatHeadsBridge,
+  InfoSession,
   RepoSummary,
   TrackedRepo,
   Unsubscribe,
@@ -28,6 +29,14 @@ const bridge: ChatHeadsBridge = {
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 
   onInfoShow: (cb) => subscribe<{ head: ChatHead }>("info:show", cb),
+  onInfoHide: (cb) => {
+    const handler = (): void => cb();
+    ipcRenderer.on("info:hide", handler);
+    return () => ipcRenderer.off("info:hide", handler);
+  },
+
+  listSessionsForHead: (headId) =>
+    ipcRenderer.invoke("sessions:forHead", headId) as Promise<InfoSession[]>,
 
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,

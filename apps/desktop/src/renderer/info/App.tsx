@@ -1,66 +1,59 @@
 import { useEffect, useState } from "react";
-import type { ChatHead } from "../../shared/types";
+import { SessionState } from "@slashtalk/shared";
+import type { ChatHead, InfoSession } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 
-// All data here is hard-coded — real data will come from the session/feed
-// backend (see CLAUDE.md "Implementation status"). Shapes mirror what we
-// expect once ingest aggregates land.
+const REFRESH_MS = 15_000;
 
-type Session = {
-  title: string;
-  repo: string;
-  branch: string;
-  tool: string;
-  status:
-    | { kind: "active"; duration: string }
-    | { kind: "paused"; since: string };
+const DOT_COLOR: Record<SessionState, string> = {
+  [SessionState.BUSY]: "bg-warning",
+  [SessionState.ACTIVE]: "bg-success",
+  [SessionState.IDLE]: "bg-warning",
+  [SessionState.RECENT]: "bg-muted",
+  [SessionState.ENDED]: "bg-muted",
 };
-
-const SESSIONS: Session[] = [
-  {
-    title: "Simplifying the sign up flow",
-    repo: "towns-app",
-    branch: "feat/auth-cleanup",
-    tool: "Claude",
-    status: { kind: "active", duration: "1h 12m" },
-  },
-  {
-    title: "Redesigning the home page",
-    repo: "towns-app",
-    branch: "user/fei",
-    tool: "Claude",
-    status: { kind: "paused", since: "2h" },
-  },
-];
-
-type FeedEntry = {
-  age: string;
-  tone: "success" | "info" | "fg";
-  text: string;
-};
-
-const FEED: FeedEntry[] = [
-  { age: "14m", tone: "success", text: "Handled duplicate-email 409 as field error." },
-  { age: "41m", tone: "success", text: "Added zod validation + SIGNUP_ERRORS map." },
-  { age: "1h", tone: "info", text: "Opened feat/auth-cleanup from main." },
-  { age: "3h", tone: "fg", text: "Closed home-page hero explorations — parked." },
-];
 
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
+  const [sessions, setSessions] = useState<InfoSession[] | null>(null);
   useAutoResize();
 
   useEffect(() => {
-    return window.chatheads.onInfoShow((p) => setHead(p.head));
+    const offShow = window.chatheads.onInfoShow((p) => {
+      setHead(p.head);
+      setSessions(null);
+    });
+    const offHide = window.chatheads.onInfoHide(() => setHead(null));
+    return () => {
+      offShow();
+      offHide();
+    };
   }, []);
+
+  useEffect(() => {
+    if (!head) return;
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      try {
+        const rows = await window.chatheads.listSessionsForHead(head.id);
+        if (!cancelled) setSessions(rows);
+      } catch {
+        if (!cancelled) setSessions([]);
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [head?.id]);
 
   return (
     <>
       <Header head={head} />
       <Divider />
-      <SessionsSection />
-      <Divider />
-      <FeedSection />
+      <SessionsSection sessions={sessions} />
     </>
   );
 }
@@ -135,87 +128,101 @@ function SectionHeader({
   );
 }
 
-function SessionsSection(): JSX.Element {
+function SessionsSection({
+  sessions,
+}: {
+  sessions: InfoSession[] | null;
+}): JSX.Element {
+  const title = sessions == null ? "Sessions" : `Sessions · ${sessions.length}`;
   return (
     <div className="px-lg pt-md pb-lg">
-      <SectionHeader title={`Sessions · ${SESSIONS.length}`} trailing="last 24h" />
+      <SectionHeader title={title} trailing="last 24h" />
       <div className="mt-md space-y-lg">
-        {SESSIONS.map((s) => (
-          <SessionRow key={s.title} session={s} />
-        ))}
+        {sessions == null ? (
+          <div className="text-[12px] text-subtle">Loading…</div>
+        ) : sessions.length === 0 ? (
+          <div className="text-[12px] text-subtle">No sessions yet.</div>
+        ) : (
+          sessions.map((s) => <SessionRow key={s.id} session={s} />)
+        )}
       </div>
     </div>
   );
 }
 
-function SessionRow({ session }: { session: Session }): JSX.Element {
-  const dotColor = session.status.kind === "active" ? "bg-success" : "bg-warning";
+function repoLabel(s: InfoSession): string | null {
+  if ("repo_full_name" in s && s.repo_full_name) return s.repo_full_name;
+  // Fallback for own sessions: Claude writes projects as a slugified cwd path
+  // (e.g. "-Users-erik-dev-towns-app"); the trailing segment is the repo dir.
+  const parts = s.project.split(/[-/]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1]! : null;
+}
+
+function toolLabel(kind: string | null, model: string | null): string {
+  if (kind === "codex") return "Codex";
+  if (kind === "claude") return "Claude";
+  if (model?.toLowerCase().includes("gpt")) return "Codex";
+  return "Claude";
+}
+
+function SessionRow({ session }: { session: InfoSession }): JSX.Element {
+  const repo = repoLabel(session);
+  const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
+  const status = statusLabel(session);
   return (
     <div>
       <div className="flex items-center gap-2">
-        <Dot color={dotColor} />
+        <Dot color={DOT_COLOR[session.state]} />
         <div className="text-[14px] font-semibold text-fg flex-1 truncate">
-          {session.title}
+          {title}
         </div>
         <Chevron />
       </div>
       <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-muted flex-wrap">
-        <span className="inline-flex items-center gap-1.5 font-mono bg-code rounded-md px-1.5 py-0.5 text-fg/85">
-          <BranchIcon />
-          <span>{session.repo}</span>
-          <span className="text-subtle">·</span>
-          <span>{session.branch}</span>
-        </span>
+        {(repo || session.branch) && (
+          <span className="inline-flex items-center gap-1.5 font-mono bg-code rounded-md px-1.5 py-0.5 text-fg/85">
+            <BranchIcon />
+            {repo && <span>{repo}</span>}
+            {repo && session.branch && <span className="text-subtle">·</span>}
+            {session.branch && <span>{session.branch}</span>}
+          </span>
+        )}
         <span className="text-subtle">·</span>
         <span className="inline-flex items-center gap-1">
           <span className="text-subtle">✦</span>
-          <span>{session.tool}</span>
+          <span>{toolLabel(session.kind, session.model)}</span>
         </span>
-        {session.status.kind === "paused" && (
-          <>
-            <span className="text-subtle">·</span>
-            <span>paused {session.status.since}</span>
-          </>
-        )}
       </div>
-      {session.status.kind === "active" && (
-        <div className="mt-1.5 text-[12px] text-muted">
-          {session.status.duration}
-        </div>
-      )}
+      {status && <div className="mt-1.5 text-[12px] text-muted">{status}</div>}
     </div>
   );
 }
 
-function FeedSection(): JSX.Element {
-  return (
-    <div className="px-lg pt-md pb-lg">
-      <SectionHeader title="24h Feed" trailing="derived" />
-      <div className="mt-md space-y-sm">
-        {FEED.map((e, i) => (
-          <FeedRow key={i} entry={e} />
-        ))}
-      </div>
-    </div>
-  );
+function statusLabel(s: InfoSession): string | null {
+  switch (s.state) {
+    case SessionState.BUSY:
+      return "working now";
+    case SessionState.ACTIVE:
+      return s.durationS != null ? fmtDuration(s.durationS) : null;
+    case SessionState.IDLE:
+      return s.idleS != null ? `idle ${fmtDuration(s.idleS)}` : null;
+    case SessionState.RECENT:
+      return s.idleS != null ? `paused ${fmtDuration(s.idleS)}` : null;
+    case SessionState.ENDED:
+      return s.idleS != null ? `ended ${fmtDuration(s.idleS)} ago` : null;
+  }
 }
 
-function FeedRow({ entry }: { entry: FeedEntry }): JSX.Element {
-  const toneClass =
-    entry.tone === "success"
-      ? "bg-success"
-      : entry.tone === "info"
-        ? "bg-info"
-        : "bg-fg";
-  return (
-    <div className="flex items-center gap-2.5 text-[13px]">
-      <span className="w-7 text-[11.5px] text-subtle text-right tabular-nums shrink-0">
-        {entry.age}
-      </span>
-      <Dot color={toneClass} />
-      <span className="text-fg/90 flex-1">{entry.text}</span>
-    </div>
-  );
+function fmtDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  if (h < 24) return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d`;
 }
 
 function Dot({ color }: { color: string }): JSX.Element {

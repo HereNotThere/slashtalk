@@ -160,11 +160,15 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
               .set(updates)
               .where(eq(sessions.sessionId, query.session));
 
-            if (!currentSession.repoId && updates.cwd) {
+            // Retry while repo_id unresolved; fall back to the session's
+            // stored cwd so strategy 3 (project-slug) can fire even when no
+            // event has ever carried a cwd.
+            if (!currentSession.repoId) {
+              const cwd = updates.cwd ?? currentSession.cwd ?? null;
               const repoId = await matchSessionRepo(
                 db,
                 user.id,
-                updates.cwd,
+                cwd,
                 query.project,
                 device?.id
               );

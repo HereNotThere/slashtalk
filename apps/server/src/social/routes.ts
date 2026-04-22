@@ -4,6 +4,7 @@ import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { toSnapshot, sortByStateThenTime } from "../sessions/snapshot";
+import { normalizeFullName } from "./github-sync";
 
 export const socialRoutes = (db: Database) =>
   new Elysia({ prefix: "/api", name: "social" })
@@ -51,7 +52,7 @@ export const socialRoutes = (db: Database) =>
           const [filterRepo] = await db
             .select({ id: repos.id })
             .from(repos)
-            .where(eq(repos.fullName, query.repo))
+            .where(eq(repos.fullName, normalizeFullName(query.repo)))
             .limit(1);
           if (filterRepo) {
             sessionRows = sessionRows.filter(

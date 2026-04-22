@@ -10,6 +10,9 @@ export interface ChatHead {
   label: string;
   tint: string;
   avatar: Avatar;
+  /** Epoch ms of the most recent activity on this head. Optional for back-compat
+   *  with persisted heads from before this field was added. */
+  lastActionAt?: number;
 }
 
 export type Unsubscribe = () => void;
@@ -64,7 +67,7 @@ export interface ChatHeadsBridge {
   dragEnd: () => Promise<void>;
 
   // Info window (main → info renderer)
-  onInfoShow: (cb: (payload: { label: string }) => void) => Unsubscribe;
+  onInfoShow: (cb: (payload: { head: ChatHead }) => void) => Unsubscribe;
 
   // Tray popup actions
   openMain: () => Promise<void>;

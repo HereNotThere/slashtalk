@@ -1,14 +1,36 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChatHead } from '../../shared/types';
 import { useHeads } from '../shared/useHeads';
 
 const DRAG_THRESHOLD = 4;
+const TICK_MS = 30_000;
+
+// Compact "time since" — "now" / "5m" / "3h" / "2d".
+function formatAge(ms: number): string {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return 'now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  return `${Math.floor(hr / 24)}d`;
+}
+
+// Forces a re-render every interval so age badges stay current without IPC.
+function useTick(intervalMs: number): void {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+}
 
 // Click-vs-drag discrimination + toggle-info, mirrors DraggableHostingView.swift.
 // Below threshold on mouseUp = click (toggleInfo); above = start IPC-driven drag.
 export function App(): JSX.Element {
   const heads = useHeads();
   const stackRef = useRef<HTMLDivElement>(null);
+  useTick(TICK_MS);
 
   useEffect(() => {
     let downPos: { x: number; y: number } | null = null;
@@ -105,6 +127,18 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
           alt=""
           className="w-full h-full rounded-full object-cover pointer-events-none"
         />
+      )}
+      {head.lastActionAt != null && (
+        <div
+          className="
+            absolute -bottom-0.5 -right-0.5 z-[2]
+            px-1.5 py-px rounded-full
+            bg-gray-700/85 text-white text-[9px] font-light leading-none
+            pointer-events-none
+          "
+        >
+          {formatAge(Date.now() - head.lastActionAt)}
+        </div>
       )}
     </div>
   );

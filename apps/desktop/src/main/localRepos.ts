@@ -10,6 +10,18 @@ import * as backend from "./backend";
 import * as store from "./store";
 import { createEmitter } from "./emitter";
 
+/** True if `cwd` lives under any tracked local repo path. */
+export function isPathTracked(cwd: string | null | undefined): boolean {
+  if (!cwd) return false;
+  const abs = path.resolve(cwd) + path.sep;
+  for (const r of tracked) {
+    const root = path.resolve(r.localPath);
+    const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+    if (abs.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 const TRACKED_KEY = "trackedRepos";
 
 let tracked: TrackedRepo[] = [];

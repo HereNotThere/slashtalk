@@ -14,6 +14,8 @@ import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import * as rail from "./rail";
+import * as uploader from "./uploader";
+import * as heartbeat from "./heartbeat";
 
 // Single source of truth, mirrors ChatHeadWindow.swift constants.
 const BUBBLE_SIZE = 48;
@@ -468,6 +470,18 @@ ipcMain.handle("backend:signOut", async () => {
   await backend.signOut();
   localRepos.clearOnSignOut();
 });
+
+function applySyncForAuth(signedIn: boolean): void {
+  if (signedIn) {
+    void uploader.start();
+    void heartbeat.start();
+  } else {
+    heartbeat.stop();
+    uploader.reset();
+  }
+}
+
+backend.onChange((state) => applySyncForAuth(state.signedIn));
 ipcMain.handle("backend:listRepos", () => backend.listRepos());
 
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());
@@ -493,6 +507,7 @@ app.whenReady().then(() => {
   createMainWindow();
   createTray();
   rail.start();
+  applySyncForAuth(backend.getAuthState().signedIn);
 });
 
 // Keep the app alive when all windows close — the mere presence of a

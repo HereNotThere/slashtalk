@@ -216,9 +216,13 @@ export function processEvents(
 
   for (const event of newEvents) {
     eventCount++;
-    const ts = new Date(event.timestamp);
+    // Some event types (e.g. `file-history-snapshot`) carry no top-level
+    // timestamp — their timestamp lives on a nested payload and they hold
+    // no aggregate-relevant data. Skip rather than letting an Invalid Date
+    // poison the session row.
+    const ts = event.timestamp ? new Date(event.timestamp) : null;
+    if (!ts || Number.isNaN(ts.getTime())) continue;
 
-    // Update timestamps
     if (!firstTs || ts < firstTs) firstTs = ts;
     if (!lastTs || ts > lastTs) lastTs = ts;
 

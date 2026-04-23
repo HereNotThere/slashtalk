@@ -1103,6 +1103,7 @@ ws.onSessionUpdated((msg) => {
   // hover. scheduleInfoRefresh then coalesces any UI refresh for the
   // currently-selected head across bursty events.
   sessionCache.delete(rail.userHeadId(msg.github_login));
+  rail.refreshSoon();
   scheduleInfoRefresh(msg.session_id);
   broadcastToMain("ws:sessionUpdated", msg);
 });

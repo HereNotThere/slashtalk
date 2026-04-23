@@ -1,23 +1,21 @@
 /**
- * Session aggregate computation from Claude JSONL events.
- * Replicates the server.py _ingest() logic for the hosted backend.
- *
- * Codex event aggregation is TBD; this module currently handles Claude only.
+ * Session aggregate computation from source JSONL events.
+ * Claude and Codex both fold into the same sessions table shape.
  */
 
-// ── Types ────────────────────────────────────────────────────
+import type { EventSource, Provider } from "@slashtalk/shared";
 
 interface ContentBlock {
   type: string;
   text?: string;
   id?: string;
   name?: string;
-  input?: Record<string, any>;
+  input?: Record<string, unknown>;
   tool_use_id?: string;
   is_error?: boolean;
 }
 
-export interface EventPayload {
+interface ClaudeEventPayload {
   type: string;
   uuid: string;
   timestamp: string;
@@ -50,7 +48,10 @@ export interface EventPayload {
   };
 }
 
-export interface SessionUpdates {
+type JsonObj = Record<string, unknown>;
+
+interface SessionUpdates {
+  provider: Provider | null;
   userMsgs: number;
   assistantMsgs: number;
   toolCalls: number;
@@ -69,8 +70,12 @@ export interface SessionUpdates {
   lastTs: Date | null;
   title: string | null;
   inTurn: boolean;
+  currentTurnId: string | null;
   lastBoundaryTs: Date | null;
-  outstandingTools: Record<string, { name: string; desc: string | null; started: number }>;
+  outstandingTools: Record<
+    string,
+    { name: string; desc: string | null; started: number }
+  >;
   lastUserPrompt: string | null;
   topFilesRead: Record<string, number>;
   topFilesEdited: Record<string, number>;
@@ -80,9 +85,8 @@ export interface SessionUpdates {
   recentEvents: Array<{ ts: string; type: string; summary: string }>;
 }
 
-// ── Current session state (loaded from DB) ───────────────────
-
 interface CurrentSession {
+  provider: Provider | null;
   userMsgs: number | null;
   assistantMsgs: number | null;
   toolCalls: number | null;
@@ -101,6 +105,7 @@ interface CurrentSession {
   lastTs: Date | null;
   title: string | null;
   inTurn: boolean | null;
+  currentTurnId: string | null;
   lastBoundaryTs: Date | null;
   outstandingTools: unknown;
   lastUserPrompt: string | null;
@@ -112,222 +117,250 @@ interface CurrentSession {
   recentEvents: unknown;
 }
 
-// ── Helpers ──────────────────────────────────────────────────
-
-function isRealUserMessage(event: EventPayload): boolean {
-  if (event.isMeta || event.isSidechain) return false;
-  const content = event.message?.content;
-  if (typeof content === "string") {
-    if (content.startsWith("<local-command") || content.startsWith("<command"))
-      return false;
-  }
-  return true;
+function isObj(v: unknown): v is JsonObj {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function extractUserPromptText(event: EventPayload): string | null {
-  const content = event.message?.content;
-  if (!content) return null;
-  if (typeof content === "string") return content;
-  const textBlocks = content.filter((b) => b.type === "text" && b.text);
-  return textBlocks.map((b) => b.text).join("\n") || null;
+function asString(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
 }
 
-function summarizeEvent(event: EventPayload): string {
-  if (event.type === "user") {
-    const text = extractUserPromptText(event);
-    return text ? text.slice(0, 80) : "(user message)";
+function asNumber(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function parseJsonObject(v: unknown): JsonObj | null {
+  if (typeof v !== "string") return null;
+  try {
+    const parsed = JSON.parse(v);
+    return isObj(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
-  if (event.type === "assistant") {
-    const content = event.message?.content;
-    if (Array.isArray(content)) {
-      const toolUse = content.find((b) => b.type === "tool_use");
-      if (toolUse) return `tool: ${toolUse.name}`;
-      const thinking = content.find((b) => b.type === "thinking");
-      if (thinking) return "thinking...";
-      const text = content.find((b) => b.type === "text" && b.text);
-      if (text) return text.text!.slice(0, 80);
-    }
-    return "(assistant)";
-  }
-  if (event.type === "attachment" && event.attachment?.type === "queued_command") {
-    return `queued: ${(event.attachment.prompt ?? "").slice(0, 60)}`;
-  }
-  return event.type;
 }
 
 function incMap(map: Record<string, number>, key: string): void {
   map[key] = (map[key] ?? 0) + 1;
 }
 
-function topN(
-  map: Record<string, number>,
-  n: number
-): Record<string, number> {
+function topN(map: Record<string, number>, n: number): Record<string, number> {
   const sorted = Object.entries(map).sort((a, b) => b[1] - a[1]);
   return Object.fromEntries(sorted.slice(0, n));
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length > limit ? text.slice(0, limit) : text;
+}
+
+function initState(current: CurrentSession): SessionUpdates {
+  return {
+    provider: current.provider ?? null,
+    userMsgs: current.userMsgs ?? 0,
+    assistantMsgs: current.assistantMsgs ?? 0,
+    toolCalls: current.toolCalls ?? 0,
+    toolErrors: current.toolErrors ?? 0,
+    events: current.events ?? 0,
+    tokensIn: current.tokensIn ?? 0,
+    tokensOut: current.tokensOut ?? 0,
+    tokensCacheRead: current.tokensCacheRead ?? 0,
+    tokensCacheWrite: current.tokensCacheWrite ?? 0,
+    tokensReasoning: current.tokensReasoning ?? 0,
+    model: current.model,
+    version: current.version,
+    branch: current.branch,
+    cwd: current.cwd,
+    firstTs: current.firstTs,
+    lastTs: current.lastTs,
+    title: current.title,
+    inTurn: current.inTurn ?? false,
+    currentTurnId: current.currentTurnId ?? null,
+    lastBoundaryTs: current.lastBoundaryTs,
+    outstandingTools: {
+      ...((current.outstandingTools as Record<string, SessionUpdates["outstandingTools"][string]>) ??
+        {}),
+    },
+    lastUserPrompt: current.lastUserPrompt,
+    topFilesRead: {
+      ...((current.topFilesRead as Record<string, number>) ?? {}),
+    },
+    topFilesEdited: {
+      ...((current.topFilesEdited as Record<string, number>) ?? {}),
+    },
+    topFilesWritten: {
+      ...((current.topFilesWritten as Record<string, number>) ?? {}),
+    },
+    toolUseNames: {
+      ...((current.toolUseNames as Record<string, number>) ?? {}),
+    },
+    queued: [...((current.queued as SessionUpdates["queued"]) ?? [])],
+    recentEvents: [...((current.recentEvents as SessionUpdates["recentEvents"]) ?? [])],
+  };
+}
+
+function pushRecent(
+  state: SessionUpdates,
+  ts: string,
+  type: string,
+  summary: string,
+): void {
+  state.recentEvents.push({ ts, type, summary });
+  if (state.recentEvents.length > 20) {
+    state.recentEvents = state.recentEvents.slice(-20);
+  }
+}
+
+function updateTimestamps(state: SessionUpdates, timestamp: string): Date | null {
+  const ts = new Date(timestamp);
+  if (Number.isNaN(ts.getTime())) return null;
+  if (!state.firstTs || ts < state.firstTs) state.firstTs = ts;
+  if (!state.lastTs || ts > state.lastTs) state.lastTs = ts;
+  return ts;
+}
+
+function isRealClaudeUserMessage(event: ClaudeEventPayload): boolean {
+  if (event.isMeta || event.isSidechain) return false;
+  const content = event.message?.content;
+  if (typeof content === "string") {
+    if (content.startsWith("<local-command") || content.startsWith("<command")) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function extractClaudeUserPromptText(event: ClaudeEventPayload): string | null {
+  const content = event.message?.content;
+  if (!content) return null;
+  if (typeof content === "string") return content;
+  const textBlocks = content.filter((block) => block.type === "text" && block.text);
+  return textBlocks.map((block) => block.text).join("\n") || null;
+}
+
+function summarizeClaudeEvent(event: ClaudeEventPayload): string {
+  if (event.type === "user") {
+    const text = extractClaudeUserPromptText(event);
+    return text ? truncate(text, 80) : "(user message)";
+  }
+  if (event.type === "assistant") {
+    const content = event.message?.content;
+    if (Array.isArray(content)) {
+      const toolUse = content.find((block) => block.type === "tool_use");
+      if (toolUse) return `tool: ${toolUse.name}`;
+      const thinking = content.find((block) => block.type === "thinking");
+      if (thinking) return "thinking...";
+      const text = content.find((block) => block.type === "text" && block.text);
+      if (text?.text) return truncate(text.text, 80);
+    }
+    return "(assistant)";
+  }
+  if (event.type === "attachment" && event.attachment?.type === "queued_command") {
+    return `queued: ${truncate(event.attachment.prompt ?? "", 60)}`;
+  }
+  return event.type;
 }
 
 const FILE_TOOLS_READ = new Set(["Read"]);
 const FILE_TOOLS_EDIT = new Set(["Edit", "MultiEdit"]);
 const FILE_TOOLS_WRITE = new Set(["Write"]);
 
-// ── Main aggregation ─────────────────────────────────────────
-
-export function processEvents(
+function processClaudeEvents(
   current: CurrentSession,
-  newEvents: EventPayload[]
+  newEvents: unknown[],
 ): SessionUpdates {
-  // Start from current accumulated state
-  let userMsgs = current.userMsgs ?? 0;
-  let assistantMsgs = current.assistantMsgs ?? 0;
-  let toolCalls = current.toolCalls ?? 0;
-  let toolErrors = current.toolErrors ?? 0;
-  let eventCount = current.events ?? 0;
-  let tokensIn = current.tokensIn ?? 0;
-  let tokensOut = current.tokensOut ?? 0;
-  let tokensCacheRead = current.tokensCacheRead ?? 0;
-  let tokensCacheWrite = current.tokensCacheWrite ?? 0;
-  const tokensReasoning = current.tokensReasoning ?? 0; // Claude doesn't emit
-  let model = current.model;
-  let version = current.version;
-  let branch = current.branch;
-  let cwd = current.cwd;
-  let firstTs = current.firstTs;
-  let lastTs = current.lastTs;
-  let title = current.title;
-  let inTurn = current.inTurn ?? false;
-  let lastBoundaryTs = current.lastBoundaryTs;
-  let outstandingTools = {
-    ...((current.outstandingTools as Record<string, any>) ?? {}),
-  };
-  let lastUserPrompt = current.lastUserPrompt;
-  const filesRead = { ...((current.topFilesRead as Record<string, number>) ?? {}) };
-  const filesEdited = {
-    ...((current.topFilesEdited as Record<string, number>) ?? {}),
-  };
-  const filesWritten = {
-    ...((current.topFilesWritten as Record<string, number>) ?? {}),
-  };
-  const toolNames = {
-    ...((current.toolUseNames as Record<string, number>) ?? {}),
-  };
-  const queued = [...((current.queued as any[]) ?? [])];
-  let recentEvents = [...((current.recentEvents as any[]) ?? [])];
+  const state = initState(current);
+  state.provider ??= "anthropic";
 
-  for (const event of newEvents) {
-    eventCount++;
-    // Some event types (e.g. `file-history-snapshot`) carry no top-level
-    // timestamp — their timestamp lives on a nested payload and they hold
-    // no aggregate-relevant data. Skip rather than letting an Invalid Date
-    // poison the session row.
-    const ts = event.timestamp ? new Date(event.timestamp) : null;
-    if (!ts || Number.isNaN(ts.getTime())) continue;
+  for (const raw of newEvents) {
+    const event = raw as ClaudeEventPayload;
+    state.events++;
+    if (!event.timestamp) continue;
+    const ts = updateTimestamps(state, event.timestamp);
+    if (!ts) continue;
 
-    if (!firstTs || ts < firstTs) firstTs = ts;
-    if (!lastTs || ts > lastTs) lastTs = ts;
+    if (event.cwd) state.cwd = event.cwd;
+    if (event.gitBranch) state.branch = event.gitBranch;
+    if (event.version) state.version = event.version;
 
-    // Update metadata (latest non-null)
-    if (event.cwd) cwd = event.cwd;
-    if (event.gitBranch) branch = event.gitBranch;
-    if (event.version) version = event.version;
-
-    // Add to recent events (ring buffer of 20)
-    recentEvents.push({
-      ts: event.timestamp,
-      type: event.type,
-      summary: summarizeEvent(event),
-    });
-    if (recentEvents.length > 20) {
-      recentEvents = recentEvents.slice(-20);
-    }
-
-    // ── Type-specific processing ─────────────────────────
+    pushRecent(state, event.timestamp, event.type, summarizeClaudeEvent(event));
 
     if (event.type === "user") {
-      if (!event.isSidechain) userMsgs++;
+      if (!event.isSidechain) state.userMsgs++;
 
-      // Process tool_results in user message content
       const content = event.message?.content;
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === "tool_result" && block.tool_use_id) {
-            // Remove from outstanding tools
-            delete outstandingTools[block.tool_use_id];
-            if (block.is_error) toolErrors++;
+            delete state.outstandingTools[block.tool_use_id];
+            if (block.is_error) state.toolErrors++;
           }
         }
       }
 
-      // Track prompts and title
-      if (isRealUserMessage(event)) {
-        const promptText = extractUserPromptText(event);
+      if (isRealClaudeUserMessage(event)) {
+        const promptText = extractClaudeUserPromptText(event);
         if (promptText) {
-          if (!title) title = promptText.split("\n")[0].slice(0, 80);
-          lastUserPrompt = promptText.slice(0, 800);
+          state.title ??= truncate(promptText.split("\n")[0] ?? promptText, 80);
+          state.lastUserPrompt = truncate(promptText, 800);
         }
-        // Flip in_turn on real user message
-        inTurn = true;
-        lastBoundaryTs = ts;
+        state.inTurn = true;
+        state.currentTurnId = null;
+        state.lastBoundaryTs = ts;
       }
     }
 
     if (event.type === "assistant") {
-      if (!event.isSidechain) assistantMsgs++;
-
+      if (!event.isSidechain) state.assistantMsgs++;
       const msg = event.message;
 
-      // Update model
-      if (msg?.model) model = msg.model;
+      if (msg?.model) state.model = msg.model;
 
-      // Token accounting — Claude 5m/1h cache writes both roll into
-      // tokensCacheWrite. Pricing (which needs the split) is deferred.
       if (msg?.usage) {
-        const u = msg.usage;
-        tokensIn += u.input_tokens ?? 0;
-        tokensOut += u.output_tokens ?? 0;
-        tokensCacheRead += u.cache_read_input_tokens ?? 0;
-        if (u.cache_creation) {
-          tokensCacheWrite +=
-            (u.cache_creation.ephemeral_5m_input_tokens ?? 0) +
-            (u.cache_creation.ephemeral_1h_input_tokens ?? 0);
-        } else if (u.cache_creation_input_tokens) {
-          tokensCacheWrite += u.cache_creation_input_tokens;
+        const usage = msg.usage;
+        state.tokensIn += usage.input_tokens ?? 0;
+        state.tokensOut += usage.output_tokens ?? 0;
+        state.tokensCacheRead += usage.cache_read_input_tokens ?? 0;
+        if (usage.cache_creation) {
+          state.tokensCacheWrite +=
+            (usage.cache_creation.ephemeral_5m_input_tokens ?? 0) +
+            (usage.cache_creation.ephemeral_1h_input_tokens ?? 0);
+        } else if (usage.cache_creation_input_tokens) {
+          state.tokensCacheWrite += usage.cache_creation_input_tokens;
         }
       }
 
-      // Process content blocks (tool_use)
       if (Array.isArray(msg?.content)) {
-        for (const block of msg!.content as ContentBlock[]) {
-          if (block.type === "tool_use" && block.id && block.name) {
-            toolCalls++;
-            incMap(toolNames, block.name);
+        for (const block of msg.content as ContentBlock[]) {
+          if (block.type !== "tool_use" || !block.id || !block.name) continue;
+          state.toolCalls++;
+          incMap(state.toolUseNames, block.name);
+          state.outstandingTools[block.id] = {
+            name: block.name,
+            desc: block.input
+              ? truncate(`${block.name} ${JSON.stringify(block.input)}`, 120)
+              : null,
+            started: ts.getTime(),
+          };
 
-            // Track outstanding tool
-            outstandingTools[block.id] = {
-              name: block.name,
-              desc: block.input
-                ? `${block.name} ${JSON.stringify(block.input).slice(0, 60)}`
-                : null,
-              started: ts.getTime(),
-            };
-
-            // Track file operations
-            const filePath =
-              block.input?.file_path ?? block.input?.path ?? null;
-            if (filePath && typeof filePath === "string") {
-              if (FILE_TOOLS_READ.has(block.name)) incMap(filesRead, filePath);
-              if (FILE_TOOLS_EDIT.has(block.name)) incMap(filesEdited, filePath);
-              if (FILE_TOOLS_WRITE.has(block.name))
-                incMap(filesWritten, filePath);
-            }
+          const filePath =
+            (typeof block.input?.["file_path"] === "string"
+              ? block.input["file_path"]
+              : null) ??
+            (typeof block.input?.["path"] === "string" ? block.input["path"] : null);
+          if (!filePath || typeof filePath !== "string") continue;
+          if (FILE_TOOLS_READ.has(block.name)) incMap(state.topFilesRead, filePath);
+          if (FILE_TOOLS_EDIT.has(block.name)) {
+            incMap(state.topFilesEdited, filePath);
+          }
+          if (FILE_TOOLS_WRITE.has(block.name)) {
+            incMap(state.topFilesWritten, filePath);
           }
         }
       }
 
-      // Turn boundary
       if (msg?.stop_reason === "end_turn") {
-        inTurn = false;
-        lastBoundaryTs = ts;
+        state.inTurn = false;
+        state.currentTurnId = null;
+        state.lastBoundaryTs = ts;
       }
     }
 
@@ -337,43 +370,267 @@ export function processEvents(
         event.attachment.prompt &&
         !event.attachment.prompt.startsWith("<task-notification")
       ) {
-        queued.push({
+        state.queued.push({
           prompt: event.attachment.prompt,
           ts: event.timestamp,
           mode: event.attachment.commandMode ?? null,
         });
-        inTurn = true;
+        state.inTurn = true;
       }
     }
   }
 
+  return finalizeState(state);
+}
+
+function summarizeCodexEvent(event: JsonObj): string {
+  const topType = asString(event.type) ?? "unknown";
+  const payload = isObj(event.payload) ? event.payload : null;
+  const payloadType = payload ? asString(payload.type) : null;
+
+  if (topType === "event_msg" && payloadType === "user_message") {
+    return truncate(asString(payload?.message) ?? "(user message)", 80);
+  }
+  if (topType === "event_msg" && payloadType === "agent_message") {
+    return truncate(asString(payload?.message) ?? "(assistant)", 80);
+  }
+  if (topType === "event_msg" && payloadType === "task_complete") {
+    return truncate(asString(payload?.last_agent_message) ?? "turn complete", 80);
+  }
+  if (topType === "event_msg" && payloadType === "turn_aborted") {
+    const reason = asString(payload?.reason);
+    return reason ? `turn aborted: ${reason}` : "turn aborted";
+  }
+  if (topType === "response_item" && payloadType) {
+    if (
+      payloadType === "function_call" ||
+      payloadType === "custom_tool_call" ||
+      payloadType === "web_search_call"
+    ) {
+      return `tool: ${asString(payload?.name) ?? payloadType}`;
+    }
+    if (
+      payloadType === "function_call_output" ||
+      payloadType === "custom_tool_call_output"
+    ) {
+      return `tool result: ${asString(payload?.call_id) ?? "call"}`;
+    }
+  }
+  if (topType === "event_msg" && payloadType === "exec_command_end") {
+    const command = Array.isArray(payload?.command)
+      ? (payload?.command as unknown[])
+          .map((part) => (typeof part === "string" ? part : ""))
+          .join(" ")
+          .trim()
+      : "";
+    return command ? truncate(`exec: ${command}`, 80) : "exec command";
+  }
+  if (topType === "event_msg" && payloadType === "patch_apply_end") {
+    return "patch apply";
+  }
+  if (topType === "event_msg" && payloadType === "web_search_end") {
+    return "web search";
+  }
+  if (topType === "turn_context") {
+    return "turn context";
+  }
+  if (topType === "session_meta") {
+    return "session meta";
+  }
+  return payloadType ? `${topType}.${payloadType}` : topType;
+}
+
+function trackCodexParsedCmd(state: SessionUpdates, parsedCmd: unknown): void {
+  if (!Array.isArray(parsedCmd)) return;
+  for (const part of parsedCmd) {
+    if (!isObj(part)) continue;
+    const op = asString(part.type);
+    const target = asString(part.path);
+    if (!op || !target) continue;
+    if (op === "read" || op === "search") incMap(state.topFilesRead, target);
+  }
+}
+
+function trackCodexPatchChanges(state: SessionUpdates, changes: unknown): void {
+  if (!isObj(changes)) return;
+  for (const [filePath, change] of Object.entries(changes)) {
+    if (!isObj(change)) continue;
+    const kind = asString(change.type);
+    if (kind === "update") incMap(state.topFilesEdited, filePath);
+    else if (kind === "add") incMap(state.topFilesWritten, filePath);
+  }
+}
+
+function toolDesc(name: string, args: JsonObj | null, rawArgs: string | null): string | null {
+  if (args) return truncate(`${name} ${JSON.stringify(args)}`, 120);
+  if (rawArgs) return truncate(`${name} ${rawArgs}`, 120);
+  return null;
+}
+
+function processCodexEvents(
+  current: CurrentSession,
+  newEvents: unknown[],
+): SessionUpdates {
+  const state = initState(current);
+
+  for (const raw of newEvents) {
+    if (!isObj(raw)) {
+      state.events++;
+      continue;
+    }
+
+    state.events++;
+    const topType = asString(raw.type) ?? "unknown";
+    const timestamp = asString(raw.timestamp);
+    if (!timestamp) continue;
+    const ts = updateTimestamps(state, timestamp);
+    if (!ts) continue;
+
+    pushRecent(state, timestamp, topType, summarizeCodexEvent(raw));
+
+    const payload = isObj(raw.payload) ? raw.payload : null;
+    const payloadType = payload ? asString(payload.type) : null;
+
+    if (topType === "session_meta") {
+      state.provider =
+        payload && asString(payload.model_provider) === "openai"
+          ? "openai"
+          : payload && asString(payload.model_provider) === "anthropic"
+            ? "anthropic"
+            : state.provider;
+      if (payload && asString(payload.cwd)) state.cwd = asString(payload.cwd);
+      if (payload && asString(payload.cli_version)) {
+        state.version = asString(payload.cli_version);
+      }
+      continue;
+    }
+
+    if (topType === "turn_context") {
+      if (payload && asString(payload.cwd)) state.cwd = asString(payload.cwd);
+      if (payload && asString(payload.model)) state.model = asString(payload.model);
+      continue;
+    }
+
+    if (topType === "event_msg" && payload && payloadType) {
+      if (payloadType === "task_started") {
+        state.inTurn = true;
+        state.currentTurnId = asString(payload.turn_id);
+        continue;
+      }
+
+      if (payloadType === "task_complete" || payloadType === "turn_aborted") {
+        state.inTurn = false;
+        state.currentTurnId = null;
+        state.lastBoundaryTs = ts;
+        continue;
+      }
+
+      if (payloadType === "user_message") {
+        const message = asString(payload.message);
+        state.userMsgs++;
+        if (message) {
+          state.title ??= truncate(message.split("\n")[0] ?? message, 80);
+          state.lastUserPrompt = truncate(message, 800);
+        }
+        state.inTurn = true;
+        state.lastBoundaryTs = ts;
+        continue;
+      }
+
+      if (payloadType === "agent_message") {
+        state.assistantMsgs++;
+        continue;
+      }
+
+      if (payloadType === "token_count") {
+        const info = payload.info;
+        const usage =
+          isObj(info) && isObj(info.last_token_usage) ? info.last_token_usage : null;
+        if (usage) {
+          state.tokensIn += asNumber(usage.input_tokens) ?? 0;
+          state.tokensCacheRead += asNumber(usage.cached_input_tokens) ?? 0;
+          state.tokensOut += asNumber(usage.output_tokens) ?? 0;
+          state.tokensReasoning += asNumber(usage.reasoning_output_tokens) ?? 0;
+        }
+        continue;
+      }
+
+      if (payloadType === "exec_command_end") {
+        delete state.outstandingTools[asString(payload.call_id) ?? ""];
+        trackCodexParsedCmd(state, payload.parsed_cmd);
+        if ((asNumber(payload.exit_code) ?? 0) !== 0) state.toolErrors++;
+        if (asString(payload.cwd)) state.cwd = asString(payload.cwd);
+        continue;
+      }
+
+      if (payloadType === "patch_apply_end") {
+        delete state.outstandingTools[asString(payload.call_id) ?? ""];
+        trackCodexPatchChanges(state, payload.changes);
+        if (payload.success === false) state.toolErrors++;
+        continue;
+      }
+
+      if (payloadType === "web_search_end") {
+        delete state.outstandingTools[asString(payload.call_id) ?? ""];
+        continue;
+      }
+
+      if (payloadType === "error") {
+        state.toolErrors++;
+        continue;
+      }
+    }
+
+    if (topType === "response_item" && payload && payloadType) {
+      if (
+        payloadType === "function_call" ||
+        payloadType === "custom_tool_call" ||
+        payloadType === "web_search_call"
+      ) {
+        const name = asString(payload.name) ?? payloadType;
+        const callId = asString(payload.call_id);
+        const args = parseJsonObject(payload.arguments);
+        state.toolCalls++;
+        incMap(state.toolUseNames, name);
+        if (callId) {
+          state.outstandingTools[callId] = {
+            name,
+            desc: toolDesc(name, args, asString(payload.arguments)),
+            started: ts.getTime(),
+          };
+        }
+        continue;
+      }
+
+      if (
+        payloadType === "function_call_output" ||
+        payloadType === "custom_tool_call_output"
+      ) {
+        const callId = asString(payload.call_id);
+        if (callId) delete state.outstandingTools[callId];
+      }
+    }
+  }
+
+  return finalizeState(state);
+}
+
+function finalizeState(state: SessionUpdates): SessionUpdates {
   return {
-    userMsgs,
-    assistantMsgs,
-    toolCalls,
-    toolErrors,
-    events: eventCount,
-    tokensIn,
-    tokensOut,
-    tokensCacheRead,
-    tokensCacheWrite,
-    tokensReasoning,
-    model,
-    version,
-    branch,
-    cwd,
-    firstTs,
-    lastTs,
-    title,
-    inTurn,
-    lastBoundaryTs,
-    outstandingTools,
-    lastUserPrompt,
-    topFilesRead: topN(filesRead, 5),
-    topFilesEdited: topN(filesEdited, 5),
-    topFilesWritten: topN(filesWritten, 5),
-    toolUseNames: topN(toolNames, 10),
-    queued,
-    recentEvents,
+    ...state,
+    topFilesRead: topN(state.topFilesRead, 5),
+    topFilesEdited: topN(state.topFilesEdited, 5),
+    topFilesWritten: topN(state.topFilesWritten, 5),
+    toolUseNames: topN(state.toolUseNames, 10),
   };
+}
+
+export function processEvents(
+  source: EventSource,
+  current: CurrentSession,
+  newEvents: unknown[],
+): SessionUpdates {
+  return source === "claude"
+    ? processClaudeEvents(current, newEvents)
+    : processCodexEvents(current, newEvents);
 }

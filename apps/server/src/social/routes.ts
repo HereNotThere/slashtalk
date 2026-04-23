@@ -8,6 +8,7 @@ import {
   sortByStateThenTime,
   loadInsightsForSessions,
 } from "../sessions/snapshot";
+import { HEARTBEAT_FRESH_S } from "../sessions/state";
 import { normalizeFullName } from "./github-sync";
 
 export const socialRoutes = (db: Database) =>
@@ -147,6 +148,9 @@ export const socialRoutes = (db: Database) =>
 
     // GET /api/feed/users — users in social graph with session counts
     .get("/feed/users", async ({ user }) => {
+      const freshHeartbeatCutoff = new Date(
+        Date.now() - HEARTBEAT_FRESH_S * 1000,
+      );
       const peerUserIds = await db
         .selectDistinct({ userId: userRepos.userId })
         .from(userRepos)
@@ -170,36 +174,60 @@ export const socialRoutes = (db: Database) =>
         .from(users)
         .where(inArray(users.id, userIds));
 
-      const result = [];
-      for (const peer of peerUsers) {
-        const sessionCount = await db
-          .select({ count: sql<number>`count(*)` })
+      const [sessionCountRows, activeCountRows, peerRepoRows] = await Promise.all([
+        db
+          .select({
+            userId: sessions.userId,
+            count: sql<number>`count(*)`,
+          })
           .from(sessions)
-          .where(eq(sessions.userId, peer.id));
-
-        const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
-        const activeCount = await db
-          .select({ count: sql<number>`count(*)` })
+          .where(inArray(sessions.userId, userIds))
+          .groupBy(sessions.userId),
+        db
+          .select({
+            userId: sessions.userId,
+            count: sql<number>`count(*)`,
+          })
           .from(sessions)
+          .innerJoin(heartbeats, eq(heartbeats.sessionId, sessions.sessionId))
           .where(
             and(
-              eq(sessions.userId, peer.id),
-              gt(sessions.lastTs, fifteenMinAgo)
-            )
-          );
-
-        const peerRepos = await db
-          .select({ fullName: repos.fullName })
+              inArray(sessions.userId, userIds),
+              gt(heartbeats.updatedAt, freshHeartbeatCutoff),
+            ),
+          )
+          .groupBy(sessions.userId),
+        db
+          .select({
+            userId: userRepos.userId,
+            fullName: repos.fullName,
+          })
           .from(userRepos)
           .innerJoin(repos, eq(repos.id, userRepos.repoId))
-          .where(eq(userRepos.userId, peer.id));
+          .where(inArray(userRepos.userId, userIds)),
+      ]);
 
+      const sessionCountByUser = new Map(
+        sessionCountRows.map((row) => [row.userId, row.count]),
+      );
+      const activeCountByUser = new Map(
+        activeCountRows.map((row) => [row.userId, row.count]),
+      );
+      const reposByUser = new Map<number, string[]>();
+      for (const row of peerRepoRows) {
+        const existing = reposByUser.get(row.userId);
+        if (existing) existing.push(row.fullName);
+        else reposByUser.set(row.userId, [row.fullName]);
+      }
+
+      const result = [];
+      for (const peer of peerUsers) {
         result.push({
           github_login: peer.githubLogin,
           avatar_url: peer.avatarUrl,
-          total_sessions: sessionCount[0]?.count ?? 0,
-          active_sessions: activeCount[0]?.count ?? 0,
-          repos: peerRepos.map((r) => r.fullName),
+          total_sessions: sessionCountByUser.get(peer.id) ?? 0,
+          active_sessions: activeCountByUser.get(peer.id) ?? 0,
+          repos: reposByUser.get(peer.id) ?? [],
         });
       }
 

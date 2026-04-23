@@ -164,6 +164,10 @@ function scheduleRefresh(): void {
   }, REFRESH_DEBOUNCE_MS);
 }
 
+export function refreshSoon(): void {
+  scheduleRefresh();
+}
+
 /** Stamp a teammate's head with a fresh PR-activity timestamp so the overlay
  *  renders its celebration animation. The stamp self-expires after the TTL so
  *  later refreshes don't keep replaying the animation. */

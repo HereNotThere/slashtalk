@@ -459,6 +459,7 @@ export async function ingestChunk(args: {
   project: string;
   fromLineSeq: number;
   prefixHash: string;
+  source?: "claude" | "codex";
   body: string;
 }): Promise<IngestResponse> {
   if (!creds) throw new Error("Not signed in");
@@ -467,6 +468,7 @@ export async function ingestChunk(args: {
     session: args.session,
     fromLineSeq: String(args.fromLineSeq),
     prefixHash: args.prefixHash,
+    source: args.source ?? "claude",
   });
   const res = await fetch(`${baseUrl()}/v1/ingest?${qs.toString()}`, {
     method: "POST",

@@ -33,7 +33,7 @@ const SCHEMA = {
   required: ["summary", "highlights"],
 };
 
-const SYSTEM = `You narrate a live Claude Code session so a teammate glancing at a sidebar instantly gets what's going on.
+const SYSTEM = `You narrate a live coding session so a teammate glancing at a sidebar instantly gets what's going on.
 
 summary: 3-5 present-tense sentences. Punchy verbs, concrete nouns. Name the file, the function, the bug, the approach being tried. Show momentum — what was just attempted, what's happening now, what's stuck.
 

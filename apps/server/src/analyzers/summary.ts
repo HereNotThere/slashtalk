@@ -29,7 +29,7 @@ const SCHEMA = {
   required: ["title", "description"],
 };
 
-const SYSTEM = `You label live Claude Code sessions so teammates can see what each session is about.
+const SYSTEM = `You label live coding sessions so teammates can see what each session is about.
 
 Given session metadata (recent prompt, files being edited, tools used), emit a concise title and a 1-2 sentence description. Be specific to the technical work, not generic.
 
@@ -37,7 +37,7 @@ Good examples:
 - title: "Refactoring Redis pub/sub for soft-fail"
 - title: "Debugging WebSocket reconnect backoff"
 
-Avoid vague labels like "Coding with Claude" or "Software development session".`;
+Avoid vague labels like "Coding session" or "Software development session".`;
 
 function buildPrompt(ctx: AnalyzerContext): string {
   const s = ctx.session;
@@ -93,7 +93,7 @@ export const summaryAnalyzer: Analyzer<SummaryOutput> = {
       prompt,
       toolName: "emit_summary",
       toolDescription:
-        "Emit the title and 1-2 sentence description for this Claude Code session.",
+        "Emit the title and 1-2 sentence description for this coding session.",
       schema: SCHEMA,
       maxTokens: 300,
     });

@@ -405,7 +405,7 @@ function AgentChat({
   useEffect(() => {
     if (!sessionId || !seed || seedSent.current) return;
     seedSent.current = true;
-    void sendText(seed);
+    void sendText(seed, { appendOptimistic: false });
     // sendText closes over current state intentionally; guard prevents repeats.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, seed]);
@@ -431,14 +431,25 @@ function AgentChat({
     setNextCursor(page.nextCursor);
   };
 
-  const sendText = async (text: string): Promise<void> => {
+  const sendText = async (
+    text: string,
+    opts: { appendOptimistic?: boolean } = {},
+  ): Promise<void> => {
     if (!sessionId) return;
     setBusy(true);
-    setMsgs((prev) => [
-      ...prev,
-      { role: "user", text },
-      { role: "assistant", blocks: [], phase: "Working...", done: false },
-    ]);
+    if (opts.appendOptimistic !== false) {
+      setMsgs((prev) => [
+        ...prev,
+        { role: "user", text },
+        { role: "assistant", blocks: [], phase: "Working...", done: false },
+      ]);
+    } else {
+      setMsgs((prev) => {
+        const last = prev[prev.length - 1];
+        if (!last || last.role !== "assistant" || last.done) return prev;
+        return [...prev.slice(0, -1), { ...last, phase: "Working..." }];
+      });
+    }
     try {
       await window.chatheads.agents.send(agentId, text);
     } catch (err) {

@@ -152,8 +152,15 @@ function sessionIdFromPath(filePath: string, source: EventSource): string | null
 
 function matchQuoted(text: string, key: string): string | null {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(new RegExp(`"${escaped}":"([^"]+)"`));
-  return match?.[1] ?? null;
+  const match = text.match(
+    new RegExp(`"${escaped}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`)
+  );
+  if (!match?.[1]) return null;
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return match[1];
+  }
 }
 
 async function readHeader(
@@ -187,13 +194,55 @@ function scanClaudeHeader(buf: Buffer, filePath: string): SessionHeader {
 
 function scanCodexHeader(buf: Buffer, filePath: string): SessionHeader {
   const text = buf.toString("utf8");
-  const sessionId =
-    matchQuoted(text, "id") ?? sessionIdFromPath(filePath, "codex");
-  const cwd = matchQuoted(text, "cwd");
+  let sessionId: string | null = null;
+  let cwd: string | null = null;
+  let version: string | null = null;
+  let start = 0;
+  while (start < text.length) {
+    const nl = text.indexOf("\n", start);
+    if (nl === -1) break;
+    const line = text.slice(start, nl);
+    start = nl + 1;
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as {
+        id?: unknown;
+        cwd?: unknown;
+        cli_version?: unknown;
+        payload?: {
+          id?: unknown;
+          cwd?: unknown;
+          cli_version?: unknown;
+        };
+      };
+      const payload =
+        parsed.payload && typeof parsed.payload === "object"
+          ? parsed.payload
+          : null;
+      if (!sessionId) {
+        const value = payload?.id ?? parsed.id;
+        if (typeof value === "string") sessionId = value;
+      }
+      if (!cwd) {
+        const value = payload?.cwd ?? parsed.cwd;
+        if (typeof value === "string") cwd = value;
+      }
+      if (!version) {
+        const value = payload?.cli_version ?? parsed.cli_version;
+        if (typeof value === "string") version = value;
+      }
+      if (sessionId && cwd && version) break;
+    } catch {
+      // Partial line — regex fallback below can still recover fields.
+    }
+  }
+  sessionId ??= matchQuoted(text, "id") ?? sessionIdFromPath(filePath, "codex");
+  cwd ??= matchQuoted(text, "cwd");
+  version ??= matchQuoted(text, "cli_version");
   return {
     sessionId,
     cwd,
-    version: matchQuoted(text, "cli_version"),
+    version,
     project: cwd ? slugifyPath(cwd) : null,
   };
 }

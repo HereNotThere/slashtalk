@@ -1,10 +1,12 @@
 // Long-lived WebSocket connection to the slashtalk backend.
 //
-// Subscribes the desktop to server-pushed events on the user's social graph —
-// `pr_activity` from the GitHub PR poller, plus `session_insights_updated`
-// and `session_updated` from the analyzer cron and ingest path. Opened on
-// sign-in (or at cold start if creds were restored), torn down on sign-out.
-// Reconnects with capped exponential backoff.
+// Subscribes the desktop to server-pushed events on the user's social graph:
+//   - `pr_activity` — teammate PR activity (animates chat heads)
+//   - `session_updated` — a session's aggregates or live-state changed
+//   - `session_insights_updated` — analyzer cron published new output
+//
+// Opens on sign-in (or at cold start if creds were restored) and tears down
+// on sign-out. Reconnects with capped exponential backoff.
 //
 // Uses the `ws` npm package rather than a global WebSocket — Electron 33
 // ships Node 20 which doesn't expose `WebSocket` globally (v22+ only), so
@@ -13,7 +15,10 @@
 import WebSocket from "ws";
 import * as backend from "./backend";
 import { createEmitter } from "./emitter";
-import type { PrActivityMessage } from "@slashtalk/shared";
+import type {
+  PrActivityMessage,
+  SessionUpdatedMessage,
+} from "@slashtalk/shared";
 
 export interface SessionInsightsUpdatedMessage {
   type: "session_insights_updated";
@@ -22,13 +27,6 @@ export interface SessionInsightsUpdatedMessage {
   analyzer: string;
   output: unknown;
   analyzed_at: string;
-}
-
-export interface SessionUpdatedMessage {
-  type: "session_updated";
-  session_id: string;
-  repo_id: number;
-  [k: string]: unknown;
 }
 
 type ServerMessage =

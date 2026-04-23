@@ -1033,9 +1033,8 @@ ws.onPrActivity((msg) => {
   rail.markPrActivity(msg.login);
 });
 
-// A freshly ingested session belongs to the signed-in user — drop any stale
-// self-head cache so the next open of the info window refetches. Peer caches
-// are unaffected (peer sessions arrive via /api/feed, not the uploader).
+// Local uploader ingestion invalidates the self-head cache synchronously —
+// faster than waiting for the server-side WS echo for your own sessions.
 uploader.onIngested(() => {
   const state = backend.getAuthState();
   if (!state.signedIn) return;
@@ -1054,6 +1053,10 @@ ws.onSessionInsightsUpdated((msg) => {
 });
 
 ws.onSessionUpdated((msg) => {
+  // Drop the owner's cache so a non-selected head goes stale-free on next
+  // hover. scheduleInfoRefresh then coalesces any UI refresh for the
+  // currently-selected head across bursty events.
+  sessionCache.delete(rail.userHeadId(msg.github_login));
   scheduleInfoRefresh(msg.session_id);
   broadcastToMain("ws:sessionUpdated", msg);
 });

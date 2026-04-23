@@ -4,6 +4,7 @@ import {
   SOURCES,
   type EventSource,
   type IngestResponse,
+  type SessionUpdatedMessage,
   type SyncStateEntry,
 } from "@slashtalk/shared";
 import type { Database } from "../db";
@@ -192,15 +193,22 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             .where(eq(sessions.sessionId, query.session))
             .limit(1);
 
-          if (finalSession?.repoId) {
-            await redis.publish(`repo:${finalSession.repoId}`, {
+          if (finalSession) {
+            const msg: SessionUpdatedMessage = {
               type: "session_updated",
               session_id: query.session,
               user_id: user.id,
               github_login: user.githubLogin,
-              repo_id: finalSession.repoId,
+              repo_id: finalSession.repoId ?? null,
               last_ts: finalSession.lastTs?.toISOString(),
-            });
+            };
+            // user:<id> always fires so own-session updates reach the owner
+            // even before (or if) repo matching resolves. repo:<id> fans out
+            // to teammates sharing that repo.
+            await redis.publish(`user:${user.id}`, msg);
+            if (finalSession.repoId) {
+              await redis.publish(`repo:${finalSession.repoId}`, msg);
+            }
           }
         }
 
@@ -299,15 +307,20 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             lastTs: session.lastTs,
           });
 
-          if (newState !== prevState && session.repoId) {
-            await redis.publish(`repo:${session.repoId}`, {
+          if (newState !== prevState) {
+            const msg: SessionUpdatedMessage = {
               type: "session_updated",
               session_id: body.sessionId,
               user_id: user.id,
               github_login: user.githubLogin,
-              repo_id: session.repoId,
+              repo_id: session.repoId ?? null,
+              last_ts: session.lastTs?.toISOString(),
               state: newState,
-            });
+            };
+            await redis.publish(`user:${user.id}`, msg);
+            if (session.repoId) {
+              await redis.publish(`repo:${session.repoId}`, msg);
+            }
           }
         }
 

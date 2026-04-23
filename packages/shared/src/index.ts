@@ -146,6 +146,27 @@ export interface PrActivityMessage {
   ts: string;
 }
 
+/**
+ * WS push: a session's aggregates or live-state changed.
+ *
+ * Fires on ingest (new events) and on heartbeat (state transition). Clients
+ * should treat it as "invalidate your cached snapshot for this session" and
+ * re-fetch via `/api/sessions` or `/api/feed` — the message carries enough
+ * to locate the head but not a full snapshot.
+ */
+export interface SessionUpdatedMessage {
+  type: "session_updated";
+  session_id: string;
+  user_id: number;
+  github_login: string;
+  /** null when session→repo match hasn't resolved yet */
+  repo_id: number | null;
+  /** Present when fired from ingest; ISO8601 */
+  last_ts?: string;
+  /** Present when fired from heartbeat state-change */
+  state?: SessionState;
+}
+
 /** Standard API response wrapper */
 export interface ApiResponse<T> {
   data: T;

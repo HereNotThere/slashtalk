@@ -28,6 +28,33 @@ interface Bindings {
   msgSend_arrayIndex: (obj: bigint, sel: bigint, idx: bigint) => bigint;
   // `[obj isKindOfClass:cls]` — (id, SEL, Class) → BOOL.
   msgSend_isKind: (obj: bigint, sel: bigint, cls: bigint) => boolean;
+  // `[img initWithSize:NSSize]`. NSSize is 16 bytes (2 doubles); the Darwin
+  // arm64 ABI passes it as two consecutive double registers, so we declare
+  // it as (double, double) rather than as a koffi struct.
+  msgSend_initSize: (obj: bigint, sel: bigint, w: number, h: number) => bigint;
+  // `[NSBezierPath bezierPathWithRoundedRect:NSRect xRadius:d yRadius:d]` —
+  // NSRect is an HFA of 4 doubles, passes as 4 FP regs on arm64.
+  msgSend_bezier: (
+    obj: bigint,
+    sel: bigint,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    rx: number,
+    ry: number,
+  ) => bigint;
+  // `[img setCapInsets:NSEdgeInsets]` — 4 doubles (top/left/bottom/right).
+  msgSend_insets: (
+    obj: bigint,
+    sel: bigint,
+    t: number,
+    l: number,
+    b: number,
+    r: number,
+  ) => void;
+  // `[img setResizingMode:NSInteger]`.
+  msgSend_pn: (obj: bigint, sel: bigint, n: bigint) => void;
 }
 
 let bindings: Bindings | null = null;
@@ -84,6 +111,35 @@ function load(): Bindings | null {
       "intptr_t",
       "intptr_t",
     ]),
+    msgSend_initSize: objc.func("objc_msgSend", "intptr_t", [
+      "intptr_t",
+      "intptr_t",
+      "double",
+      "double",
+    ]),
+    msgSend_bezier: objc.func("objc_msgSend", "intptr_t", [
+      "intptr_t",
+      "intptr_t",
+      "double",
+      "double",
+      "double",
+      "double",
+      "double",
+      "double",
+    ]),
+    msgSend_insets: objc.func("objc_msgSend", "void", [
+      "intptr_t",
+      "intptr_t",
+      "double",
+      "double",
+      "double",
+      "double",
+    ]),
+    msgSend_pn: objc.func("objc_msgSend", "void", [
+      "intptr_t",
+      "intptr_t",
+      "intptr_t",
+    ]),
   };
   return bindings;
 }
@@ -136,12 +192,16 @@ export function setMacCornerRadius(
   b.msgSend_pd(layer, b.sel_registerName("setCornerRadius:"), radius);
   b.msgSend_pb(layer, b.sel_registerName("setMasksToBounds:"), true);
 
-  // Round the NSVisualEffectView too. On macOS 14 / 15 the parent
-  // `masksToBounds` doesn't always clip the vibrancy layer (it has its own
-  // compositing path), leaving a thin rectangular frost edge visible outside
-  // the pill. macOS 26 no-ops this because the newer compositor already clips
-  // siblings. Harmless to call everywhere; the selector is idempotent.
-  roundVisualEffectSubviews(b, contentView, radius);
+  // Clip the NSVisualEffectView via its documented `maskImage` API. The
+  // contentView's `masksToBounds` does not reach the vibrancy backdrop on
+  // macOS 14/15 (it has a separate compositing path), and neither does
+  // setting `cornerRadius` on the NSVisualEffectView's own backing layer —
+  // both get ignored, leaving a thin rectangular frost halo outside the
+  // pill. `setMaskImage:` with a stretchable rounded-rect image is the
+  // Apple-recommended fix; the system blends the vibrancy against the
+  // image's alpha. macOS 26 already clips siblings at composite time, so
+  // the mask is redundant but harmless there.
+  maskVisualEffectSubviews(b, contentView, radius);
 
   // System shadow (hasShadow:true) is cached against the original
   // rectangular alpha mask; invalidate so macOS recomputes it against our
@@ -167,7 +227,63 @@ export function setMacCornerRadius(
   }
 }
 
-function roundVisualEffectSubviews(
+// Cache the stretchable pill mask image per radius. NSImage has a refcount;
+// we hold a strong reference in JS-land for the process lifetime. The image
+// is tiny (~2r × 2r alpha) and there's typically one pill size in the app.
+const maskImageCache = new Map<number, bigint>();
+
+function pillMaskImage(b: Bindings, radius: number): bigint {
+  const cached = maskImageCache.get(radius);
+  if (cached) return cached;
+
+  // Source image is a square of side = 2*radius (a full "two-caps-touching"
+  // pill). capInsets freeze top/bottom caps; the 1-row middle tiles
+  // vertically at any window height.
+  const side = radius * 2;
+  const NSImage = b.objc_getClass("NSImage");
+  const NSColor = b.objc_getClass("NSColor");
+  const NSBezierPath = b.objc_getClass("NSBezierPath");
+
+  const alloc = b.msgSend_pp(NSImage, b.sel_registerName("alloc"));
+  const img = b.msgSend_initSize(
+    alloc,
+    b.sel_registerName("initWithSize:"),
+    side,
+    side,
+  );
+
+  b.msgSend_pp(img, b.sel_registerName("lockFocus"));
+  const white = b.msgSend_pp(NSColor, b.sel_registerName("whiteColor"));
+  b.msgSend_pp(white, b.sel_registerName("setFill"));
+  const path = b.msgSend_bezier(
+    NSBezierPath,
+    b.sel_registerName("bezierPathWithRoundedRect:xRadius:yRadius:"),
+    0,
+    0,
+    side,
+    side,
+    radius,
+    radius,
+  );
+  b.msgSend_pp(path, b.sel_registerName("fill"));
+  b.msgSend_pp(img, b.sel_registerName("unlockFocus"));
+
+  b.msgSend_insets(
+    img,
+    b.sel_registerName("setCapInsets:"),
+    radius,
+    0,
+    radius,
+    0,
+  );
+  // NSImageResizingModeStretch = 1.
+  b.msgSend_pn(img, b.sel_registerName("setResizingMode:"), 1n);
+
+  maskImageCache.set(radius, img);
+  return img;
+}
+
+function maskVisualEffectSubviews(
   b: Bindings,
   contentView: bigint,
   radius: number,
@@ -176,22 +292,15 @@ function roundVisualEffectSubviews(
   if (!vfvClass) return;
   const subviews = b.msgSend_pp(contentView, b.sel_registerName("subviews"));
   if (!subviews) return;
-  // NSArray count returns NSUInteger; fits in intptr_t for any realistic tree.
   const count = Number(b.msgSend_pp(subviews, b.sel_registerName("count")));
   const objectAtIndex = b.sel_registerName("objectAtIndex:");
   const isKindOfClass = b.sel_registerName("isKindOfClass:");
-  const setWantsLayer = b.sel_registerName("setWantsLayer:");
-  const layerSel = b.sel_registerName("layer");
-  const setCornerRadius = b.sel_registerName("setCornerRadius:");
-  const setMasksToBounds = b.sel_registerName("setMasksToBounds:");
+  const setMaskImage = b.sel_registerName("setMaskImage:");
+  const mask = pillMaskImage(b, radius);
   for (let i = 0; i < count; i += 1) {
     const sub = b.msgSend_arrayIndex(subviews, objectAtIndex, BigInt(i));
     if (!sub) continue;
     if (!b.msgSend_isKind(sub, isKindOfClass, vfvClass)) continue;
-    b.msgSend_pb(sub, setWantsLayer, true);
-    const subLayer = b.msgSend_pp(sub, layerSel);
-    if (!subLayer) continue;
-    b.msgSend_pd(subLayer, setCornerRadius, radius);
-    b.msgSend_pb(subLayer, setMasksToBounds, true);
+    b.msgSend_ppp(sub, setMaskImage, mask);
   }
 }

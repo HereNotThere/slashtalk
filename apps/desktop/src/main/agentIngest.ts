@@ -5,34 +5,15 @@
 // usage.
 
 import type { AgentSessionRow } from "@slashtalk/shared";
-import * as backend from "./backend";
 import * as chatheadsAuth from "./chatheadsAuth";
 import type { LocalAgent } from "./agentStore";
 
-let loggedDisabled = false;
 let loggedUnauthorized = false;
 
-function isLocalUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname;
-    return host === "localhost" || host === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
+const DEFAULT_MCP_BASE_URL = "https://chatheads.onrender.com";
 
-function baseUrl(): string | null {
-  const explicit = process.env["SLASHTALK_MCP_BASE_URL"];
-  if (explicit) return explicit;
-  return isLocalUrl(backend.getBaseUrl()) ? "http://localhost:3000" : null;
-}
-
-function logDisabledOnce(): void {
-  if (loggedDisabled) return;
-  loggedDisabled = true;
-  console.log(
-    "[agentIngest] MCP disabled; set SLASHTALK_MCP_BASE_URL to enable team agent summaries",
-  );
+function baseUrl(): string {
+  return process.env["SLASHTALK_MCP_BASE_URL"] ?? DEFAULT_MCP_BASE_URL;
 }
 
 function logUnauthorizedOnce(): void {
@@ -60,10 +41,6 @@ export interface UpsertSessionPayload {
 export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
   const token = chatheadsAuth.getToken();
   const base = baseUrl();
-  if (!base) {
-    logDisabledOnce();
-    return;
-  }
   if (!token) {
     // Not signed into the Slashtalk backend yet. Skip silently — teammates
     // can't see any ingest anyway, and the agent still runs locally.
@@ -103,10 +80,6 @@ async function listSessions(params: {
   const token = chatheadsAuth.getToken();
   if (!token) return [];
   const base = baseUrl();
-  if (!base) {
-    logDisabledOnce();
-    return [];
-  }
   try {
     const url = new URL(`${base}/v1/agent_sessions`);
     if (params.userLogin) url.searchParams.set("user_login", params.userLogin);

@@ -23,7 +23,7 @@ export interface InstallStatus {
 }
 
 const MCP_URL =
-  process.env["SLASHTALK_MCP_URL"] ?? "http://localhost:3000/mcp";
+  process.env["SLASHTALK_MCP_URL"] ?? "https://chatheads.onrender.com/mcp";
 const MCP_KEY = "slashtalk-mcp";
 
 interface ConfigShape {

@@ -1,9 +1,22 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  AgentHistoryPage,
+  AgentSessionRow,
+  AgentSessionSummary,
+  AgentStreamEvent,
+  AgentSummary,
   BackendAuthState,
   ChatHead,
+  ChatHeadsAuthState,
   ChatHeadsBridge,
+  CreateAgentInput,
+  GithubConnectState,
+  GithubPendingConnect,
   InfoSession,
+  McpInstallStatus,
+  McpPresenceDetail,
+  McpTarget,
+  McpTargetState,
   RailDebugSnapshot,
   RepoSummary,
   TrackedRepo,
@@ -20,6 +33,76 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 }
 
 const bridge: ChatHeadsBridge = {
+  auth: {
+    getState: () =>
+      ipcRenderer.invoke("chatheads:getAuthState") as Promise<ChatHeadsAuthState>,
+    signIn: () => ipcRenderer.invoke("chatheads:signIn") as Promise<void>,
+    cancelSignIn: () =>
+      ipcRenderer.invoke("chatheads:cancelSignIn") as Promise<void>,
+    signOut: () => ipcRenderer.invoke("chatheads:signOut") as Promise<void>,
+    onState: (cb) => subscribe<ChatHeadsAuthState>("chatheads:authState", cb),
+  },
+
+  mcp: {
+    install: (target: McpTarget) =>
+      ipcRenderer.invoke("mcp:install", target) as Promise<McpTargetState>,
+    uninstall: (target: McpTarget) =>
+      ipcRenderer.invoke("mcp:uninstall", target) as Promise<McpTargetState>,
+    status: () => ipcRenderer.invoke("mcp:status") as Promise<McpInstallStatus>,
+    url: () => ipcRenderer.invoke("mcp:url") as Promise<string>,
+    detailForHead: (headId) =>
+      ipcRenderer.invoke("mcp:detailForHead", headId) as Promise<McpPresenceDetail | null>,
+  },
+
+  github: {
+    isConfigured: () =>
+      ipcRenderer.invoke("github:isConfigured") as Promise<boolean>,
+    getState: () =>
+      ipcRenderer.invoke("github:getState") as Promise<GithubConnectState>,
+    connect: () =>
+      ipcRenderer.invoke("github:connect") as Promise<GithubPendingConnect>,
+    cancelConnect: () =>
+      ipcRenderer.invoke("github:cancelConnect") as Promise<void>,
+    disconnect: () => ipcRenderer.invoke("github:disconnect") as Promise<void>,
+    onState: (cb) => subscribe<GithubConnectState>("github:state", cb),
+  },
+
+  agents: {
+    isConfigured: () =>
+      ipcRenderer.invoke("agents:isConfigured") as Promise<boolean>,
+    setApiKey: (key) =>
+      ipcRenderer.invoke("agents:setApiKey", key) as Promise<void>,
+    clearApiKey: () => ipcRenderer.invoke("agents:clearApiKey") as Promise<void>,
+    onConfiguredChange: (cb) => subscribe<boolean>("agents:configured", cb),
+    list: () => ipcRenderer.invoke("agents:list") as Promise<AgentSummary[]>,
+    create: (input: CreateAgentInput) =>
+      ipcRenderer.invoke("agents:create", input) as Promise<AgentSummary>,
+    remove: (id) => ipcRenderer.invoke("agents:remove", id) as Promise<void>,
+    send: (agentId, text) =>
+      ipcRenderer.invoke("agents:send", agentId, text) as Promise<void>,
+    history: (agentId, cursor) =>
+      ipcRenderer.invoke("agents:history", agentId, cursor) as Promise<AgentHistoryPage>,
+    listSessions: (agentId) =>
+      ipcRenderer.invoke("agents:listSessions", agentId) as Promise<AgentSessionSummary[]>,
+    newSession: (agentId) =>
+      ipcRenderer.invoke("agents:newSession", agentId) as Promise<AgentSessionSummary>,
+    selectSession: (agentId, sessionId) =>
+      ipcRenderer.invoke("agents:selectSession", agentId, sessionId) as Promise<void>,
+    ensureSessionUsage: (agentId, sessionId) =>
+      ipcRenderer.invoke("agents:ensureSessionUsage", agentId, sessionId) as Promise<void>,
+    removeSession: (agentId, sessionId) =>
+      ipcRenderer.invoke("agents:removeSession", agentId, sessionId) as Promise<void>,
+    popOut: (agentId, sessionId) =>
+      ipcRenderer.invoke("agents:popOut", agentId, sessionId) as Promise<void>,
+    onEvent: (cb) => subscribe<AgentStreamEvent>("agents:event", cb),
+    onListChange: (cb) => subscribe<AgentSummary[]>("agents:listChange", cb),
+    onSessionsChange: (cb) =>
+      subscribe<{ agentId: string; sessions: AgentSessionSummary[] }>(
+        "agents:sessionsChange",
+        cb,
+      ),
+  },
+
   list: () => ipcRenderer.invoke("heads:list") as Promise<ChatHead[]>,
   onUpdate: (cb) => subscribe<ChatHead[]>("heads:update", cb),
 
@@ -65,6 +148,11 @@ const bridge: ChatHeadsBridge = {
   preloadSessions: (headId) =>
     ipcRenderer.invoke("sessions:preload", headId) as Promise<void>,
 
+  listAgentSessionsForAgent: (agentId) =>
+    ipcRenderer.invoke("agentSessions:forAgent", agentId) as Promise<
+      AgentSessionRow[]
+    >,
+
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,
 
@@ -72,6 +160,10 @@ const bridge: ChatHeadsBridge = {
     ipcRenderer.invoke("clipboard:writeText", text) as Promise<void>,
   openExternal: (url) =>
     ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
+  selectDirectory: (defaultPath) =>
+    ipcRenderer.invoke("dialog:selectDirectory", defaultPath) as Promise<
+      string | null
+    >,
 
   requestResize: (height) =>
     ipcRenderer.invoke("window:requestResize", height) as Promise<void>,

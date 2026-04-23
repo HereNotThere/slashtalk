@@ -5,25 +5,9 @@
 // arriving partial PUT can't wipe state a newer one already wrote.
 
 import { z } from "zod";
+import type { AgentSessionRow } from "@slashtalk/shared";
 import * as db from "./db.ts";
 import { log } from "./server.ts";
-
-// Inlined from the old @chatheads/shared package. When we fold into
-// @slashtalk/shared (merge plan Phase 1), move this back out and re-import.
-interface AgentSessionRow {
-  user_login: string;
-  agent_id: string;
-  session_id: string;
-  mode: "cloud" | "local";
-  visibility: "private" | "team";
-  name: string | null;
-  started_at: string; // ISO timestamp
-  ended_at: string | null; // ISO timestamp
-  last_activity: string; // ISO timestamp
-  summary: string | null;
-  summary_model: string | null;
-  summary_ts: string | null; // ISO timestamp
-}
 
 const LIST_LIMIT = 50;
 

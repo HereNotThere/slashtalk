@@ -559,8 +559,10 @@ function ActivityRow({ event }: { event: RecentEvent }): JSX.Element {
 
 function fmtTokens(tokens: TokenUsage | undefined): string | null {
   if (!tokens) return null;
-  const total =
-    tokens.in + tokens.out + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
+  // Exclude cacheRead: with prompt caching, the same cached prefix is re-read
+  // every turn, so summing it across turns multiplies unique tokens by the
+  // turn count. cacheWrite already accounts for what's in the cache.
+  const total = tokens.in + tokens.out + tokens.cacheWrite + tokens.reasoning;
   if (total <= 0) return null;
   if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}M`;
   if (total >= 1_000) return `${(total / 1_000).toFixed(1)}k`;

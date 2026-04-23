@@ -4,6 +4,7 @@ import {
   SOURCES,
   type EventSource,
   type IngestResponse,
+  type SessionUpdatedMessage,
   type SyncStateEntry,
 } from "@slashtalk/shared";
 import type { Database } from "../db";
@@ -192,15 +193,20 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             .where(eq(sessions.sessionId, query.session))
             .limit(1);
 
+          // Only publish when we've resolved a repo — clients dedupe by
+          // receiving exactly once via `repo:<id>`. The session owner's own
+          // cache is already invalidated locally by `uploader.onIngested`,
+          // so we don't need a user-channel echo.
           if (finalSession?.repoId) {
-            await redis.publish(`repo:${finalSession.repoId}`, {
+            const msg: SessionUpdatedMessage = {
               type: "session_updated",
               session_id: query.session,
               user_id: user.id,
               github_login: user.githubLogin,
               repo_id: finalSession.repoId,
               last_ts: finalSession.lastTs?.toISOString(),
-            });
+            };
+            await redis.publish(`repo:${finalSession.repoId}`, msg);
           }
         }
 
@@ -300,14 +306,16 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
           });
 
           if (newState !== prevState && session.repoId) {
-            await redis.publish(`repo:${session.repoId}`, {
+            const msg: SessionUpdatedMessage = {
               type: "session_updated",
               session_id: body.sessionId,
               user_id: user.id,
               github_login: user.githubLogin,
               repo_id: session.repoId,
+              last_ts: session.lastTs?.toISOString(),
               state: newState,
-            });
+            };
+            await redis.publish(`repo:${session.repoId}`, msg);
           }
         }
 

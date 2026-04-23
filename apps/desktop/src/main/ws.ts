@@ -1,21 +1,49 @@
 // Long-lived WebSocket connection to the slashtalk backend.
 //
-// Subscribes the desktop to server-pushed events on the user's social graph —
-// today, just `pr_activity` from the GitHub PR poller. The connection is
-// opened on sign-in (or at cold start if creds were restored) and torn down
+// Subscribes the desktop to server-pushed events on the user's social graph:
+//   - `pr_activity` — teammate PR activity (animates chat heads)
+//   - `session_updated` — a session's aggregates or live-state changed
+//   - `session_insights_updated` — analyzer cron published new output
+//
+// Opens on sign-in (or at cold start if creds were restored) and tears down
 // on sign-out. Reconnects with capped exponential backoff.
+//
+// Uses the `ws` npm package rather than a global WebSocket — Electron 33
+// ships Node 20 which doesn't expose `WebSocket` globally (v22+ only), so
+// `new WebSocket(url)` throws "WebSocket is not defined" intermittently.
 
+import WebSocket from "ws";
 import * as backend from "./backend";
 import { createEmitter } from "./emitter";
-import type { PrActivityMessage } from "@slashtalk/shared";
+import type {
+  PrActivityMessage,
+  SessionUpdatedMessage,
+} from "@slashtalk/shared";
+
+export interface SessionInsightsUpdatedMessage {
+  type: "session_insights_updated";
+  session_id: string;
+  repo_id: number;
+  analyzer: string;
+  output: unknown;
+  analyzed_at: string;
+}
 
 type ServerMessage =
   | PrActivityMessage
+  | SessionInsightsUpdatedMessage
+  | SessionUpdatedMessage
   | { type: "ping" }
   | { type: string; [k: string]: unknown };
 
 const prActivity = createEmitter<PrActivityMessage>();
 export const onPrActivity = prActivity.on;
+
+const sessionInsightsUpdated = createEmitter<SessionInsightsUpdatedMessage>();
+export const onSessionInsightsUpdated = sessionInsightsUpdated.on;
+
+const sessionUpdated = createEmitter<SessionUpdatedMessage>();
+export const onSessionUpdated = sessionUpdated.on;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -92,6 +120,10 @@ function open(): void {
     }
     if (msg.type === "pr_activity") {
       prActivity.emit(msg as PrActivityMessage);
+    } else if (msg.type === "session_insights_updated") {
+      sessionInsightsUpdated.emit(msg as SessionInsightsUpdatedMessage);
+    } else if (msg.type === "session_updated") {
+      sessionUpdated.emit(msg as SessionUpdatedMessage);
     }
     // Other types (ping, future) are ignored — connection liveness is handled
     // by the server's keepalive frames; we don't echo.

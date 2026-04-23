@@ -3,6 +3,8 @@ import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 
 type Status = { kind: "ok" | "err"; text: string } | null;
 
+const PRIMARY_GRADIENT = "linear-gradient(180deg, #2ECF81 0%, #0BB764 100%)";
+
 export function SlashtalkSection(): JSX.Element {
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
   const [tracked, setTracked] = useState<TrackedRepo[]>([]);
@@ -61,34 +63,33 @@ export function SlashtalkSection(): JSX.Element {
   };
 
   return (
-    <>
-      <div className="flex items-center gap-2 mt-5 mb-2">
-        <h2 className="m-0 text-[14px] text-muted uppercase tracking-[0.5px]">
-          Slashtalk
-        </h2>
-        {auth.signedIn && (
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-subtle">
-              @{auth.user.githubLogin}
-            </span>
-            <LinkButton onClick={signOut}>Sign out</LinkButton>
-          </div>
-        )}
-      </div>
+    <section className="bg-card rounded-2xl p-4">
+      {auth.signedIn ? (
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[13px] font-medium">
+            @{auth.user.githubLogin}
+          </span>
+          <LinkButton onClick={signOut}>Sign out</LinkButton>
+        </div>
+      ) : null}
 
       {!auth.signedIn ? (
         <button
           onClick={signIn}
           disabled={busy === "signIn"}
+          style={{ background: PRIMARY_GRADIENT }}
           className="
-            self-start bg-accent border border-accent text-accent-fg
-            rounded-md px-3.5 py-2 text-[13px] cursor-pointer
-            hover:bg-accent-hover disabled:opacity-60 disabled:cursor-wait
+            w-full border-0 text-white font-medium
+            rounded-xl px-4 py-2.5 text-[13px] cursor-pointer
+            shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_1px_2px_rgba(0,0,0,0.1)]
+            hover:brightness-105 active:brightness-95
+            disabled:opacity-60 disabled:cursor-wait
+            transition-[filter]
           "
         >
           {busy === "signIn"
             ? "Waiting for browser…"
-            : "→  Sign in to slashtalk"}
+            : "→  Sign in to Slashtalk"}
         </button>
       ) : (
         <SignedInBody
@@ -101,12 +102,14 @@ export function SlashtalkSection(): JSX.Element {
 
       {status && (
         <div
-          className={`text-xs mt-2 ${status.kind === "ok" ? "text-success" : "text-danger"}`}
+          className={`text-[12px] mt-3 leading-snug ${
+            status.kind === "ok" ? "text-success" : "text-danger"
+          }`}
         >
           {status.text}
         </div>
       )}
-    </>
+    </section>
   );
 }
 
@@ -128,7 +131,7 @@ function SignedInBody({
         disabled={adding}
         className="
           self-start bg-button border border-border text-fg
-          rounded-md px-3.5 py-2 text-[13px] cursor-pointer
+          rounded-lg px-3.5 py-2 text-[13px] font-medium cursor-pointer
           hover:bg-button-hover disabled:opacity-60 disabled:cursor-wait
         "
       >
@@ -136,19 +139,19 @@ function SignedInBody({
       </button>
 
       {tracked.length === 0 ? (
-        <div className="text-xs text-subtle mt-2">
+        <div className="text-[12px] text-subtle mt-3 leading-snug">
           No local repos tracked yet. Click &ldquo;Add local repo&rdquo; and
           pick a folder that&rsquo;s a clone of one of your GitHub repos.
         </div>
       ) : (
-        <div className="flex flex-col gap-1.5 mt-2">
+        <div className="flex flex-col gap-1.5 mt-3">
           {tracked.map((t) => (
             <div
               key={t.repoId}
-              className="flex items-center gap-2.5 px-2.5 py-1.5 bg-card rounded-md"
+              className="flex items-center gap-2.5 px-3 py-2 bg-surface rounded-lg"
             >
               <span className="text-[13px] font-medium">{t.fullName}</span>
-              <span className="text-xs text-subtle truncate">
+              <span className="text-[12px] text-subtle truncate">
                 {t.localPath}
               </span>
               <button
@@ -176,7 +179,7 @@ function LinkButton({
   return (
     <button
       onClick={onClick}
-      className="bg-transparent border-none text-link px-1.5 py-1 cursor-pointer hover:text-link-hover hover:bg-transparent"
+      className="bg-transparent border-none text-link text-[12px] px-1 py-0.5 cursor-pointer hover:text-link-hover"
     >
       {children}
     </button>

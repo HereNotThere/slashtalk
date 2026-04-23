@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { SessionState } from "@slashtalk/shared";
+import type { RecentEvent, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
@@ -19,7 +20,10 @@ export function App(): JSX.Element {
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
   const [visible, setVisible] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  useAutoResize();
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Measure the inner content, not the card: the card is capped at max-h-screen
+  // so its height saturates at the window size and wouldn't signal growth.
+  useAutoResize(contentRef);
 
   useEffect(() => {
     const offShow = window.chatheads.onInfoShow((p) => {
@@ -76,21 +80,23 @@ export function App(): JSX.Element {
       ref={rootRef}
       onMouseEnter={() => void window.chatheads.infoHoverEnter()}
       onMouseLeave={() => void window.chatheads.infoHoverLeave()}
-      className="bg-card rounded-lg transition-[opacity,transform] duration-75 ease-out"
+      className="bg-card rounded-3xl max-h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out"
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? "translateX(0)" : "translateX(-4px)",
       }}
     >
-      <Header head={head} />
-      <Divider />
-      <SessionsSection sessions={sessions} />
+      <div ref={contentRef}>
+        <Header head={head} />
+        <Divider />
+        <SessionsSection sessions={sessions} />
+      </div>
     </div>
   );
 }
 
 function Divider(): JSX.Element {
-  return <div className="h-px bg-divider" />;
+  return <div className="mx-lg h-px bg-divider" />;
 }
 
 function Header({ head }: { head: ChatHead | null }): JSX.Element {
@@ -152,175 +158,288 @@ function Avatar({ head }: { head: ChatHead | null }): JSX.Element {
   );
 }
 
-function SectionHeader({
-  title,
-  trailing,
-}: {
-  title: string;
-  trailing: string;
-}): JSX.Element {
+function SubHeader({ children }: { children: string }): JSX.Element {
   return (
-    <div className="flex items-baseline justify-between">
-      <div className="text-[11px] font-semibold tracking-wider uppercase text-subtle">
-        {title}
-      </div>
-      <div className="text-[11px] text-subtle">{trailing}</div>
+    <div className="text-[11px] font-semibold tracking-wider uppercase text-subtle">
+      {children}
     </div>
   );
 }
+
+const DEFAULT_SESSION_LIMIT = 5;
 
 function SessionsSection({
   sessions,
 }: {
   sessions: InfoSession[] | null;
 }): JSX.Element {
-  const title = sessions == null ? "Sessions" : `Sessions · ${sessions.length}`;
-  return (
-    <div className="px-lg pt-md pb-lg min-h-[120px]">
-      <SectionHeader title={title} trailing="last 24h" />
-      <div className="mt-md space-y-lg">
-        {sessions == null ? (
-          <div className="text-[12px] text-subtle">Loading…</div>
-        ) : sessions.length === 0 ? (
-          <div className="text-[12px] text-subtle">No sessions yet.</div>
-        ) : (
-          sessions.map((s) => <SessionRow key={s.id} session={s} />)
-        )}
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  if (sessions == null) {
+    return (
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        Loading…
       </div>
+    );
+  }
+  if (sessions.length === 0) {
+    return (
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        No sessions yet.
+      </div>
+    );
+  }
+  const visible =
+    showAll || sessions.length <= DEFAULT_SESSION_LIMIT
+      ? sessions
+      : sessions.slice(0, DEFAULT_SESSION_LIMIT);
+  const hasMore = sessions.length > DEFAULT_SESSION_LIMIT;
+  return (
+    <div>
+      {visible.map((s, i) => (
+        <Fragment key={s.id}>
+          {i > 0 && <div className="mx-lg h-px bg-divider" />}
+          <SessionRow
+            session={s}
+            expanded={expandedId === s.id}
+            onToggle={() =>
+              setExpandedId((cur) => (cur === s.id ? null : s.id))
+            }
+          />
+        </Fragment>
+      ))}
+      {hasMore && (
+        <>
+          <div className="mx-lg h-px bg-divider" />
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="w-full px-lg py-md text-center text-[12px] font-medium text-muted hover:text-fg hover:bg-surface/60 transition-colors cursor-pointer"
+          >
+            {showAll ? "Show less" : `Show all (${sessions.length})`}
+          </button>
+        </>
+      )}
     </div>
   );
 }
 
 function repoLabel(s: InfoSession): string | null {
-  if ("repo_full_name" in s && s.repo_full_name) return s.repo_full_name;
+  if ("repo_full_name" in s && s.repo_full_name) {
+    const slash = s.repo_full_name.lastIndexOf("/");
+    return slash >= 0 ? s.repo_full_name.slice(slash + 1) : s.repo_full_name;
+  }
   // Fallback for own sessions: Claude writes projects as a slugified cwd path
   // (e.g. "-Users-erik-dev-towns-app"); the trailing segment is the repo dir.
   const parts = s.project.split(/[-/]/).filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1]! : null;
 }
 
-function toolLabel(kind: string | null, model: string | null): string {
-  if (kind === "codex") return "Codex";
-  if (kind === "claude") return "Claude";
-  if (model?.toLowerCase().includes("gpt")) return "Codex";
-  return "Claude";
-}
-
-function SessionRow({ session }: { session: InfoSession }): JSX.Element {
+function SessionRow({
+  session,
+  expanded,
+  onToggle,
+}: {
+  session: InfoSession;
+  expanded: boolean;
+  onToggle: () => void;
+}): JSX.Element {
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
-  const status = statusLabel(session);
-  const tool = toolLabel(session.kind, session.model);
+  const tokenStr = fmtTokens(session.tokens);
+  const showDot =
+    session.state === SessionState.ACTIVE ||
+    session.state === SessionState.BUSY;
+  const shrinkableParts = [repo, session.branch].filter(
+    (v): v is string => Boolean(v),
+  );
+  const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
+  const hasMeta = shrinkableParts.length > 0 || tokensLabel !== null;
+
   return (
-    <div>
-      <div className="flex items-start gap-2">
-        <span className="mt-[7px] shrink-0 inline-flex">
-          <Dot color={DOT_COLOR[session.state]} />
-        </span>
-        <div className="text-[14px] leading-5 text-fg flex-1 min-w-0 whitespace-normal break-words">
-          {title}
+    <div className={expanded ? "bg-surface" : undefined}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            {showDot && <Dot color={DOT_COLOR[session.state]} />}
+            <div className="text-[14px] font-medium text-fg flex-1 truncate">
+              {title}
+            </div>
+          </div>
+          {session.description && (
+            <div
+              className="mt-1 text-[12px] text-muted line-clamp-2"
+              style={showDot ? { marginLeft: 14 } : undefined}
+            >
+              {session.description}
+            </div>
+          )}
+          {hasMeta && (
+            <div
+              className="mt-px flex items-center gap-1.5 text-[11.5px] text-muted min-w-0"
+              style={showDot ? { marginLeft: 14 } : undefined}
+            >
+              {shrinkableParts.map((v, i) => (
+                <Fragment key={i}>
+                  {i > 0 && <span className="text-subtle shrink-0">·</span>}
+                  <span className="truncate min-w-0">{v}</span>
+                </Fragment>
+              ))}
+              {tokensLabel && (
+                <>
+                  {shrinkableParts.length > 0 && (
+                    <span className="text-subtle shrink-0">·</span>
+                  )}
+                  <span className="shrink-0">{tokensLabel}</span>
+                </>
+              )}
+            </div>
+          )}
         </div>
-      </div>
-      {(repo || session.branch) && (
-        <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
-          <span className="inline-flex items-center gap-1.5 font-mono bg-code rounded-md px-1.5 py-0.5 text-fg/85 min-w-0 max-w-full whitespace-nowrap overflow-hidden">
-            <BranchIcon />
-            {repo && <span className="truncate">{repo}</span>}
-            {repo && session.branch && (
-              <span className="text-subtle shrink-0">·</span>
-            )}
-            {session.branch && (
-              <span className="truncate">{session.branch}</span>
-            )}
-          </span>
+        <Chevron open={expanded} />
+      </button>
+      {expanded && <ExpandedSession session={session} />}
+    </div>
+  );
+}
+
+function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
+  // Prefer the LLM rolling narrative; fall back to the raw user prompt only
+  // if it adds info beyond the title.
+  const summary =
+    session.rollingSummary ??
+    (session.lastUserPrompt && session.lastUserPrompt !== session.title
+      ? session.lastUserPrompt
+      : null);
+  const highlights = session.highlights ?? [];
+  const recent = session.recent ?? [];
+  const hasAnything =
+    Boolean(summary) || highlights.length > 0 || recent.length > 0;
+  return (
+    <div className="px-lg pb-lg space-y-md">
+      {summary && (
+        <div>
+          <SubHeader>Summary</SubHeader>
+          <div className="mt-1 text-[13px] text-fg leading-relaxed whitespace-pre-wrap">
+            {summary}
+          </div>
         </div>
       )}
-      <div className="mt-1.5 flex items-center gap-1.5 text-[12px] text-muted">
-        {status && <span>{status}</span>}
-        {status && <span className="text-subtle shrink-0">·</span>}
-        <span className="inline-flex items-center gap-1 shrink-0">
-          {tool === "Claude" ? (
-            <ClaudeIcon />
-          ) : (
-            <span className="text-subtle">✦</span>
-          )}
-          <span>{tool}</span>
-        </span>
+      {highlights.length > 0 && (
+        <div>
+          <SubHeader>Highlights</SubHeader>
+          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside">
+            {highlights.map((h, i) => (
+              <li key={i}>{h}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div>
+          <SubHeader>Latest activity</SubHeader>
+          <div className="mt-1 space-y-md">
+            {recent.slice(0, 4).map((e, i) => (
+              <ActivityRow key={i} event={e} />
+            ))}
+          </div>
+        </div>
+      )}
+      {!hasAnything && (
+        <div className="text-[12px] text-subtle">No activity yet.</div>
+      )}
+    </div>
+  );
+}
+
+function ActivityRow({ event }: { event: RecentEvent }): JSX.Element {
+  return (
+    <div className="flex items-start gap-2">
+      <ArrowIcon />
+      <div className="flex-1 min-w-0">
+        <div className="text-[13px] text-fg leading-snug break-words">
+          {event.summary}
+        </div>
+        <div className="mt-0.5 text-[11.5px] text-subtle">
+          {fmtAgo(event.ts)}
+        </div>
       </div>
     </div>
   );
 }
 
-function statusLabel(s: InfoSession): string | null {
-  switch (s.state) {
-    case SessionState.BUSY:
-      return "working now";
-    case SessionState.ACTIVE:
-      return s.durationS != null ? fmtDuration(s.durationS) : null;
-    case SessionState.IDLE:
-      return s.idleS != null ? `idle ${fmtDuration(s.idleS)}` : null;
-    case SessionState.RECENT:
-      return s.idleS != null ? `paused ${fmtDuration(s.idleS)}` : null;
-    case SessionState.ENDED:
-      return s.idleS != null ? `ended ${fmtDuration(s.idleS)} ago` : null;
-  }
+function fmtTokens(tokens: TokenUsage | undefined): string | null {
+  if (!tokens) return null;
+  const total =
+    tokens.in + tokens.out + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
+  if (total <= 0) return null;
+  if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}M`;
+  if (total >= 1_000) return `${(total / 1_000).toFixed(1)}k`;
+  return `${total}`;
 }
 
-function fmtDuration(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  if (s < 60) return `${s}s`;
+function fmtAgo(ts: string): string {
+  const diff = Date.now() - new Date(ts).getTime();
+  const s = Math.max(0, Math.floor(diff / 1000));
+  if (s < 30) return "just now";
+  if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   const rem = m % 60;
   const roundedH = rem >= 30 ? h + 1 : h;
-  if (roundedH < 24) return `${roundedH}h`;
+  if (roundedH < 24) return `${roundedH}h ago`;
   const d = Math.floor(roundedH / 24);
-  return `${d}d`;
+  return `${d}d ago`;
 }
 
 function Dot({ color }: { color: string }): JSX.Element {
   return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />;
 }
 
-function ClaudeIcon(): JSX.Element {
+function Chevron({ open }: { open: boolean }): JSX.Element {
   return (
     <svg
-      width="11"
-      height="12"
-      viewBox="0 0 13 14"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
       fill="none"
-      className="text-subtle shrink-0"
+      className="text-subtle shrink-0 transition-transform duration-150"
+      style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
       aria-hidden
     >
       <path
-        d="M 2.55 9.31 L 5.108 7.765 L 5.151 7.631 L 5.108 7.557 L 4.984 7.556 L 4.556 7.528 L 3.094 7.486 L 1.827 7.429 L 0.599 7.358 L 0.29 7.287 L 0 6.876 L 0.03 6.671 L 0.29 6.483 L 0.662 6.518 L 1.484 6.579 L 2.719 6.67 L 3.614 6.727 L 4.941 6.875 L 5.151 6.875 L 5.181 6.784 L 5.109 6.727 L 5.053 6.67 L 3.776 5.739 L 2.393 4.754 L 1.669 4.187 L 1.277 3.9 L 1.08 3.631 L 0.995 3.043 L 1.35 2.622 L 1.828 2.657 L 1.95 2.692 L 2.433 3.092 L 3.467 3.953 L 4.816 5.023 L 5.013 5.199 L 5.092 5.139 L 5.102 5.096 L 5.013 4.937 L 4.279 3.509 L 3.496 2.057 L 3.148 1.455 L 3.056 1.094 C 3.023 0.946 3 0.821 3 0.669 L 3.404 0.077 L 3.628 0 L 4.168 0.077 L 4.395 0.29 L 4.731 1.116 L 5.274 2.416 L 6.117 4.184 L 6.364 4.708 L 6.495 5.194 L 6.544 5.342 L 6.629 5.342 L 6.629 5.257 L 6.699 4.261 L 6.827 3.038 L 6.952 1.465 L 6.995 1.022 L 7.198 0.491 L 7.603 0.204 L 7.919 0.367 L 8.179 0.767 L 8.143 1.026 L 7.988 2.107 L 7.685 3.8 L 7.488 4.934 L 7.603 4.934 L 7.735 4.792 L 8.268 4.031 L 9.163 2.826 L 9.558 2.348 L 10.019 1.82 L 10.315 1.568 L 10.874 1.568 L 11.286 2.227 L 11.101 2.907 L 10.525 3.693 L 10.048 4.359 L 9.363 5.351 L 8.936 6.145 L 8.975 6.208 L 9.077 6.198 L 10.624 5.843 L 11.459 5.681 L 12.457 5.497 L 12.908 5.724 L 12.957 5.954 L 12.78 6.426 L 11.713 6.709 L 10.462 6.978 L 8.599 7.453 L 8.577 7.471 L 8.603 7.505 L 9.442 7.591 L 9.801 7.611 L 10.68 7.611 L 12.316 7.743 L 12.744 8.047 L 13 8.419 L 12.957 8.703 L 12.299 9.063 L 11.41 8.837 L 9.337 8.306 L 8.626 8.115 L 8.527 8.115 L 8.527 8.178 L 9.12 8.802 L 10.206 9.857 L 11.566 11.218 L 11.635 11.554 L 11.46 11.819 L 11.276 11.791 L 10.081 10.824 L 9.62 10.388 L 8.577 9.442 L 8.507 9.442 L 8.507 9.541 L 8.748 9.92 L 10.018 11.975 L 10.084 12.605 L 9.992 12.811 L 9.662 12.934 L 9.301 12.863 L 8.557 11.74 L 7.79 10.475 L 7.171 9.341 L 7.096 9.387 L 6.73 13.621 L 6.559 13.837 L 6.164 14 L 5.835 13.731 L 5.66 13.295 L 5.835 12.434 L 6.046 11.311 L 6.217 10.418 L 6.371 9.309 L 6.464 8.941 L 6.457 8.916 L 6.382 8.926 L 5.605 10.074 L 4.423 11.793 L 3.489 12.87 L 3.265 12.965 L 2.877 12.749 L 2.913 12.363 L 4.423 10.247 L 5.204 9.149 L 5.708 8.515 L 5.704 8.424 L 5.674 8.424 L 2.238 10.825 L 1.626 10.911 L 1.362 10.645 L 1.395 10.209 L 1.52 10.068 L 2.553 9.302 L 2.549 9.306 L 2.55 9.31 Z"
-        fill="currentColor"
-        fillRule="nonzero"
+        d="M3.5 5.25 L7 8.75 L10.5 5.25"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
 }
 
-function BranchIcon(): JSX.Element {
+function ArrowIcon(): JSX.Element {
   return (
     <svg
-      width="10"
-      height="10"
-      viewBox="0 0 12 12"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
       fill="none"
-      className="text-subtle shrink-0"
+      className="text-subtle shrink-0 mt-0.5"
       aria-hidden
     >
-      <circle cx="3" cy="2.5" r="1.2" stroke="currentColor" strokeWidth="1" />
-      <circle cx="3" cy="9.5" r="1.2" stroke="currentColor" strokeWidth="1" />
-      <circle cx="9" cy="4" r="1.2" stroke="currentColor" strokeWidth="1" />
       <path
-        d="M3 3.7 L3 8.3 M3 6 Q3 4 5 4 L7.8 4"
+        d="M3 7 L11 7 M8 4 L11 7 L8 10"
         stroke="currentColor"
-        strokeWidth="1"
+        strokeWidth="1.4"
         strokeLinecap="round"
-        fill="none"
+        strokeLinejoin="round"
       />
     </svg>
   );

@@ -48,6 +48,10 @@ const TRAY_POPUP_INITIAL_HEIGHT = 80;
 
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
+// Info window caps at whichever is smaller: a hard ceiling, or 2/3 of the
+// screen's work area. Computed per-resize so a display change just works.
+const INFO_MAX_ABSOLUTE = 650;
+const INFO_MAX_SCREEN_FRACTION = 2 / 3;
 
 // Tracked dynamically — renderer reports its content height via IPC and we
 // resize/reposition the window each time it changes.
@@ -92,6 +96,19 @@ const sessionCache = new Map<string, InfoSession[]>();
 
 let dragOffset: { dx: number; dy: number } | null = null;
 let dragTicker: ReturnType<typeof setInterval> | null = null;
+// While the stack is being dragged, bubble hovers still fire (the cursor sits
+// over bubbles as the window moves under it), which would pop the info card
+// repeatedly. Suppress showInfo for the duration of the drag + dock animation.
+let isDraggingStack = false;
+
+// Dock-to-edge feature. During drag we show a dashed ghost at the nearest dock
+// slot (center-left / center-right); on release the overlay tweens to it.
+const DOCK_EDGE_MARGIN = 24;
+const DOCK_ANIM_MS = 180;
+let dockPlaceholderWindow: BrowserWindow | null = null;
+// Monotonic counter — each new tween takes the next token; in-flight steps
+// bail when they see a newer token, so a re-drag mid-slide cancels cleanly.
+let overlayAnimToken = 0;
 
 // electron-vite sets ELECTRON_RENDERER_URL in dev mode (pointing at the Vite
 // dev server) so we can reuse the same BrowserWindow code for dev + packaged.
@@ -116,7 +133,7 @@ function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 620,
     height: 640,
-    title: "ChatHeads",
+    title: "Slashtalk",
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -346,6 +363,7 @@ function positionInfo(index: number, bubbleScreenY?: number): void {
 }
 
 async function showInfo(index: number, bubbleScreenY?: number): Promise<void> {
+  if (isDraggingStack) return;
   const head = heads[index];
   if (!head) return;
 
@@ -766,11 +784,140 @@ ipcMain.handle("response:open", (_e, message: string): void => {
   showResponse(message);
 });
 
+// -------- Dock to edge (drag → release → snap) --------
+
+type DockSide = "left" | "right";
+
+function overlayDisplay(): Electron.Display {
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    return screen.getPrimaryDisplay();
+  }
+  return screen.getDisplayMatching(overlayWindow.getBounds());
+}
+
+function currentDockSide(): DockSide {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return "right";
+  const b = overlayWindow.getBounds();
+  const wa = overlayDisplay().workArea;
+  const overlayCenter = b.x + b.width / 2;
+  const screenCenter = wa.x + wa.width / 2;
+  return overlayCenter < screenCenter ? "left" : "right";
+}
+
+function computeDockBounds(side: DockSide): Electron.Rectangle {
+  const wa = overlayDisplay().workArea;
+  const height = overlayHeight(heads.length);
+  const x =
+    side === "left"
+      ? wa.x + DOCK_EDGE_MARGIN
+      : wa.x + wa.width - OVERLAY_WIDTH - DOCK_EDGE_MARGIN;
+  const y = wa.y + Math.floor((wa.height - height) / 2);
+  return { x, y, width: OVERLAY_WIDTH, height };
+}
+
+function ensureDockPlaceholder(): BrowserWindow {
+  if (dockPlaceholderWindow && !dockPlaceholderWindow.isDestroyed()) {
+    return dockPlaceholderWindow;
+  }
+  const radius = Math.round(OVERLAY_WIDTH / 2);
+  // Single-pill shape matched to the overlay. Loaded from a data URL so this
+  // stays self-contained — no new renderer entry to wire through vite.
+  const html = `<!doctype html><html><head><style>
+    html,body{margin:0;padding:0;background:transparent;overflow:hidden;height:100%;}
+    .pill{
+      position:fixed;inset:0;box-sizing:border-box;
+      border:2px dashed rgba(255,255,255,0.55);
+      border-radius:${radius}px;
+      background:rgba(255,255,255,0.05);
+    }
+  </style></head><body><div class="pill"></div></body></html>`;
+  dockPlaceholderWindow = new BrowserWindow({
+    width: OVERLAY_WIDTH,
+    height: overlayHeight(heads.length),
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      contextIsolation: true,
+    },
+  });
+  dockPlaceholderWindow.setAlwaysOnTop(true, "floating");
+  dockPlaceholderWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+  });
+  dockPlaceholderWindow.setIgnoreMouseEvents(true);
+  void dockPlaceholderWindow.loadURL(
+    "data:text/html;charset=utf-8," + encodeURIComponent(html),
+  );
+  dockPlaceholderWindow.on("closed", () => {
+    dockPlaceholderWindow = null;
+  });
+  return dockPlaceholderWindow;
+}
+
+function updateDockPlaceholder(): void {
+  const ph = ensureDockPlaceholder();
+  ph.setBounds(computeDockBounds(currentDockSide()));
+  if (!ph.isVisible()) ph.showInactive();
+}
+
+function hideDockPlaceholder(): void {
+  if (!dockPlaceholderWindow || dockPlaceholderWindow.isDestroyed()) return;
+  if (dockPlaceholderWindow.isVisible()) dockPlaceholderWindow.hide();
+}
+
+function animateOverlayTo(
+  target: Electron.Rectangle,
+  duration: number,
+  onDone?: () => void,
+): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayAnimToken += 1;
+  const token = overlayAnimToken;
+  const start = overlayWindow.getBounds();
+  const t0 = Date.now();
+  const ease = (t: number): number => 1 - Math.pow(1 - t, 3); // easeOutCubic
+  const step = (): void => {
+    if (
+      token !== overlayAnimToken ||
+      !overlayWindow ||
+      overlayWindow.isDestroyed()
+    ) {
+      return;
+    }
+    const t = Math.min(1, (Date.now() - t0) / duration);
+    const e = ease(t);
+    overlayWindow.setPosition(
+      Math.round(start.x + (target.x - start.x) * e),
+      Math.round(start.y + (target.y - start.y) * e),
+    );
+    repositionInfoIfVisible();
+    repositionChatIfVisible();
+    if (t < 1) setTimeout(step, 16);
+    else onDone?.();
+  };
+  step();
+}
+
 ipcMain.handle("drag:start", (): void => {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  // A new drag cancels any in-flight dock tween.
+  overlayAnimToken += 1;
+
   const cursor = screen.getCursorScreenPoint();
   const win = overlayWindow.getBounds();
   dragOffset = { dx: cursor.x - win.x, dy: cursor.y - win.y };
+  isDraggingStack = true;
+  // Kill any visible/pending info card so it doesn't trail the stack.
+  hideInfoNow();
+  updateDockPlaceholder();
 
   if (dragTicker) clearInterval(dragTicker);
   dragTicker = setInterval(() => {
@@ -779,6 +926,7 @@ ipcMain.handle("drag:start", (): void => {
     overlayWindow.setPosition(p.x - dragOffset.dx, p.y - dragOffset.dy);
     repositionInfoIfVisible();
     repositionChatIfVisible();
+    updateDockPlaceholder();
   }, 16);
 });
 
@@ -786,7 +934,21 @@ ipcMain.handle("drag:end", (): void => {
   if (dragTicker) clearInterval(dragTicker);
   dragTicker = null;
   dragOffset = null;
-  saveOverlayPosition();
+  hideDockPlaceholder();
+
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    isDraggingStack = false;
+    saveOverlayPosition();
+    return;
+  }
+
+  const target = computeDockBounds(currentDockSide());
+  // Keep isDraggingStack on through the slide so bubble hovers under the
+  // moving window don't pop the info card mid-tween.
+  animateOverlayTo(target, DOCK_ANIM_MS, () => {
+    isDraggingStack = false;
+    saveOverlayPosition();
+  });
 });
 
 ipcMain.handle("app:openMain", (): void => {
@@ -811,7 +973,16 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!win || win.isDestroyed()) return;
-  const h = Math.max(RESIZE_MIN, Math.min(RESIZE_MAX, Math.round(height)));
+  let maxForWin = RESIZE_MAX;
+  if (win === infoWindow) {
+    const { height: screenH } = screen.getDisplayMatching(win.getBounds())
+      .workAreaSize;
+    maxForWin = Math.min(
+      INFO_MAX_ABSOLUTE,
+      Math.floor(screenH * INFO_MAX_SCREEN_FRACTION),
+    );
+  }
+  const h = Math.max(RESIZE_MIN, Math.min(maxForWin, Math.round(height)));
 
   if (win === infoWindow) {
     if (h === infoCurrentHeight) return;
@@ -894,7 +1065,76 @@ ws.onPrActivity((msg) => {
   rail.markPrActivity(msg.login);
 });
 
+// Local uploader ingestion invalidates the self-head cache synchronously —
+// faster than waiting for the server-side WS echo for your own sessions.
+uploader.onIngested(() => {
+  const state = backend.getAuthState();
+  if (!state.signedIn) return;
+  sessionCache.delete(rail.userHeadId(state.user.githubLogin));
+});
+
 backend.onChange((state) => applySyncForAuth(state.signedIn));
+
+ws.onSessionInsightsUpdated((msg) => {
+  console.log(
+    `[insights] ${msg.analyzer} ready for session ${msg.session_id.slice(0, 8)} (repo=${msg.repo_id})`,
+    msg.output,
+  );
+  scheduleInfoRefresh(msg.session_id);
+  broadcastToMain("ws:sessionInsightsUpdated", msg);
+});
+
+ws.onSessionUpdated((msg) => {
+  // Drop the owner's cache so a non-selected head goes stale-free on next
+  // hover. scheduleInfoRefresh then coalesces any UI refresh for the
+  // currently-selected head across bursty events.
+  sessionCache.delete(rail.userHeadId(msg.github_login));
+  scheduleInfoRefresh(msg.session_id);
+  broadcastToMain("ws:sessionUpdated", msg);
+});
+
+// `session_updated` fires on every ingest batch — potentially many per second
+// during an active session. Coalesce refreshes so the info window re-renders
+// at most once per REFRESH_DEBOUNCE_MS regardless of WS traffic.
+const REFRESH_DEBOUNCE_MS = 300;
+let refreshTimer: NodeJS.Timeout | null = null;
+
+function scheduleInfoRefresh(sessionId: string | null): void {
+  if (!selectedHeadId) return;
+  if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
+    return;
+  }
+  // If we know which session changed, skip refreshes whose session isn't in
+  // the currently-shown head. Fall through when we can't tell.
+  if (sessionId) {
+    const cached = sessionCache.get(selectedHeadId);
+    if (cached && !cached.some((s) => s.id === sessionId)) return;
+  }
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    void refreshInfoNow();
+  }, REFRESH_DEBOUNCE_MS);
+}
+
+async function refreshInfoNow(): Promise<void> {
+  if (!selectedHeadId) return;
+  if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
+    return;
+  }
+  const head = heads.find((h) => h.id === selectedHeadId);
+  if (!head) return;
+  // Only drop the selected head's cache; other heads stay warm until clicked.
+  sessionCache.delete(head.id);
+  try {
+    const sessions = await fetchSessionsForHead(head.id);
+    if (selectedHeadId !== head.id) return;
+    if (!infoWindow || infoWindow.isDestroyed()) return;
+    infoWindow.webContents.send("info:show", { head, sessions });
+  } catch (e) {
+    console.warn("[ws] refreshInfoNow failed:", e);
+  }
+}
 ipcMain.handle("backend:listRepos", () => backend.listRepos());
 
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());

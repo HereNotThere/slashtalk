@@ -1,10 +1,4 @@
 import { and, eq, gt, inArray, sql } from "drizzle-orm";
-import { z } from "zod";
-import {
-  createSdkMcpServer,
-  tool,
-  type McpSdkServerConfigWithInstance,
-} from "@anthropic-ai/claude-agent-sdk";
 import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { loadInsightsForSessions, toSnapshot } from "../sessions/snapshot";
@@ -230,57 +224,76 @@ export async function getSessionImpl(
   };
 }
 
-/** MCP server exposing the two chat tools, scoped to `userId`. */
-export function createChatMcpServer(
+export interface ChatToolDefinition {
+  name: string;
+  description: string;
+  input_schema: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  handler: (input: Record<string, unknown>) => Promise<{
+    content: string;
+    isError?: boolean;
+  }>;
+}
+
+export function buildChatTools(
   db: Database,
   userId: number,
-): McpSdkServerConfigWithInstance {
-  return createSdkMcpServer({
-    name: "slashtalk",
-    version: "0.1.0",
-    tools: [
-      tool(
-        "get_team_activity",
+): ChatToolDefinition[] {
+  return [
+    {
+      name: "get_team_activity",
+      description:
         "Per-teammate roll-up of recent Claude Code sessions across repos you share with your team. Call this first for open-ended questions about what the team is working on. Returns teammates (including yourself) with up to 3 recent sessions each.",
-        {
-          sinceHours: z
-            .number()
-            .int()
-            .min(1)
-            .max(168)
-            .optional()
-            .describe("Lookback window in hours; default 24"),
-          state: z
-            .enum(["busy", "active", "idle", "recent"])
-            .optional()
-            .describe("Filter to a single session state"),
+      input_schema: {
+        type: "object",
+        properties: {
+          sinceHours: {
+            type: "integer",
+            minimum: 1,
+            maximum: 168,
+            description: "Lookback window in hours; default 24",
+          },
+          state: {
+            type: "string",
+            enum: ["busy", "active", "idle", "recent"],
+            description: "Filter to a single session state",
+          },
         },
-        async (args) => {
-          const result = await getTeamActivityImpl(db, userId, args);
-          return {
-            content: [{ type: "text", text: JSON.stringify(result) }],
-          };
-        },
-      ),
-      tool(
-        "get_session",
+      },
+      handler: async (input) => {
+        const result = await getTeamActivityImpl(
+          db,
+          userId,
+          input as GetTeamActivityArgs,
+        );
+        return { content: JSON.stringify(result) };
+      },
+    },
+    {
+      name: "get_session",
+      description:
         "Full detail on one session: rolling summary, highlights, recent events, top files, current tool. Use after get_team_activity to go deep on a specific session.",
-        {
-          sessionId: z.string().describe("Session UUID"),
+      input_schema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string", description: "Session UUID" },
         },
-        async (args) => {
-          const result = await getSessionImpl(db, userId, args);
-          if (result.kind === "error") {
-            return {
-              content: [{ type: "text", text: result.message }],
-              isError: true,
-            };
-          }
-          return {
-            content: [{ type: "text", text: JSON.stringify(result.session) }],
-          };
-        },
-      ),
-    ],
-  });
+        required: ["sessionId"],
+      },
+      handler: async (input) => {
+        const result = await getSessionImpl(
+          db,
+          userId,
+          input as unknown as GetSessionArgs,
+        );
+        if (result.kind === "error") {
+          return { content: result.message, isError: true };
+        }
+        return { content: JSON.stringify(result.session) };
+      },
+    },
+  ];
 }

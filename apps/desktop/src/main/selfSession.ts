@@ -12,10 +12,9 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import * as backend from "./backend";
 import * as chatheadsAuth from "./chatheadsAuth";
 
-const MCP_URL =
-  process.env["SLASHTALK_MCP_URL"] ?? "http://localhost:3000/mcp";
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
@@ -24,15 +23,48 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = RECONNECT_MIN_MS;
 let running = false;
 let unsubAuth: (() => void) | null = null;
+let authRejected = false;
+let loggedDisabled = false;
+let loggedUnauthorized = false;
+
+function isLocalUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+function mcpUrl(): string | null {
+  const explicit = process.env["SLASHTALK_MCP_URL"];
+  if (explicit) return explicit;
+  return isLocalUrl(backend.getBaseUrl()) ? "http://localhost:3000/mcp" : null;
+}
+
+function isUnauthorized(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 401;
+}
 
 async function connect(): Promise<void> {
   if (!running) return;
   if (client) return; // already connected
+  if (authRejected) return;
+  const url = mcpUrl();
+  if (!url) {
+    if (!loggedDisabled) {
+      loggedDisabled = true;
+      console.log(
+        "[selfSession] MCP disabled; set SLASHTALK_MCP_URL to enable desktop presence",
+      );
+    }
+    return;
+  }
   const token = chatheadsAuth.getToken();
   if (!token) return;
 
   try {
-    const transport = new StreamableHTTPClientTransport(new URL(MCP_URL), {
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
       requestInit: {
         headers: { authorization: `Bearer ${token}` },
       },
@@ -54,6 +86,7 @@ async function connect(): Promise<void> {
       const cause = (err as { cause?: { code?: string } } | null)?.cause;
       if (cause?.code === "UND_ERR_SOCKET") return;
       if ((err as Error)?.message === "fetch failed") return;
+      if (isUnauthorized(err)) return;
       console.error("[selfSession] transport error:", err);
     };
     const c = new Client({ name: "slashtalk-desktop", version: "0.0.1" });
@@ -62,6 +95,16 @@ async function connect(): Promise<void> {
     reconnectDelay = RECONNECT_MIN_MS;
     console.log("[selfSession] connected", { sessionId: transport.sessionId });
   } catch (err) {
+    if (isUnauthorized(err)) {
+      authRejected = true;
+      if (!loggedUnauthorized) {
+        loggedUnauthorized = true;
+        console.warn(
+          "[selfSession] MCP rejected the current apiKey; check that SLASHTALK_MCP_URL points at the same environment as SLASHTALK_API_URL",
+        );
+      }
+      return;
+    }
     console.error("[selfSession] connect failed:", err);
     scheduleReconnect();
   }
@@ -96,6 +139,8 @@ export function start(): void {
   if (running) return;
   running = true;
   unsubAuth = chatheadsAuth.onChange((state) => {
+    authRejected = false;
+    loggedUnauthorized = false;
     if (state.signedIn) void connect();
     else void disconnect();
   });

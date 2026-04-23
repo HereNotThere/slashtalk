@@ -5,13 +5,42 @@
 // usage.
 
 import type { AgentSessionRow } from "@slashtalk/shared";
+import * as backend from "./backend";
 import * as chatheadsAuth from "./chatheadsAuth";
 import type { LocalAgent } from "./agentStore";
 
-const DEFAULT_BASE_URL = "http://localhost:3000";
+let loggedDisabled = false;
+let loggedUnauthorized = false;
 
-function baseUrl(): string {
-  return process.env["SLASHTALK_MCP_BASE_URL"] ?? DEFAULT_BASE_URL;
+function isLocalUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+function baseUrl(): string | null {
+  const explicit = process.env["SLASHTALK_MCP_BASE_URL"];
+  if (explicit) return explicit;
+  return isLocalUrl(backend.getBaseUrl()) ? "http://localhost:3000" : null;
+}
+
+function logDisabledOnce(): void {
+  if (loggedDisabled) return;
+  loggedDisabled = true;
+  console.log(
+    "[agentIngest] MCP disabled; set SLASHTALK_MCP_BASE_URL to enable team agent summaries",
+  );
+}
+
+function logUnauthorizedOnce(): void {
+  if (loggedUnauthorized) return;
+  loggedUnauthorized = true;
+  console.warn(
+    "[agentIngest] MCP rejected the current apiKey; check that SLASHTALK_MCP_BASE_URL points at the same environment as SLASHTALK_API_URL",
+  );
 }
 
 export interface UpsertSessionPayload {
@@ -30,13 +59,18 @@ export interface UpsertSessionPayload {
 
 export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
   const token = chatheadsAuth.getToken();
+  const base = baseUrl();
+  if (!base) {
+    logDisabledOnce();
+    return;
+  }
   if (!token) {
     // Not signed into the Slashtalk backend yet. Skip silently — teammates
     // can't see any ingest anyway, and the agent still runs locally.
     return;
   }
   try {
-    const res = await fetch(`${baseUrl()}/v1/agent_sessions`, {
+    const res = await fetch(`${base}/v1/agent_sessions`, {
       method: "PUT",
       headers: {
         "content-type": "application/json",
@@ -45,6 +79,10 @@ export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
       body: JSON.stringify(p),
     });
     if (!res.ok) {
+      if (res.status === 401) {
+        logUnauthorizedOnce();
+        return;
+      }
       const preview = await res.text().catch(() => "");
       console.warn(
         `[agentIngest] upsert ${res.status}: ${preview.slice(0, 200)}`,
@@ -64,8 +102,13 @@ async function listSessions(params: {
 }): Promise<AgentSessionRow[]> {
   const token = chatheadsAuth.getToken();
   if (!token) return [];
+  const base = baseUrl();
+  if (!base) {
+    logDisabledOnce();
+    return [];
+  }
   try {
-    const url = new URL(`${baseUrl()}/v1/agent_sessions`);
+    const url = new URL(`${base}/v1/agent_sessions`);
     if (params.userLogin) url.searchParams.set("user_login", params.userLogin);
     if (params.agentId) url.searchParams.set("agent_id", params.agentId);
     const res = await fetch(url, {
@@ -73,6 +116,10 @@ async function listSessions(params: {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
+      if (res.status === 401) {
+        logUnauthorizedOnce();
+        return [];
+      }
       const preview = await res.text().catch(() => "");
       console.warn(
         `[agentIngest] list ${res.status}: ${preview.slice(0, 200)}`,

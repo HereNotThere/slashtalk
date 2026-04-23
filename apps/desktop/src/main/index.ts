@@ -675,11 +675,8 @@ function hideTrayPopup(): void {
 function createTray(): void {
   // resources/ lives at apps/desktop/resources/, alongside out/. __dirname is
   // out/main at runtime in both dev and packaged builds.
-  const iconPath = path.join(__dirname, "../../resources/trayTemplate.png");
+  const iconPath = path.join(__dirname, "../../resources/trayIcon.png");
   const icon = nativeImage.createFromPath(iconPath);
-  // Template image: macOS auto-tints to match menu bar (dark/light, focused).
-  // Only the alpha channel is used — gray values are ignored.
-  icon.setTemplateImage(true);
 
   tray = new Tray(icon);
   tray.setToolTip("ChatHeads");

@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   Tray,
   nativeImage,
+  nativeTheme,
   ipcMain,
   screen,
   clipboard,
@@ -189,6 +190,18 @@ function saveOverlayPosition(): void {
   store.set(POSITION_KEY, payload);
 }
 
+// White rim over the `hud` vibrancy. In dark mode the stroke reads as a bright
+// hairline, so keep it faint; in light mode the same stroke gets buried by the
+// material and needs more alpha to remain visible.
+function applyOverlayRim(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
+    width: 1.5,
+    white: 1,
+    alpha: nativeTheme.shouldUseDarkColors ? 0.12 : 0.33,
+  });
+}
+
 function ensureOverlay(): BrowserWindow {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
 
@@ -240,11 +253,8 @@ function ensureOverlay(): BrowserWindow {
   // Pill ends — half the window width gives perfect semicircle caps at top
   // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
   // as soon as the BrowserWindow constructor returns.
-  setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
-    width: 1.5,
-    white: 1,
-    alpha: 0.33,
-  });
+  applyOverlayRim();
+  nativeTheme.on("updated", applyOverlayRim);
 
   loadRenderer(overlayWindow, "overlay");
 

@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import type { FSWatcher } from "node:fs";
 import * as backend from "./backend";
+import { createEmitter } from "./emitter";
 import * as localRepos from "./localRepos";
 import * as store from "./store";
 
@@ -53,6 +54,12 @@ const inFlight = new Map<string, Promise<void>>();
 const pending = new Map<string, NodeJS.Timeout>();
 let persistTimer: NodeJS.Timeout | null = null;
 
+// Fires after a chunk has been accepted by the server. Lets the main process
+// invalidate caches (e.g. the info-window session list) the moment the user's
+// own session becomes visible.
+const ingested = createEmitter<{ sessionId: string }>();
+export const onIngested = ingested.on;
+
 // Rescan can queue thousands of files at once; uncapped concurrency blows
 // through macOS's default 256 fd limit.
 const MAX_CONCURRENT_SYNCS = 16;
@@ -75,9 +82,27 @@ function releaseSlot(): void {
 
 // ---------- persistence ----------
 
+// Resets every entry's derived/transient state so the next syncFileInner
+// pass re-reads the header and re-evaluates tracked-ness. Clearing `size`
+// alongside `tracked` is load-bearing: otherwise the stat fast-path at
+// line ~192 short-circuits quiescent sessions before tracked gets recomputed,
+// which also leaves `hasIngested()` returning false and silently stops
+// heartbeats until the JSONL next grows.
+function invalidateDerivedState(): void {
+  for (const entry of Object.values(state)) {
+    entry.tracked = null;
+    entry.size = -1;
+  }
+}
+
 function loadState(): void {
   const saved = store.get<SyncState>(SYNC_STATE_KEY);
   state = saved && typeof saved === "object" ? saved : {};
+  // `tracked` is derived from cwd + localRepos.list() — never trust a
+  // persisted value across restarts. A session recorded as `tracked:false`
+  // before the repo was claimed would otherwise stay skipped until the next
+  // localRepos.onChange event, which may not fire again in this process.
+  invalidateDerivedState();
 }
 
 function persistSoon(): void {
@@ -269,6 +294,8 @@ async function ingestTail(
     `[uploader] ingested ${sessionId} +${res.acceptedEvents} events ` +
       `(${res.duplicateEvents} dup, ${tail.consumed}B) → lineSeq=${res.serverLineSeq}`,
   );
+
+  if (res.acceptedEvents > 0) ingested.emit({ sessionId });
 }
 
 // ---------- scan + watch ----------
@@ -348,7 +375,7 @@ export async function start(): Promise<void> {
   }
 
   unsubTracked = localRepos.onChange(() => {
-    for (const entry of Object.values(state)) entry.tracked = null;
+    invalidateDerivedState();
     persistSoon();
     void rescanAll();
   });

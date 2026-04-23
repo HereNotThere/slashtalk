@@ -62,13 +62,17 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent): void => {
+    // Use `mousedown` (not `click`) so we check containment BEFORE any React
+    // state update has remounted the clicked node. With `click`, expanding
+    // the accordion caused `e.target` to detach mid-event and contains() to
+    // return false, falsely firing hideInfo.
+    const handleMouseDown = (e: MouseEvent): void => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         void window.chatheads.hideInfo();
       }
     };
-    document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
   }, []);
 
   return (
@@ -201,13 +205,30 @@ function SessionRow({ session }: { session: InfoSession }): JSX.Element {
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
   const status = statusLabel(session);
+  const hasExpandable =
+    Boolean(session.rollingSummary) ||
+    Boolean(session.highlights && session.highlights.length > 0);
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <div>
-      <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => hasExpandable && setExpanded((v) => !v)}
+        className={`flex items-center gap-2 w-full text-left ${
+          hasExpandable ? "cursor-pointer" : "cursor-default"
+        }`}
+        aria-expanded={hasExpandable ? expanded : undefined}
+      >
         <Dot color={DOT_COLOR[session.state]} />
         <div className="text-[14px] text-fg flex-1 truncate">{title}</div>
-        <Chevron />
-      </div>
+        {hasExpandable && <Chevron open={expanded} />}
+      </button>
+      {session.description && (
+        <div className="mt-1 text-[12px] text-muted line-clamp-2 pl-3.5">
+          {session.description}
+        </div>
+      )}
       <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
         {(repo || session.branch) && (
           <span className="inline-flex items-center gap-1.5 font-mono bg-code rounded-md px-1.5 py-0.5 text-fg/85 min-w-0 max-w-full whitespace-nowrap overflow-hidden">
@@ -228,6 +249,22 @@ function SessionRow({ session }: { session: InfoSession }): JSX.Element {
         </span>
       </div>
       {status && <div className="mt-1.5 text-[12px] text-muted">{status}</div>}
+      {expanded && hasExpandable && (
+        <div className="mt-2 pl-3.5 space-y-1.5">
+          {session.rollingSummary && (
+            <div className="text-[12px] text-fg/85 leading-relaxed">
+              {session.rollingSummary}
+            </div>
+          )}
+          {session.highlights && session.highlights.length > 0 && (
+            <ul className="text-[11.5px] text-muted space-y-0.5 list-disc list-inside">
+              {session.highlights.map((h, i) => (
+                <li key={i}>{h}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -263,14 +300,14 @@ function Dot({ color }: { color: string }): JSX.Element {
   return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />;
 }
 
-function Chevron(): JSX.Element {
+function Chevron({ open = false }: { open?: boolean }): JSX.Element {
   return (
     <svg
       width="12"
       height="12"
       viewBox="0 0 12 12"
       fill="none"
-      className="text-subtle shrink-0"
+      className={`text-subtle shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
       aria-hidden
     >
       <path

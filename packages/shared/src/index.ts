@@ -68,6 +68,9 @@ export interface SessionSnapshot {
   id: string;
   project: string;
   title: string | null;
+  description: string | null;
+  rollingSummary: string | null;
+  highlights: string[] | null;
   queued: QueuedCommand[];
   state: SessionState;
   pid: number | null;

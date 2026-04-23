@@ -16,6 +16,7 @@ import * as localRepos from "./localRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
+import * as wsClient from "./wsClient";
 import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -802,13 +803,85 @@ function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
     void uploader.start();
     void heartbeat.start();
+    const token = backend.getWsToken();
+    if (token) wsClient.connect(backend.getBaseUrl(), token);
   } else {
     heartbeat.stop();
     uploader.reset();
+    wsClient.disconnect();
   }
 }
 
 backend.onChange((state) => applySyncForAuth(state.signedIn));
+
+// Route incoming WS messages. Server forwards anything published to
+// repo:<id> (for every repo the user has) plus user:<id>. For now we log
+// everything at main-process level and forward high-signal frames to the
+// main renderer for devtools inspection; downstream UI routing lands as each
+// surface starts consuming insights.
+wsClient.onMessage((msg) => {
+  const sessionId = typeof msg.session_id === "string" ? msg.session_id : null;
+  switch (msg.type) {
+    case "session_insights_updated":
+      console.log(
+        `[insights] ${String(msg.analyzer)} ready for session ${(sessionId ?? "?").slice(0, 8)} (repo=${String(msg.repo_id)})`,
+        msg.output,
+      );
+      scheduleInfoRefresh(sessionId);
+      broadcastToMain("ws:sessionInsightsUpdated", msg);
+      break;
+    case "session_updated":
+      scheduleInfoRefresh(sessionId);
+      broadcastToMain("ws:sessionUpdated", msg);
+      break;
+    default:
+      broadcastToMain("ws:message", msg);
+      break;
+  }
+});
+
+// `session_updated` fires on every ingest batch — potentially many per second
+// during an active session. Coalesce refreshes so the info window re-renders
+// at most once per REFRESH_DEBOUNCE_MS regardless of WS traffic.
+const REFRESH_DEBOUNCE_MS = 300;
+let refreshTimer: NodeJS.Timeout | null = null;
+
+function scheduleInfoRefresh(sessionId: string | null): void {
+  if (!selectedHeadId) return;
+  if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
+    return;
+  }
+  // If we know which session changed, skip refreshes whose session isn't in
+  // the currently-shown head. Fall through when we can't tell.
+  if (sessionId) {
+    const cached = sessionCache.get(selectedHeadId);
+    if (cached && !cached.some((s) => s.id === sessionId)) return;
+  }
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    void refreshInfoNow();
+  }, REFRESH_DEBOUNCE_MS);
+}
+
+async function refreshInfoNow(): Promise<void> {
+  if (!selectedHeadId) return;
+  if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
+    return;
+  }
+  const head = heads.find((h) => h.id === selectedHeadId);
+  if (!head) return;
+  // Only drop the selected head's cache; other heads stay warm until clicked.
+  sessionCache.delete(head.id);
+  try {
+    const sessions = await fetchSessionsForHead(head.id);
+    if (selectedHeadId !== head.id) return;
+    if (!infoWindow || infoWindow.isDestroyed()) return;
+    infoWindow.webContents.send("info:show", { head, sessions });
+  } catch (e) {
+    console.warn("[ws] refreshInfoNow failed:", e);
+  }
+}
 ipcMain.handle("backend:listRepos", () => backend.listRepos());
 
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());

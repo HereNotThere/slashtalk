@@ -64,6 +64,14 @@ export function getAuthState(): BackendAuthState {
   return { signedIn: true, user: creds.user };
 }
 
+export function getWsToken(): string | null {
+  return creds?.jwt ?? null;
+}
+
+export function getBaseUrl(): string {
+  return baseUrl();
+}
+
 function persistCreds(): void {
   if (creds) saveEncrypted(CREDS_KEY, creds);
   else clearEncrypted(CREDS_KEY);

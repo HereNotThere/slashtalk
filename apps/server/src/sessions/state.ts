@@ -1,7 +1,7 @@
 import { SessionState } from "@slashtalk/shared";
 
 const HEARTBEAT_FRESH_S = 30;
-const ACTIVE_WINDOW_S = 10;
+const ACTIVE_WINDOW_S = 30;
 const RECENT_WINDOW_S = 3600; // 1 hour
 
 /**
@@ -10,7 +10,7 @@ const RECENT_WINDOW_S = 3600; // 1 hour
  * State machine:
  *   heartbeat fresh?
  *     yes → in_turn? → BUSY
- *            no → last event < 10s? → ACTIVE
+ *            no → last event < 30s? → ACTIVE
  *                  no → IDLE
  *     no → last event < 1h? → RECENT
  *           no → ENDED

@@ -83,7 +83,7 @@ export interface ChatHeadsBridge {
   // the leave timer and asks main to hide after the user leaves the bubble
   // and doesn't re-enter the info panel. `infoHoverEnter/Leave` let the info
   // panel itself hold the window open while the cursor is over it.
-  showInfo: (index: number) => Promise<void>;
+  showInfo: (index: number, bubbleScreenY?: number) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
 
@@ -150,7 +150,14 @@ export interface ChatHeadsBridge {
   debug: {
     railSnapshot: () => Promise<RailDebugSnapshot>;
     refreshRail: () => Promise<RailDebugSnapshot>;
+    shuffleRail: () => Promise<void>;
+    addFakeTeammate: () => Promise<void>;
+    removeFakeTeammate: () => Promise<void>;
+    replayEnterAnimation: () => Promise<void>;
   };
+  /** Dev-only: main fires this to ask the overlay to replay the enter
+   *  animation on all currently mounted bubbles. */
+  onDebugReplayEnter: (cb: () => void) => Unsubscribe;
 }
 
 declare global {

@@ -23,8 +23,12 @@ const bridge: ChatHeadsBridge = {
   list: () => ipcRenderer.invoke("heads:list") as Promise<ChatHead[]>,
   onUpdate: (cb) => subscribe<ChatHead[]>("heads:update", cb),
 
-  showInfo: (index) =>
-    ipcRenderer.invoke("heads:showInfo", index) as Promise<void>,
+  showInfo: (index, bubbleScreenY) =>
+    ipcRenderer.invoke(
+      "heads:showInfo",
+      index,
+      bubbleScreenY,
+    ) as Promise<void>,
   infoHoverEnter: () =>
     ipcRenderer.invoke("info:hoverEnter") as Promise<void>,
   infoHoverLeave: () =>
@@ -102,6 +106,19 @@ const bridge: ChatHeadsBridge = {
       ipcRenderer.invoke("debug:railSnapshot") as Promise<RailDebugSnapshot>,
     refreshRail: () =>
       ipcRenderer.invoke("debug:refreshRail") as Promise<RailDebugSnapshot>,
+    shuffleRail: () =>
+      ipcRenderer.invoke("debug:shuffleRail") as Promise<void>,
+    addFakeTeammate: () =>
+      ipcRenderer.invoke("debug:addFakeTeammate") as Promise<void>,
+    removeFakeTeammate: () =>
+      ipcRenderer.invoke("debug:removeFakeTeammate") as Promise<void>,
+    replayEnterAnimation: () =>
+      ipcRenderer.invoke("debug:replayEnterAnimation") as Promise<void>,
+  },
+  onDebugReplayEnter: (cb) => {
+    const handler = (): void => cb();
+    ipcRenderer.on("debug:replayEnter", handler);
+    return () => ipcRenderer.off("debug:replayEnter", handler);
   },
 };
 

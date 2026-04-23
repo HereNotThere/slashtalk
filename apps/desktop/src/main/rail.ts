@@ -26,6 +26,21 @@ let lastSnapshot: RailDebugSnapshot = { at: null, peers: null, error: null };
 const prActivityByLogin = new Map<string, number>();
 const PR_ACTIVITY_TTL_MS = 8_000;
 
+// DEV ONLY — synthetic teammates for testing enter/exit animations without
+// touching the backend. Merged into the peer list in refresh() so regular
+// polls don't wipe them.
+const debugFakes: ChatHead[] = [];
+let debugFakeSeq = 0;
+const DEBUG_EMOJIS = ["🦊", "🐼", "🐙", "🦄", "🐸", "🐵", "🦉", "🐧", "🐝"];
+const DEBUG_TINTS = [
+  "#ff6b6b",
+  "#4ecdc4",
+  "#ffd166",
+  "#9b5de5",
+  "#06d6a0",
+  "#f15bb5",
+];
+
 export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
 
@@ -107,16 +122,18 @@ async function refresh(): Promise<void> {
     }
 
     lastSnapshot = { at: Date.now(), peers, error: null };
-    apply([
-      self,
-      ...peers.map((t) =>
-        headForUser(
-          t.githubLogin,
-          t.avatarUrl,
-          latestByLogin.get(t.githubLogin) ?? null,
-        ),
+    const peerHeads = peers.map((t) =>
+      headForUser(
+        t.githubLogin,
+        t.avatarUrl,
+        latestByLogin.get(t.githubLogin) ?? null,
       ),
-    ]);
+    );
+    // Merge debug fakes into the peer list so they survive the poll refresh.
+    for (const fake of debugFakes) peerHeads.push(fake);
+    // Most recently active first; peers with no known activity sink to the end.
+    peerHeads.sort((a, b) => (b.lastActionAt ?? -1) - (a.lastActionAt ?? -1));
+    apply([self, ...peerHeads]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     lastSnapshot = { at: Date.now(), peers: null, error: message };
@@ -175,6 +192,64 @@ export function markPrActivity(login: string): void {
     parseUserHeadId(h.id) === login ? { ...h, prActivityAt: now } : h,
   );
   apply(next);
+}
+
+/** DEV ONLY — append a synthetic teammate and re-sort the rail, triggering
+ *  the renderer's enter animation. Persists across polls via `debugFakes`. */
+export function debugAddFakeTeammate(): void {
+  debugFakeSeq += 1;
+  const id = `user:debug_${debugFakeSeq}`;
+  const emoji = DEBUG_EMOJIS[debugFakeSeq % DEBUG_EMOJIS.length]!;
+  const tint = DEBUG_TINTS[debugFakeSeq % DEBUG_TINTS.length]!;
+  const fake: ChatHead = {
+    id,
+    label: `debug_${debugFakeSeq}`,
+    tint,
+    avatar: { type: "emoji", value: emoji },
+    lastActionAt: Date.now(),
+  };
+  debugFakes.push(fake);
+
+  // Immediate broadcast so the enter animation fires without waiting for a
+  // poll. We splice the new fake into the existing rail sorted by lastActionAt.
+  if (heads.length === 0) return;
+  const [self, ...peers] = heads;
+  const merged = [...peers, fake];
+  merged.sort((a, b) => (b.lastActionAt ?? -1) - (a.lastActionAt ?? -1));
+  apply([self, ...merged]);
+}
+
+/** DEV ONLY — remove the most recently added fake teammate. */
+export function debugRemoveFakeTeammate(): void {
+  const removed = debugFakes.pop();
+  if (!removed) return;
+  const next = heads.filter((h) => h.id !== removed.id);
+  apply(next);
+}
+
+/** DEV ONLY — clear all synthetic teammates. */
+export function debugClearFakeTeammates(): void {
+  if (debugFakes.length === 0) return;
+  const removedIds = new Set(debugFakes.map((f) => f.id));
+  debugFakes.length = 0;
+  apply(heads.filter((h) => !removedIds.has(h.id)));
+}
+
+/** DEV ONLY — shuffle peer heads in place and emit. Used to verify the rail's
+ *  reorder animation without waiting for real activity. Self (index 0) is
+ *  never moved. */
+export function debugShuffleRail(): void {
+  if (heads.length < 3) return;
+  const [self, ...peers] = heads;
+  for (let i = peers.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [peers[i], peers[j]] = [peers[j], peers[i]];
+  }
+  // Guarantee an observable change so a no-op shuffle doesn't confuse testing.
+  if (peers.length >= 2 && sameHeads(heads, [self, ...peers])) {
+    [peers[0], peers[1]] = [peers[1], peers[0]];
+  }
+  apply([self, ...peers]);
 }
 
 export function start(): void {

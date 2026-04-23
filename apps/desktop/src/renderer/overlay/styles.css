@@ -54,6 +54,13 @@
   border-color: #fde68a; /* amber-200 */
 }
 
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .pr-spark {
   position: absolute;
   left: 50%;

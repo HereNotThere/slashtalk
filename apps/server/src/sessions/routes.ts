@@ -4,11 +4,7 @@ import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessions, events, heartbeats, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import {
-  toSnapshot,
-  sortByStateThenTime,
-  loadInsightsForSessions,
-} from "./snapshot";
+import { toSnapshot, loadInsightsForSessions } from "./snapshot";
 
 const SESSION_STATE_VALUES = Object.values(SessionState);
 
@@ -50,7 +46,7 @@ export const sessionRoutes = (db: Database) =>
           snapshots = snapshots.filter((s) => s.project === query.project);
         }
 
-        return sortByStateThenTime(snapshots);
+        return snapshots;
       },
       {
         query: t.Object({

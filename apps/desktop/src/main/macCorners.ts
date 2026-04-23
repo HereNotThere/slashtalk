@@ -24,6 +24,10 @@ interface Bindings {
   msgSend_pd: (obj: bigint, sel: bigint, arg: number) => void;
   msgSend_ppp: (obj: bigint, sel: bigint, arg: bigint) => void;
   msgSend_pdd: (obj: bigint, sel: bigint, a: number, b: number) => bigint;
+  // `[array objectAtIndex:i]` — (id, SEL, NSUInteger) → id.
+  msgSend_arrayIndex: (obj: bigint, sel: bigint, idx: bigint) => bigint;
+  // `[obj isKindOfClass:cls]` — (id, SEL, Class) → BOOL.
+  msgSend_isKind: (obj: bigint, sel: bigint, cls: bigint) => boolean;
 }
 
 let bindings: Bindings | null = null;
@@ -69,6 +73,16 @@ function load(): Bindings | null {
       "intptr_t",
       "double",
       "double",
+    ]),
+    msgSend_arrayIndex: objc.func("objc_msgSend", "intptr_t", [
+      "intptr_t",
+      "intptr_t",
+      "intptr_t",
+    ]),
+    msgSend_isKind: objc.func("objc_msgSend", "bool", [
+      "intptr_t",
+      "intptr_t",
+      "intptr_t",
     ]),
   };
   return bindings;
@@ -122,6 +136,13 @@ export function setMacCornerRadius(
   b.msgSend_pd(layer, b.sel_registerName("setCornerRadius:"), radius);
   b.msgSend_pb(layer, b.sel_registerName("setMasksToBounds:"), true);
 
+  // Round the NSVisualEffectView too. On macOS 14 / 15 the parent
+  // `masksToBounds` doesn't always clip the vibrancy layer (it has its own
+  // compositing path), leaving a thin rectangular frost edge visible outside
+  // the pill. macOS 26 no-ops this because the newer compositor already clips
+  // siblings. Harmless to call everywhere; the selector is idempotent.
+  roundVisualEffectSubviews(b, contentView, radius);
+
   // System shadow (hasShadow:true) is cached against the original
   // rectangular alpha mask; invalidate so macOS recomputes it against our
   // rounded pill.
@@ -143,5 +164,34 @@ export function setMacCornerRadius(
     const strokeCg = b.msgSend_pp(strokeNs, b.sel_registerName("CGColor"));
     b.msgSend_ppp(layer, b.sel_registerName("setBorderColor:"), strokeCg);
     b.msgSend_pd(layer, b.sel_registerName("setBorderWidth:"), border.width);
+  }
+}
+
+function roundVisualEffectSubviews(
+  b: Bindings,
+  contentView: bigint,
+  radius: number,
+): void {
+  const vfvClass = b.objc_getClass("NSVisualEffectView");
+  if (!vfvClass) return;
+  const subviews = b.msgSend_pp(contentView, b.sel_registerName("subviews"));
+  if (!subviews) return;
+  // NSArray count returns NSUInteger; fits in intptr_t for any realistic tree.
+  const count = Number(b.msgSend_pp(subviews, b.sel_registerName("count")));
+  const objectAtIndex = b.sel_registerName("objectAtIndex:");
+  const isKindOfClass = b.sel_registerName("isKindOfClass:");
+  const setWantsLayer = b.sel_registerName("setWantsLayer:");
+  const layerSel = b.sel_registerName("layer");
+  const setCornerRadius = b.sel_registerName("setCornerRadius:");
+  const setMasksToBounds = b.sel_registerName("setMasksToBounds:");
+  for (let i = 0; i < count; i += 1) {
+    const sub = b.msgSend_arrayIndex(subviews, objectAtIndex, BigInt(i));
+    if (!sub) continue;
+    if (!b.msgSend_isKind(sub, isKindOfClass, vfvClass)) continue;
+    b.msgSend_pb(sub, setWantsLayer, true);
+    const subLayer = b.msgSend_pp(sub, layerSel);
+    if (!subLayer) continue;
+    b.msgSend_pd(subLayer, setCornerRadius, radius);
+    b.msgSend_pb(subLayer, setMasksToBounds, true);
   }
 }

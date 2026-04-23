@@ -20,7 +20,10 @@ export function App(): JSX.Element {
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
   const [visible, setVisible] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  useAutoResize();
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Measure the inner content, not the card: the card is capped at max-h-screen
+  // so its height saturates at the window size and wouldn't signal growth.
+  useAutoResize(contentRef);
 
   useEffect(() => {
     const offShow = window.chatheads.onInfoShow((p) => {
@@ -77,21 +80,23 @@ export function App(): JSX.Element {
       ref={rootRef}
       onMouseEnter={() => void window.chatheads.infoHoverEnter()}
       onMouseLeave={() => void window.chatheads.infoHoverLeave()}
-      className="bg-card rounded-2xl px-lg transition-[opacity,transform] duration-75 ease-out overflow-hidden"
+      className="bg-card rounded-3xl max-h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out"
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? "translateX(0)" : "translateX(-4px)",
       }}
     >
-      <Header head={head} />
-      <Divider />
-      <SessionsSection sessions={sessions} />
+      <div ref={contentRef}>
+        <Header head={head} />
+        <Divider />
+        <SessionsSection sessions={sessions} />
+      </div>
     </div>
   );
 }
 
 function Divider(): JSX.Element {
-  return <div className="h-px bg-divider" />;
+  return <div className="mx-lg h-px bg-divider" />;
 }
 
 function Header({ head }: { head: ChatHead | null }): JSX.Element {
@@ -102,7 +107,7 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
   });
   const { city, icon } = useLocationWeather();
   return (
-    <div className="flex items-start gap-md pt-lg pb-md">
+    <div className="flex items-start gap-md px-lg pt-lg pb-md">
       <Avatar head={head} />
       <div className="flex-1 min-w-0">
         <div className="text-[19px] font-bold leading-tight truncate">
@@ -178,12 +183,14 @@ function SessionsSection({
 
   if (sessions == null) {
     return (
-      <div className="py-md text-[12px] text-subtle min-h-[60px]">Loading…</div>
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        Loading…
+      </div>
     );
   }
   if (sessions.length === 0) {
     return (
-      <div className="py-md text-[12px] text-subtle min-h-[60px]">
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
         No sessions yet.
       </div>
     );
@@ -197,7 +204,7 @@ function SessionsSection({
     <div>
       {visible.map((s, i) => (
         <Fragment key={s.id}>
-          {i > 0 && <div className="h-px bg-divider" />}
+          {i > 0 && <div className="mx-lg h-px bg-divider" />}
           <SessionRow
             session={s}
             expanded={expandedId === s.id}
@@ -209,11 +216,11 @@ function SessionsSection({
       ))}
       {hasMore && (
         <>
-          <div className="h-px bg-divider" />
+          <div className="mx-lg h-px bg-divider" />
           <button
             type="button"
             onClick={() => setShowAll((v) => !v)}
-            className="w-full py-md text-center text-[12px] font-medium text-muted hover:text-fg hover:bg-surface/60 transition-colors cursor-pointer"
+            className="w-full px-lg py-md text-center text-[12px] font-medium text-muted hover:text-fg hover:bg-surface/60 transition-colors cursor-pointer"
           >
             {showAll ? "Show less" : `Show all (${sessions.length})`}
           </button>
@@ -224,7 +231,10 @@ function SessionsSection({
 }
 
 function repoLabel(s: InfoSession): string | null {
-  if ("repo_full_name" in s && s.repo_full_name) return s.repo_full_name;
+  if ("repo_full_name" in s && s.repo_full_name) {
+    const slash = s.repo_full_name.lastIndexOf("/");
+    return slash >= 0 ? s.repo_full_name.slice(slash + 1) : s.repo_full_name;
+  }
   // Fallback for own sessions: Claude writes projects as a slugified cwd path
   // (e.g. "-Users-erik-dev-towns-app"); the trailing segment is the repo dir.
   const parts = s.project.split(/[-/]/).filter(Boolean);
@@ -257,7 +267,7 @@ function SessionRow({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
+        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -302,7 +312,7 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
       : null;
   const recent = session.recent ?? [];
   return (
-    <div className="pb-lg space-y-md">
+    <div className="px-lg pb-lg space-y-md">
       {summary && (
         <div>
           <SubHeader>Summary</SubHeader>

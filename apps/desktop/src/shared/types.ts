@@ -101,6 +101,11 @@ export interface ChatHeadsBridge {
   openResponse: (message: string) => Promise<void>;
   onResponseOpen: (cb: (payload: { message: string }) => void) => Unsubscribe;
 
+  // Ask the backend chat endpoint. Client owns the full history.
+  askChat: (
+    messages: import("@slashtalk/shared").ChatMessage[],
+  ) => Promise<import("@slashtalk/shared").ChatAskResponse>;
+
   // Drag (overlay → main)
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;

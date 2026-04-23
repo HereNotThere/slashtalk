@@ -7,8 +7,10 @@
 
 import type { ChatHead, RailDebugSnapshot } from "../shared/types";
 import * as backend from "./backend";
+import * as agentStore from "./agentStore";
 import * as localRepos from "./localRepos";
 import { createEmitter } from "./emitter";
+import type { LocalAgent } from "./agentStore";
 
 const POLL_INTERVAL_MS = 30_000;
 // Coalesce bursts of auth/tracked-repo events into one fetch.
@@ -45,6 +47,7 @@ export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
 
 const USER_HEAD_PREFIX = "user:";
+const AGENT_HEAD_PREFIX = "agent:";
 
 export function userHeadId(login: string): string {
   return `${USER_HEAD_PREFIX}${login}`;
@@ -53,6 +56,16 @@ export function userHeadId(login: string): string {
 export function parseUserHeadId(headId: string): string | null {
   return headId.startsWith(USER_HEAD_PREFIX)
     ? headId.slice(USER_HEAD_PREFIX.length)
+    : null;
+}
+
+export function agentHeadId(agentId: string): string {
+  return `${AGENT_HEAD_PREFIX}${agentId}`;
+}
+
+export function parseAgentHeadId(headId: string): string | null {
+  return headId.startsWith(AGENT_HEAD_PREFIX)
+    ? headId.slice(AGENT_HEAD_PREFIX.length)
     : null;
 }
 
@@ -67,8 +80,21 @@ function headForUser(
     label: login,
     tint: "transparent",
     avatar: { type: "remote", value: avatarUrl },
+    kind: "user",
     ...(lastActivityAt != null && { lastActionAt: lastActivityAt }),
     ...(prAt != null && { prActivityAt: prAt }),
+  };
+}
+
+function headForAgent(agent: LocalAgent): ChatHead {
+  const initial = (agent.name[0] ?? "A").toUpperCase();
+  return {
+    id: agentHeadId(agent.id),
+    label: agent.name,
+    tint: "var(--color-accent)",
+    avatar: { type: "emoji", value: initial },
+    kind: "agent",
+    lastActionAt: agent.createdAt,
   };
 }
 
@@ -84,6 +110,10 @@ function sameHeads(a: ChatHead[], b: ChatHead[]): boolean {
     if (a[i].id !== b[i].id) return false;
     if (a[i].label !== b[i].label) return false;
     if (a[i].avatar.value !== b[i].avatar.value) return false;
+    if (a[i].kind !== b[i].kind) return false;
+    if (a[i].lastActionAt !== b[i].lastActionAt) return false;
+    if (a[i].live !== b[i].live) return false;
+    if (a[i].unread !== b[i].unread) return false;
     if (a[i].prActivityAt !== b[i].prActivityAt) return false;
   }
   return true;
@@ -104,6 +134,10 @@ async function refresh(): Promise<void> {
     return;
   }
   console.log(`[rail] refresh as ${self.label}`);
+  const agentHeads = agentStore
+    .list()
+    .map(headForAgent)
+    .sort((a, b) => (b.lastActionAt ?? -1) - (a.lastActionAt ?? -1));
   try {
     // Fetch the peer list and the recent session feed in parallel. Each peer's
     // "last activity" is just the timestamp of their most recent session in
@@ -133,13 +167,13 @@ async function refresh(): Promise<void> {
     for (const fake of debugFakes) peerHeads.push(fake);
     // Most recently active first; peers with no known activity sink to the end.
     peerHeads.sort((a, b) => (b.lastActionAt ?? -1) - (a.lastActionAt ?? -1));
-    apply([self, ...peerHeads]);
+    apply([self, ...agentHeads, ...peerHeads]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     lastSnapshot = { at: Date.now(), peers: null, error: message };
     console.error("[rail] listTeammates failed:", err);
-    // Keep showing self so the rail doesn't flash.
-    apply([self]);
+    // Keep showing self + agents so the rail doesn't flash.
+    apply([self, ...agentHeads]);
   }
 }
 
@@ -254,6 +288,7 @@ export function debugShuffleRail(): void {
 
 export function start(): void {
   backend.onChange(scheduleRefresh);
+  agentStore.onChange(scheduleRefresh);
   localRepos.onChange(scheduleRefresh);
   setInterval(() => void refresh(), POLL_INTERVAL_MS);
   void refresh();

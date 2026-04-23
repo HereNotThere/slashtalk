@@ -1,5 +1,6 @@
 import { useHeads } from "../shared/useHeads";
 import { SlashtalkSection } from "./SlashtalkSection";
+import { AgentsSection } from "./AgentsSection";
 import type { ChatHead } from "../../shared/types";
 
 export function App(): JSX.Element {
@@ -20,6 +21,7 @@ export function App(): JSX.Element {
       </header>
 
       <SlashtalkSection />
+      <AgentsSection />
 
       <SectionHeading>Active ({heads.length})</SectionHeading>
       <div className="flex flex-col gap-1.5">
@@ -61,6 +63,11 @@ function ActiveRow({ head }: { head: ChatHead }): JSX.Element {
         )}
       </span>
       <span className="text-[13px]">{head.label}</span>
+      {head.kind === "agent" && (
+        <span className="ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border text-muted">
+          Agent
+        </span>
+      )}
     </div>
   );
 }

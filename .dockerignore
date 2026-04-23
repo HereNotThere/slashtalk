@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+**/node_modules
+.env
+.env.*
+*.log
+dist
+out
+coverage
+.DS_Store

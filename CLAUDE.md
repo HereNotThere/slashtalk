@@ -37,7 +37,7 @@ bun run db:migrate
 bun run typecheck
 ```
 
-`config.ts` throws at boot if any var in `.env.example` is unset; Postgres + Redis must be reachable. Default port 10000. No test runner is wired up — use `bun test` if adding tests.
+`config.ts` throws at boot if any var in `.env.example` is unset; Postgres + Redis must be reachable. Default port 10000. The server has a `bun test` suite under `apps/server/test/` (classifier, ingest, refresh, pr-poller, integration) — run via `bun run test` from `apps/server`. The desktop app has no test runner wired up.
 
 ## Architecture that matters
 
@@ -60,6 +60,8 @@ bun run typecheck
 
 **Redis pub/sub → WebSocket fan-out** (`ws/redis-bridge.ts`, `ws/handler.ts`). Separate `pub`/`sub` ioredis clients (ioredis requirement). On WS open, subscribes the connection to `repo:<id>` for every row in `user_repos`, plus `user:<userId>`. `RedisBridge` is soft-fail: if Redis can't connect, `publish`/`subscribe` become no-ops and the HTTP API keeps working.
 
+**PR activity is the only Redis publisher today** (`social/pr-poller.ts`). Polls `https://api.github.com/users/:login/events` every 60s for every user with a stored token, filters `PullRequestEvent` (action `opened`/`reopened`, or `closed && merged`), looks up the matching `repos` row by `full_name`, and publishes a `PrActivityMessage` (see `@slashtalk/shared`) to `repo:<id>`. Per-user `lastSeenEventId` is in-memory — a process restart re-baselines from each user's feed head rather than replaying history. The desktop's `main/ws.ts` consumes these and calls `rail.markPrActivity(login)`, which the overlay renders as a celebratory ring/spark animation around the actor's chat head. WS clients should expect `{ type: "pr_activity" }` plus the existing `{ type: "ping" }` keepalive — anything else is forward-compat noise.
+
 **Secrets** (`auth/tokens.ts`). GitHub OAuth tokens are AES-256-GCM encrypted (`hex(iv):hex(ciphertext)`) with `ENCRYPTION_KEY` before insert. Refresh tokens, API keys, and setup tokens are stored as SHA-256 hashes — plaintext returned exactly once at issuance. Never log or return the raw values.
 
 **`@slashtalk/shared` is source-only.** No build, no `dist`. `apps/server/tsconfig.json` maps the package to `packages/shared/src` via `paths`. Keep runtime values (enums, constants) minimal here unless you're willing to add a build step — today it's mostly types, plus a `SessionState` object literal that works only because it's imported from TS source directly.
@@ -70,7 +72,7 @@ The spec is substantially ahead of the code. The backend skeleton exists, but se
 
 - **Ingest does not update session aggregates.** `/v1/ingest` inserts raw events and bumps `server_offset`, but never updates `lastTs`, `tokensIn/Out/…`, `userMsgs`, `assistantMsgs`, `toolCalls`, `inTurn`, `recentEvents`, `topFiles*`, `lastUserPrompt`, etc. on the `sessions` row. Spec §5 describes event-by-event aggregation; it's not implemented.
 - **`in_turn` is read but never written.** `classifySessionState` reads it; nothing sets it. Until ingest parses events, every session will classify as `ACTIVE`/`IDLE` (based on `lastTs`), never `BUSY`.
-- **Nothing publishes to Redis.** No call to `redis.publish()` exists. WS clients connect and receive only the 30s ping — no `session_updated` messages.
+- **Nothing session-related publishes to Redis.** The PR poller publishes `pr_activity` to `repo:<id>` (see "PR activity is the only Redis publisher today" above), but no call to `redis.publish()` exists for `session_updated`. Until ingest aggregation lands, presence/turn changes never fan out.
 - **Session → repo matching is absent.** `sessions.repo_id` is never set on insert, so `/api/feed` (`inArray(sessions.repoId, repoIds)`) always returns `[]`.
 - **Repo population path is the desktop app's "Add local repo" button** (`POST /api/me/repos`) — no auto-sync, by design. Social graph stays empty until a user claims a repo; `/api/feed/users` reflects only those claims.
 - **`install.sh` is vestigial.** `GET /install.sh` serves it and `POST /v1/auth/exchange` still works, but the script posts byte-offset `fromOffset` against an API that now takes `fromLineSeq` — running it will 400. The desktop app is the supported watcher; delete the script when nothing else points at it.

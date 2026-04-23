@@ -16,6 +16,7 @@ import * as localRepos from "./localRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
+import * as ws from "./ws";
 import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -846,11 +847,20 @@ function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
     void uploader.start();
     void heartbeat.start();
+    ws.start();
   } else {
     heartbeat.stop();
     uploader.reset();
+    ws.stop();
   }
 }
+
+ws.onPrActivity((msg) => {
+  console.log(
+    `[ws] pr_activity ${msg.action} by ${msg.login} on ${msg.repoFullName}#${msg.number}`,
+  );
+  rail.markPrActivity(msg.login);
+});
 
 backend.onChange((state) => applySyncForAuth(state.signedIn));
 ipcMain.handle("backend:listRepos", () => backend.listRepos());

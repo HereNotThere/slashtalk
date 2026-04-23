@@ -19,6 +19,9 @@ export interface ChatHead {
   /** Epoch ms of the most recent activity on this head. Optional for back-compat
    *  with persisted heads from before this field was added. */
   lastActionAt?: number;
+  /** Epoch ms when this teammate's most recent PR opened/merged event landed.
+   *  Renderer treats it as transient (animates while it's < a few seconds old). */
+  prActivityAt?: number;
 }
 
 export type Unsubscribe = () => void;

@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ChatHead } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
 import { SearchIcon } from "../shared/icons";
 
 const DRAG_THRESHOLD = 4;
+// Slightly longer than the longest CSS animation (last ring delay 0.4s + 1.4s)
+// so the markup stays mounted until the animation visually finishes.
+const PR_CELEBRATION_MS = 2000;
+const SPARK_COUNT = 8;
+const SPARK_DISTANCE_PX = 28;
 
 // Hover-to-show timings. Enter-delay avoids showing during pass-through
 // hovers; leave-delay gives the cursor time to reach the info panel (whose
@@ -162,6 +167,7 @@ function Bubble({
   onHoverLeave: () => void;
 }): JSX.Element {
   useActivityBadgeUpdate(head.lastActionAt ?? null);
+  const celebrating = usePrCelebration(head.prActivityAt ?? null);
 
   const handleMouseEnter = (): void => {
     void window.chatheads.preloadSessions(head.id);
@@ -213,6 +219,57 @@ function Bubble({
           {formatAge(Date.now() - head.lastActionAt)}
         </div>
       )}
+      {celebrating != null && <PrCelebration key={celebrating} />}
+    </div>
+  );
+}
+
+// Returns the timestamp to use as a remount key while the celebration is
+// active, or null when it should not render. Bound to prActivityAt so a new
+// PR (different timestamp) restarts the animation cleanly.
+function usePrCelebration(prActivityAt: number | null): number | null {
+  const [active, setActive] = useState<number | null>(null);
+  useEffect(() => {
+    if (prActivityAt == null) {
+      setActive(null);
+      return;
+    }
+    const elapsed = Date.now() - prActivityAt;
+    if (elapsed >= PR_CELEBRATION_MS) {
+      setActive(null);
+      return;
+    }
+    setActive(prActivityAt);
+    const t = setTimeout(() => setActive(null), PR_CELEBRATION_MS - elapsed);
+    return () => clearTimeout(t);
+  }, [prActivityAt]);
+  return active;
+}
+
+function PrCelebration(): JSX.Element {
+  return (
+    <div className="pr-celebration">
+      <div className="pr-ring" />
+      <div className="pr-ring" />
+      <div className="pr-ring" />
+      {Array.from({ length: SPARK_COUNT }).map((_, i) => {
+        const angle = (i / SPARK_COUNT) * Math.PI * 2;
+        const dx = Math.cos(angle) * SPARK_DISTANCE_PX;
+        const dy = Math.sin(angle) * SPARK_DISTANCE_PX;
+        return (
+          <span
+            key={i}
+            className="pr-spark"
+            style={
+              {
+                animationDelay: `${i * 0.04}s`,
+                "--dx": `${dx.toFixed(1)}px`,
+                "--dy": `${dy.toFixed(1)}px`,
+              } as CSSProperties
+            }
+          />
+        );
+      })}
     </div>
   );
 }

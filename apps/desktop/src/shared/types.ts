@@ -21,6 +21,8 @@ export type Avatar =
 
 export interface ChatHead {
   id: string;
+  /** Picks the info-popover layout and routes session fetches. */
+  kind: "user" | "repo" | "agent";
   label: string;
   tint: string;
   avatar: Avatar;
@@ -33,12 +35,12 @@ export interface ChatHead {
   /** True when this user currently has at least one active MCP session. Renders
    *  a green presence dot on the bubble. */
   live?: boolean;
-  /** "user" (default) or "agent". Agent heads render as their own group and
-   *  the info panel uses the agent branch once Phase 4 lands. */
-  kind?: 'user' | 'agent';
   /** Set when the agent streamed new content while its info panel was not
    *  open. Cleared when the user opens the panel. Agent heads only. */
   unread?: boolean;
+  /** Only set when kind === "repo". */
+  repoId?: number;
+  repoFullName?: string;
 }
 
 export type Unsubscribe = () => void;
@@ -313,11 +315,16 @@ export interface ChatHeadsBridge {
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
 
+  // Project heads — GitHub repos the user has claimed. Rendered below the
+  // teammate rail in the overlay; ignored by other windows.
+  listProjects: () => Promise<ChatHead[]>;
+  onProjectsUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
+
   // Info box (overlay → main). Show/hide are driven by hover; the rail keeps
   // the leave timer and asks main to hide after the user leaves the bubble
   // and doesn't re-enter the info panel. `infoHoverEnter/Leave` let the info
   // panel itself hold the window open while the cursor is over it.
-  showInfo: (index: number, bubbleScreenY?: number) => Promise<void>;
+  showInfo: (headId: string, bubbleScreenY?: number) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
 
@@ -352,8 +359,8 @@ export interface ChatHeadsBridge {
   onInfoHide: (cb: () => void) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
-  // Fetch sessions for a given chat head (signed-in user's own or a peer's
-  // that share a claimed repo with you).
+  // Fetch sessions for a given chat head (user: own or a peer's; repo: all
+  // sessions on that repo across peers + self).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
   listAgentSessionsForAgent: (agentId: string) => Promise<AgentSessionRow[]>;

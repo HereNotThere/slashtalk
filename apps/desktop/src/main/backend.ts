@@ -439,6 +439,13 @@ export function listFeedSessionsForUser(
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
 
+export function listFeedSessionsForRepo(
+  fullName: string,
+): Promise<FeedSessionSnapshot[]> {
+  const qs = new URLSearchParams({ repo: fullName });
+  return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
+}
+
 export function listDeviceRepos(): Promise<
   Array<{ repoId: number; fullName: string; localPath: string }>
 > {

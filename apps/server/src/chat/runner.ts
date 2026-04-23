@@ -1,4 +1,10 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import Anthropic from "@anthropic-ai/sdk";
+import type {
+  MessageParam,
+  TextBlockParam,
+  ToolResultBlockParam,
+  ToolUseBlock,
+} from "@anthropic-ai/sdk/resources/messages";
 import type {
   ChatAssistantMessage,
   ChatCitation,
@@ -6,7 +12,7 @@ import type {
 } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { config } from "../config";
-import { createChatMcpServer } from "./tools";
+import { buildChatTools, type ChatToolDefinition } from "./tools";
 
 const SYSTEM_PROMPT = `You are the slashtalk team-presence assistant. You answer questions about what the user's teammates are working on in Claude Code right now, using only the tools provided.
 
@@ -20,6 +26,21 @@ Citations: whenever you reference a session, append [session:<id>] after the sen
 
 Tone: concise, factual, no preamble. Do not say "I'll call the tool" — just call it and answer. If the tools return no data, say so plainly.`;
 
+const MODEL = "claude-sonnet-4-6";
+const MAX_ITERATIONS = 8;
+const MAX_TOKENS = 4096;
+
+let _client: Anthropic | null = null;
+function client(): Anthropic {
+  if (!_client) {
+    if (!config.anthropicApiKey) {
+      throw new Error("ANTHROPIC_API_KEY not set");
+    }
+    _client = new Anthropic({ apiKey: config.anthropicApiKey });
+  }
+  return _client;
+}
+
 export interface RunChatParams {
   db: Database;
   userId: number;
@@ -29,78 +50,88 @@ export interface RunChatParams {
 export async function runChatAgent(
   params: RunChatParams,
 ): Promise<ChatAssistantMessage> {
-  if (!config.anthropicApiKey) {
-    throw new Error("ANTHROPIC_API_KEY not set");
-  }
-  const mcp = createChatMcpServer(params.db, params.userId);
-  const prompt = renderPrompt(params.messages);
+  const tools = buildChatTools(params.db, params.userId);
+  const byName = new Map(tools.map((t) => [t.name, t]));
+  const toolDefs = tools.map(({ handler: _h, ...def }) => def);
 
-  const q = query({
-    prompt,
-    options: {
-      model: "claude-sonnet-4-6",
-      systemPrompt: SYSTEM_PROMPT,
-      // Empty array disables all built-in Claude Code tools; only our MCP
-      // tools remain. Keep the agent sandboxed — no Bash, no file access.
-      tools: [],
-      mcpServers: { slashtalk: mcp },
-      allowedTools: [
-        "mcp__slashtalk__get_team_activity",
-        "mcp__slashtalk__get_session",
-      ],
-      maxTurns: 8,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      env: {
-        ...process.env,
-        ANTHROPIC_API_KEY: config.anthropicApiKey,
-      },
+  const messages: MessageParam[] = params.messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+
+  const system: TextBlockParam[] = [
+    {
+      type: "text",
+      text: SYSTEM_PROMPT,
+      cache_control: { type: "ephemeral" },
     },
-  });
+  ];
 
-  let content = "";
-  for await (const msg of q) {
-    if (msg.type === "result") {
-      if (msg.subtype === "success") {
-        content = msg.result;
-      } else {
-        throw new Error(`agent ended without success: ${msg.subtype}`);
-      }
-      break;
-    }
+  let finalText = "";
+
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    const resp = await client().messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      system,
+      tools: toolDefs,
+      messages,
+    });
+
+    const textBlocks = resp.content
+      .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+      .map((b) => b.text);
+    if (textBlocks.length > 0) finalText = textBlocks.join("\n");
+
+    if (resp.stop_reason !== "tool_use") break;
+
+    messages.push({ role: "assistant", content: resp.content });
+
+    const toolUses = resp.content.filter(
+      (b): b is ToolUseBlock => b.type === "tool_use",
+    );
+    const toolResults: ToolResultBlockParam[] = await Promise.all(
+      toolUses.map((use) => runToolCall(use, byName)),
+    );
+    messages.push({ role: "user", content: toolResults });
   }
 
   return {
     role: "assistant",
-    content,
-    citations: extractCitations(content),
+    content: finalText,
+    citations: extractCitations(finalText),
   };
 }
 
-/**
- * The Agent SDK's `prompt` only accepts user-side messages — we can't pre-seed
- * assistant turns. Flatten prior history into a context block inside a single
- * user message so the agent sees the thread as user-supplied text. The client
- * still stores messages in the clean alternating shape.
- */
-function renderPrompt(messages: ChatMessage[]): string {
-  if (messages.length === 0) {
-    throw new Error("messages must be non-empty");
+async function runToolCall(
+  use: ToolUseBlock,
+  byName: Map<string, ChatToolDefinition>,
+): Promise<ToolResultBlockParam> {
+  const tool = byName.get(use.name);
+  if (!tool) {
+    return {
+      type: "tool_result",
+      tool_use_id: use.id,
+      content: `unknown tool: ${use.name}`,
+      is_error: true,
+    };
   }
-  const last = messages[messages.length - 1];
-  if (last.role !== "user") {
-    throw new Error("last message must be role=user");
+  try {
+    const result = await tool.handler(use.input as Record<string, unknown>);
+    return {
+      type: "tool_result",
+      tool_use_id: use.id,
+      content: result.content,
+      is_error: result.isError,
+    };
+  } catch (err) {
+    return {
+      type: "tool_result",
+      tool_use_id: use.id,
+      content: (err as Error).message,
+      is_error: true,
+    };
   }
-  if (messages.length === 1) return last.content;
-
-  const history = messages
-    .slice(0, -1)
-    .map((m) => {
-      const label = m.role === "user" ? "User" : "Assistant";
-      return `${label}: ${m.content}`;
-    })
-    .join("\n\n");
-  return `Prior conversation:\n${history}\n\nLatest user question: ${last.content}`;
 }
 
 function extractCitations(text: string): ChatCitation[] {

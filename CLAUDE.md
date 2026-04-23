@@ -84,7 +84,7 @@ When adding a feature, check whether its upstream dependency is one of the above
 
 - Elysia plugins are factories `(db, redis?) => new Elysia({ name, prefix })`. The `name` is required for Elysia's plugin dedup — preserve it when editing.
 - Route prefix encodes auth: `/v1/*` = API key (CLI), `/auth/*` + `/api/*` = JWT (web). Don't mix.
-- Drizzle schema (`src/db/schema.ts`) is source of truth; regenerate migrations with `db:generate` after schema edits.
+- Drizzle schema (`src/db/schema.ts`) is source of truth. Follow the migration workflow in `README.md` ("Database migrations") for schema changes, custom SQL migrations, and the rules around never hand-editing Drizzle journal/snapshot metadata.
 - TS is strict across the repo; all tsconfigs use `moduleResolution: bundler` and ESM (`"type": "module"`).
 
 ## Keeping this file in sync

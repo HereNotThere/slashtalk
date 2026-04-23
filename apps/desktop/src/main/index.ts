@@ -95,6 +95,19 @@ const sessionCache = new Map<string, InfoSession[]>();
 
 let dragOffset: { dx: number; dy: number } | null = null;
 let dragTicker: ReturnType<typeof setInterval> | null = null;
+// While the stack is being dragged, bubble hovers still fire (the cursor sits
+// over bubbles as the window moves under it), which would pop the info card
+// repeatedly. Suppress showInfo for the duration of the drag + dock animation.
+let isDraggingStack = false;
+
+// Dock-to-edge feature. During drag we show a dashed ghost at the nearest dock
+// slot (center-left / center-right); on release the overlay tweens to it.
+const DOCK_EDGE_MARGIN = 24;
+const DOCK_ANIM_MS = 180;
+let dockPlaceholderWindow: BrowserWindow | null = null;
+// Monotonic counter — each new tween takes the next token; in-flight steps
+// bail when they see a newer token, so a re-drag mid-slide cancels cleanly.
+let overlayAnimToken = 0;
 
 // electron-vite sets ELECTRON_RENDERER_URL in dev mode (pointing at the Vite
 // dev server) so we can reuse the same BrowserWindow code for dev + packaged.
@@ -332,6 +345,7 @@ function positionInfo(index: number): void {
 }
 
 async function showInfo(index: number): Promise<void> {
+  if (isDraggingStack) return;
   const head = heads[index];
   if (!head) return;
 
@@ -738,11 +752,140 @@ ipcMain.handle("response:open", (_e, message: string): void => {
   showResponse(message);
 });
 
+// -------- Dock to edge (drag → release → snap) --------
+
+type DockSide = "left" | "right";
+
+function overlayDisplay(): Electron.Display {
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    return screen.getPrimaryDisplay();
+  }
+  return screen.getDisplayMatching(overlayWindow.getBounds());
+}
+
+function currentDockSide(): DockSide {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return "right";
+  const b = overlayWindow.getBounds();
+  const wa = overlayDisplay().workArea;
+  const overlayCenter = b.x + b.width / 2;
+  const screenCenter = wa.x + wa.width / 2;
+  return overlayCenter < screenCenter ? "left" : "right";
+}
+
+function computeDockBounds(side: DockSide): Electron.Rectangle {
+  const wa = overlayDisplay().workArea;
+  const height = overlayHeight(heads.length);
+  const x =
+    side === "left"
+      ? wa.x + DOCK_EDGE_MARGIN
+      : wa.x + wa.width - OVERLAY_WIDTH - DOCK_EDGE_MARGIN;
+  const y = wa.y + Math.floor((wa.height - height) / 2);
+  return { x, y, width: OVERLAY_WIDTH, height };
+}
+
+function ensureDockPlaceholder(): BrowserWindow {
+  if (dockPlaceholderWindow && !dockPlaceholderWindow.isDestroyed()) {
+    return dockPlaceholderWindow;
+  }
+  const radius = Math.round(OVERLAY_WIDTH / 2);
+  // Single-pill shape matched to the overlay. Loaded from a data URL so this
+  // stays self-contained — no new renderer entry to wire through vite.
+  const html = `<!doctype html><html><head><style>
+    html,body{margin:0;padding:0;background:transparent;overflow:hidden;height:100%;}
+    .pill{
+      position:fixed;inset:0;box-sizing:border-box;
+      border:2px dashed rgba(255,255,255,0.55);
+      border-radius:${radius}px;
+      background:rgba(255,255,255,0.05);
+    }
+  </style></head><body><div class="pill"></div></body></html>`;
+  dockPlaceholderWindow = new BrowserWindow({
+    width: OVERLAY_WIDTH,
+    height: overlayHeight(heads.length),
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      contextIsolation: true,
+    },
+  });
+  dockPlaceholderWindow.setAlwaysOnTop(true, "floating");
+  dockPlaceholderWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+  });
+  dockPlaceholderWindow.setIgnoreMouseEvents(true);
+  void dockPlaceholderWindow.loadURL(
+    "data:text/html;charset=utf-8," + encodeURIComponent(html),
+  );
+  dockPlaceholderWindow.on("closed", () => {
+    dockPlaceholderWindow = null;
+  });
+  return dockPlaceholderWindow;
+}
+
+function updateDockPlaceholder(): void {
+  const ph = ensureDockPlaceholder();
+  ph.setBounds(computeDockBounds(currentDockSide()));
+  if (!ph.isVisible()) ph.showInactive();
+}
+
+function hideDockPlaceholder(): void {
+  if (!dockPlaceholderWindow || dockPlaceholderWindow.isDestroyed()) return;
+  if (dockPlaceholderWindow.isVisible()) dockPlaceholderWindow.hide();
+}
+
+function animateOverlayTo(
+  target: Electron.Rectangle,
+  duration: number,
+  onDone?: () => void,
+): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayAnimToken += 1;
+  const token = overlayAnimToken;
+  const start = overlayWindow.getBounds();
+  const t0 = Date.now();
+  const ease = (t: number): number => 1 - Math.pow(1 - t, 3); // easeOutCubic
+  const step = (): void => {
+    if (
+      token !== overlayAnimToken ||
+      !overlayWindow ||
+      overlayWindow.isDestroyed()
+    ) {
+      return;
+    }
+    const t = Math.min(1, (Date.now() - t0) / duration);
+    const e = ease(t);
+    overlayWindow.setPosition(
+      Math.round(start.x + (target.x - start.x) * e),
+      Math.round(start.y + (target.y - start.y) * e),
+    );
+    repositionInfoIfVisible();
+    repositionChatIfVisible();
+    if (t < 1) setTimeout(step, 16);
+    else onDone?.();
+  };
+  step();
+}
+
 ipcMain.handle("drag:start", (): void => {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  // A new drag cancels any in-flight dock tween.
+  overlayAnimToken += 1;
+
   const cursor = screen.getCursorScreenPoint();
   const win = overlayWindow.getBounds();
   dragOffset = { dx: cursor.x - win.x, dy: cursor.y - win.y };
+  isDraggingStack = true;
+  // Kill any visible/pending info card so it doesn't trail the stack.
+  hideInfoNow();
+  updateDockPlaceholder();
 
   if (dragTicker) clearInterval(dragTicker);
   dragTicker = setInterval(() => {
@@ -751,6 +894,7 @@ ipcMain.handle("drag:start", (): void => {
     overlayWindow.setPosition(p.x - dragOffset.dx, p.y - dragOffset.dy);
     repositionInfoIfVisible();
     repositionChatIfVisible();
+    updateDockPlaceholder();
   }, 16);
 });
 
@@ -758,7 +902,21 @@ ipcMain.handle("drag:end", (): void => {
   if (dragTicker) clearInterval(dragTicker);
   dragTicker = null;
   dragOffset = null;
-  saveOverlayPosition();
+  hideDockPlaceholder();
+
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    isDraggingStack = false;
+    saveOverlayPosition();
+    return;
+  }
+
+  const target = computeDockBounds(currentDockSide());
+  // Keep isDraggingStack on through the slide so bubble hovers under the
+  // moving window don't pop the info card mid-tween.
+  animateOverlayTo(target, DOCK_ANIM_MS, () => {
+    isDraggingStack = false;
+    saveOverlayPosition();
+  });
 });
 
 ipcMain.handle("app:openMain", (): void => {

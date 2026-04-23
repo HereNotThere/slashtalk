@@ -2,13 +2,17 @@
 // and a reducer over the server's device_repo_paths set. Any change re-POSTs
 // the full set to /v1/devices/:id/repos (the endpoint replaces the whole set).
 
+import { execFile } from "node:child_process";
 import { dialog } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { TrackedRepo } from "../shared/types";
 import * as backend from "./backend";
 import * as store from "./store";
 import { createEmitter } from "./emitter";
+
+const execFileAsync = promisify(execFile);
 
 /** True if `cwd` lives under any tracked local repo path, or under a git
  *  linked worktree whose main repo is tracked. */
@@ -148,7 +152,7 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
   if (result.canceled || result.filePaths.length === 0) return null;
 
   const localPath = result.filePaths[0];
-  const remote = readGithubRemote(localPath);
+  const remote = await readGithubRemote(localPath);
   if (remote.kind === "not_git") {
     throw new Error(`${localPath} is not a git repository`);
   }
@@ -196,13 +200,86 @@ type RemoteResult =
   | { kind: "not_git" }
   | { kind: "no_github_remote" };
 
-// Matches the handful of forms git writes for a github.com remote:
-//   https://github.com/owner/repo(.git)
-//   git@github.com:owner/repo(.git)
-//   ssh://git@github.com/owner/repo(.git)
-const GITHUB_URL = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i;
+type ParsedRemote = {
+  kind: "https" | "ssh";
+  host: string;
+  owner: string;
+  name: string;
+};
 
-function readGithubRemote(localPath: string): RemoteResult {
+// Parses git remote URLs into {host, owner, name}. Covers:
+//   https://host/owner/repo(.git)
+//   git@host:owner/repo(.git)           (SCP-style)
+//   ssh://[user@]host[:port]/owner/repo(.git)
+//   git://host/owner/repo(.git)
+// `host` may be a literal hostname or an ssh_config alias.
+export function parseGitRemote(url: string): ParsedRemote | null {
+  const stripSuffix = (s: string): string => s.replace(/\.git$/i, "");
+
+  // SCP-style: [user@]host:owner/repo. Host must not contain `/` (that would
+  // be a URL path) and the path must be exactly owner/repo.
+  const scp = url.match(
+    /^(?:[^@\s]+@)?([^:\s/]+):([^/\s]+)\/([^/\s]+?)(?:\.git)?$/,
+  );
+  if (scp) {
+    return {
+      kind: "ssh",
+      host: scp[1].toLowerCase(),
+      owner: scp[2],
+      name: stripSuffix(scp[3]),
+    };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  if (segments.length < 2) return null;
+  const owner = segments[0];
+  const name = stripSuffix(segments[1]);
+  const host = parsed.hostname.toLowerCase();
+  if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+    return { kind: "https", host, owner, name };
+  }
+  if (parsed.protocol === "ssh:" || parsed.protocol === "git:") {
+    return { kind: "ssh", host, owner, name };
+  }
+  return null;
+}
+
+const GITHUB_HOSTS = new Set(["github.com", "ssh.github.com"]);
+
+// Runs `ssh -G <alias>` and returns the effective `hostname` ssh would dial
+// after resolving the user's ssh_config (Host, Match, Include, token
+// expansion). Pure config resolution — no network, no key loading. Returns
+// null if ssh is missing, times out, or prints no hostname line.
+async function resolveSshHost(alias: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("ssh", ["-G", alias], {
+      timeout: 2000,
+    });
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("hostname ")) {
+        return line.slice("hostname ".length).trim().toLowerCase();
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolvesToGithub(parsed: ParsedRemote): Promise<boolean> {
+  if (GITHUB_HOSTS.has(parsed.host)) return true;
+  if (parsed.kind !== "ssh") return false;
+  const resolved = await resolveSshHost(parsed.host);
+  return resolved !== null && GITHUB_HOSTS.has(resolved);
+}
+
+async function readGithubRemote(localPath: string): Promise<RemoteResult> {
   let contents: string;
   try {
     contents = fs.readFileSync(path.join(localPath, ".git", "config"), "utf8");
@@ -214,11 +291,20 @@ function readGithubRemote(localPath: string): RemoteResult {
   }
 
   const urls = extractRemoteUrls(contents);
+  // Origin wins if present, even when it points elsewhere — matches prior
+  // behavior and avoids silently tracking a non-origin remote. Only scan
+  // other remotes when `origin` is absent.
   const origin = urls.get("origin");
-  const candidate = origin ?? [...urls.values()].find((u) => GITHUB_URL.test(u));
-  const match = candidate?.match(GITHUB_URL);
-  if (!match) return { kind: "no_github_remote" };
-  return { kind: "ok", owner: match[1], name: match[2] };
+  const candidates = origin ? [origin] : [...urls.values()];
+
+  for (const url of candidates) {
+    const parsed = parseGitRemote(url);
+    if (!parsed) continue;
+    if (await resolvesToGithub(parsed)) {
+      return { kind: "ok", owner: parsed.owner, name: parsed.name };
+    }
+  }
+  return { kind: "no_github_remote" };
 }
 
 function extractRemoteUrls(config: string): Map<string, string> {

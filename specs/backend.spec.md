@@ -811,7 +811,6 @@ CLI watcher
 
 ## 12. Non-Goals (for v1)
 
-- **Codex session support** — Claude only for now.
 - **Automatic repo sync** — manual button only; no background cron.
 - **Session search / full-text search** — just list and filter.
 - **Session sharing links** — no public/unauthenticated access.

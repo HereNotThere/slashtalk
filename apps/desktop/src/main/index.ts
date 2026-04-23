@@ -15,6 +15,7 @@ import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
+import * as codexUploader from "./codex-uploader";
 import * as heartbeat from "./heartbeat";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -771,10 +772,12 @@ ipcMain.handle("backend:signOut", async () => {
 function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
     void uploader.start();
+    void codexUploader.start();
     void heartbeat.start();
   } else {
     heartbeat.stop();
     uploader.reset();
+    codexUploader.reset();
   }
 }
 

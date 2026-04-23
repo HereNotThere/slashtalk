@@ -12,6 +12,10 @@ import { apiKeyAuth } from "../auth/middleware";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { classifyEvent } from "./classifier";
 import { processEvents, type EventPayload } from "./aggregator";
+import {
+  processCodexEvents,
+  type CodexEventPayload,
+} from "./aggregator-codex";
 import { matchSessionRepo } from "../social/github-sync";
 import { classifySessionState } from "../sessions/state";
 
@@ -63,7 +67,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
     .post(
       "/ingest",
       async ({ body, query, user, device }): Promise<IngestResponse> => {
-        const source: EventSource = query.source ?? "claude";
+        const source: EventSource = (query.source as EventSource | undefined) ?? "claude";
         // onParse above returns the chunk as a string already.
         const text = body as string;
         const fromLineSeq = Number(query.fromLineSeq);
@@ -140,10 +144,10 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
           }
         }
 
-        // Aggregate accepted events into session aggregates. The aggregator
-        // currently only understands Claude's event shape; Codex normalization
-        // will be added in a follow-up PR.
-        if (source === "claude" && acceptedPayloads.length > 0) {
+        // Aggregate accepted events into session aggregates. Claude and
+        // Codex have wildly different event shapes, so the dispatch lives
+        // here — both paths produce the same SessionUpdates shape.
+        if (acceptedPayloads.length > 0) {
           const [currentSession] = await db
             .select()
             .from(sessions)
@@ -151,10 +155,16 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             .limit(1);
 
           if (currentSession) {
-            const updates = processEvents(
-              currentSession,
-              acceptedPayloads as EventPayload[]
-            );
+            const updates =
+              source === "codex"
+                ? processCodexEvents(
+                    currentSession,
+                    acceptedPayloads as CodexEventPayload[]
+                  )
+                : processEvents(
+                    currentSession,
+                    acceptedPayloads as EventPayload[]
+                  );
             await db
               .update(sessions)
               .set(updates)

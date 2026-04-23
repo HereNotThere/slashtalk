@@ -1,12 +1,12 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Product intent
 
-**Chat-heads-style presence for Claude Code sessions.** A rail of teammate avatars — people who share a GitHub repo with you; click one to peek into their live sessions: current prompt, files Claude is editing right now, latest tool results and token spend. Ambient awareness of what your team is building with Claude, plus a "Fork Session" action to branch off someone else's work.
+**Chat-heads-style presence for Codex sessions.** A rail of teammate avatars — people who share a GitHub repo with you; click one to peek into their live sessions: current prompt, files Codex is editing right now, latest tool results and token spend. Ambient awareness of what your team is building with Codex, plus a "Fork Session" action to branch off someone else's work.
 
-The backend in this repo makes that possible: a CLI watcher on each device tails Claude Code's `~/.claude/projects/*/*.jsonl` event streams and POSTs NDJSON chunks; the server aggregates them, matches sessions to GitHub repos (social graph = repo co-membership), computes live/busy/idle state at read time, and fans updates out over WebSockets. Authoritative design in `specs/backend.spec.md` and `specs/upload.spec.md` — consult before changing API shape, auth, the event pipeline, or state classification.
+The backend in this repo makes that possible: a CLI watcher on each device tails Codex's `~/.Codex/projects/*/*.jsonl` event streams and POSTs NDJSON chunks; the server aggregates them, matches sessions to GitHub repos (social graph = repo co-membership), computes live/busy/idle state at read time, and fans updates out over WebSockets. Authoritative design in `specs/backend.spec.md` and `specs/upload.spec.md` — consult before changing API shape, auth, the event pipeline, or state classification.
 
 The desktop UI shell (`apps/desktop`) exists — Electron + React + Tailwind v4, floating overlay/tray windows — but only the backend sign-in and "add local repo" flow is wired to the server. The teammate rail, live session peek, and Fork Session are not built.
 
@@ -56,7 +56,7 @@ bun run typecheck
 
 **Ingest protocol is resumable** (`ingest/routes.ts`). Client POSTs NDJSON to `/v1/ingest?session=…&project=…&fromLineSeq=N&prefixHash=…`; server dedups by `(session_id, line_seq)` (`onConflictDoNothing`), persists `server_line_seq + prefix_hash` on the session, returns `{acceptedEvents, duplicateEvents, serverLineSeq}`. Line-seq counts every newline-delimited chunk in the source file (including blank/malformed lines) so client and server stay aligned even when individual lines are dropped. Client uses `GET /v1/sync-state` on startup to learn where to resume each session. Don't change the dedup key or seq semantics without updating the Electron uploader.
 
-**Desktop owns the CLI-watcher pipeline.** `apps/desktop/src/main/uploader.ts` tails `~/.claude/projects/*/*.jsonl` via `fs.watch(..., {recursive: true})` and ships deltas to `/v1/ingest`; `heartbeat.ts` watches `~/.claude/sessions/` and posts `/v1/heartbeat` every 15s plus on change for any pid-live session. A parallel `codex-uploader.ts` tails `~/.codex/sessions/**/rollout-*-<uuid>.jsonl` and POSTs with `?source=codex`; since Codex has no external pid file, the codex uploader emits its own heartbeats (one per successful ingest + a 15s pulse for rollouts whose mtime is within the last minute). All three run whenever the desktop is signed in and stop on sign-out. **Strict tracking:** a session's first-line `cwd` (for Codex: the nested `session_meta.payload.cwd`) must resolve under a tracked local repo path (`localRepos.list()`) or it is never uploaded or heartbeated. The server-side `install.sh` / `GET /install.sh` still exist but are deprecated and byte-offset-based against the old ingest API — do not extend them; the desktop app is the supported client.
+**Desktop owns the CLI-watcher pipeline.** `apps/desktop/src/main/uploader.ts` tails `~/.Codex/projects/*/*.jsonl` via `fs.watch(..., {recursive: true})` and ships deltas to `/v1/ingest`; `heartbeat.ts` watches `~/.Codex/sessions/` and posts `/v1/heartbeat` every 15s plus on change for any pid-live session. Both run whenever the desktop is signed in and stop on sign-out. **Strict tracking:** a session's first-line `cwd` must resolve under a tracked local repo path (`localRepos.list()`) or it is never uploaded or heartbeated. The server-side `install.sh` / `GET /install.sh` still exist but are deprecated and byte-offset-based against the old ingest API — do not extend them; the desktop app is the supported client.
 
 **Redis pub/sub → WebSocket fan-out** (`ws/redis-bridge.ts`, `ws/handler.ts`). Separate `pub`/`sub` ioredis clients (ioredis requirement). On WS open, subscribes the connection to `repo:<id>` for every row in `user_repos`, plus `user:<userId>`. `RedisBridge` is soft-fail: if Redis can't connect, `publish`/`subscribe` become no-ops and the HTTP API keeps working.
 
@@ -87,4 +87,4 @@ When adding a feature, check whether its upstream dependency is one of the above
 
 ## Keeping this file in sync
 
-**When you make an architectural change, update CLAUDE.md in the same commit.** Specifically: adding/removing a workspace, changing the auth model, changing the ingest protocol or event-dedup semantics, touching the Redis pub/sub channel design, closing or opening an "Implementation status" gap, adding a new top-level route prefix, or changing how `@slashtalk/shared` is consumed. If a change would invalidate a claim in this file, fix the claim — a subtly wrong CLAUDE.md is worse than a missing one.
+**When you make an architectural change, update AGENTS.md in the same commit.** Specifically: adding/removing a workspace, changing the auth model, changing the ingest protocol or event-dedup semantics, touching the Redis pub/sub channel design, closing or opening an "Implementation status" gap, adding a new top-level route prefix, or changing how `@slashtalk/shared` is consumed. If a change would invalidate a claim in this file, fix the claim — a subtly wrong AGENTS.md is worse than a missing one.

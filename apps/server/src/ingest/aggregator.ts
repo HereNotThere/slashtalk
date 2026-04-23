@@ -2,7 +2,8 @@
  * Session aggregate computation from Claude JSONL events.
  * Replicates the server.py _ingest() logic for the hosted backend.
  *
- * Codex event aggregation is TBD; this module currently handles Claude only.
+ * Codex aggregation lives alongside in aggregator-codex.ts and reuses the
+ * CurrentSession/SessionUpdates shapes exported here.
  */
 
 // ── Types ────────────────────────────────────────────────────
@@ -82,7 +83,7 @@ export interface SessionUpdates {
 
 // ── Current session state (loaded from DB) ───────────────────
 
-interface CurrentSession {
+export interface CurrentSession {
   userMsgs: number | null;
   assistantMsgs: number | null;
   toolCalls: number | null;

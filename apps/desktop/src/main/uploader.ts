@@ -82,6 +82,19 @@ function releaseSlot(): void {
 
 // ---------- persistence ----------
 
+// Resets every entry's derived/transient state so the next syncFileInner
+// pass re-reads the header and re-evaluates tracked-ness. Clearing `size`
+// alongside `tracked` is load-bearing: otherwise the stat fast-path at
+// line ~192 short-circuits quiescent sessions before tracked gets recomputed,
+// which also leaves `hasIngested()` returning false and silently stops
+// heartbeats until the JSONL next grows.
+function invalidateDerivedState(): void {
+  for (const entry of Object.values(state)) {
+    entry.tracked = null;
+    entry.size = -1;
+  }
+}
+
 function loadState(): void {
   const saved = store.get<SyncState>(SYNC_STATE_KEY);
   state = saved && typeof saved === "object" ? saved : {};
@@ -89,7 +102,7 @@ function loadState(): void {
   // persisted value across restarts. A session recorded as `tracked:false`
   // before the repo was claimed would otherwise stay skipped until the next
   // localRepos.onChange event, which may not fire again in this process.
-  for (const entry of Object.values(state)) entry.tracked = null;
+  invalidateDerivedState();
 }
 
 function persistSoon(): void {
@@ -362,13 +375,7 @@ export async function start(): Promise<void> {
   }
 
   unsubTracked = localRepos.onChange(() => {
-    for (const entry of Object.values(state)) {
-      entry.tracked = null;
-      // Force syncFileInner's stat fast-path to miss: a quiescent session
-      // whose JSONL hasn't grown since the last visit would otherwise stay
-      // skipped until its next append, even though tracked-ness just changed.
-      entry.size = -1;
-    }
+    invalidateDerivedState();
     persistSoon();
     void rescanAll();
   });

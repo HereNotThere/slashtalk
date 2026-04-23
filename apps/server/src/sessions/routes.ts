@@ -4,7 +4,7 @@ import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessions, events, heartbeats, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { toSnapshot, sortByStateThenTime } from "./snapshot";
+import { toSnapshot, loadInsightsForSessions } from "./snapshot";
 
 const SESSION_STATE_VALUES = Object.values(SessionState);
 
@@ -32,10 +32,11 @@ export const sessionRoutes = (db: Database) =>
                 .where(inArray(heartbeats.sessionId, sessionIds))
             : [];
         const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
+        const insightsMap = await loadInsightsForSessions(db, sessionIds);
 
         let snapshots = rows.map((s) => {
           const hb = hbMap.get(s.sessionId) ?? null;
-          return toSnapshot(s, hb);
+          return toSnapshot(s, hb, insightsMap.get(s.sessionId) ?? null);
         });
 
         if (query.state) {
@@ -45,7 +46,7 @@ export const sessionRoutes = (db: Database) =>
           snapshots = snapshots.filter((s) => s.project === query.project);
         }
 
-        return sortByStateThenTime(snapshots);
+        return snapshots;
       },
       {
         query: t.Object({
@@ -100,7 +101,12 @@ export const sessionRoutes = (db: Database) =>
           .where(eq(heartbeats.sessionId, params.id))
           .limit(1);
 
-        return toSnapshot(session, hb ?? null);
+        const insightsMap = await loadInsightsForSessions(db, [params.id]);
+        return toSnapshot(
+          session,
+          hb ?? null,
+          insightsMap.get(params.id) ?? null,
+        );
       },
       { params: t.Object({ id: t.String() }) }
     )

@@ -3,8 +3,15 @@
  * that matches upload.spec.md exactly.
  */
 
+import { inArray } from "drizzle-orm";
 import { classifySessionState } from "./state";
 import type { SessionState } from "@slashtalk/shared";
+import type { Database } from "../db";
+import { sessionInsights } from "../db/schema";
+import {
+  SUMMARY_ANALYZER,
+  ROLLING_SUMMARY_ANALYZER,
+} from "../analyzers/names";
 
 interface SessionRow {
   sessionId: string;
@@ -44,6 +51,15 @@ interface HeartbeatRow {
   updatedAt: Date | null;
 }
 
+/**
+ * LLM-derived insights loaded from session_insights, keyed by analyzer name.
+ * Callers pass whatever they have; missing analyzers → snapshot fields stay null.
+ */
+export interface SessionInsightsForSnapshot {
+  summary?: { title?: string; description?: string } | null;
+  rollingSummary?: { summary?: string; highlights?: string[] } | null;
+}
+
 function mapToSortedPairs(obj: unknown, limit: number): [string, number][] {
   if (!obj || typeof obj !== "object") return [];
   return Object.entries(obj as Record<string, number>)
@@ -54,6 +70,7 @@ function mapToSortedPairs(obj: unknown, limit: number): [string, number][] {
 export function toSnapshot(
   session: SessionRow,
   heartbeat: HeartbeatRow | null,
+  insights?: SessionInsightsForSnapshot | null,
   now?: Date
 ) {
   const currentTime = now ?? new Date();
@@ -64,13 +81,14 @@ export function toSnapshot(
     now: currentTime,
   });
 
-  return buildSnapshot(session, heartbeat, state, currentTime);
+  return buildSnapshot(session, heartbeat, state, insights, currentTime);
 }
 
 export function buildSnapshot(
   session: SessionRow,
   heartbeat: HeartbeatRow | null,
   state: SessionState,
+  insights?: SessionInsightsForSnapshot | null,
   now?: Date
 ) {
   const currentTime = now ?? new Date();
@@ -122,10 +140,21 @@ export function buildSnapshot(
     ? allQueued.filter((q) => new Date(q.ts) > boundaryTs)
     : allQueued;
 
+  // LLM-derived overrides — prefer summary.title when present so the UI
+  // doesn't fall back to lastUserPrompt. Leave heuristic title in place as a
+  // fallback if no insight exists yet.
+  const summaryTitle = insights?.summary?.title ?? null;
+  const summaryDescription = insights?.summary?.description ?? null;
+  const rollingSummary = insights?.rollingSummary?.summary ?? null;
+  const highlights = insights?.rollingSummary?.highlights ?? null;
+
   return {
     id: session.sessionId,
     project: session.project,
-    title: session.title,
+    title: summaryTitle ?? session.title,
+    description: summaryDescription,
+    rollingSummary,
+    highlights,
     queued,
     state,
     pid: heartbeat?.pid ?? null,
@@ -158,6 +187,42 @@ export function buildSnapshot(
       summary: string;
     }>,
   };
+}
+
+/**
+ * Batch-load session_insights for a set of session IDs. Returns a map keyed
+ * by session_id whose value holds the per-analyzer outputs the snapshot cares
+ * about. Missing analyzers → undefined, callers treat as "no insight yet".
+ */
+export async function loadInsightsForSessions(
+  db: Database,
+  sessionIds: string[],
+): Promise<Map<string, SessionInsightsForSnapshot>> {
+  const result = new Map<string, SessionInsightsForSnapshot>();
+  if (sessionIds.length === 0) return result;
+
+  const rows = await db
+    .select({
+      sessionId: sessionInsights.sessionId,
+      analyzerName: sessionInsights.analyzerName,
+      output: sessionInsights.output,
+      errorText: sessionInsights.errorText,
+    })
+    .from(sessionInsights)
+    .where(inArray(sessionInsights.sessionId, sessionIds));
+
+  for (const row of rows) {
+    if (row.errorText) continue;
+    const slot = result.get(row.sessionId) ?? {};
+    if (row.analyzerName === SUMMARY_ANALYZER) {
+      slot.summary = row.output as SessionInsightsForSnapshot["summary"];
+    } else if (row.analyzerName === ROLLING_SUMMARY_ANALYZER) {
+      slot.rollingSummary =
+        row.output as SessionInsightsForSnapshot["rollingSummary"];
+    }
+    result.set(row.sessionId, slot);
+  }
+  return result;
 }
 
 /** State priority for feed ordering */

@@ -1043,6 +1043,63 @@ uploader.onIngested(() => {
 });
 
 backend.onChange((state) => applySyncForAuth(state.signedIn));
+
+ws.onSessionInsightsUpdated((msg) => {
+  console.log(
+    `[insights] ${msg.analyzer} ready for session ${msg.session_id.slice(0, 8)} (repo=${msg.repo_id})`,
+    msg.output,
+  );
+  scheduleInfoRefresh(msg.session_id);
+  broadcastToMain("ws:sessionInsightsUpdated", msg);
+});
+
+ws.onSessionUpdated((msg) => {
+  scheduleInfoRefresh(msg.session_id);
+  broadcastToMain("ws:sessionUpdated", msg);
+});
+
+// `session_updated` fires on every ingest batch — potentially many per second
+// during an active session. Coalesce refreshes so the info window re-renders
+// at most once per REFRESH_DEBOUNCE_MS regardless of WS traffic.
+const REFRESH_DEBOUNCE_MS = 300;
+let refreshTimer: NodeJS.Timeout | null = null;
+
+function scheduleInfoRefresh(sessionId: string | null): void {
+  if (!selectedHeadId) return;
+  if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
+    return;
+  }
+  // If we know which session changed, skip refreshes whose session isn't in
+  // the currently-shown head. Fall through when we can't tell.
+  if (sessionId) {
+    const cached = sessionCache.get(selectedHeadId);
+    if (cached && !cached.some((s) => s.id === sessionId)) return;
+  }
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    void refreshInfoNow();
+  }, REFRESH_DEBOUNCE_MS);
+}
+
+async function refreshInfoNow(): Promise<void> {
+  if (!selectedHeadId) return;
+  if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
+    return;
+  }
+  const head = heads.find((h) => h.id === selectedHeadId);
+  if (!head) return;
+  // Only drop the selected head's cache; other heads stay warm until clicked.
+  sessionCache.delete(head.id);
+  try {
+    const sessions = await fetchSessionsForHead(head.id);
+    if (selectedHeadId !== head.id) return;
+    if (!infoWindow || infoWindow.isDestroyed()) return;
+    infoWindow.webContents.send("info:show", { head, sessions });
+  } catch (e) {
+    console.warn("[ws] refreshInfoNow failed:", e);
+  }
+}
 ipcMain.handle("backend:listRepos", () => backend.listRepos());
 
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());

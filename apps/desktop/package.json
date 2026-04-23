@@ -44,7 +44,8 @@
     "@slashtalk/shared": "workspace:*",
     "koffi": "^2.16.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
@@ -52,6 +53,7 @@
     "@types/node": "^22.7.5",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.5.12",
     "@vitejs/plugin-react": "^4.3.3",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",

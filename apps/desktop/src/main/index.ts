@@ -16,14 +16,15 @@ import * as localRepos from "./localRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
+import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
-// BUBBLE_SIZE ↔ `w-14 h-14` on Bubble/ChatBubble (56px),
+// BUBBLE_SIZE ↔ `w-12 h-12` on Bubble/ChatBubble (48px),
 // SPACING ↔ `gap-sm` on the stack (8px),
-// PADDING ↔ `p-xl` on the stack (24px). Drift here = popovers misalign.
-const BUBBLE_SIZE = 56;
+// PADDING ↔ `p-lg` on the stack (16px). Drift here = popovers misalign.
+const BUBBLE_SIZE = 48;
 const SPACING = 8;
-const PADDING = 24;
+const PADDING = 16;
 const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING * 2;
 
 const INFO_WIDTH = 340;
@@ -166,13 +167,26 @@ function ensureOverlay(): BrowserWindow {
     x: restored?.x ?? workArea.x + workArea.width - OVERLAY_WIDTH - 24,
     y: restored?.y ?? workArea.y + Math.floor((workArea.height - height) / 2),
     frame: false,
-    transparent: true,
+    transparent: false,
+    // System shadow off — macOS renders it by blurring the alpha mask with
+    // the darkest pixels sitting right at the edge, which reads as a crisp
+    // dark ring around our white stroke instead of a soft halo. Revisit with
+    // a custom CALayer shadow on a wrapper layer if we want a real drop
+    // shadow back.
     hasShadow: false,
     alwaysOnTop: true,
     resizable: false,
     movable: false, // we drive drag manually via IPC + setPosition
     skipTaskbar: true,
     backgroundColor: "#00000000",
+    // Real macOS frost. CSS backdrop-filter is a no-op on non-vibrancy Electron
+    // windows, so the rail uses NSVisualEffectView as its single background.
+    // Vibrancy is a sibling NSView of the webContents, so CSS can't clip it —
+    // we reshape to a pill via `setMacCornerRadius` below instead.
+    // `hud` reads heavily translucent over arbitrary app windows, unlike
+    // `under-window` which only blurs the desktop wallpaper.
+    vibrancy: "hud",
+    visualEffectState: "active",
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -181,6 +195,16 @@ function ensureOverlay(): BrowserWindow {
 
   overlayWindow.setAlwaysOnTop(true, "floating");
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  // Pill ends — half the window width gives perfect semicircle caps at top
+  // and bottom. Only takes effect once the NSWindow has a handle, so defer
+  // to after show/ready; calling immediately on arm64 still works in practice
+  // because getNativeWindowHandle is valid as soon as BrowserWindow returns.
+  setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
+    width: 1.5,
+    white: 1,
+    alpha: 1,
+  });
 
   loadRenderer(overlayWindow, "overlay");
 

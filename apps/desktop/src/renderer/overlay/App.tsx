@@ -92,7 +92,7 @@ export function App(): JSX.Element {
   return (
     <div
       ref={stackRef}
-      className="flex flex-col items-center gap-sm p-xl box-border"
+      className="flex flex-col items-center gap-sm p-lg box-border"
     >
       {heads.map((h) => (
         <Bubble key={h.id} head={h} />
@@ -109,7 +109,7 @@ function ChatBubble({ hidden }: { hidden: boolean }): JSX.Element {
       data-chat
       title="Ask your team"
       className={`
-        relative w-14 h-14 rounded-full cursor-pointer
+        relative w-12 h-12 rounded-full cursor-pointer
         flex items-center justify-center
         bg-chat text-white
         outline outline-1 -outline-offset-1 outline-bubble-outline
@@ -139,7 +139,7 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
       title={head.label}
       onMouseEnter={handleMouseEnter}
       className="
-        relative w-14 h-14 rounded-full cursor-pointer
+        relative w-12 h-12 rounded-full cursor-pointer
         flex items-center justify-center text-[28px]
         bg-bubble
         backdrop-blur-[18px] backdrop-saturate-[1.4]

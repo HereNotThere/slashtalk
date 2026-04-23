@@ -386,9 +386,18 @@ async function showInfo(index: number): Promise<void> {
   positionInfo(index);
   if (firstShow) win.showInactive();
 
-  // Cache miss: fetch in the background; renderer's head-effect also kicks a
-  // fetch, but this warms the cache for future hovers of the same head.
-  if (!cached) void fetchSessionsForHead(head.id);
+  // Cache miss: fetch in the background and push the result to the renderer.
+  // The renderer's load-effect is keyed on head.id, so a re-hover of the same
+  // head after the cache was cleared (e.g. by uploader.onIngested) won't
+  // re-fire it — without this push the renderer sits on "Loading…" (and any
+  // expanded row is hidden) until the 15s poll ticks.
+  if (!cached) {
+    void fetchSessionsForHead(head.id).then((loaded) => {
+      if (selectedHeadId !== head.id) return;
+      if (!infoWindow || infoWindow.isDestroyed()) return;
+      infoWindow.webContents.send("info:show", { head, sessions: loaded });
+    });
+  }
 }
 
 function scheduleHideInfo(): void {

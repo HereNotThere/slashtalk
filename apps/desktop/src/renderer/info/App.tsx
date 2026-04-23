@@ -321,8 +321,11 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
     (session.lastUserPrompt && session.lastUserPrompt !== session.title
       ? session.lastUserPrompt
       : null);
-  const highlights = session.highlights ?? [];
-  const recent = session.recent ?? [];
+  // Defensive: the server sometimes returns non-array shapes here (stale rows
+  // where the rolling-summary analyzer output didn't match its JSON schema).
+  // Without this, .map crashes the whole tree and the card goes blank.
+  const highlights = Array.isArray(session.highlights) ? session.highlights : [];
+  const recent = Array.isArray(session.recent) ? session.recent : [];
   const hasAnything =
     Boolean(summary) || highlights.length > 0 || recent.length > 0;
   return (

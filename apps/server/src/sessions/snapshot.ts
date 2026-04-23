@@ -146,7 +146,12 @@ export function buildSnapshot(
   const summaryTitle = insights?.summary?.title ?? null;
   const summaryDescription = insights?.summary?.description ?? null;
   const rollingSummary = insights?.rollingSummary?.summary ?? null;
-  const highlights = insights?.rollingSummary?.highlights ?? null;
+  // Stale rows (older analyzer shapes, schema-violating LLM output) can land
+  // here as a string or object. Coerce to string[] so clients can .map safely.
+  const rawHighlights = insights?.rollingSummary?.highlights;
+  const highlights = Array.isArray(rawHighlights)
+    ? rawHighlights.filter((h): h is string => typeof h === "string")
+    : null;
 
   return {
     id: session.sessionId,

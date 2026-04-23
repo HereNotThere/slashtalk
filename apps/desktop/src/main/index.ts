@@ -204,9 +204,8 @@ function ensureOverlay(): BrowserWindow {
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   // Pill ends — half the window width gives perfect semicircle caps at top
-  // and bottom. Only takes effect once the NSWindow has a handle, so defer
-  // to after show/ready; calling immediately on arm64 still works in practice
-  // because getNativeWindowHandle is valid as soon as BrowserWindow returns.
+  // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
+  // as soon as the BrowserWindow constructor returns.
   setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
     width: 1.5,
     white: 1,

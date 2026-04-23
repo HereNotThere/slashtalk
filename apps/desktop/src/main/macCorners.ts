@@ -144,5 +144,4 @@ export function setMacCornerRadius(
     b.msgSend_ppp(layer, b.sel_registerName("setBorderColor:"), strokeCg);
     b.msgSend_pd(layer, b.sel_registerName("setBorderWidth:"), border.width);
   }
-
 }

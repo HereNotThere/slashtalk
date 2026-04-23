@@ -168,6 +168,11 @@ function ensureOverlay(): BrowserWindow {
     y: restored?.y ?? workArea.y + Math.floor((workArea.height - height) / 2),
     frame: false,
     transparent: false,
+    // Never let the rail become key — macOS deepens the system shadow on
+    // focused windows, so without this the drop shadow visibly darkens
+    // whenever the user clicks the rail. Clicks still work for drag and
+    // bubble toggles.
+    focusable: false,
     // System shadow — macOS derives it from the window's alpha mask, so
     // with the rounded contentView + cleared NSWindow background the
     // shadow follows the pill. Re-invalidated in setMacCornerRadius so

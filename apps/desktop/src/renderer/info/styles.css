@@ -13,4 +13,12 @@
       background: var(--color-card);
     }
   }
+
+  /* Tailwind v4 dropped the default `cursor: pointer` on buttons, and our
+   * shared base sets `cursor: default` on html/body which children inherit.
+   * Restore the pointer on interactive elements inside this window. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
 }

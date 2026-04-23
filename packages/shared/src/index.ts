@@ -129,6 +129,23 @@ export interface SyncStateEntry {
   prefixHash: string | null;
 }
 
+/** WS push: a teammate just opened or merged a PR on a shared repo. */
+export interface PrActivityMessage {
+  type: "pr_activity";
+  /** opened | merged */
+  action: "opened" | "merged";
+  /** GitHub login of the actor */
+  login: string;
+  /** owner/name */
+  repoFullName: string;
+  /** PR number */
+  number: number;
+  title: string;
+  url: string;
+  /** ISO8601 */
+  ts: string;
+}
+
 /** Standard API response wrapper */
 export interface ApiResponse<T> {
   data: T;

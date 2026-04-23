@@ -19,6 +19,9 @@ export interface ChatHead {
   /** Epoch ms of the most recent activity on this head. Optional for back-compat
    *  with persisted heads from before this field was added. */
   lastActionAt?: number;
+  /** Epoch ms when this teammate's most recent PR opened/merged event landed.
+   *  Renderer treats it as transient (animates while it's < a few seconds old). */
+  prActivityAt?: number;
 }
 
 export type Unsubscribe = () => void;
@@ -76,8 +79,13 @@ export interface ChatHeadsBridge {
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
 
-  // Info box (overlay → main)
-  toggleInfo: (index: number) => Promise<void>;
+  // Info box (overlay → main). Show/hide are driven by hover; the rail keeps
+  // the leave timer and asks main to hide after the user leaves the bubble
+  // and doesn't re-enter the info panel. `infoHoverEnter/Leave` let the info
+  // panel itself hold the window open while the cursor is over it.
+  showInfo: (index: number) => Promise<void>;
+  infoHoverEnter: () => Promise<void>;
+  infoHoverLeave: () => Promise<void>;
 
   // Chat input (overlay ↔ main, chat renderer → main)
   toggleChat: () => Promise<void>;
@@ -100,7 +108,7 @@ export interface ChatHeadsBridge {
   // Info window (main → info renderer). Sessions are prefetched in main so
   // the renderer can paint in one pass at the correct height.
   onInfoShow: (
-    cb: (payload: { head: ChatHead; sessions: InfoSession[] }) => void,
+    cb: (payload: { head: ChatHead; sessions: InfoSession[] | null }) => void,
   ) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
   hideInfo: () => Promise<void>;

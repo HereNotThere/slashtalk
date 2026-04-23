@@ -60,6 +60,43 @@ bun run db:generate   # generate migration SQL from Drizzle schema
 bun run db:migrate    # apply migrations
 ```
 
+## Database migrations
+
+`apps/server/src/db/schema.ts` is the source of truth for schema changes.
+
+For normal schema changes:
+
+```sh
+cd apps/server
+bun run db:generate
+bun run db:migrate
+```
+
+Workflow:
+
+1. Edit `apps/server/src/db/schema.ts`.
+2. Run `bun run db:generate` from `apps/server`.
+3. Review the generated SQL in `apps/server/drizzle/`.
+4. Apply it with `bun run db:migrate`.
+5. Commit the schema change and generated migration files together.
+
+For data migrations or hand-written SQL that Drizzle cannot derive from the schema diff:
+
+```sh
+cd apps/server
+bunx drizzle-kit generate --custom --name=your_migration_name
+```
+
+Then edit the generated `.sql` file and apply it with `bun run db:migrate`.
+
+Important rules:
+
+1. Do not manually edit `apps/server/drizzle/meta/_journal.json`.
+2. Do not manually edit snapshot IDs or timestamps in `apps/server/drizzle/meta/*_snapshot.json`.
+3. Do not rename or resequence existing migration files after they have been committed.
+4. If a migration is wrong, add a new corrective migration instead of mutating an already-shared migration.
+5. Review generated SQL before applying it, especially for renames and destructive changes.
+
 ### 5. Run the server
 
 ```sh

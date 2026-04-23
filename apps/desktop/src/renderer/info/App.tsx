@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { SessionState } from "@slashtalk/shared";
+import type { RecentEvent, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
+import { useLocationWeather } from "../shared/useLocationWeather";
 
 const REFRESH_MS = 15_000;
 
@@ -16,15 +18,22 @@ const DOT_COLOR: Record<SessionState, string> = {
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
+  const [visible, setVisible] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  useAutoResize();
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Measure the inner content, not the card: the card is capped at max-h-screen
+  // so its height saturates at the window size and wouldn't signal growth.
+  useAutoResize(contentRef);
 
   useEffect(() => {
     const offShow = window.chatheads.onInfoShow((p) => {
       setHead(p.head);
       setSessions(p.sessions);
+      setVisible(true);
     });
-    const offHide = window.chatheads.onInfoHide(() => setHead(null));
+    // Keep head/sessions on hide so the last content fades out instead of
+    // collapsing; next show replaces them wholesale.
+    const offHide = window.chatheads.onInfoHide(() => setVisible(false));
     return () => {
       offShow();
       offHide();
@@ -42,12 +51,17 @@ export function App(): JSX.Element {
         if (!cancelled) setSessions([]);
       }
     };
-    // Initial payload is already sent by main; only refresh on interval.
+    // Main sends the cached payload (possibly null on cache miss). Load once
+    // immediately if sessions aren't in hand yet, and poll on interval after.
+    if (sessions === null) void load();
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
+    // sessions intentionally not a dep — we only want this to (re)run when
+    // the head changes; interval handles subsequent refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [head?.id]);
 
   useEffect(() => {
@@ -61,31 +75,28 @@ export function App(): JSX.Element {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  useEffect(() => {
-    // Use `mousedown` (not `click`) so we check containment BEFORE any React
-    // state update has remounted the clicked node. With `click`, expanding
-    // the accordion caused `e.target` to detach mid-event and contains() to
-    // return false, falsely firing hideInfo.
-    const handleMouseDown = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        void window.chatheads.hideInfo();
-      }
-    };
-    document.addEventListener("mousedown", handleMouseDown);
-    return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, []);
-
   return (
-    <div ref={rootRef} className="bg-card rounded-lg">
-      <Header head={head} />
-      <Divider />
-      <SessionsSection sessions={sessions} />
+    <div
+      ref={rootRef}
+      onMouseEnter={() => void window.chatheads.infoHoverEnter()}
+      onMouseLeave={() => void window.chatheads.infoHoverLeave()}
+      className="bg-card rounded-3xl max-h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out"
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateX(0)" : "translateX(-4px)",
+      }}
+    >
+      <div ref={contentRef}>
+        <Header head={head} />
+        <Divider />
+        <SessionsSection sessions={sessions} />
+      </div>
     </div>
   );
 }
 
 function Divider(): JSX.Element {
-  return <div className="h-px bg-divider" />;
+  return <div className="mx-lg h-px bg-divider" />;
 }
 
 function Header({ head }: { head: ChatHead | null }): JSX.Element {
@@ -94,6 +105,7 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
     hour: "numeric",
     minute: "2-digit",
   });
+  const { city, icon } = useLocationWeather();
   return (
     <div className="flex items-start gap-md px-lg pt-lg pb-md">
       <Avatar head={head} />
@@ -102,9 +114,13 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
           {name}
         </div>
         <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted whitespace-nowrap min-w-0">
-          <span className="text-warning shrink-0">☀︎</span>
-          <span className="truncate">New York</span>
-          <span className="text-subtle shrink-0">·</span>
+          {city && (
+            <>
+              {icon && <span className="shrink-0">{icon}</span>}
+              <span className="truncate">{city}</span>
+              <span className="text-subtle shrink-0">·</span>
+            </>
+          )}
           <span className="shrink-0">{time}</span>
           <span className="text-subtle shrink-0">·</span>
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-success/15 text-success text-[11px] font-medium shrink-0">
@@ -147,171 +163,261 @@ function Avatar({ head }: { head: ChatHead | null }): JSX.Element {
   );
 }
 
-function SectionHeader({
-  title,
-  trailing,
-}: {
-  title: string;
-  trailing: string;
-}): JSX.Element {
+function SubHeader({ children }: { children: string }): JSX.Element {
   return (
-    <div className="flex items-baseline justify-between">
-      <div className="text-[11px] font-semibold tracking-wider uppercase text-subtle">
-        {title}
-      </div>
-      <div className="text-[11px] text-subtle">{trailing}</div>
+    <div className="text-[11px] font-semibold tracking-wider uppercase text-subtle">
+      {children}
     </div>
   );
 }
+
+const DEFAULT_SESSION_LIMIT = 5;
 
 function SessionsSection({
   sessions,
 }: {
   sessions: InfoSession[] | null;
 }): JSX.Element {
-  const title = sessions == null ? "Sessions" : `Sessions · ${sessions.length}`;
-  return (
-    <div className="px-lg pt-md pb-lg">
-      <SectionHeader title={title} trailing="last 24h" />
-      <div className="mt-md space-y-lg">
-        {sessions == null ? (
-          <div className="text-[12px] text-subtle">Loading…</div>
-        ) : sessions.length === 0 ? (
-          <div className="text-[12px] text-subtle">No sessions yet.</div>
-        ) : (
-          sessions.map((s) => <SessionRow key={s.id} session={s} />)
-        )}
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  if (sessions == null) {
+    return (
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        Loading…
       </div>
+    );
+  }
+  if (sessions.length === 0) {
+    return (
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        No sessions yet.
+      </div>
+    );
+  }
+  const visible =
+    showAll || sessions.length <= DEFAULT_SESSION_LIMIT
+      ? sessions
+      : sessions.slice(0, DEFAULT_SESSION_LIMIT);
+  const hasMore = sessions.length > DEFAULT_SESSION_LIMIT;
+  return (
+    <div>
+      {visible.map((s, i) => (
+        <Fragment key={s.id}>
+          {i > 0 && <div className="mx-lg h-px bg-divider" />}
+          <SessionRow
+            session={s}
+            expanded={expandedId === s.id}
+            onToggle={() =>
+              setExpandedId((cur) => (cur === s.id ? null : s.id))
+            }
+          />
+        </Fragment>
+      ))}
+      {hasMore && (
+        <>
+          <div className="mx-lg h-px bg-divider" />
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="w-full px-lg py-md text-center text-[12px] font-medium text-muted hover:text-fg hover:bg-surface/60 transition-colors cursor-pointer"
+          >
+            {showAll ? "Show less" : `Show all (${sessions.length})`}
+          </button>
+        </>
+      )}
     </div>
   );
 }
 
 function repoLabel(s: InfoSession): string | null {
-  if ("repo_full_name" in s && s.repo_full_name) return s.repo_full_name;
+  if ("repo_full_name" in s && s.repo_full_name) {
+    const slash = s.repo_full_name.lastIndexOf("/");
+    return slash >= 0 ? s.repo_full_name.slice(slash + 1) : s.repo_full_name;
+  }
   // Fallback for own sessions: Claude writes projects as a slugified cwd path
   // (e.g. "-Users-erik-dev-towns-app"); the trailing segment is the repo dir.
   const parts = s.project.split(/[-/]/).filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1]! : null;
 }
 
-function toolLabel(kind: string | null, model: string | null): string {
-  if (kind === "codex") return "Codex";
-  if (kind === "claude") return "Claude";
-  if (model?.toLowerCase().includes("gpt")) return "Codex";
-  return "Claude";
-}
-
-function SessionRow({ session }: { session: InfoSession }): JSX.Element {
+function SessionRow({
+  session,
+  expanded,
+  onToggle,
+}: {
+  session: InfoSession;
+  expanded: boolean;
+  onToggle: () => void;
+}): JSX.Element {
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
-  const status = statusLabel(session);
-  const hasExpandable =
-    Boolean(session.rollingSummary) ||
-    Boolean(session.highlights && session.highlights.length > 0);
-  const [expanded, setExpanded] = useState(false);
+  const tokenStr = fmtTokens(session.tokens);
+  const showDot =
+    session.state === SessionState.ACTIVE ||
+    session.state === SessionState.BUSY;
+  const shrinkableParts = [repo, session.branch].filter(
+    (v): v is string => Boolean(v),
+  );
+  const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
+  const hasMeta = shrinkableParts.length > 0 || tokensLabel !== null;
 
   return (
-    <div>
+    <div className={expanded ? "bg-surface" : undefined}>
       <button
         type="button"
-        onClick={() => hasExpandable && setExpanded((v) => !v)}
-        className={`flex items-center gap-2 w-full text-left ${
-          hasExpandable ? "cursor-pointer" : "cursor-default"
-        }`}
-        aria-expanded={hasExpandable ? expanded : undefined}
+        onClick={onToggle}
+        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
       >
-        <Dot color={DOT_COLOR[session.state]} />
-        <div className="text-[14px] text-fg flex-1 truncate">{title}</div>
-        {hasExpandable && <Chevron open={expanded} />}
-      </button>
-      {session.description && (
-        <div className="mt-1 text-[12px] text-muted line-clamp-2 pl-3.5">
-          {session.description}
-        </div>
-      )}
-      <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
-        {(repo || session.branch) && (
-          <span className="inline-flex items-center gap-1.5 font-mono bg-code rounded-md px-1.5 py-0.5 text-fg/85 min-w-0 max-w-full whitespace-nowrap overflow-hidden">
-            <BranchIcon />
-            {repo && <span className="truncate">{repo}</span>}
-            {repo && session.branch && (
-              <span className="text-subtle shrink-0">·</span>
-            )}
-            {session.branch && (
-              <span className="truncate">{session.branch}</span>
-            )}
-          </span>
-        )}
-        <span className="text-subtle shrink-0">·</span>
-        <span className="inline-flex items-center gap-1 shrink-0">
-          <span className="text-subtle">✦</span>
-          <span>{toolLabel(session.kind, session.model)}</span>
-        </span>
-      </div>
-      {status && <div className="mt-1.5 text-[12px] text-muted">{status}</div>}
-      {expanded && hasExpandable && (
-        <div className="mt-2 pl-3.5 space-y-1.5">
-          {session.rollingSummary && (
-            <div className="text-[12px] text-fg/85 leading-relaxed">
-              {session.rollingSummary}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            {showDot && <Dot color={DOT_COLOR[session.state]} />}
+            <div className="text-[14px] font-medium text-fg flex-1 truncate">
+              {title}
+            </div>
+          </div>
+          {session.description && (
+            <div
+              className="mt-1 text-[12px] text-muted line-clamp-2"
+              style={showDot ? { marginLeft: 14 } : undefined}
+            >
+              {session.description}
             </div>
           )}
-          {session.highlights && session.highlights.length > 0 && (
-            <ul className="text-[11.5px] text-muted space-y-0.5 list-disc list-inside">
-              {session.highlights.map((h, i) => (
-                <li key={i}>{h}</li>
+          {hasMeta && (
+            <div
+              className="mt-px flex items-center gap-1.5 text-[11.5px] text-muted min-w-0"
+              style={showDot ? { marginLeft: 14 } : undefined}
+            >
+              {shrinkableParts.map((v, i) => (
+                <Fragment key={i}>
+                  {i > 0 && <span className="text-subtle shrink-0">·</span>}
+                  <span className="truncate min-w-0">{v}</span>
+                </Fragment>
               ))}
-            </ul>
+              {tokensLabel && (
+                <>
+                  {shrinkableParts.length > 0 && (
+                    <span className="text-subtle shrink-0">·</span>
+                  )}
+                  <span className="shrink-0">{tokensLabel}</span>
+                </>
+              )}
+            </div>
           )}
         </div>
+        <Chevron open={expanded} />
+      </button>
+      {expanded && <ExpandedSession session={session} />}
+    </div>
+  );
+}
+
+function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
+  // Prefer the LLM rolling narrative; fall back to the raw user prompt only
+  // if it adds info beyond the title.
+  const summary =
+    session.rollingSummary ??
+    (session.lastUserPrompt && session.lastUserPrompt !== session.title
+      ? session.lastUserPrompt
+      : null);
+  const highlights = session.highlights ?? [];
+  const recent = session.recent ?? [];
+  const hasAnything =
+    Boolean(summary) || highlights.length > 0 || recent.length > 0;
+  return (
+    <div className="px-lg pb-lg space-y-md">
+      {summary && (
+        <div>
+          <SubHeader>Summary</SubHeader>
+          <div className="mt-1 text-[13px] text-fg leading-relaxed whitespace-pre-wrap">
+            {summary}
+          </div>
+        </div>
+      )}
+      {highlights.length > 0 && (
+        <div>
+          <SubHeader>Highlights</SubHeader>
+          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside">
+            {highlights.map((h, i) => (
+              <li key={i}>{h}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div>
+          <SubHeader>Latest activity</SubHeader>
+          <div className="mt-1 space-y-md">
+            {recent.slice(0, 4).map((e, i) => (
+              <ActivityRow key={i} event={e} />
+            ))}
+          </div>
+        </div>
+      )}
+      {!hasAnything && (
+        <div className="text-[12px] text-subtle">No activity yet.</div>
       )}
     </div>
   );
 }
 
-function statusLabel(s: InfoSession): string | null {
-  switch (s.state) {
-    case SessionState.BUSY:
-      return "working now";
-    case SessionState.ACTIVE:
-      return s.durationS != null ? fmtDuration(s.durationS) : null;
-    case SessionState.IDLE:
-      return s.idleS != null ? `idle ${fmtDuration(s.idleS)}` : null;
-    case SessionState.RECENT:
-      return s.idleS != null ? `paused ${fmtDuration(s.idleS)}` : null;
-    case SessionState.ENDED:
-      return s.idleS != null ? `ended ${fmtDuration(s.idleS)} ago` : null;
-  }
+function ActivityRow({ event }: { event: RecentEvent }): JSX.Element {
+  return (
+    <div className="flex items-start gap-2">
+      <ArrowIcon />
+      <div className="flex-1 min-w-0">
+        <div className="text-[13px] text-fg leading-snug break-words">
+          {event.summary}
+        </div>
+        <div className="mt-0.5 text-[11.5px] text-subtle">
+          {fmtAgo(event.ts)}
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function fmtDuration(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  if (s < 60) return `${s}s`;
+function fmtTokens(tokens: TokenUsage | undefined): string | null {
+  if (!tokens) return null;
+  const total =
+    tokens.in + tokens.out + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
+  if (total <= 0) return null;
+  if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}M`;
+  if (total >= 1_000) return `${(total / 1_000).toFixed(1)}k`;
+  return `${total}`;
+}
+
+function fmtAgo(ts: string): string {
+  const diff = Date.now() - new Date(ts).getTime();
+  const s = Math.max(0, Math.floor(diff / 1000));
+  if (s < 30) return "just now";
+  if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
-  const rem = m % 60;
-  if (h < 24) return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
+  if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
-  return `${d}d`;
+  return `${d}d ago`;
 }
 
 function Dot({ color }: { color: string }): JSX.Element {
   return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />;
 }
 
-function Chevron({ open = false }: { open?: boolean }): JSX.Element {
+function Chevron({ open }: { open: boolean }): JSX.Element {
   return (
     <svg
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
       fill="none"
-      className={`text-subtle shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+      className="text-subtle shrink-0 transition-transform duration-150"
+      style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
       aria-hidden
     >
       <path
-        d="M3 4.5 L6 7.5 L9 4.5"
+        d="M3.5 5.25 L7 8.75 L10.5 5.25"
         stroke="currentColor"
         strokeWidth="1.4"
         strokeLinecap="round"
@@ -321,25 +427,22 @@ function Chevron({ open = false }: { open?: boolean }): JSX.Element {
   );
 }
 
-function BranchIcon(): JSX.Element {
+function ArrowIcon(): JSX.Element {
   return (
     <svg
-      width="10"
-      height="10"
-      viewBox="0 0 12 12"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
       fill="none"
-      className="text-subtle shrink-0"
+      className="text-subtle shrink-0 mt-0.5"
       aria-hidden
     >
-      <circle cx="3" cy="2.5" r="1.2" stroke="currentColor" strokeWidth="1" />
-      <circle cx="3" cy="9.5" r="1.2" stroke="currentColor" strokeWidth="1" />
-      <circle cx="9" cy="4" r="1.2" stroke="currentColor" strokeWidth="1" />
       <path
-        d="M3 3.7 L3 8.3 M3 6 Q3 4 5 4 L7.8 4"
+        d="M3 7 L11 7 M8 4 L11 7 L8 10"
         stroke="currentColor"
-        strokeWidth="1"
+        strokeWidth="1.4"
         strokeLinecap="round"
-        fill="none"
+        strokeLinejoin="round"
       />
     </svg>
   );

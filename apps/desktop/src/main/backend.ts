@@ -64,7 +64,9 @@ export function getAuthState(): BackendAuthState {
   return { signedIn: true, user: creds.user };
 }
 
-export function getWsToken(): string | null {
+/** Current JWT — used by the WS client to authenticate the upgrade. May rotate
+ *  on refresh, so callers should re-read on reconnect rather than caching. */
+export function getJwt(): string | null {
   return creds?.jwt ?? null;
 }
 

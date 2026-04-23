@@ -20,6 +20,12 @@ const changes = createEmitter<ChatHead[]>();
 
 let lastSnapshot: RailDebugSnapshot = { at: null, peers: null, error: null };
 
+// Transient PR-event timestamps keyed by GitHub login. Survives across rail
+// refreshes (which would otherwise rebuild head objects without prActivityAt)
+// and is cleared on a timer so stale events don't re-trigger animations.
+const prActivityByLogin = new Map<string, number>();
+const PR_ACTIVITY_TTL_MS = 8_000;
+
 export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
 
@@ -40,12 +46,14 @@ function headForUser(
   avatarUrl: string,
   lastActivityAt?: number | null,
 ): ChatHead {
+  const prAt = prActivityByLogin.get(login);
   return {
     id: userHeadId(login),
     label: login,
     tint: "transparent",
     avatar: { type: "remote", value: avatarUrl },
     ...(lastActivityAt != null && { lastActionAt: lastActivityAt }),
+    ...(prAt != null && { prActivityAt: prAt }),
   };
 }
 
@@ -61,6 +69,7 @@ function sameHeads(a: ChatHead[], b: ChatHead[]): boolean {
     if (a[i].id !== b[i].id) return false;
     if (a[i].label !== b[i].label) return false;
     if (a[i].avatar.value !== b[i].avatar.value) return false;
+    if (a[i].prActivityAt !== b[i].prActivityAt) return false;
   }
   return true;
 }
@@ -136,6 +145,36 @@ function scheduleRefresh(): void {
     debounceTimer = null;
     void refresh();
   }, REFRESH_DEBOUNCE_MS);
+}
+
+/** Stamp a teammate's head with a fresh PR-activity timestamp so the overlay
+ *  renders its celebration animation. The stamp self-expires after the TTL so
+ *  later refreshes don't keep replaying the animation. */
+export function markPrActivity(login: string): void {
+  const now = Date.now();
+  prActivityByLogin.set(login, now);
+  setTimeout(() => {
+    if (prActivityByLogin.get(login) === now) {
+      prActivityByLogin.delete(login);
+      // Re-emit so the renderer drops prActivityAt cleanly. This is cheap; the
+      // animation has already finished by then.
+      const next = heads.map((h) =>
+        parseUserHeadId(h.id) === login && h.prActivityAt === now
+          ? (() => {
+              const { prActivityAt, ...rest } = h;
+              return rest as ChatHead;
+            })()
+          : h,
+      );
+      apply(next);
+    }
+  }, PR_ACTIVITY_TTL_MS);
+
+  // Immediate broadcast so the animation starts now without waiting for a poll.
+  const next = heads.map((h) =>
+    parseUserHeadId(h.id) === login ? { ...h, prActivityAt: now } : h,
+  );
+  apply(next);
 }
 
 export function start(): void {

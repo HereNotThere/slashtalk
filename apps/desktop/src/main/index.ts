@@ -16,7 +16,7 @@ import * as localRepos from "./localRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
-import * as wsClient from "./wsClient";
+import * as ws from "./ws";
 import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -47,17 +47,36 @@ const TRAY_POPUP_INITIAL_HEIGHT = 80;
 
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
+// Info window caps at whichever is smaller: a hard ceiling, or 2/3 of the
+// screen's work area. Computed per-resize so a display change just works.
+const INFO_MAX_ABSOLUTE = 650;
+const INFO_MAX_SCREEN_FRACTION = 2 / 3;
 
 // Tracked dynamically — renderer reports its content height via IPC and we
 // resize/reposition the window each time it changes.
 let infoCurrentHeight = INFO_INITIAL_HEIGHT;
 
-// When set, the info window is waiting to be shown at the index below. The
-// next `window:requestResize` from the info renderer (i.e. first measurement
-// after the new head/sessions are painted) triggers the actual show with the
-// correct height. A fallback timeout shows it even if resize never fires.
-let pendingInfoShowIndex: number | null = null;
-let pendingInfoShowTimeout: NodeJS.Timeout | null = null;
+// Last observed rendered height per head, keyed by head id. Populated from
+// renderer resize reports. Lets subsequent shows of the same head size the
+// window correctly on first paint instead of resizing after render.
+const infoHeightByHead = new Map<string, number>();
+
+// Delay between the user leaving a rail bubble and the info window actually
+// hiding. Gives them time to move the cursor onto the info panel, which cancels
+// the pending hide via infoHoverEnter.
+const INFO_HIDE_GRACE_MS = 180;
+
+// Matches the renderer's CSS fade-out duration. After the opacity transition,
+// the NSWindow is hidden so it doesn't intercept events while invisible.
+const INFO_FADE_OUT_MS = 90;
+
+// Pending "user left the rail" hide. Cancelled if the cursor enters the info
+// panel or re-enters a bubble within INFO_HIDE_GRACE_MS.
+let infoHideGraceTimer: NodeJS.Timeout | null = null;
+
+// Pending `win.hide()` after the renderer has faded out. Cancelled if we
+// re-show before the fade completes.
+let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
 
@@ -71,7 +90,7 @@ let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
 let selectedHeadId: string | null = null;
-let sessionCache = new Map<string, InfoSession[]>();
+const sessionCache = new Map<string, InfoSession[]>();
 
 
 let dragOffset: { dx: number; dy: number } | null = null;
@@ -217,7 +236,7 @@ function ensureOverlay(): BrowserWindow {
 
   overlayWindow.on("closed", () => {
     overlayWindow = null;
-    hideInfo();
+    hideInfoNow();
     hideChat();
   });
 
@@ -271,9 +290,8 @@ function ensureInfoWindow(): BrowserWindow {
 
   loadRenderer(infoWindow, "info");
 
-  infoWindow.on("blur", () => {
-    if (infoWindow && !infoWindow.isDestroyed()) infoWindow.hide();
-  });
+  // No blur-hide: hover model owns visibility; a blur-triggered hide fights
+  // with the leave-timer and click-outside logic.
   infoWindow.on("closed", () => {
     infoWindow = null;
   });
@@ -303,7 +321,8 @@ function positionInfo(index: number): void {
   const avatarTopY = stackBounds.y + PADDING_Y + index * cell;
   const infoY = Math.round(avatarTopY - 16);
 
-  // setBounds (vs setPosition) so we apply the latest tracked height atomically.
+  // Instant setBounds — macOS's native animate=true runs ~300ms and isn't
+  // tunable. The CSS opacity fade on the renderer covers the content swap.
   infoWindow.setBounds({
     x: Math.round(infoX),
     y: infoY,
@@ -316,6 +335,16 @@ async function showInfo(index: number): Promise<void> {
   const head = heads[index];
   if (!head) return;
 
+  // Cancel any pending hide so fast re-entry just swaps content.
+  if (infoHideGraceTimer) {
+    clearTimeout(infoHideGraceTimer);
+    infoHideGraceTimer = null;
+  }
+  if (infoHideFadeTimer) {
+    clearTimeout(infoHideFadeTimer);
+    infoHideFadeTimer = null;
+  }
+
   const win = ensureInfoWindow();
   selectedHeadId = head.id;
 
@@ -323,50 +352,68 @@ async function showInfo(index: number): Promise<void> {
     await new Promise<void>((resolve) => {
       win.webContents.once("did-finish-load", () => resolve());
     });
+    // A newer show/hide may have fired while we awaited load.
+    if (selectedHeadId !== head.id) return;
   }
 
-  // Prefetch so the renderer paints at its final size on first render. Hover
-  // preloads usually warm the cache already, so this is typically a no-op.
-  const sessions = await fetchSessionsForHead(head.id);
+  // Size the window using the cached height for this head (if we've rendered
+  // it before) so first paint lands at the right size instead of mid-resize.
+  const cachedHeight = infoHeightByHead.get(head.id);
+  if (cachedHeight) infoCurrentHeight = cachedHeight;
 
-  // A newer toggle/hide might have fired while we were awaiting — bail if the
-  // selected head no longer matches.
-  if (selectedHeadId !== head.id) return;
+  // Send cached sessions immediately if we have them; renderer handles the
+  // `null` case by loading on its own effect.
+  const cached = sessionCache.get(head.id) ?? null;
+  win.webContents.send("info:show", { head, sessions: cached });
 
-  pendingInfoShowIndex = index;
-  if (pendingInfoShowTimeout) clearTimeout(pendingInfoShowTimeout);
-  pendingInfoShowTimeout = setTimeout(() => {
-    if (pendingInfoShowIndex !== null) flushPendingInfoShow();
-  }, 250);
+  // Animate position/size when switching heads on an already-visible window;
+  // land-in-place on first appearance.
+  const firstShow = !win.isVisible();
+  positionInfo(index);
+  if (firstShow) win.showInactive();
 
-  win.webContents.send("info:show", { head, sessions });
+  // Cache miss: fetch in the background; renderer's head-effect also kicks a
+  // fetch, but this warms the cache for future hovers of the same head.
+  if (!cached) void fetchSessionsForHead(head.id);
 }
 
-function flushPendingInfoShow(): void {
-  if (pendingInfoShowIndex === null) return;
+function scheduleHideInfo(): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
-  const idx = pendingInfoShowIndex;
-  pendingInfoShowIndex = null;
-  if (pendingInfoShowTimeout) {
-    clearTimeout(pendingInfoShowTimeout);
-    pendingInfoShowTimeout = null;
-  }
-  positionInfo(idx);
-  infoWindow.show();
-  infoWindow.focus();
+  if (infoHideGraceTimer) clearTimeout(infoHideGraceTimer);
+  infoHideGraceTimer = setTimeout(() => {
+    infoHideGraceTimer = null;
+    hideInfoNow();
+  }, INFO_HIDE_GRACE_MS);
 }
 
-function hideInfo(): void {
-  selectedHeadId = null;
-  pendingInfoShowIndex = null;
-  if (pendingInfoShowTimeout) {
-    clearTimeout(pendingInfoShowTimeout);
-    pendingInfoShowTimeout = null;
+function cancelHideInfo(): void {
+  if (infoHideGraceTimer) {
+    clearTimeout(infoHideGraceTimer);
+    infoHideGraceTimer = null;
   }
+  if (infoHideFadeTimer) {
+    clearTimeout(infoHideFadeTimer);
+    infoHideFadeTimer = null;
+  }
+}
+
+function hideInfoNow(): void {
+  selectedHeadId = null;
   if (infoWindow && !infoWindow.isDestroyed()) {
-    // Renderer pauses its session poll when it sees an empty head.
     infoWindow.webContents.send("info:hide");
-    infoWindow.hide();
+    // Defer the actual NSWindow hide until the renderer's fade-out completes
+    // so we don't clip the transition.
+    if (infoHideFadeTimer) clearTimeout(infoHideFadeTimer);
+    infoHideFadeTimer = setTimeout(() => {
+      infoHideFadeTimer = null;
+      if (
+        infoWindow &&
+        !infoWindow.isDestroyed() &&
+        selectedHeadId === null
+      ) {
+        infoWindow.hide();
+      }
+    }, INFO_FADE_OUT_MS);
   }
 }
 
@@ -561,10 +608,6 @@ function showResponse(message: string): void {
   win.focus();
 }
 
-function hideResponse(): void {
-  if (responseWindow && !responseWindow.isDestroyed()) responseWindow.hide();
-}
-
 // -------- Tray + popup --------
 
 function ensureTrayPopup(): BrowserWindow {
@@ -659,7 +702,7 @@ rail.onChange((next) => {
   heads = next;
   // Drop info-window selection if the targeted head left the graph.
   if (selectedHeadId && !heads.some((h) => h.id === selectedHeadId)) {
-    hideInfo();
+    hideInfoNow();
   }
   debugBackfillTimestamps();
   if (heads.length === 0) {
@@ -671,17 +714,22 @@ rail.onChange((next) => {
     repositionInfoIfVisible();
     repositionChatIfVisible();
   }
+  // Pre-warm the session cache so hover-to-show is instant.
+  for (const h of heads) {
+    if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
+  }
   broadcastHeads();
 });
 
-ipcMain.handle("heads:toggleInfo", (_e, index: number): void => {
+ipcMain.handle("heads:showInfo", (_e, index: number): void => {
   const head = heads[index];
   if (!head) return;
-  if (selectedHeadId === head.id) hideInfo();
-  else void showInfo(index);
+  void showInfo(index);
 });
 
-ipcMain.handle("info:hide", (): void => hideInfo());
+ipcMain.handle("info:hide", (): void => scheduleHideInfo());
+ipcMain.handle("info:hoverEnter", (): void => cancelHideInfo());
+ipcMain.handle("info:hoverLeave", (): void => scheduleHideInfo());
 
 ipcMain.handle("chat:toggle", (): void => toggleChat());
 ipcMain.handle("chat:hide", (): void => hideChat());
@@ -735,23 +783,32 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!win || win.isDestroyed()) return;
-  const h = Math.max(RESIZE_MIN, Math.min(RESIZE_MAX, Math.round(height)));
+  let maxForWin = RESIZE_MAX;
+  if (win === infoWindow) {
+    const { height: screenH } = screen.getDisplayMatching(win.getBounds())
+      .workAreaSize;
+    maxForWin = Math.min(
+      INFO_MAX_ABSOLUTE,
+      Math.floor(screenH * INFO_MAX_SCREEN_FRACTION),
+    );
+  }
+  const h = Math.max(RESIZE_MIN, Math.min(maxForWin, Math.round(height)));
 
   if (win === infoWindow) {
-    const changed = h !== infoCurrentHeight;
-    if (changed) infoCurrentHeight = h;
+    if (h === infoCurrentHeight) return;
+    infoCurrentHeight = h;
+    // Remember the height for this head so the next time it's shown we land
+    // at the right size on first paint.
+    if (selectedHeadId) infoHeightByHead.set(selectedHeadId, h);
 
-    if (pendingInfoShowIndex !== null) {
-      // First measurement after a show request — reveal with the right height.
-      flushPendingInfoShow();
-    } else if (changed) {
-      // positionInfo recenters vertically using the new tracked height.
+    if (selectedHeadId) {
+      // Smoothly retween the open panel to the new height.
       repositionInfoIfVisible();
-      // If not currently visible, still reflect the new height so next show is correct.
-      if (!selectedHeadId) {
-        const b = win.getBounds();
-        win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
-      }
+    } else {
+      // Nothing selected (renderer sending a resize during fade-out or
+      // initial load) — apply the height so the next show lands correctly.
+      const b = win.getBounds();
+      win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
     }
   } else if (win === trayPopup) {
     const b = win.getBounds();
@@ -803,41 +860,44 @@ function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
     void uploader.start();
     void heartbeat.start();
-    const token = backend.getWsToken();
-    if (token) wsClient.connect(backend.getBaseUrl(), token);
+    ws.start();
   } else {
     heartbeat.stop();
     uploader.reset();
-    wsClient.disconnect();
+    ws.stop();
   }
 }
 
+ws.onPrActivity((msg) => {
+  console.log(
+    `[ws] pr_activity ${msg.action} by ${msg.login} on ${msg.repoFullName}#${msg.number}`,
+  );
+  rail.markPrActivity(msg.login);
+});
+
+// A freshly ingested session belongs to the signed-in user — drop any stale
+// self-head cache so the next open of the info window refetches. Peer caches
+// are unaffected (peer sessions arrive via /api/feed, not the uploader).
+uploader.onIngested(() => {
+  const state = backend.getAuthState();
+  if (!state.signedIn) return;
+  sessionCache.delete(rail.userHeadId(state.user.githubLogin));
+});
+
 backend.onChange((state) => applySyncForAuth(state.signedIn));
 
-// Route incoming WS messages. Server forwards anything published to
-// repo:<id> (for every repo the user has) plus user:<id>. For now we log
-// everything at main-process level and forward high-signal frames to the
-// main renderer for devtools inspection; downstream UI routing lands as each
-// surface starts consuming insights.
-wsClient.onMessage((msg) => {
-  const sessionId = typeof msg.session_id === "string" ? msg.session_id : null;
-  switch (msg.type) {
-    case "session_insights_updated":
-      console.log(
-        `[insights] ${String(msg.analyzer)} ready for session ${(sessionId ?? "?").slice(0, 8)} (repo=${String(msg.repo_id)})`,
-        msg.output,
-      );
-      scheduleInfoRefresh(sessionId);
-      broadcastToMain("ws:sessionInsightsUpdated", msg);
-      break;
-    case "session_updated":
-      scheduleInfoRefresh(sessionId);
-      broadcastToMain("ws:sessionUpdated", msg);
-      break;
-    default:
-      broadcastToMain("ws:message", msg);
-      break;
-  }
+ws.onSessionInsightsUpdated((msg) => {
+  console.log(
+    `[insights] ${msg.analyzer} ready for session ${msg.session_id.slice(0, 8)} (repo=${msg.repo_id})`,
+    msg.output,
+  );
+  scheduleInfoRefresh(msg.session_id);
+  broadcastToMain("ws:sessionInsightsUpdated", msg);
+});
+
+ws.onSessionUpdated((msg) => {
+  scheduleInfoRefresh(msg.session_id);
+  broadcastToMain("ws:sessionUpdated", msg);
 });
 
 // `session_updated` fires on every ingest batch — potentially many per second

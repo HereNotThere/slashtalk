@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { SessionState } from "@slashtalk/shared";
 import type { RecentEvent, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
+import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
 
@@ -94,7 +95,7 @@ export function App(): JSX.Element {
         <Header head={head} />
         <Divider />
         {head?.kind === "agent" ? (
-          <AgentStubPanel head={head} />
+          <AgentPanel head={head} />
         ) : (
           <SessionsSection sessions={sessions} />
         )}
@@ -172,65 +173,6 @@ function SubHeader({ children }: { children: string }): JSX.Element {
       {children}
     </div>
   );
-}
-
-function AgentStubPanel({ head }: { head: ChatHead }): JSX.Element {
-  return (
-    <div className="px-lg py-md">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-border text-muted bg-surface">
-          Agent
-        </span>
-        <span className="text-[11px] text-subtle">
-          {head.live ? "Responding" : "Ready"}
-        </span>
-      </div>
-
-      <div className="text-[13px] text-muted leading-snug">
-        This agent is available in the merged Slashtalk desktop. Creation and
-        removal now live in the main window; chat history and streaming replies
-        move here in the next Phase 4 pass.
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <InfoChip label="Head ID" value={head.id} />
-        <InfoChip
-          label="Last activity"
-          value={head.lastActionAt ? relativeAge(head.lastActionAt) : "New"}
-        />
-      </div>
-    </div>
-  );
-}
-
-function InfoChip({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): JSX.Element {
-  return (
-    <div className="bg-surface rounded-xl px-3 py-2 min-w-0">
-      <div className="text-[10px] uppercase tracking-wider text-subtle mb-0.5">
-        {label}
-      </div>
-      <div className="text-[12px] text-fg truncate" title={value}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function relativeAge(ts: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 const DEFAULT_SESSION_LIMIT = 5;

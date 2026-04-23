@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, or, sql } from "drizzle-orm";
 import type { Database } from "../db";
 import { events as eventsTable, sessionInsights, sessions } from "../db/schema";
 import type { RedisBridge } from "../ws/redis-bridge";
@@ -39,12 +39,17 @@ async function tick(db: Database, redis: RedisBridge): Promise<void> {
     const candidates = await db
       .select()
       .from(sessions)
-      .where(gt(sessions.lastTs, sql`now() - interval '1 hour'`))
+      .where(
+        or(
+          gt(sessions.lastTs, sql`now() - interval '1 hour'`),
+          sql`NOT EXISTS (SELECT 1 FROM ${sessionInsights} si WHERE si.session_id = ${sessions.sessionId})`,
+        ),
+      )
       .orderBy(desc(sessions.lastTs))
       .limit(config.analyzerMaxSessionsPerTick);
 
     console.log(
-      `[analyzers] selected ${candidates.length} candidate sessions (touched in last 1h), running ${analyzers.length} analyzers`,
+      `[analyzers] selected ${candidates.length} candidate sessions (touched in last 1h or never analyzed), running ${analyzers.length} analyzers`,
     );
 
     if (candidates.length === 0) {

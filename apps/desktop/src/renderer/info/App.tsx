@@ -8,7 +8,7 @@ import { useLocationWeather } from "../shared/useLocationWeather";
 const REFRESH_MS = 15_000;
 
 const DOT_COLOR: Record<SessionState, string> = {
-  [SessionState.BUSY]: "bg-warning",
+  [SessionState.BUSY]: "bg-success",
   [SessionState.ACTIVE]: "bg-success",
   [SessionState.IDLE]: "bg-warning",
   [SessionState.RECENT]: "bg-muted",
@@ -122,11 +122,6 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
             </>
           )}
           <span className="shrink-0">{time}</span>
-          <span className="text-subtle shrink-0">·</span>
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-success/15 text-success text-[11px] font-medium shrink-0">
-            <Dot color="bg-success" />
-            active
-          </span>
         </div>
       </div>
       <button
@@ -399,8 +394,10 @@ function fmtAgo(ts: string): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
+  const rem = m % 60;
+  const roundedH = rem >= 30 ? h + 1 : h;
+  if (roundedH < 24) return `${roundedH}h ago`;
+  const d = Math.floor(roundedH / 24);
   return `${d}d ago`;
 }
 

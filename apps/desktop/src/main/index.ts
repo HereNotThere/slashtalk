@@ -7,6 +7,7 @@ import {
   screen,
   clipboard,
   shell,
+  globalShortcut,
 } from "electron";
 import path from "node:path";
 import type { ChatHead, InfoSession } from "../shared/types";
@@ -256,16 +257,30 @@ function ensureOverlay(): BrowserWindow {
   return overlayWindow;
 }
 
+const OVERLAY_SCREEN_MARGIN = 40;
+
 function resizeOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const height = overlayHeight(heads.length);
+  const display = screen.getDisplayMatching(overlayWindow.getBounds());
+  const maxHeight = Math.max(
+    overlayHeight(0),
+    display.workArea.height - OVERLAY_SCREEN_MARGIN * 2,
+  );
+  const height = Math.min(overlayHeight(heads.length), maxHeight);
   const bounds = overlayWindow.getBounds();
-  overlayWindow.setBounds({
-    x: bounds.x,
-    y: bounds.y,
-    width: OVERLAY_WIDTH,
-    height,
-  });
+  // Keep the window inside the work area after a size change so the ask bubble
+  // never clips below the dock.
+  const minY = display.workArea.y + OVERLAY_SCREEN_MARGIN;
+  const maxY = display.workArea.y + display.workArea.height - height - OVERLAY_SCREEN_MARGIN;
+  const y = Math.max(minY, Math.min(bounds.y, maxY));
+  // `animate: true` uses macOS's native NSWindow animator (~200ms ease), which
+  // reads as a fluid grow/shrink alongside the renderer's bubble enter/exit
+  // animations. No-op on other platforms.
+  const animate = bounds.height !== height || bounds.y !== y;
+  overlayWindow.setBounds(
+    { x: bounds.x, y, width: OVERLAY_WIDTH, height },
+    animate,
+  );
 }
 
 function broadcastHeads(): void {
@@ -312,7 +327,7 @@ function ensureInfoWindow(): BrowserWindow {
   return infoWindow;
 }
 
-function positionInfo(index: number): void {
+function positionInfo(index: number, bubbleScreenY?: number): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
@@ -330,12 +345,15 @@ function positionInfo(index: number): void {
     ? pillRight + INFO_GAP
     : pillLeft - INFO_GAP - INFO_WIDTH;
 
+  // Prefer the renderer-reported screen-Y when available: with a scrollable
+  // peer list the index-based formula no longer reflects where the bubble
+  // actually sits. Fall back to the formula for callers that don't have a
+  // live DOM rect (e.g. chat-bubble reposition during resize).
   const cell = BUBBLE_SIZE + SPACING;
-  const avatarTopY = stackBounds.y + PADDING_Y + index * cell;
+  const avatarTopY =
+    bubbleScreenY ?? stackBounds.y + PADDING_Y + index * cell;
   const infoY = Math.round(avatarTopY - 16);
 
-  // Instant setBounds — macOS's native animate=true runs ~300ms and isn't
-  // tunable. The CSS opacity fade on the renderer covers the content swap.
   infoWindow.setBounds({
     x: Math.round(infoX),
     y: infoY,
@@ -344,7 +362,7 @@ function positionInfo(index: number): void {
   });
 }
 
-async function showInfo(index: number): Promise<void> {
+async function showInfo(index: number, bubbleScreenY?: number): Promise<void> {
   if (isDraggingStack) return;
   const head = heads[index];
   if (!head) return;
@@ -383,7 +401,7 @@ async function showInfo(index: number): Promise<void> {
   // Animate position/size when switching heads on an already-visible window;
   // land-in-place on first appearance.
   const firstShow = !win.isVisible();
-  positionInfo(index);
+  positionInfo(index, bubbleScreenY);
   if (firstShow) win.showInactive();
 
   // Cache miss: fetch in the background and push the result to the renderer.
@@ -510,12 +528,12 @@ function positionChat(): void {
   const stackBounds = overlayWindow.getBounds();
   const anchor = chatAnchorFromOverlay();
 
-  // Chat bubble sits at the last rail cell — index === heads.length. Its center
-  // on screen is the target we align the pill's leading icon to.
+  // Chat bubble is pinned to the bottom of the overlay window (flex-none in
+  // the renderer). Anchor from window bounds so this works whether content
+  // fits or the peer list is scrolling under a height cap.
   const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
-  const cell = BUBBLE_SIZE + SPACING;
   const bubbleCenterY =
-    stackBounds.y + PADDING_Y + heads.length * cell + BUBBLE_SIZE / 2;
+    stackBounds.y + stackBounds.height - PADDING_Y - BUBBLE_SIZE / 2;
 
   const chatX =
     anchor === "left"
@@ -720,6 +738,17 @@ ipcMain.handle("heads:list", (): ChatHead[] => heads);
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
 ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
+ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());
+ipcMain.handle("debug:addFakeTeammate", () => rail.debugAddFakeTeammate());
+ipcMain.handle("debug:removeFakeTeammate", () =>
+  rail.debugRemoveFakeTeammate(),
+);
+ipcMain.handle("debug:replayEnterAnimation", () => replayEnterAnimation());
+
+function replayEnterAnimation(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send("debug:replayEnter");
+}
 
 rail.onChange((next) => {
   heads = next;
@@ -744,11 +773,14 @@ rail.onChange((next) => {
   broadcastHeads();
 });
 
-ipcMain.handle("heads:showInfo", (_e, index: number): void => {
-  const head = heads[index];
-  if (!head) return;
-  void showInfo(index);
-});
+ipcMain.handle(
+  "heads:showInfo",
+  (_e, index: number, bubbleScreenY?: number): void => {
+    const head = heads[index];
+    if (!head) return;
+    void showInfo(index, bubbleScreenY);
+  },
+);
 
 ipcMain.handle("info:hide", (): void => scheduleHideInfo());
 ipcMain.handle("info:hoverEnter", (): void => cancelHideInfo());
@@ -1143,6 +1175,24 @@ app.whenReady().then(() => {
   createTray();
   rail.start();
   applySyncForAuth(backend.getAuthState().signedIn);
+
+  // DEV ONLY — rail test shortcuts. Remove before shipping.
+  if (!app.isPackaged) {
+    const bindings: Array<[string, () => void]> = [
+      ["CommandOrControl+Shift+R", () => rail.debugShuffleRail()],
+      ["CommandOrControl+Shift+J", () => rail.debugAddFakeTeammate()],
+      ["CommandOrControl+Shift+L", () => rail.debugRemoveFakeTeammate()],
+      ["CommandOrControl+Shift+K", () => replayEnterAnimation()],
+    ];
+    for (const [accel, fn] of bindings) {
+      const ok = globalShortcut.register(accel, fn);
+      if (!ok) console.warn(`[debug] failed to register ${accel}`);
+    }
+  }
+});
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });
 
 // Keep the app alive when all windows close — the mere presence of a

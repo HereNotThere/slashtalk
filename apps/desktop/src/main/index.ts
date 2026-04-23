@@ -862,6 +862,15 @@ ws.onPrActivity((msg) => {
   rail.markPrActivity(msg.login);
 });
 
+// A freshly ingested session belongs to the signed-in user — drop any stale
+// self-head cache so the next open of the info window refetches. Peer caches
+// are unaffected (peer sessions arrive via /api/feed, not the uploader).
+uploader.onIngested(() => {
+  const state = backend.getAuthState();
+  if (!state.signedIn) return;
+  sessionCache.delete(rail.userHeadId(state.user.githubLogin));
+});
+
 backend.onChange((state) => applySyncForAuth(state.signedIn));
 ipcMain.handle("backend:listRepos", () => backend.listRepos());
 

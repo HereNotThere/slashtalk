@@ -170,6 +170,37 @@ export interface SessionUpdatedMessage {
   state?: SessionState;
 }
 
+/**
+ * Chat (team-presence Q&A). The server is stateless: the client owns the
+ * thread and re-sends the full `messages` array on every turn. Tool turns
+ * are hidden from the client — only user-visible text + citations come back.
+ */
+export interface ChatCitation {
+  sessionId: string;
+  reason: string;
+}
+
+export interface ChatUserMessage {
+  role: "user";
+  content: string;
+}
+
+export interface ChatAssistantMessage {
+  role: "assistant";
+  content: string;
+  citations?: ChatCitation[];
+}
+
+export type ChatMessage = ChatUserMessage | ChatAssistantMessage;
+
+export interface ChatAskRequest {
+  messages: ChatMessage[];
+}
+
+export interface ChatAskResponse {
+  message: ChatAssistantMessage;
+}
+
 /** Standard API response wrapper */
 export interface ApiResponse<T> {
   data: T;

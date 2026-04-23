@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { ChatAskResponse, ChatMessage } from "@slashtalk/shared";
 import type {
   BackendAuthState,
   ChatHead,
@@ -43,6 +44,9 @@ const bridge: ChatHeadsBridge = {
   openResponse: (message) =>
     ipcRenderer.invoke("response:open", message) as Promise<void>,
   onResponseOpen: (cb) => subscribe<{ message: string }>("response:open", cb),
+
+  askChat: (messages: ChatMessage[]) =>
+    ipcRenderer.invoke("chat:ask", messages) as Promise<ChatAskResponse>,
 
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,

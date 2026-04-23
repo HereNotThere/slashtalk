@@ -798,6 +798,12 @@ ipcMain.handle("response:open", (_e, message: string): void => {
   showResponse(message);
 });
 
+ipcMain.handle(
+  "chat:ask",
+  (_e, messages: Parameters<typeof backend.askChat>[0]) =>
+    backend.askChat(messages),
+);
+
 // -------- Dock to edge (drag → release → snap) --------
 
 type DockSide = "left" | "right";

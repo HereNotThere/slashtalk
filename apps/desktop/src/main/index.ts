@@ -168,12 +168,12 @@ function ensureOverlay(): BrowserWindow {
     y: restored?.y ?? workArea.y + Math.floor((workArea.height - height) / 2),
     frame: false,
     transparent: false,
-    // System shadow off — macOS renders it by blurring the alpha mask with
-    // the darkest pixels sitting right at the edge, which reads as a crisp
-    // dark ring around our white stroke instead of a soft halo. Revisit with
-    // a custom CALayer shadow on a wrapper layer if we want a real drop
-    // shadow back.
-    hasShadow: false,
+    // System shadow — macOS derives it from the window's alpha mask, so
+    // with the rounded contentView + cleared NSWindow background the
+    // shadow follows the pill. Re-invalidated in setMacCornerRadius so
+    // macOS recomputes against the pill mask instead of the original
+    // rectangle.
+    hasShadow: true,
     alwaysOnTop: true,
     resizable: false,
     movable: false, // we drive drag manually via IPC + setPosition
@@ -203,7 +203,7 @@ function ensureOverlay(): BrowserWindow {
   setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
     width: 1.5,
     white: 1,
-    alpha: 1,
+    alpha: 0.33,
   });
 
   loadRenderer(overlayWindow, "overlay");

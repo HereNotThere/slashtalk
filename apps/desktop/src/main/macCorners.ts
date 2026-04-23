@@ -122,6 +122,13 @@ export function setMacCornerRadius(
   b.msgSend_pd(layer, b.sel_registerName("setCornerRadius:"), radius);
   b.msgSend_pb(layer, b.sel_registerName("setMasksToBounds:"), true);
 
+  // System shadow (hasShadow:true) is cached against the original
+  // rectangular alpha mask; invalidate so macOS recomputes it against our
+  // rounded pill.
+  if (nsWindow) {
+    b.msgSend_pp(nsWindow, b.sel_registerName("invalidateShadow"));
+  }
+
   if (border) {
     const nsColor = b.objc_getClass("NSColor");
     // +[NSColor colorWithWhite:alpha:] returns an autoreleased NSColor*. Its

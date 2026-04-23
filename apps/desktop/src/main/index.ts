@@ -132,7 +132,7 @@ function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 620,
     height: 640,
-    title: "ChatHeads",
+    title: "Slashtalk",
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

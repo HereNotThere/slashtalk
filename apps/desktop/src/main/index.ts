@@ -31,6 +31,10 @@ const PADDING_X = 12;
 const PADDING_Y = 16;
 const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
 
+// Extra vertical space the separator between peers and projects occupies.
+// Counts as one extra SPACING row (14px) — matches the other gaps visually.
+const SEPARATOR_EXTRA = SPACING;
+
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
 const INFO_GAP = 8; // distance from the pill's outer edge to the info window
@@ -90,8 +94,17 @@ let tray: Tray | null = null;
 let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
+let projects: ChatHead[] = [];
 let selectedHeadId: string | null = null;
 const sessionCache = new Map<string, InfoSession[]>();
+
+function allHeads(): ChatHead[] {
+  return [...heads, ...projects];
+}
+
+function findHead(id: string): ChatHead | undefined {
+  return allHeads().find((h) => h.id === id);
+}
 
 
 let dragOffset: { dx: number; dy: number } | null = null;
@@ -148,9 +161,12 @@ function createMainWindow(): void {
 // -------- Overlay (bubbles) --------
 
 // Overlay always renders heads plus the chat bubble at the bottom, so add 1.
-function overlayHeight(count: number): number {
-  const n = count + 1;
-  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING_Y * 2;
+// When there are any project heads we reserve one extra SPACING row for the
+// divider between peers and projects.
+function overlayHeight(count: number, projectCount = 0): number {
+  const n = count + projectCount + 1;
+  const sep = projectCount > 0 ? SEPARATOR_EXTRA : 0;
+  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + sep + PADDING_Y * 2;
 }
 
 interface SavedPosition {
@@ -194,7 +210,7 @@ function ensureOverlay(): BrowserWindow {
 
   const display = screen.getPrimaryDisplay();
   const { workArea } = display;
-  const height = overlayHeight(heads.length);
+  const height = overlayHeight(heads.length, projects.length);
   const restored = restoredOrigin();
 
   overlayWindow = new BrowserWindow({
@@ -266,7 +282,10 @@ function resizeOverlay(): void {
     overlayHeight(0),
     display.workArea.height - OVERLAY_SCREEN_MARGIN * 2,
   );
-  const height = Math.min(overlayHeight(heads.length), maxHeight);
+  const height = Math.min(
+    overlayHeight(heads.length, projects.length),
+    maxHeight,
+  );
   const bounds = overlayWindow.getBounds();
   // Keep the window inside the work area after a size change so the ask bubble
   // never clips below the dock.
@@ -288,6 +307,13 @@ function broadcastHeads(): void {
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
   for (const w of targets) w.webContents.send("heads:update", heads);
+}
+
+function broadcastProjects(): void {
+  // Only the overlay renders projects. Keep statusbar/main windows on the
+  // user-head list so "Active teammates" doesn't start listing repos.
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send("projects:update", projects);
 }
 
 // -------- Info box --------
@@ -327,7 +353,7 @@ function ensureInfoWindow(): BrowserWindow {
   return infoWindow;
 }
 
-function positionInfo(index: number, bubbleScreenY?: number): void {
+function positionInfo(headId: string, bubbleScreenY?: number): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
@@ -347,11 +373,22 @@ function positionInfo(index: number, bubbleScreenY?: number): void {
 
   // Prefer the renderer-reported screen-Y when available: with a scrollable
   // peer list the index-based formula no longer reflects where the bubble
-  // actually sits. Fall back to the formula for callers that don't have a
-  // live DOM rect (e.g. chat-bubble reposition during resize).
+  // actually sits. Fall back to a formula derived from the head's position in
+  // the combined (peers + projects) list — for callers that don't have a live
+  // DOM rect (e.g. reposition during overlay drag/slide).
   const cell = BUBBLE_SIZE + SPACING;
-  const avatarTopY =
-    bubbleScreenY ?? stackBounds.y + PADDING_Y + index * cell;
+  let avatarTopY = bubbleScreenY;
+  if (avatarTopY == null) {
+    const combined = allHeads();
+    const index = combined.findIndex((h) => h.id === headId);
+    const peersBeforeProjects = heads.length;
+    const crossesSep = index >= peersBeforeProjects && projects.length > 0;
+    avatarTopY =
+      stackBounds.y +
+      PADDING_Y +
+      Math.max(0, index) * cell +
+      (crossesSep ? SEPARATOR_EXTRA : 0);
+  }
   const desiredY = Math.round(avatarTopY - 16);
 
   // Clamp so the card's bottom stays within the work area minus 32px padding.
@@ -367,9 +404,9 @@ function positionInfo(index: number, bubbleScreenY?: number): void {
   });
 }
 
-async function showInfo(index: number, bubbleScreenY?: number): Promise<void> {
+async function showInfo(headId: string, bubbleScreenY?: number): Promise<void> {
   if (isDraggingStack) return;
-  const head = heads[index];
+  const head = findHead(headId);
   if (!head) return;
 
   // Cancel any pending hide so fast re-entry just swaps content.
@@ -406,7 +443,7 @@ async function showInfo(index: number, bubbleScreenY?: number): Promise<void> {
   // Animate position/size when switching heads on an already-visible window;
   // land-in-place on first appearance.
   const firstShow = !win.isVisible();
-  positionInfo(index, bubbleScreenY);
+  positionInfo(head.id, bubbleScreenY);
   if (firstShow) win.showInactive();
 
   // Cache miss: fetch in the background and push the result to the renderer.
@@ -465,9 +502,8 @@ function hideInfoNow(): void {
 
 function repositionInfoIfVisible(): void {
   if (!selectedHeadId) return;
-  const idx = heads.findIndex((h) => h.id === selectedHeadId);
-  if (idx === -1) return;
-  positionInfo(idx);
+  if (!findHead(selectedHeadId)) return;
+  positionInfo(selectedHeadId);
 }
 
 // -------- Chat input popover --------
@@ -740,6 +776,7 @@ function createTray(): void {
 // -------- IPC --------
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
+ipcMain.handle("projects:list", (): ChatHead[] => projects);
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
 ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
@@ -758,11 +795,11 @@ function replayEnterAnimation(): void {
 rail.onChange((next) => {
   heads = next;
   // Drop info-window selection if the targeted head left the graph.
-  if (selectedHeadId && !heads.some((h) => h.id === selectedHeadId)) {
+  if (selectedHeadId && !findHead(selectedHeadId)) {
     hideInfoNow();
   }
   debugBackfillTimestamps();
-  if (heads.length === 0) {
+  if (heads.length === 0 && projects.length === 0) {
     overlayWindow?.close();
     overlayWindow = null;
   } else {
@@ -778,12 +815,31 @@ rail.onChange((next) => {
   broadcastHeads();
 });
 
+rail.onProjectsChange((next) => {
+  projects = next;
+  if (selectedHeadId && !findHead(selectedHeadId)) {
+    hideInfoNow();
+  }
+  if (heads.length === 0 && projects.length === 0) {
+    overlayWindow?.close();
+    overlayWindow = null;
+  } else if (overlayWindow && !overlayWindow.isDestroyed()) {
+    resizeOverlay();
+    repositionInfoIfVisible();
+    repositionChatIfVisible();
+  }
+  // Pre-warm session cache for repo heads too so hover is instant.
+  for (const h of projects) {
+    if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
+  }
+  broadcastProjects();
+});
+
 ipcMain.handle(
   "heads:showInfo",
-  (_e, index: number, bubbleScreenY?: number): void => {
-    const head = heads[index];
-    if (!head) return;
-    void showInfo(index, bubbleScreenY);
+  (_e, headId: string, bubbleScreenY?: number): void => {
+    if (!findHead(headId)) return;
+    void showInfo(headId, bubbleScreenY);
   },
 );
 
@@ -826,7 +882,7 @@ function currentDockSide(): DockSide {
 
 function computeDockBounds(side: DockSide): Electron.Rectangle {
   const wa = overlayDisplay().workArea;
-  const height = overlayHeight(heads.length);
+  const height = overlayHeight(heads.length, projects.length);
   const x =
     side === "left"
       ? wa.x + DOCK_EDGE_MARGIN
@@ -853,7 +909,7 @@ function ensureDockPlaceholder(): BrowserWindow {
   </style></head><body><div class="pill"></div></body></html>`;
   dockPlaceholderWindow = new BrowserWindow({
     width: OVERLAY_WIDTH,
-    height: overlayHeight(heads.length),
+    height: overlayHeight(heads.length, projects.length),
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -1032,20 +1088,37 @@ async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
   const cached = sessionCache.get(headId);
   if (cached) return cached;
 
-  const login = rail.parseUserHeadId(headId);
-  if (!login) return [];
   const state = backend.getAuthState();
   if (!state.signedIn) return [];
-  try {
-    const sessions =
-      state.user.githubLogin === login
-        ? await backend.listOwnSessions()
-        : await backend.listFeedSessionsForUser(login);
-    sessionCache.set(headId, sessions);
-    return sessions;
-  } catch {
-    return [];
+
+  const login = rail.parseUserHeadId(headId);
+  if (login) {
+    try {
+      const sessions =
+        state.user.githubLogin === login
+          ? await backend.listOwnSessions()
+          : await backend.listFeedSessionsForUser(login);
+      sessionCache.set(headId, sessions);
+      return sessions;
+    } catch {
+      return [];
+    }
   }
+
+  const repoId = rail.parseRepoHeadId(headId);
+  if (repoId != null) {
+    const head = projects.find((h) => h.id === headId);
+    if (!head?.repoFullName) return [];
+    try {
+      const sessions = await backend.listFeedSessionsForRepo(head.repoFullName);
+      sessionCache.set(headId, sessions);
+      return sessions;
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 ipcMain.handle("sessions:forHead", async (_e, headId: string): Promise<InfoSession[]> => {
@@ -1109,6 +1182,11 @@ ws.onSessionUpdated((msg) => {
   // hover. scheduleInfoRefresh then coalesces any UI refresh for the
   // currently-selected head across bursty events.
   sessionCache.delete(rail.userHeadId(msg.github_login));
+  // Also invalidate the repo-head cache — a session update changes what the
+  // project popover should render too.
+  if (msg.repo_id != null) {
+    sessionCache.delete(rail.repoHeadId(msg.repo_id));
+  }
   rail.refreshSoon();
   scheduleInfoRefresh(msg.session_id);
   broadcastToMain("ws:sessionUpdated", msg);

@@ -7,6 +7,7 @@ import {
 } from "react";
 import type { ChatHead } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
+import { useProjects } from "../shared/useProjects";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
 import { SearchIcon } from "../shared/icons";
 
@@ -44,6 +45,7 @@ function formatAge(ms: number): string {
 //   main, with a short enter delay and a longer leave grace (main-side).
 export function App(): JSX.Element {
   const heads = useHeads();
+  const projects = useProjects();
   const stackRef = useRef<HTMLDivElement>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const hoverShowTimer = useRef<number | null>(null);
@@ -93,7 +95,7 @@ export function App(): JSX.Element {
 
     prevTops.current = newTops;
     prevIds.current = new Set(bubbleRefs.current.keys());
-  }, [heads, replayToken]);
+  }, [heads, projects, replayToken]);
 
   // Debug: main tells us to replay the mount animation on all current heads.
   useEffect(() => {
@@ -160,7 +162,7 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  const hoverEnterBubble = (index: number, bubbleScreenY: number): void => {
+  const hoverEnterBubble = (headId: string, bubbleScreenY: number): void => {
     if (hoverShowTimer.current != null) {
       window.clearTimeout(hoverShowTimer.current);
     }
@@ -169,7 +171,7 @@ export function App(): JSX.Element {
     void window.chatheads.infoHoverEnter();
     hoverShowTimer.current = window.setTimeout(() => {
       hoverShowTimer.current = null;
-      void window.chatheads.showInfo(index, bubbleScreenY);
+      void window.chatheads.showInfo(headId, bubbleScreenY);
     }, HOVER_SHOW_DELAY_MS);
   };
 
@@ -187,12 +189,12 @@ export function App(): JSX.Element {
   };
 
   const handleBubbleEnter = (
-    index: number,
+    headId: string,
     e: React.MouseEvent<HTMLDivElement>,
   ): void => {
     const rect = e.currentTarget.getBoundingClientRect();
     const screenY = Math.round(rect.top + window.screenY);
-    hoverEnterBubble(index, screenY);
+    hoverEnterBubble(headId, screenY);
   };
 
   const self = heads[0];
@@ -212,7 +214,7 @@ export function App(): JSX.Element {
           key={self.id}
           ref={registerBubble(self.id)}
           className="shrink-0"
-          onMouseEnter={(e) => handleBubbleEnter(0, e)}
+          onMouseEnter={(e) => handleBubbleEnter(self.id, e)}
           onMouseLeave={hoverLeaveBubble}
         >
           <Bubble
@@ -222,34 +224,63 @@ export function App(): JSX.Element {
           />
         </div>
       )}
-      {peers.length > 0 && (
+      {(peers.length > 0 || projects.length > 0) && (
         <div
           className="
             w-full flex-1 min-h-0 flex flex-col items-center gap-[14px]
             overflow-y-auto overflow-x-hidden no-scrollbar
           "
         >
-          {peers.map((h, i) => {
-            const realIndex = i + 1;
-            return (
-              <div
-                key={h.id}
-                ref={registerBubble(h.id)}
-                className="shrink-0"
-                onMouseEnter={(e) => handleBubbleEnter(realIndex, e)}
-                onMouseLeave={hoverLeaveBubble}
-              >
-                <Bubble
-                  head={h}
-                  onHoverEnter={() => {}}
-                  onHoverLeave={() => {}}
-                />
-              </div>
-            );
-          })}
+          {peers.map((h) => (
+            <div
+              key={h.id}
+              ref={registerBubble(h.id)}
+              className="shrink-0"
+              onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
+              onMouseLeave={hoverLeaveBubble}
+            >
+              <Bubble
+                head={h}
+                onHoverEnter={() => {}}
+                onHoverLeave={() => {}}
+              />
+            </div>
+          ))}
+          {peers.length > 0 && projects.length > 0 && <RailSeparator />}
+          {projects.map((h) => (
+            <div
+              key={h.id}
+              ref={registerBubble(h.id)}
+              className="shrink-0"
+              onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
+              onMouseLeave={hoverLeaveBubble}
+            >
+              <Bubble
+                head={h}
+                onHoverEnter={() => {}}
+                onHoverLeave={() => {}}
+              />
+            </div>
+          ))}
         </div>
       )}
       <ChatBubble hidden={chatOpen} />
+    </div>
+  );
+}
+
+// Divider between the teammate row and the project row. Takes one extra
+// SPACING-row worth of vertical space in the flex stack (the flex `gap`
+// adds 14px above and below the 1px line); this matches the
+// SEPARATOR_EXTRA reserved in the main-process overlayHeight formula.
+function RailSeparator(): JSX.Element {
+  return (
+    <div
+      className="w-full shrink-0 flex items-center justify-center"
+      style={{ height: 1 }}
+      aria-hidden
+    >
+      <div className="w-[60%] h-px bg-white/20 rounded-full" />
     </div>
   );
 }

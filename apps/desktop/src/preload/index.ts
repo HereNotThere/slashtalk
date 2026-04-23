@@ -24,10 +24,14 @@ const bridge: ChatHeadsBridge = {
   list: () => ipcRenderer.invoke("heads:list") as Promise<ChatHead[]>,
   onUpdate: (cb) => subscribe<ChatHead[]>("heads:update", cb),
 
-  showInfo: (index, bubbleScreenY) =>
+  listProjects: () =>
+    ipcRenderer.invoke("projects:list") as Promise<ChatHead[]>,
+  onProjectsUpdate: (cb) => subscribe<ChatHead[]>("projects:update", cb),
+
+  showInfo: (headId, bubbleScreenY) =>
     ipcRenderer.invoke(
       "heads:showInfo",
-      index,
+      headId,
       bubbleScreenY,
     ) as Promise<void>,
   infoHoverEnter: () =>

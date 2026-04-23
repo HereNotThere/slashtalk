@@ -67,6 +67,7 @@ export function AgentPanel({ head }: { head: ChatHead }): JSX.Element {
         agentId={agentId}
         sessionId={sessionId}
         seed={seed}
+        showPopOut
         onBack={() => {
           setView("sessions");
           setSessionId(null);
@@ -95,10 +96,14 @@ function AgentHeader({
   head,
   agent,
   onBack,
+  onPopOut,
+  onClose = () => void window.chatheads.hideInfo(),
 }: {
   head: ChatHead;
   agent: AgentSummary | null;
   onBack?: () => void;
+  onPopOut?: () => void;
+  onClose?: () => void;
 }): JSX.Element {
   return (
     <div className="px-lg pt-lg pb-md flex items-start gap-md">
@@ -122,8 +127,18 @@ function AgentHeader({
           <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-card border border-border text-muted">
             {(agent?.mode ?? "cloud") === "local" ? "Local" : "Cloud"}
           </span>
+          {onPopOut && (
+            <button
+              onClick={onPopOut}
+              className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
+              aria-label="Open expanded agent chat"
+              title="Open expanded chat"
+            >
+              ↗
+            </button>
+          )}
           <button
-            onClick={() => void window.chatheads.hideInfo()}
+            onClick={onClose}
             className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
             aria-label="Close"
           >
@@ -337,13 +352,16 @@ function PastSummary({ row }: { row: AgentSessionRow }): JSX.Element {
   );
 }
 
-function AgentChat({
+export function AgentChat({
   head,
   agent,
   agentId,
   sessionId,
   seed,
   onBack,
+  fullHeight = false,
+  showPopOut = false,
+  onClose,
 }: {
   head: ChatHead;
   agent: AgentSummary | null;
@@ -351,6 +369,9 @@ function AgentChat({
   sessionId: string | null;
   seed: string | null;
   onBack: () => void;
+  fullHeight?: boolean;
+  showPopOut?: boolean;
+  onClose?: () => void;
 }): JSX.Element {
   const [msgs, setMsgs] = useState<AgentMsg[]>([]);
   const [loading, setLoading] = useState(true);
@@ -385,7 +406,7 @@ function AgentChat({
     }
     setLoading(true);
     window.chatheads.agents
-      .history(agentId)
+      .history(agentId, sessionId)
       .then((page) => {
         if (cancelled) return;
         setMsgs(page.msgs);
@@ -426,7 +447,11 @@ function AgentChat({
 
   const loadOlder = async (): Promise<void> => {
     if (!nextCursor) return;
-    const page = await window.chatheads.agents.history(agentId, nextCursor);
+    const page = await window.chatheads.agents.history(
+      agentId,
+      sessionId,
+      nextCursor,
+    );
     setMsgs((prev) => [...page.msgs, ...prev]);
     setNextCursor(page.nextCursor);
   };
@@ -451,7 +476,7 @@ function AgentChat({
       });
     }
     try {
-      await window.chatheads.agents.send(agentId, text);
+      await window.chatheads.agents.send(agentId, text, sessionId);
     } catch (err) {
       setMsgs((prev) =>
         applyEvent(prev, {
@@ -472,8 +497,18 @@ function AgentChat({
   };
 
   return (
-    <div className="flex flex-col min-h-[240px] max-h-[620px]">
-      <AgentHeader head={head} agent={agent} onBack={onBack} />
+    <div className={fullHeight ? "flex flex-col h-screen" : "flex flex-col min-h-[240px] max-h-[620px]"}>
+      <AgentHeader
+        head={head}
+        agent={agent}
+        onBack={onBack}
+        onClose={onClose}
+        onPopOut={
+          showPopOut && sessionId
+            ? () => void window.chatheads.agents.popOut(agentId, sessionId)
+            : undefined
+        }
+      />
       <Divider />
       <div
         ref={transcriptRef}

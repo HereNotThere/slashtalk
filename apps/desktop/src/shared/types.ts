@@ -245,6 +245,10 @@ export interface McpInstallStatus {
   claudeCode: McpTargetState;
 }
 
+export type ResponseOpenPayload =
+  | { kind: "message"; message: string }
+  | { kind: "agent"; agentId: string; sessionId: string };
+
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
 export interface ChatHeadsBridge {
@@ -286,8 +290,12 @@ export interface ChatHeadsBridge {
     list: () => Promise<AgentSummary[]>;
     create: (input: CreateAgentInput) => Promise<AgentSummary>;
     remove: (id: string) => Promise<void>;
-    send: (agentId: string, text: string) => Promise<void>;
-    history: (agentId: string, cursor?: string | null) => Promise<AgentHistoryPage>;
+    send: (agentId: string, text: string, sessionId?: string | null) => Promise<void>;
+    history: (
+      agentId: string,
+      sessionId?: string | null,
+      cursor?: string | null,
+    ) => Promise<AgentHistoryPage>;
     listSessions: (agentId: string) => Promise<AgentSessionSummary[]>;
     newSession: (agentId: string) => Promise<AgentSessionSummary>;
     selectSession: (agentId: string, sessionId: string) => Promise<void>;
@@ -323,9 +331,9 @@ export interface ChatHeadsBridge {
     cb: (cfg: { anchor: "left" | "right" }) => void,
   ) => Unsubscribe;
 
-  // Response window (chat → main → response)
+  // Response window (chat/agent pop-out → main → response)
   openResponse: (message: string) => Promise<void>;
-  onResponseOpen: (cb: (payload: { message: string }) => void) => Unsubscribe;
+  onResponseOpen: (cb: (payload: ResponseOpenPayload) => void) => Unsubscribe;
 
   // Drag (overlay → main)
   dragStart: () => Promise<void>;

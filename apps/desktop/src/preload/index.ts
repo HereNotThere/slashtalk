@@ -18,6 +18,7 @@ import type {
   McpTarget,
   McpTargetState,
   RailDebugSnapshot,
+  ResponseOpenPayload,
   RepoSummary,
   TrackedRepo,
   Unsubscribe,
@@ -78,10 +79,10 @@ const bridge: ChatHeadsBridge = {
     create: (input: CreateAgentInput) =>
       ipcRenderer.invoke("agents:create", input) as Promise<AgentSummary>,
     remove: (id) => ipcRenderer.invoke("agents:remove", id) as Promise<void>,
-    send: (agentId, text) =>
-      ipcRenderer.invoke("agents:send", agentId, text) as Promise<void>,
-    history: (agentId, cursor) =>
-      ipcRenderer.invoke("agents:history", agentId, cursor) as Promise<AgentHistoryPage>,
+    send: (agentId, text, sessionId) =>
+      ipcRenderer.invoke("agents:send", agentId, text, sessionId) as Promise<void>,
+    history: (agentId, sessionId, cursor) =>
+      ipcRenderer.invoke("agents:history", agentId, sessionId, cursor) as Promise<AgentHistoryPage>,
     listSessions: (agentId) =>
       ipcRenderer.invoke("agents:listSessions", agentId) as Promise<AgentSessionSummary[]>,
     newSession: (agentId) =>
@@ -125,7 +126,7 @@ const bridge: ChatHeadsBridge = {
 
   openResponse: (message) =>
     ipcRenderer.invoke("response:open", message) as Promise<void>,
-  onResponseOpen: (cb) => subscribe<{ message: string }>("response:open", cb),
+  onResponseOpen: (cb) => subscribe<ResponseOpenPayload>("response:open", cb),
 
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,

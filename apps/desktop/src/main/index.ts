@@ -20,6 +20,7 @@ import type {
   CreateAgentInput,
   InfoSession,
   McpTarget,
+  ResponseOpenPayload,
 } from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
@@ -673,10 +674,10 @@ function ensureResponseWindow(): BrowserWindow {
   return responseWindow;
 }
 
-function showResponse(message: string): void {
+function showResponse(payload: ResponseOpenPayload): void {
   const win = ensureResponseWindow();
   const send = (): void => {
-    win.webContents.send("response:open", { message });
+    win.webContents.send("response:open", payload);
   };
   if (win.webContents.isLoading()) {
     win.webContents.once("did-finish-load", send);
@@ -828,7 +829,7 @@ ipcMain.handle("chat:toggle", (): void => toggleChat());
 ipcMain.handle("chat:hide", (): void => hideChat());
 
 ipcMain.handle("response:open", (_e, message: string): void => {
-  showResponse(message);
+  showResponse({ kind: "message", message });
 });
 
 // -------- Dock to edge (drag → release → snap) --------
@@ -1188,75 +1189,88 @@ ipcMain.handle(
   async (
     _e,
     agentId: string,
+    sessionId?: string | null,
     cursor?: string | null,
   ): Promise<AgentHistoryPage> => {
     const row = agentStore.get(agentId);
-    if (!row?.activeSessionId) return { msgs: [], nextCursor: null };
+    const targetSessionId = sessionId ?? row?.activeSessionId;
+    if (!row || !targetSessionId) return { msgs: [], nextCursor: null };
     if (isLocalAgent(row)) {
-      return localAgent.loadSessionMessages(row.activeSessionId, cursor);
+      return localAgent.loadSessionMessages(targetSessionId, cursor);
     }
     try {
-      return await anthropic.loadSessionMessages(row.activeSessionId, cursor);
+      return await anthropic.loadSessionMessages(targetSessionId, cursor);
     } catch (err) {
       console.warn("history load failed:", err);
       return { msgs: [], nextCursor: null };
     }
   },
 );
-ipcMain.handle("agents:send", async (_e, agentId: string, text: string) => {
-  const row = agentStore.get(agentId);
-  if (!row) throw new Error("Unknown agent");
-  streamingAgents.add(agentId);
-  try {
-    let sessionId = row.activeSessionId;
-    if (!sessionId) {
-      sessionId = isLocalAgent(row)
-        ? localAgent.localSessionId()
-        : (await anthropic.startSession(agentId)).sessionId;
-      const createdAt = Date.now();
-      agentStore.addSession(agentId, { id: sessionId, createdAt });
-      agentIngest.upsertSessionStart(row, sessionId, createdAt);
-      emitSessionsChange(agentId);
-    }
-
-    const session = row.sessions.find((s) => s.id === sessionId);
-    if (session && !session.title) {
-      const title = truncateTitle(text);
-      agentStore.setSessionTitle(agentId, sessionId, title);
-      emitSessionsChange(agentId);
-      if (!isLocalAgent(row)) {
-        anthropic.updateSessionTitle(sessionId, title).catch((err) => {
-          console.warn("server title update failed:", err);
-        });
-      }
-    }
-
-    const streamSessionId = sessionId;
-    const handleEvent = (e: anthropic.AgentStreamEvent): void => {
-      const payload: AgentStreamEvent = { ...e, agentId };
-      broadcastAgentEvent(payload);
-      if (e.kind === "usage") {
-        agentStore.addSessionUsage(agentId, streamSessionId, {
-          input: e.input,
-          output: e.output,
-        });
+ipcMain.handle(
+  "agents:send",
+  async (
+    _e,
+    agentId: string,
+    text: string,
+    requestedSessionId?: string | null,
+  ) => {
+    const row = agentStore.get(agentId);
+    if (!row) throw new Error("Unknown agent");
+    streamingAgents.add(agentId);
+    try {
+      let sessionId = requestedSessionId ?? row.activeSessionId;
+      if (!sessionId) {
+        sessionId = isLocalAgent(row)
+          ? localAgent.localSessionId()
+          : (await anthropic.startSession(agentId)).sessionId;
+        const createdAt = Date.now();
+        agentStore.addSession(agentId, { id: sessionId, createdAt });
+        agentIngest.upsertSessionStart(row, sessionId, createdAt);
         emitSessionsChange(agentId);
+      } else if (requestedSessionId) {
+        agentStore.setActiveSession(agentId, requestedSessionId);
       }
-      if (e.kind === "done" || e.kind === "error") {
-        streamingAgents.delete(agentId);
-      }
-    };
 
-    if (isLocalAgent(row)) {
-      void localAgent.sendMessage(streamSessionId, text, row, handleEvent);
-    } else {
-      void anthropic.sendMessage(streamSessionId, text, handleEvent);
+      const latestRow = agentStore.get(agentId) ?? row;
+      const session = latestRow.sessions.find((s) => s.id === sessionId);
+      if (session && !session.title) {
+        const title = truncateTitle(text);
+        agentStore.setSessionTitle(agentId, sessionId, title);
+        emitSessionsChange(agentId);
+        if (!isLocalAgent(row)) {
+          anthropic.updateSessionTitle(sessionId, title).catch((err) => {
+            console.warn("server title update failed:", err);
+          });
+        }
+      }
+
+      const streamSessionId = sessionId;
+      const handleEvent = (e: anthropic.AgentStreamEvent): void => {
+        const payload: AgentStreamEvent = { ...e, agentId };
+        broadcastAgentEvent(payload);
+        if (e.kind === "usage") {
+          agentStore.addSessionUsage(agentId, streamSessionId, {
+            input: e.input,
+            output: e.output,
+          });
+          emitSessionsChange(agentId);
+        }
+        if (e.kind === "done" || e.kind === "error") {
+          streamingAgents.delete(agentId);
+        }
+      };
+
+      if (isLocalAgent(row)) {
+        void localAgent.sendMessage(streamSessionId, text, row, handleEvent);
+      } else {
+        void anthropic.sendMessage(streamSessionId, text, handleEvent);
+      }
+    } catch (err) {
+      streamingAgents.delete(agentId);
+      throw err;
     }
-  } catch (err) {
-    streamingAgents.delete(agentId);
-    throw err;
-  }
-});
+  },
+);
 ipcMain.handle(
   "agents:listSessions",
   (_e, agentId: string): AgentSessionSummary[] => {
@@ -1292,7 +1306,8 @@ async function refreshSessionsFromServer(agentId: string): Promise<void> {
 ipcMain.handle(
   "agents:popOut",
   (_e, agentId: string, sessionId: string): void => {
-    showResponse(`Agent ${agentId} session ${sessionId}`);
+    agentStore.setActiveSession(agentId, sessionId);
+    showResponse({ kind: "agent", agentId, sessionId });
   },
 );
 

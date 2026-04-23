@@ -1,16 +1,80 @@
 import { useEffect, useState } from "react";
+import type {
+  AgentSummary,
+  ChatHead,
+  ResponseOpenPayload,
+} from "../../shared/types";
+import { AgentChat } from "../info/AgentPanel";
 import { SendIcon } from "../shared/icons";
 
 export function App(): JSX.Element {
-  const [message, setMessage] = useState("");
-  const [followUp, setFollowUp] = useState("");
+  const [payload, setPayload] = useState<ResponseOpenPayload | null>(null);
 
   useEffect(() => {
-    return window.chatheads.onResponseOpen(({ message }) => {
-      setMessage(message);
-      setFollowUp("");
+    return window.chatheads.onResponseOpen((next) => {
+      setPayload(next);
     });
   }, []);
+
+  if (payload?.kind === "agent") {
+    return <AgentResponse payload={payload} />;
+  }
+
+  return <MessageResponse message={payload?.message ?? ""} />;
+}
+
+function AgentResponse({
+  payload,
+}: {
+  payload: Extract<ResponseOpenPayload, { kind: "agent" }>;
+}): JSX.Element {
+  const [agent, setAgent] = useState<AgentSummary | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const updateAgent = (agents: AgentSummary[]): void => {
+      if (!cancelled) {
+        setAgent(agents.find((item) => item.id === payload.agentId) ?? null);
+      }
+    };
+
+    void window.chatheads.agents.list().then(updateAgent);
+    const unsubscribe = window.chatheads.agents.onListChange(updateAgent);
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [payload.agentId]);
+
+  const head: ChatHead = {
+    id: `agent:${payload.agentId}`,
+    label: agent?.name ?? "Agent",
+    tint: "#86a5ff",
+    avatar: { type: "emoji", value: agent?.name?.[0] ?? "A" },
+    kind: "agent",
+  };
+
+  return (
+    <div className="h-screen bg-bg text-fg">
+      <AgentChat
+        key={`${payload.agentId}:${payload.sessionId}`}
+        head={head}
+        agent={agent}
+        agentId={payload.agentId}
+        sessionId={payload.sessionId}
+        seed={null}
+        fullHeight
+        onBack={() => window.close()}
+        onClose={() => window.close()}
+      />
+    </div>
+  );
+}
+
+function MessageResponse({ message }: { message: string }): JSX.Element {
+  const [followUp, setFollowUp] = useState("");
 
   const handleFollowUpSend = (): void => {
     if (followUp.trim()) {
@@ -21,7 +85,6 @@ export function App(): JSX.Element {
 
   return (
     <div className="flex flex-col h-screen bg-bg">
-      {/* Content */}
       <div className="flex-1 overflow-auto px-lg py-lg space-y-lg min-w-0">
         {message && (
           <div className="flex justify-end mb-lg">
@@ -34,11 +97,10 @@ export function App(): JSX.Element {
           Three people. Fei opened feat/auth-cleanup 1h ago and has a live
           session scaffolding the /signup route and OAuth buttons. PF is on
           the same branch renaming design tokens, with an active overlap in
-          OAuthButtons.tsx. MJ closed the Auth0 → Firebase swap an hour
-          ago; the token refresh path is the relevant piece for you.
+          OAuthButtons.tsx. MJ closed the Auth0 → Firebase swap an hour ago;
+          the token refresh path is the relevant piece for you.
         </p>
 
-        {/* Contributors */}
         <div className="flex flex-wrap gap-md">
           <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-surface">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-sm font-semibold shrink-0">
@@ -67,7 +129,6 @@ export function App(): JSX.Element {
         </div>
       </div>
 
-      {/* Footer - Follow-up input */}
       <div className="flex-none px-lg py-lg border-t border-divider">
         <div className="flex items-center gap-md">
           <input

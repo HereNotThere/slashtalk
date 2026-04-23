@@ -1,6 +1,5 @@
-// Sends /v1/heartbeat for every live ~/.claude/sessions/*.json whose cwd
-// resolves under a tracked local repo AND whose session has already been
-// ingested by the uploader (the server's heartbeats FK into sessions).
+// Sends /v1/heartbeat for live Claude and Codex sessions that belong to a
+// tracked repo and have already been ingested.
 
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -11,20 +10,23 @@ import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import * as uploader from "./uploader";
 
-const SESSIONS_DIR = path.join(os.homedir(), ".claude", "sessions");
+const CLAUDE_SESSIONS_DIR = path.join(os.homedir(), ".claude", "sessions");
+const CODEX_SESSIONS_DIR = path.join(os.homedir(), ".codex", "sessions");
+
 const FALLBACK_MS = 15_000;
 const CHANGE_DEBOUNCE_MS = 250;
+const CODEX_LIVE_WINDOW_MS = 10 * 60_000;
 
 interface LiveSession {
   sessionId: string;
-  pid: number;
+  pid?: number;
   kind?: string;
   cwd?: string;
   version?: string;
   startedAt?: string;
 }
 
-let watcher: FSWatcher | null = null;
+let watchers: FSWatcher[] = [];
 let timer: NodeJS.Timeout | null = null;
 let running = false;
 let pendingTimer: NodeJS.Timeout | null = null;
@@ -35,12 +37,11 @@ function pidAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch {
-    // ESRCH from kill(0) is the "pid is dead" signal, not an error.
     return false;
   }
 }
 
-async function readLiveSession(filePath: string): Promise<LiveSession | null> {
+async function readClaudeLiveSession(filePath: string): Promise<LiveSession | null> {
   let text: string;
   try {
     text = await fsp.readFile(filePath, "utf8");
@@ -48,6 +49,7 @@ async function readLiveSession(filePath: string): Promise<LiveSession | null> {
     console.error("[heartbeat] readFile failed", filePath, err);
     return null;
   }
+
   let parsed: {
     pid?: unknown;
     sessionId?: unknown;
@@ -62,14 +64,19 @@ async function readLiveSession(filePath: string): Promise<LiveSession | null> {
     console.error("[heartbeat] malformed session file", filePath, err);
     return null;
   }
+
   const pid = typeof parsed.pid === "number" ? parsed.pid : null;
   const sessionId =
     typeof parsed.sessionId === "string" ? parsed.sessionId : null;
   if (pid === null || !sessionId) return null;
+
   let startedAt: string | undefined;
-  if (typeof parsed.startedAt === "number")
+  if (typeof parsed.startedAt === "number") {
     startedAt = new Date(parsed.startedAt).toISOString();
-  else if (typeof parsed.startedAt === "string") startedAt = parsed.startedAt;
+  } else if (typeof parsed.startedAt === "string") {
+    startedAt = parsed.startedAt;
+  }
+
   return {
     pid,
     sessionId,
@@ -80,39 +87,67 @@ async function readLiveSession(filePath: string): Promise<LiveSession | null> {
   };
 }
 
-async function enumerateLive(): Promise<LiveSession[]> {
+async function enumerateClaudeLive(): Promise<LiveSession[]> {
   let entries: string[];
   try {
-    entries = await fsp.readdir(SESSIONS_DIR);
+    entries = await fsp.readdir(CLAUDE_SESSIONS_DIR);
   } catch (err) {
     console.error("[heartbeat] readdir sessions failed", err);
     return [];
   }
+
   const out: LiveSession[] = [];
   for (const name of entries) {
     if (!name.endsWith(".json")) continue;
-    const s = await readLiveSession(path.join(SESSIONS_DIR, name));
-    if (!s) continue;
-    if (!pidAlive(s.pid)) continue;
-    if (!localRepos.isPathTracked(s.cwd)) continue;
-    if (!uploader.hasIngested(s.sessionId)) continue;
-    out.push(s);
+    const session = await readClaudeLiveSession(path.join(CLAUDE_SESSIONS_DIR, name));
+    if (!session?.pid || !pidAlive(session.pid)) continue;
+    if (!localRepos.isPathTracked(session.cwd)) continue;
+    if (!uploader.hasIngested(session.sessionId)) continue;
+    out.push(session);
   }
   return out;
+}
+
+function enumerateCodexLive(now: number): LiveSession[] {
+  return uploader
+    .listTrackedSessions()
+    .filter(
+      (session) =>
+        session.source === "codex" &&
+        session.cwd &&
+        now - session.mtimeMs <= CODEX_LIVE_WINDOW_MS,
+    )
+    .map((session) => ({
+      sessionId: session.sessionId,
+      kind: "codex",
+      cwd: session.cwd ?? undefined,
+      version: session.version ?? undefined,
+    }));
+}
+
+async function enumerateLive(): Promise<LiveSession[]> {
+  const [claude, codex] = await Promise.all([
+    enumerateClaudeLive(),
+    Promise.resolve(enumerateCodexLive(Date.now())),
+  ]);
+  return [...claude, ...codex];
 }
 
 async function pulse(): Promise<void> {
   if (!running) return;
   const live = await enumerateLive();
   await Promise.all(
-    live.map((s) =>
+    live.map((session) =>
       backend
-        .sendHeartbeat(s)
+        .sendHeartbeat(session)
         .then(() =>
-          console.log(`[heartbeat] sent ${s.sessionId} pid=${s.pid}`),
+          console.log(
+            `[heartbeat] sent ${session.sessionId}` +
+              (session.pid ? ` pid=${session.pid}` : ` kind=${session.kind ?? "-"}`),
+          ),
         )
         .catch((err) =>
-          console.error("[heartbeat] send failed", s.sessionId, err),
+          console.error("[heartbeat] send failed", session.sessionId, err),
         ),
     ),
   );
@@ -126,25 +161,29 @@ function schedulePulse(): void {
   }, CHANGE_DEBOUNCE_MS);
 }
 
-function startWatcher(): void {
+function watchRoot(root: string): void {
   try {
-    watcher = fs.watch(SESSIONS_DIR, () => schedulePulse());
+    const watcher = fs.watch(root, { recursive: true }, () => schedulePulse());
     watcher.on("error", (err) => console.error("[heartbeat] watcher error", err));
+    watchers.push(watcher);
   } catch (err) {
-    console.error("[heartbeat] fs.watch failed", err);
+    console.error("[heartbeat] fs.watch failed", root, err);
   }
 }
 
 export async function start(): Promise<void> {
   if (running) return;
   running = true;
-  try {
-    await fsp.mkdir(SESSIONS_DIR, { recursive: true });
-  } catch (err) {
-    console.error("[heartbeat] mkdir sessions failed", err);
+  for (const root of [CLAUDE_SESSIONS_DIR, CODEX_SESSIONS_DIR]) {
+    try {
+      await fsp.mkdir(root, { recursive: true });
+    } catch (err) {
+      console.error("[heartbeat] mkdir failed", root, err);
+    }
   }
   unsubTracked = localRepos.onChange(() => schedulePulse());
-  startWatcher();
+  watchRoot(CLAUDE_SESSIONS_DIR);
+  watchRoot(CODEX_SESSIONS_DIR);
   timer = setInterval(() => void pulse(), FALLBACK_MS);
   await pulse();
 }
@@ -152,8 +191,8 @@ export async function start(): Promise<void> {
 export function stop(): void {
   if (!running) return;
   running = false;
-  watcher?.close();
-  watcher = null;
+  for (const watcher of watchers) watcher.close();
+  watchers = [];
   if (timer) {
     clearInterval(timer);
     timer = null;

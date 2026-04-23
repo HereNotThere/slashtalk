@@ -371,8 +371,8 @@ function repoLabel(s: InfoSession): string | null {
     const slash = s.repo_full_name.lastIndexOf("/");
     return slash >= 0 ? s.repo_full_name.slice(slash + 1) : s.repo_full_name;
   }
-  // Fallback for own sessions: Claude writes projects as a slugified cwd path
-  // (e.g. "-Users-erik-dev-towns-app"); the trailing segment is the repo dir.
+  // Fallback for own sessions: both uploaders store `project` as a slugified
+  // cwd path, so the trailing segment is usually the repo dir.
   const parts = s.project.split(/[-/]/).filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1]! : null;
 }

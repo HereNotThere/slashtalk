@@ -1181,6 +1181,7 @@ ws.onSessionUpdated((msg) => {
   if (msg.repo_id != null) {
     sessionCache.delete(rail.repoHeadId(msg.repo_id));
   }
+  rail.refreshSoon();
   scheduleInfoRefresh(msg.session_id);
   broadcastToMain("ws:sessionUpdated", msg);
 });

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { SessionState } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
+import { useLocationWeather } from "../shared/useLocationWeather";
 
 const REFRESH_MS = 15_000;
 
@@ -98,6 +99,7 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
     hour: "numeric",
     minute: "2-digit",
   });
+  const { city, icon } = useLocationWeather();
   return (
     <div className="flex items-start gap-md px-lg pt-lg pb-md">
       <Avatar head={head} />
@@ -106,9 +108,13 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
           {name}
         </div>
         <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted whitespace-nowrap min-w-0">
-          <span className="text-warning shrink-0">☀︎</span>
-          <span className="truncate">New York</span>
-          <span className="text-subtle shrink-0">·</span>
+          {city && (
+            <>
+              {icon && <span className="shrink-0">{icon}</span>}
+              <span className="truncate">{city}</span>
+              <span className="text-subtle shrink-0">·</span>
+            </>
+          )}
           <span className="shrink-0">{time}</span>
           <span className="text-subtle shrink-0">·</span>
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-success/15 text-success text-[11px] font-medium shrink-0">

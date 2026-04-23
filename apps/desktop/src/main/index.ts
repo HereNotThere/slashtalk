@@ -47,6 +47,10 @@ const TRAY_POPUP_INITIAL_HEIGHT = 80;
 
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
+// Info window caps at whichever is smaller: a hard ceiling, or 2/3 of the
+// screen's work area. Computed per-resize so a display change just works.
+const INFO_MAX_ABSOLUTE = 650;
+const INFO_MAX_SCREEN_FRACTION = 2 / 3;
 
 // Tracked dynamically — renderer reports its content height via IPC and we
 // resize/reposition the window each time it changes.
@@ -779,7 +783,16 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!win || win.isDestroyed()) return;
-  const h = Math.max(RESIZE_MIN, Math.min(RESIZE_MAX, Math.round(height)));
+  let maxForWin = RESIZE_MAX;
+  if (win === infoWindow) {
+    const { height: screenH } = screen.getDisplayMatching(win.getBounds())
+      .workAreaSize;
+    maxForWin = Math.min(
+      INFO_MAX_ABSOLUTE,
+      Math.floor(screenH * INFO_MAX_SCREEN_FRACTION),
+    );
+  }
+  const h = Math.max(RESIZE_MIN, Math.min(maxForWin, Math.round(height)));
 
   if (win === infoWindow) {
     if (h === infoCurrentHeight) return;

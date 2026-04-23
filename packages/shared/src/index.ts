@@ -116,6 +116,25 @@ export interface FeedUser {
   repos: string[];
 }
 
+/** One managed-agent session stored in the MCP backend's agent_sessions table.
+ *  Private agent sessions never reach the backend, so every row returned here
+ *  is visibility='team'. Both server and desktop speak this shape so there is
+ *  no skew between the PUT payload and GET response. */
+export interface AgentSessionRow {
+  user_login: string;
+  agent_id: string;
+  session_id: string;
+  mode: "cloud" | "local";
+  visibility: "private" | "team";
+  name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  last_activity: string;
+  summary: string | null;
+  summary_model: string | null;
+  summary_ts: string | null;
+}
+
 /** Ingest response */
 export interface IngestResponse {
   acceptedEvents: number;

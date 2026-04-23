@@ -1,7 +1,15 @@
 // Shared types used by main, preload, and all renderer windows.
 // Any IPC contract lives here, so changes are caught by the compiler on both sides.
 
-import type { FeedSessionSnapshot, SessionSnapshot } from "@slashtalk/shared";
+import type {
+  AgentSessionRow,
+  FeedSessionSnapshot,
+  SessionSnapshot,
+} from "@slashtalk/shared";
+
+// Re-export for convenience: renderers import from this module, not from
+// @slashtalk/shared directly.
+export type { AgentSessionRow };
 
 // Sessions surfaced to the info window: own sessions (SessionSnapshot) and
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
@@ -13,9 +21,8 @@ export type Avatar =
 
 export interface ChatHead {
   id: string;
-  /** "user" = person (peer or self). "repo" = GitHub project the user has
-   *  claimed. Kind picks the info-popover layout and routes session fetches. */
-  kind: "user" | "repo";
+  /** Picks the info-popover layout and routes session fetches. */
+  kind: "user" | "repo" | "agent";
   label: string;
   tint: string;
   avatar: Avatar;
@@ -25,6 +32,12 @@ export interface ChatHead {
   /** Epoch ms when this teammate's most recent PR opened/merged event landed.
    *  Renderer treats it as transient (animates while it's < a few seconds old). */
   prActivityAt?: number;
+  /** True when this user currently has at least one active MCP session. Renders
+   *  a green presence dot on the bubble. */
+  live?: boolean;
+  /** Set when the agent streamed new content while its info panel was not
+   *  open. Cleared when the user opens the panel. Agent heads only. */
+  unread?: boolean;
   /** Only set when kind === "repo". */
   repoId?: number;
   repoFullName?: string;
@@ -42,6 +55,17 @@ export interface BackendUser {
 export type BackendAuthState =
   | { signedIn: false }
   | { signedIn: true; user: BackendUser };
+
+// Signed-in identity for the MCP/agents shim. Token stays main-side.
+export interface ChatHeadsUser {
+  login: string;
+  name: string;
+  avatar: string;
+}
+
+export type ChatHeadsAuthState =
+  | { signedIn: false }
+  | { signedIn: true; user: ChatHeadsUser };
 
 export interface RepoSummary {
   repoId: number;
@@ -78,9 +102,215 @@ export interface RailDebugSnapshot {
   error: string | null;
 }
 
+export interface McpRoot {
+  uri: string;
+  name?: string;
+}
+
+export interface McpSessionInfo {
+  sessionId: string;
+  connectedAt: number;
+  lastActivity: number;
+  clientInfo?: { name?: string; version?: string };
+  roots?: McpRoot[];
+}
+
+export interface McpPresenceDetail {
+  userId: string;
+  name?: string;
+  avatar?: string;
+  tz?: string;
+  connectedAt: number;
+  lastActivity: number;
+  sessionCount: number;
+  sessions: McpSessionInfo[];
+}
+
+export type AgentMode = 'cloud' | 'local';
+export type AgentVisibility = 'private' | 'team';
+
+export interface AgentSummary {
+  id: string;
+  name: string;
+  description?: string;
+  model: string;
+  createdAt: number;
+  mode?: AgentMode;
+  cwd?: string;
+  visibility?: AgentVisibility;
+}
+
+export interface SessionUsage {
+  input: number;
+  output: number;
+}
+
+export interface AgentSessionSummary {
+  id: string;
+  createdAt: number;
+  title?: string;
+  tokens?: SessionUsage;
+}
+
+export interface McpServerInput {
+  name: string;
+  url: string;
+}
+
+export interface GithubPendingConnect {
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  expiresAt: number;
+}
+
+export type GithubConnectState =
+  | { kind: 'disconnected' }
+  | { kind: 'connecting'; pending: GithubPendingConnect }
+  | { kind: 'connected'; login?: string; scope: string }
+  | { kind: 'error'; message: string };
+
+export interface CreateAgentInput {
+  name: string;
+  description?: string;
+  systemPrompt: string;
+  model?: string;
+  mcpServers?: McpServerInput[];
+  mode?: AgentMode;
+  cwd?: string;
+  visibility?: AgentVisibility;
+}
+
+export type AgentStreamEvent =
+  | { kind: 'text'; agentId: string; text: string }
+  | { kind: 'thinking'; agentId: string }
+  | {
+      kind: 'tool_use';
+      agentId: string;
+      id: string;
+      name: string;
+      server?: string;
+      input?: unknown;
+    }
+  | {
+      kind: 'tool_result';
+      agentId: string;
+      toolUseId: string;
+      isError?: boolean;
+      summary?: string;
+    }
+  | { kind: 'phase'; agentId: string; label: string | null }
+  | {
+      kind: 'usage';
+      agentId: string;
+      input: number;
+      output: number;
+    }
+  | { kind: 'done'; agentId: string; stopReason?: string }
+  | { kind: 'error'; agentId: string; message: string };
+
+export type AssistantBlock =
+  | { kind: 'text'; text: string }
+  | { kind: 'thinking' }
+  | {
+      kind: 'tool_use';
+      id: string;
+      name: string;
+      server?: string;
+      input?: unknown;
+      status: 'running' | 'ok' | 'error';
+      resultSummary?: string;
+    };
+
+export type AgentMsg =
+  | { role: 'user'; text: string }
+  | {
+      role: 'assistant';
+      blocks: AssistantBlock[];
+      phase?: string | null;
+      done: boolean;
+    };
+
+export interface AgentHistoryPage {
+  msgs: AgentMsg[];
+  nextCursor: string | null;
+}
+
+export type McpTarget = 'claude-code';
+
+export interface McpTargetState {
+  installed: boolean;
+  path: string;
+}
+
+export interface McpInstallStatus {
+  claudeCode: McpTargetState;
+}
+
+export type ResponseOpenPayload =
+  | { kind: "message"; message: string }
+  | { kind: "agent"; agentId: string; sessionId: string };
+
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
 export interface ChatHeadsBridge {
+  // MCP/agent sign-in compatibility shim. Backed by slashtalk backend auth;
+  // token itself never crosses the preload boundary.
+  auth: {
+    getState: () => Promise<ChatHeadsAuthState>;
+    signIn: () => Promise<void>;
+    cancelSignIn: () => Promise<void>;
+    signOut: () => Promise<void>;
+    onState: (cb: (state: ChatHeadsAuthState) => void) => Unsubscribe;
+  };
+
+  // MCP install into external AI clients.
+  mcp: {
+    install: (target: McpTarget) => Promise<McpTargetState>;
+    uninstall: (target: McpTarget) => Promise<McpTargetState>;
+    status: () => Promise<McpInstallStatus>;
+    url: () => Promise<string>;
+    detailForHead: (headId: string) => Promise<McpPresenceDetail | null>;
+  };
+
+  // GitHub OAuth Device Flow for agents using the GitHub MCP server.
+  github: {
+    isConfigured: () => Promise<boolean>;
+    getState: () => Promise<GithubConnectState>;
+    connect: () => Promise<GithubPendingConnect>;
+    cancelConnect: () => Promise<void>;
+    disconnect: () => Promise<void>;
+    onState: (cb: (state: GithubConnectState) => void) => Unsubscribe;
+  };
+
+  // Anthropic Managed Agents and local Claude Agent SDK agents.
+  agents: {
+    isConfigured: () => Promise<boolean>;
+    setApiKey: (key: string) => Promise<void>;
+    clearApiKey: () => Promise<void>;
+    onConfiguredChange: (cb: (configured: boolean) => void) => Unsubscribe;
+    list: () => Promise<AgentSummary[]>;
+    create: (input: CreateAgentInput) => Promise<AgentSummary>;
+    remove: (id: string) => Promise<void>;
+    send: (agentId: string, text: string, sessionId?: string | null) => Promise<void>;
+    history: (
+      agentId: string,
+      sessionId?: string | null,
+      cursor?: string | null,
+    ) => Promise<AgentHistoryPage>;
+    listSessions: (agentId: string) => Promise<AgentSessionSummary[]>;
+    newSession: (agentId: string) => Promise<AgentSessionSummary>;
+    selectSession: (agentId: string, sessionId: string) => Promise<void>;
+    ensureSessionUsage: (agentId: string, sessionId: string) => Promise<void>;
+    removeSession: (agentId: string, sessionId: string) => Promise<void>;
+    popOut: (agentId: string, sessionId: string) => Promise<void>;
+    onEvent: (cb: (event: AgentStreamEvent) => void) => Unsubscribe;
+    onListChange: (cb: (agents: AgentSummary[]) => void) => Unsubscribe;
+    onSessionsChange: (
+      cb: (payload: { agentId: string; sessions: AgentSessionSummary[] }) => void,
+    ) => Unsubscribe;
+  };
+
   // Head state — derived from the social graph, not user-managed.
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
@@ -108,9 +338,9 @@ export interface ChatHeadsBridge {
     cb: (cfg: { anchor: "left" | "right" }) => void,
   ) => Unsubscribe;
 
-  // Response window (chat → main → response)
+  // Response window (chat/agent pop-out → main → response)
   openResponse: (message: string) => Promise<void>;
-  onResponseOpen: (cb: (payload: { message: string }) => void) => Unsubscribe;
+  onResponseOpen: (cb: (payload: ResponseOpenPayload) => void) => Unsubscribe;
 
   // Ask the backend chat endpoint. Client owns the full history.
   askChat: (
@@ -133,6 +363,7 @@ export interface ChatHeadsBridge {
   // sessions on that repo across peers + self).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
+  listAgentSessionsForAgent: (agentId: string) => Promise<AgentSessionRow[]>;
 
   // Tray popup actions
   openMain: () => Promise<void>;
@@ -141,6 +372,7 @@ export interface ChatHeadsBridge {
   // System utilities
   copyText: (text: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
+  selectDirectory: (defaultPath?: string) => Promise<string | null>;
 
   // Auto-size the calling window to the renderer's content height
   requestResize: (height: number) => Promise<void>;

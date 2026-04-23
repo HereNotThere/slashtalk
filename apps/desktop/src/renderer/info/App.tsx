@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { SessionState } from "@slashtalk/shared";
 import type { RecentEvent, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
+import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
 
@@ -42,6 +43,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!head) return;
+    if (head.kind === "agent") {
+      setSessions([]);
+      return;
+    }
     let cancelled = false;
     const load = async (): Promise<void> => {
       try {
@@ -87,12 +92,20 @@ export function App(): JSX.Element {
       }}
     >
       <div ref={contentRef}>
-        <Header head={head} />
-        <Divider />
-        {head?.kind === "repo" ? (
-          <RepoSessionsSection sessions={sessions} />
+        {head?.kind === "agent" ? (
+          <AgentPanel head={head} />
+        ) : head?.kind === "repo" ? (
+          <>
+            <Header head={head} />
+            <Divider />
+            <RepoSessionsSection sessions={sessions} />
+          </>
         ) : (
-          <SessionsSection sessions={sessions} />
+          <>
+            <Header head={head} />
+            <Divider />
+            <SessionsSection sessions={sessions} />
+          </>
         )}
       </div>
     </div>

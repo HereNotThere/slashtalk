@@ -7,10 +7,21 @@ import {
   screen,
   clipboard,
   shell,
+  dialog,
   globalShortcut,
 } from "electron";
 import path from "node:path";
-import type { ChatHead, InfoSession } from "../shared/types";
+import type {
+  AgentHistoryPage,
+  AgentSessionSummary,
+  AgentStreamEvent,
+  AgentSummary,
+  ChatHead,
+  CreateAgentInput,
+  InfoSession,
+  McpTarget,
+  ResponseOpenPayload,
+} from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
@@ -18,6 +29,16 @@ import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
 import * as ws from "./ws";
+import * as installMcp from "./installMcp";
+import * as chatheadsAuth from "./chatheadsAuth";
+import * as selfSession from "./selfSession";
+import * as anthropic from "./anthropic";
+import * as localAgent from "./localAgent";
+import * as agentStore from "./agentStore";
+import * as agentIngest from "./agentIngest";
+import * as summarize from "./summarize";
+import * as githubAuth from "./githubDeviceAuth";
+import type { LocalAgent } from "./agentStore";
 import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -98,6 +119,25 @@ let projects: ChatHead[] = [];
 let selectedHeadId: string | null = null;
 const sessionCache = new Map<string, InfoSession[]>();
 
+function toAgentSummary(a: LocalAgent): AgentSummary {
+  return {
+    id: a.id,
+    name: a.name,
+    description: a.description,
+    model: a.model,
+    createdAt: a.createdAt,
+    mode: a.mode ?? "cloud",
+    cwd: a.cwd,
+    visibility: a.visibility ?? "private",
+  };
+}
+
+function isLocalAgent(a: { mode?: "cloud" | "local" }): boolean {
+  return a.mode === "local";
+}
+
+const streamingAgents = new Set<string>();
+
 function allHeads(): ChatHead[] {
   return [...heads, ...projects];
 }
@@ -105,7 +145,6 @@ function allHeads(): ChatHead[] {
 function findHead(id: string): ChatHead | undefined {
   return allHeads().find((h) => h.id === id);
 }
-
 
 let dragOffset: { dx: number; dy: number } | null = null;
 let dragTicker: ReturnType<typeof setInterval> | null = null;
@@ -676,10 +715,10 @@ function ensureResponseWindow(): BrowserWindow {
   return responseWindow;
 }
 
-function showResponse(message: string): void {
+function showResponse(payload: ResponseOpenPayload): void {
   const win = ensureResponseWindow();
   const send = (): void => {
-    win.webContents.send("response:open", { message });
+    win.webContents.send("response:open", payload);
   };
   if (win.webContents.isLoading()) {
     win.webContents.once("did-finish-load", send);
@@ -851,7 +890,7 @@ ipcMain.handle("chat:toggle", (): void => toggleChat());
 ipcMain.handle("chat:hide", (): void => hideChat());
 
 ipcMain.handle("response:open", (_e, message: string): void => {
-  showResponse(message);
+  showResponse({ kind: "message", message });
 });
 
 ipcMain.handle(
@@ -1045,6 +1084,18 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
 });
 
+ipcMain.handle(
+  "dialog:selectDirectory",
+  async (_e, defaultPath?: string): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      title: "Choose working directory",
+      ...(defaultPath ? { defaultPath } : {}),
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0] ?? null;
+  },
+);
 
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
@@ -1128,6 +1179,353 @@ ipcMain.handle("sessions:forHead", async (_e, headId: string): Promise<InfoSessi
 // Preload sessions for a head on hover to avoid flicker when opening info window
 ipcMain.handle("sessions:preload", async (_e, headId: string): Promise<void> => {
   void fetchSessionsForHead(headId);
+});
+
+ipcMain.handle(
+  "agentSessions:forAgent",
+  async (_e, agentId: string) => agentIngest.listForAgent(agentId),
+);
+
+ipcMain.handle("mcp:install", (_e, target: McpTarget) =>
+  installMcp.install(target, chatheadsAuth.getToken()),
+);
+ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) =>
+  installMcp.uninstall(target),
+);
+ipcMain.handle("mcp:status", () => installMcp.status());
+ipcMain.handle("mcp:url", () => installMcp.mcpUrl());
+ipcMain.handle("mcp:detailForHead", (_e, _headId: string) =>
+  Promise.resolve(null),
+);
+
+ipcMain.handle("github:isConfigured", () => githubAuth.isConfigured());
+ipcMain.handle("github:getState", () => githubAuth.getState());
+ipcMain.handle("github:connect", () => githubAuth.startConnect());
+ipcMain.handle("github:cancelConnect", () => githubAuth.cancelConnect());
+ipcMain.handle("github:disconnect", () => githubAuth.disconnect());
+
+ipcMain.handle("agents:isConfigured", () => anthropic.isConfigured());
+ipcMain.handle("agents:setApiKey", async (_e, key: string): Promise<void> => {
+  await anthropic.setApiKey(key);
+});
+ipcMain.handle("agents:clearApiKey", () => anthropic.clearApiKey());
+ipcMain.handle("agents:list", () => agentStore.list().map(toAgentSummary));
+ipcMain.handle(
+  "agents:create",
+  async (_e, input: CreateAgentInput): Promise<AgentSummary> => {
+    const visibility = input.visibility ?? "private";
+    if (input.mode === "local") {
+      const created = localAgent.createAgent(input);
+      const row: LocalAgent = {
+        id: created.id,
+        name: created.name,
+        description: created.description,
+        systemPrompt: created.systemPrompt,
+        model: created.model,
+        createdAt: Date.now(),
+        sessions: [],
+        mode: "local",
+        cwd: created.cwd,
+        visibility,
+      };
+      agentStore.add(row);
+      return toAgentSummary(row);
+    }
+
+    const created = await anthropic.createAgent({
+      name: input.name,
+      description: input.description,
+      systemPrompt: input.systemPrompt,
+      model: input.model,
+      mcpServers: input.mcpServers,
+    });
+    const row: LocalAgent = {
+      id: created.id,
+      name: created.name,
+      description: created.description,
+      systemPrompt: created.systemPrompt,
+      model: created.model,
+      createdAt: Date.now(),
+      sessions: [],
+      mode: "cloud",
+      visibility,
+    };
+    agentStore.add(row);
+    return toAgentSummary(row);
+  },
+);
+ipcMain.handle("agents:remove", async (_e, id: string): Promise<void> => {
+  const row = agentStore.get(id);
+  if (row && isLocalAgent(row)) {
+    for (const s of row.sessions) localAgent.archiveSession(s.id);
+  } else {
+    try {
+      await anthropic.archiveAgent(id);
+    } catch (err) {
+      console.warn("archive agent failed (continuing):", err);
+    }
+  }
+  streamingAgents.delete(id);
+  agentStore.remove(id);
+});
+ipcMain.handle(
+  "agents:history",
+  async (
+    _e,
+    agentId: string,
+    sessionId?: string | null,
+    cursor?: string | null,
+  ): Promise<AgentHistoryPage> => {
+    const row = agentStore.get(agentId);
+    const targetSessionId = sessionId ?? row?.activeSessionId;
+    if (!row || !targetSessionId) return { msgs: [], nextCursor: null };
+    if (isLocalAgent(row)) {
+      return localAgent.loadSessionMessages(targetSessionId, cursor);
+    }
+    try {
+      return await anthropic.loadSessionMessages(targetSessionId, cursor);
+    } catch (err) {
+      console.warn("history load failed:", err);
+      return { msgs: [], nextCursor: null };
+    }
+  },
+);
+ipcMain.handle(
+  "agents:send",
+  async (
+    _e,
+    agentId: string,
+    text: string,
+    requestedSessionId?: string | null,
+  ) => {
+    const row = agentStore.get(agentId);
+    if (!row) throw new Error("Unknown agent");
+    streamingAgents.add(agentId);
+    try {
+      let sessionId = requestedSessionId ?? row.activeSessionId;
+      if (!sessionId) {
+        sessionId = isLocalAgent(row)
+          ? localAgent.localSessionId()
+          : (await anthropic.startSession(agentId)).sessionId;
+        const createdAt = Date.now();
+        agentStore.addSession(agentId, { id: sessionId, createdAt });
+        agentIngest.upsertSessionStart(row, sessionId, createdAt);
+        emitSessionsChange(agentId);
+      } else if (requestedSessionId) {
+        agentStore.setActiveSession(agentId, requestedSessionId);
+      }
+
+      const latestRow = agentStore.get(agentId) ?? row;
+      const session = latestRow.sessions.find((s) => s.id === sessionId);
+      if (session && !session.title) {
+        const title = truncateTitle(text);
+        agentStore.setSessionTitle(agentId, sessionId, title);
+        emitSessionsChange(agentId);
+        if (!isLocalAgent(row)) {
+          anthropic.updateSessionTitle(sessionId, title).catch((err) => {
+            console.warn("server title update failed:", err);
+          });
+        }
+      }
+
+      const streamSessionId = sessionId;
+      const handleEvent = (e: anthropic.AgentStreamEvent): void => {
+        const payload: AgentStreamEvent = { ...e, agentId };
+        broadcastAgentEvent(payload);
+        if (e.kind === "usage") {
+          agentStore.addSessionUsage(agentId, streamSessionId, {
+            input: e.input,
+            output: e.output,
+          });
+          emitSessionsChange(agentId);
+        }
+        if (e.kind === "done" || e.kind === "error") {
+          streamingAgents.delete(agentId);
+        }
+      };
+
+      if (isLocalAgent(row)) {
+        void localAgent.sendMessage(streamSessionId, text, row, handleEvent);
+      } else {
+        void anthropic.sendMessage(streamSessionId, text, handleEvent);
+      }
+    } catch (err) {
+      streamingAgents.delete(agentId);
+      throw err;
+    }
+  },
+);
+ipcMain.handle(
+  "agents:listSessions",
+  (_e, agentId: string): AgentSessionSummary[] => {
+    const row = agentStore.get(agentId);
+    if (row && !isLocalAgent(row)) void refreshSessionsFromServer(agentId);
+    return row?.sessions ?? [];
+  },
+);
+
+const pendingArchive = new Set<string>();
+const PENDING_ARCHIVE_TTL_MS = 30_000;
+
+async function refreshSessionsFromServer(agentId: string): Promise<void> {
+  try {
+    const server = await anthropic.listAgentSessions(agentId);
+    const active = server.filter(
+      (s) => s.archivedAt == null && !pendingArchive.has(s.id),
+    );
+    agentStore.reconcileSessions(
+      agentId,
+      active.map((s) => ({
+        id: s.id,
+        createdAt: s.createdAt,
+        title: s.title ?? undefined,
+      })),
+    );
+    emitSessionsChange(agentId);
+  } catch (err) {
+    console.warn("session reconcile failed:", err);
+  }
+}
+
+ipcMain.handle(
+  "agents:popOut",
+  (_e, agentId: string, sessionId: string): void => {
+    agentStore.setActiveSession(agentId, sessionId);
+    showResponse({ kind: "agent", agentId, sessionId });
+  },
+);
+
+ipcMain.handle(
+  "agents:removeSession",
+  async (_e, agentId: string, sessionId: string): Promise<void> => {
+    const row = agentStore.get(agentId);
+    if (row && isLocalAgent(row)) {
+      agentStore.removeSession(agentId, sessionId);
+      emitSessionsChange(agentId);
+      localAgent.archiveSession(sessionId);
+      return;
+    }
+
+    pendingArchive.add(sessionId);
+    setTimeout(() => pendingArchive.delete(sessionId), PENDING_ARCHIVE_TTL_MS);
+
+    const isTeamCloud = !!row && (row.visibility ?? "private") === "team";
+    const startedAtMs =
+      row?.sessions.find((s) => s.id === sessionId)?.createdAt ?? Date.now();
+    const agentSnapshot = row;
+
+    agentStore.removeSession(agentId, sessionId);
+    emitSessionsChange(agentId);
+
+    try {
+      await anthropic.archiveSession(sessionId);
+    } catch (err) {
+      console.warn("archive session failed (continuing):", err);
+    }
+
+    if (isTeamCloud && agentSnapshot) {
+      void finalizeTeamSession(agentSnapshot, sessionId, startedAtMs);
+    }
+  },
+);
+
+async function finalizeTeamSession(
+  agent: LocalAgent,
+  sessionId: string,
+  startedAtMs: number,
+): Promise<void> {
+  const endedAt = new Date().toISOString();
+  const base = {
+    agent_id: agent.id,
+    session_id: sessionId,
+    mode: "cloud" as const,
+    visibility: "team" as const,
+    name: agent.name,
+    started_at: new Date(startedAtMs).toISOString(),
+    ended_at: endedAt,
+    last_activity: endedAt,
+  };
+  try {
+    const { summary, model } = await summarize.summarizeCloudSession(sessionId);
+    await agentIngest.upsertSession({
+      ...base,
+      summary,
+      summary_model: model,
+      summary_ts: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn("[summarize] failed:", err);
+    await agentIngest.upsertSession(base);
+  }
+}
+
+ipcMain.handle(
+  "agents:newSession",
+  async (_e, agentId: string): Promise<AgentSessionSummary> => {
+    const row = agentStore.get(agentId);
+    if (!row) throw new Error("Unknown agent");
+    const id = isLocalAgent(row)
+      ? localAgent.localSessionId()
+      : (await anthropic.startSession(agentId)).sessionId;
+    const session: AgentSessionSummary = { id, createdAt: Date.now() };
+    agentStore.addSession(agentId, session);
+    agentIngest.upsertSessionStart(row, id, session.createdAt);
+    emitSessionsChange(agentId);
+    return session;
+  },
+);
+
+ipcMain.handle(
+  "agents:selectSession",
+  (_e, agentId: string, sessionId: string): void => {
+    agentStore.setActiveSession(agentId, sessionId);
+    emitSessionsChange(agentId);
+  },
+);
+
+ipcMain.handle(
+  "agents:ensureSessionUsage",
+  async (_e, agentId: string, sessionId: string): Promise<void> => {
+    const row = agentStore.get(agentId);
+    const session = row?.sessions.find((s) => s.id === sessionId);
+    if (!row || !session || session.tokens) return;
+    if (isLocalAgent(row)) return;
+    try {
+      const total = await anthropic.sumSessionUsage(sessionId);
+      agentStore.setSessionUsage(agentId, sessionId, total);
+      emitSessionsChange(agentId);
+    } catch (err) {
+      console.warn("backfill usage failed:", err);
+    }
+  },
+);
+
+function truncateTitle(text: string): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= 60 ? clean : clean.slice(0, 57) + "...";
+}
+
+function emitSessionsChange(agentId: string): void {
+  const sessions = agentStore.get(agentId)?.sessions ?? [];
+  const payload = { agentId, sessions };
+  for (const w of agentConsumerWindows()) {
+    w.webContents.send("agents:sessionsChange", payload);
+  }
+}
+
+ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
+ipcMain.handle("chatheads:signIn", async () => {
+  await chatheadsAuth.signIn();
+  try {
+    await installMcp.install("claude-code", chatheadsAuth.getToken());
+  } catch (err) {
+    console.warn("auto-install after sign-in failed:", err);
+  }
+});
+ipcMain.handle("chatheads:cancelSignIn", () => chatheadsAuth.cancelSignIn());
+ipcMain.handle("chatheads:signOut", async () => {
+  await chatheadsAuth.signOut();
+  await installMcp.uninstall("claude-code");
 });
 
 // slashtalk backend
@@ -1248,8 +1646,28 @@ function broadcastToMain(channel: string, payload: unknown): void {
   }
 }
 
+function agentConsumerWindows(): BrowserWindow[] {
+  return [mainWindow, infoWindow, responseWindow].filter(
+    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
+  );
+}
+
+function broadcastAgentEvent(event: AgentStreamEvent): void {
+  for (const w of agentConsumerWindows()) {
+    w.webContents.send("agents:event", event);
+  }
+}
+
 backend.onChange((state) => broadcastToMain("backend:authState", state));
 localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
+chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
+githubAuth.onChange((state) => broadcastToMain("github:state", state));
+anthropic.onConfiguredChange((configured) =>
+  broadcastToMain("agents:configured", configured),
+);
+agentStore.onChange((agents) =>
+  broadcastToMain("agents:listChange", agents.map(toAgentSummary)),
+);
 
 // -------- Lifecycle --------
 
@@ -1260,10 +1678,14 @@ function debugBackfillTimestamps(): void {
 
 app.whenReady().then(() => {
   backend.restore();
+  chatheadsAuth.restore();
+  anthropic.restore();
+  githubAuth.restore();
   localRepos.restore();
   createMainWindow();
   createTray();
   rail.start();
+  selfSession.start();
   applySyncForAuth(backend.getAuthState().signedIn);
 
   // DEV ONLY — rail test shortcuts. Remove before shipping.

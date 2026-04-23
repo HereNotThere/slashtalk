@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "@slashtalk/shared";
+import type {
+  AgentSummary,
+  ChatHead,
+  ResponseOpenPayload,
+} from "../../shared/types";
+import { AgentChat } from "../info/AgentPanel";
 import { SendIcon } from "../shared/icons";
 
 const CITATION_TOKEN = /\[session:[0-9a-fA-F-]+\]/g;
@@ -16,6 +22,76 @@ const MARKDOWN_CLASSES =
   "[&_a]:text-link [&_a]:underline hover:[&_a]:text-link-hover";
 
 export function App(): JSX.Element {
+  const [payload, setPayload] = useState<ResponseOpenPayload | null>(null);
+
+  useEffect(() => {
+    return window.chatheads.onResponseOpen((next) => {
+      setPayload(next);
+    });
+  }, []);
+
+  if (payload?.kind === "agent") {
+    return <AgentResponse payload={payload} />;
+  }
+
+  return (
+    <MessageResponse
+      message={payload?.kind === "message" ? payload.message : null}
+    />
+  );
+}
+
+function AgentResponse({
+  payload,
+}: {
+  payload: Extract<ResponseOpenPayload, { kind: "agent" }>;
+}): JSX.Element {
+  const [agent, setAgent] = useState<AgentSummary | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const updateAgent = (agents: AgentSummary[]): void => {
+      if (!cancelled) {
+        setAgent(agents.find((item) => item.id === payload.agentId) ?? null);
+      }
+    };
+
+    void window.chatheads.agents.list().then(updateAgent);
+    const unsubscribe = window.chatheads.agents.onListChange(updateAgent);
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [payload.agentId]);
+
+  const head: ChatHead = {
+    id: `agent:${payload.agentId}`,
+    label: agent?.name ?? "Agent",
+    tint: "#86a5ff",
+    avatar: { type: "emoji", value: agent?.name?.[0] ?? "A" },
+    kind: "agent",
+  };
+
+  return (
+    <div className="h-screen bg-bg text-fg">
+      <AgentChat
+        key={`${payload.agentId}:${payload.sessionId}`}
+        head={head}
+        agent={agent}
+        agentId={payload.agentId}
+        sessionId={payload.sessionId}
+        seed={null}
+        fullHeight
+        onBack={() => window.close()}
+        onClose={() => window.close()}
+      />
+    </div>
+  );
+}
+
+function MessageResponse({ message }: { message: string | null }): JSX.Element {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [followUp, setFollowUp] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,15 +99,14 @@ export function App(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    return window.chatheads.onResponseOpen(({ message }) => {
-      const initial: ChatMessage[] = [{ role: "user", content: message }];
-      setMessages(initial);
-      setFollowUp("");
-      setError(null);
-      void ask(initial);
-    });
+    if (!message) return;
+    const initial: ChatMessage[] = [{ role: "user", content: message }];
+    setMessages(initial);
+    setFollowUp("");
+    setError(null);
+    void ask(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -90,7 +165,7 @@ export function App(): JSX.Element {
         {loading && (
           <div className="flex items-center gap-2 text-sm text-muted">
             <span className="inline-block w-2 h-2 rounded-full bg-muted animate-pulse" />
-            <span>Thinking…</span>
+            <span>Thinking...</span>
           </div>
         )}
 
@@ -113,7 +188,7 @@ export function App(): JSX.Element {
               }
             }}
             disabled={loading}
-            placeholder={loading ? "Waiting for reply…" : "Ask a follow-up..."}
+            placeholder={loading ? "Waiting for reply..." : "Ask a follow-up..."}
             className="flex-1 bg-surface px-4 py-3 rounded-full border border-divider outline-none text-fg text-sm placeholder:text-muted focus:border-subtle transition-colors disabled:opacity-50"
           />
           <button

@@ -73,6 +73,12 @@ export function getJwt(): string | null {
   return creds?.jwt ?? null;
 }
 
+/** Device-scoped API key minted by /v1/auth/exchange during signIn. This is
+ *  what the MCP backend expects as Bearer. */
+export function getApiKey(): string | null {
+  return creds?.apiKey ?? null;
+}
+
 export function getBaseUrl(): string {
   return baseUrl();
 }

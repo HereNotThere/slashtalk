@@ -8,6 +8,7 @@ import {
   sortByStateThenTime,
   loadInsightsForSessions,
 } from "../sessions/snapshot";
+import { classifySessionState } from "../sessions/state";
 import { normalizeFullName } from "./github-sync";
 
 export const socialRoutes = (db: Database) =>
@@ -177,16 +178,39 @@ export const socialRoutes = (db: Database) =>
           .from(sessions)
           .where(eq(sessions.userId, peer.id));
 
-        const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
-        const activeCount = await db
-          .select({ count: sql<number>`count(*)` })
+        const peerSessions = await db
+          .select({
+            sessionId: sessions.sessionId,
+            inTurn: sessions.inTurn,
+            lastTs: sessions.lastTs,
+          })
           .from(sessions)
-          .where(
-            and(
-              eq(sessions.userId, peer.id),
-              gt(sessions.lastTs, fifteenMinAgo)
-            )
-          );
+          .where(eq(sessions.userId, peer.id));
+
+        const hbRows =
+          peerSessions.length > 0
+            ? await db
+                .select({
+                  sessionId: heartbeats.sessionId,
+                  updatedAt: heartbeats.updatedAt,
+                })
+                .from(heartbeats)
+                .where(
+                  inArray(
+                    heartbeats.sessionId,
+                    peerSessions.map((session) => session.sessionId),
+                  ),
+                )
+            : [];
+        const hbMap = new Map(hbRows.map((hb) => [hb.sessionId, hb]));
+        const activeCount = peerSessions.filter((session) => {
+          const state = classifySessionState({
+            heartbeatUpdatedAt: hbMap.get(session.sessionId)?.updatedAt ?? null,
+            inTurn: session.inTurn ?? false,
+            lastTs: session.lastTs,
+          });
+          return state === "busy" || state === "active" || state === "idle";
+        }).length;
 
         const peerRepos = await db
           .select({ fullName: repos.fullName })
@@ -198,7 +222,7 @@ export const socialRoutes = (db: Database) =>
           github_login: peer.githubLogin,
           avatar_url: peer.avatarUrl,
           total_sessions: sessionCount[0]?.count ?? 0,
-          active_sessions: activeCount[0]?.count ?? 0,
+          active_sessions: activeCount,
           repos: peerRepos.map((r) => r.fullName),
         });
       }

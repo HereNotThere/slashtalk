@@ -1,8 +1,6 @@
-// Watches ~/.claude/projects/*/*.jsonl and ships new lines to /v1/ingest.
-//
-// Strict mode: a session is only tracked if its first event's `cwd` resolves
-// under one of the user's tracked local repo paths (localRepos.ts). Sessions
-// outside any tracked path are never uploaded.
+// Watches both Claude and Codex session JSONLs and ships new lines to
+// /v1/ingest. A session is only tracked if its cwd resolves under one of the
+// user's tracked local repo paths.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -10,29 +8,39 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { FSWatcher } from "node:fs";
+import type { EventSource } from "@slashtalk/shared";
 import * as backend from "./backend";
 import { createEmitter } from "./emitter";
 import * as localRepos from "./localRepos";
 import * as store from "./store";
 
-const PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
+const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
+const CODEX_SESSIONS_DIR = path.join(os.homedir(), ".codex", "sessions");
+
 const PREFIX_BYTES = 4096; // what the server expects prefixHash to cover
-const HEADER_BYTES = 64 * 1024; // how far in we scan for a `cwd` field
+const HEADER_BYTES = 64 * 1024; // how far in we scan for source metadata
 const SYNC_STATE_KEY = "uploaderSyncState";
 const DEBOUNCE_MS = 150;
 const PERSIST_DEBOUNCE_MS = 500;
 
-// Top-level session JSONLs are named <uuid>.jsonl. Claude Code also writes
-// subagent streams under <sessionId>/subagents/agent-<id>.jsonl — those are
-// not sessions and the server rejects their non-UUID stem.
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isSessionJsonl(filePath: string): boolean {
-  if (!filePath.endsWith(".jsonl")) return false;
-  return UUID_RE.test(path.basename(filePath, ".jsonl"));
+const CODEX_ROLLOUT_RE =
+  /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+
+interface SessionHeader {
+  sessionId: string | null;
+  cwd: string | null;
+  version: string | null;
+  project: string | null;
 }
 
 interface SessionSync {
+  source: EventSource;
+  filePath: string;
+  project: string | null;
+  cwd: string | null;
+  version: string | null;
   byteOffset: number;
   lineSeq: number;
   prefixHash: string;
@@ -45,8 +53,17 @@ interface SessionSync {
 
 type SyncState = Record<string, SessionSync>;
 
+export interface TrackedSessionInfo {
+  sessionId: string;
+  source: EventSource;
+  project: string | null;
+  cwd: string | null;
+  version: string | null;
+  mtimeMs: number;
+}
+
 let state: SyncState = {};
-let watcher: FSWatcher | null = null;
+let watchers: FSWatcher[] = [];
 let running = false;
 let unsubTracked: (() => void) | null = null;
 
@@ -54,14 +71,9 @@ const inFlight = new Map<string, Promise<void>>();
 const pending = new Map<string, NodeJS.Timeout>();
 let persistTimer: NodeJS.Timeout | null = null;
 
-// Fires after a chunk has been accepted by the server. Lets the main process
-// invalidate caches (e.g. the info-window session list) the moment the user's
-// own session becomes visible.
 const ingested = createEmitter<{ sessionId: string }>();
 export const onIngested = ingested.on;
 
-// Rescan can queue thousands of files at once; uncapped concurrency blows
-// through macOS's default 256 fd limit.
 const MAX_CONCURRENT_SYNCS = 16;
 let activeSlots = 0;
 const slotQueue: Array<() => void> = [];
@@ -80,14 +92,6 @@ function releaseSlot(): void {
   else activeSlots--;
 }
 
-// ---------- persistence ----------
-
-// Resets every entry's derived/transient state so the next syncFileInner
-// pass re-reads the header and re-evaluates tracked-ness. Clearing `size`
-// alongside `tracked` is load-bearing: otherwise the stat fast-path at
-// line ~192 short-circuits quiescent sessions before tracked gets recomputed,
-// which also leaves `hasIngested()` returning false and silently stops
-// heartbeats until the JSONL next grows.
 function invalidateDerivedState(): void {
   for (const entry of Object.values(state)) {
     entry.tracked = null;
@@ -98,10 +102,6 @@ function invalidateDerivedState(): void {
 function loadState(): void {
   const saved = store.get<SyncState>(SYNC_STATE_KEY);
   state = saved && typeof saved === "object" ? saved : {};
-  // `tracked` is derived from cwd + localRepos.list() — never trust a
-  // persisted value across restarts. A session recorded as `tracked:false`
-  // before the repo was claimed would otherwise stay skipped until the next
-  // localRepos.onChange event, which may not fire again in this process.
   invalidateDerivedState();
 }
 
@@ -113,23 +113,94 @@ function persistSoon(): void {
   }, PERSIST_DEBOUNCE_MS);
 }
 
-// ---------- file primitives ----------
+function slugifyPath(cwd: string): string {
+  return cwd.replaceAll("/", "-");
+}
+
+function sourceForPath(filePath: string): EventSource | null {
+  if (filePath.startsWith(CLAUDE_PROJECTS_DIR + path.sep)) return "claude";
+  if (filePath.startsWith(CODEX_SESSIONS_DIR + path.sep)) return "codex";
+  return null;
+}
+
+function isClaudeSessionJsonl(filePath: string): boolean {
+  return (
+    filePath.endsWith(".jsonl") &&
+    UUID_RE.test(path.basename(filePath, ".jsonl"))
+  );
+}
+
+function isCodexSessionJsonl(filePath: string): boolean {
+  return CODEX_ROLLOUT_RE.test(path.basename(filePath));
+}
+
+function isSessionJsonl(filePath: string): boolean {
+  const source = sourceForPath(filePath);
+  if (source === "claude") return isClaudeSessionJsonl(filePath);
+  if (source === "codex") return isCodexSessionJsonl(filePath);
+  return false;
+}
+
+function sessionIdFromPath(filePath: string, source: EventSource): string | null {
+  if (source === "claude") {
+    const sessionId = path.basename(filePath, ".jsonl");
+    return UUID_RE.test(sessionId) ? sessionId : null;
+  }
+  const match = path.basename(filePath).match(CODEX_ROLLOUT_RE);
+  return match?.[1] ?? null;
+}
+
+function matchQuoted(text: string, key: string): string | null {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(new RegExp(`"${escaped}":"([^"]+)"`));
+  return match?.[1] ?? null;
+}
 
 async function readHeader(
   fd: fsp.FileHandle,
   size: number,
-): Promise<{ hash: string; cwd: string | null }> {
+  filePath: string,
+  source: EventSource,
+): Promise<{ hash: string; header: SessionHeader }> {
   const n = Math.min(HEADER_BYTES, size);
   const buf = Buffer.alloc(n);
   if (n > 0) await fd.read(buf, 0, n, 0);
   const hashSlice = buf.subarray(0, Math.min(PREFIX_BYTES, n));
   const hash = crypto.createHash("sha256").update(hashSlice).digest("hex");
-  return { hash, cwd: scanForCwd(buf) };
+  const header =
+    source === "claude"
+      ? scanClaudeHeader(buf, filePath)
+      : scanCodexHeader(buf, filePath);
+  return { hash, header };
+}
+
+function scanClaudeHeader(buf: Buffer, filePath: string): SessionHeader {
+  const sessionId = sessionIdFromPath(filePath, "claude");
+  const cwd = scanForCwd(buf);
+  return {
+    sessionId,
+    cwd,
+    version: null,
+    project: path.basename(path.dirname(filePath)),
+  };
+}
+
+function scanCodexHeader(buf: Buffer, filePath: string): SessionHeader {
+  const text = buf.toString("utf8");
+  const sessionId =
+    matchQuoted(text, "id") ?? sessionIdFromPath(filePath, "codex");
+  const cwd = matchQuoted(text, "cwd");
+  return {
+    sessionId,
+    cwd,
+    version: matchQuoted(text, "cli_version"),
+    project: cwd ? slugifyPath(cwd) : null,
+  };
 }
 
 // Claude's first JSONL line is often a `file-history-snapshot` event with no
-// `cwd`; the field lives on user/assistant events. Try parsing each complete
-// line and fall back to a regex scan (cwd values never contain `"`).
+// cwd; the field lives on later events. Try parsing complete lines first and
+// fall back to a regex scan for truncated headers.
 function scanForCwd(buf: Buffer): string | null {
   const text = buf.toString("utf8");
   let start = 0;
@@ -143,11 +214,10 @@ function scanForCwd(buf: Buffer): string | null {
       const parsed = JSON.parse(line) as { cwd?: unknown };
       if (typeof parsed.cwd === "string") return parsed.cwd;
     } catch {
-      // Malformed or partial line — regex fallback below will still find it.
+      // Partial line — regex fallback below can still recover the field.
     }
   }
-  const m = text.match(/"cwd":"([^"]+)"/);
-  return m ? m[1] : null;
+  return matchQuoted(text, "cwd");
 }
 
 async function readTail(
@@ -163,8 +233,6 @@ async function readTail(
   if (lastNl === -1) return null;
   return { chunk: buf.subarray(0, lastNl + 1), consumed: lastNl + 1 };
 }
-
-// ---------- core sync ----------
 
 async function syncFile(filePath: string): Promise<void> {
   const existing = inFlight.get(filePath);
@@ -188,7 +256,8 @@ async function syncFile(filePath: string): Promise<void> {
 }
 
 async function syncFileInner(filePath: string): Promise<void> {
-  if (!isSessionJsonl(filePath)) return;
+  const source = sourceForPath(filePath);
+  if (!source || !isSessionJsonl(filePath)) return;
 
   let stat: fs.Stats;
   try {
@@ -199,16 +268,14 @@ async function syncFileInner(filePath: string): Promise<void> {
   }
   if (!stat.isFile() || stat.size === 0) return;
 
-  const sessionId = path.basename(filePath, ".jsonl");
-  const project = path.basename(path.dirname(filePath));
-  let entry = state[sessionId];
+  const guessedSessionId = sessionIdFromPath(filePath, source);
+  if (!guessedSessionId) return;
+  let entry = state[guessedSessionId];
 
-  // Fast path: stat unchanged since last visit → nothing to do.
   if (entry && entry.size === stat.size && entry.mtimeMs === stat.mtimeMs) {
     return;
   }
 
-  // Truncation / replacement detected — start this session over.
   if (entry && entry.byteOffset > stat.size) {
     entry.byteOffset = 0;
     entry.lineSeq = 0;
@@ -217,23 +284,32 @@ async function syncFileInner(filePath: string): Promise<void> {
 
   const fd = await fsp.open(filePath, "r");
   try {
-    if (entry?.tracked === true) {
+    if (entry?.tracked === true && entry.project) {
+      entry.filePath = filePath;
       entry.size = stat.size;
       entry.mtimeMs = stat.mtimeMs;
-      await ingestTail(fd, stat, sessionId, project, entry);
+      await ingestTail(fd, stat, guessedSessionId, entry);
       return;
     }
 
     if (entry?.tracked === false) {
-      // Stays false until localRepos.onChange flips it back to null.
+      entry.filePath = filePath;
       entry.size = stat.size;
       entry.mtimeMs = stat.mtimeMs;
       return;
     }
 
-    const { hash: prefixHash, cwd } = await readHeader(fd, stat.size);
-    if (!entry) {
-      entry = {
+    const { hash: prefixHash, header } = await readHeader(fd, stat.size, filePath, source);
+    const sessionId = header.sessionId ?? guessedSessionId;
+    if (!sessionId) return;
+
+    if (!entry || sessionId !== guessedSessionId) {
+      entry = state[sessionId] ?? {
+        source,
+        filePath,
+        project: header.project,
+        cwd: header.cwd,
+        version: header.version,
         byteOffset: 0,
         lineSeq: 0,
         prefixHash,
@@ -242,26 +318,32 @@ async function syncFileInner(filePath: string): Promise<void> {
         tracked: null,
       };
       state[sessionId] = entry;
-    } else {
-      entry.prefixHash = prefixHash;
-      entry.size = stat.size;
-      entry.mtimeMs = stat.mtimeMs;
+      if (sessionId !== guessedSessionId) delete state[guessedSessionId];
     }
 
-    if (cwd === null) {
-      // A brand-new session that's only emitted a file-history-snapshot has
-      // no cwd yet. Leave tracked=null; re-evaluate on next append.
+    entry.source = source;
+    entry.filePath = filePath;
+    entry.prefixHash = prefixHash;
+    entry.project = header.project;
+    entry.cwd = header.cwd;
+    entry.version = header.version;
+    entry.size = stat.size;
+    entry.mtimeMs = stat.mtimeMs;
+
+    if (header.cwd === null || header.project === null) {
       return;
     }
 
-    entry.tracked = localRepos.isPathTracked(cwd);
+    entry.tracked = localRepos.isPathTracked(header.cwd);
     persistSoon();
     if (!entry.tracked) {
-      console.log(`[uploader] skip ${sessionId} — cwd not tracked (${cwd})`);
+      console.log(
+        `[uploader] skip ${sessionId} (${source}) — cwd not tracked (${header.cwd})`,
+      );
       return;
     }
 
-    await ingestTail(fd, stat, sessionId, project, entry);
+    await ingestTail(fd, stat, sessionId, entry);
   } finally {
     await fd.close();
   }
@@ -271,16 +353,16 @@ async function ingestTail(
   fd: fsp.FileHandle,
   stat: fs.Stats,
   sessionId: string,
-  project: string,
   entry: SessionSync,
 ): Promise<void> {
-  if (entry.byteOffset >= stat.size) return;
+  if (!entry.project || entry.byteOffset >= stat.size) return;
   const tail = await readTail(fd, entry.byteOffset, stat.size);
   if (!tail) return;
 
   const res = await backend.ingestChunk({
+    source: entry.source,
     session: sessionId,
-    project,
+    project: entry.project,
     fromLineSeq: entry.lineSeq,
     prefixHash: entry.prefixHash,
     body: tail.chunk.toString("utf8"),
@@ -291,38 +373,49 @@ async function ingestTail(
   persistSoon();
 
   console.log(
-    `[uploader] ingested ${sessionId} +${res.acceptedEvents} events ` +
+    `[uploader] ingested ${sessionId} (${entry.source}) +${res.acceptedEvents} events ` +
       `(${res.duplicateEvents} dup, ${tail.consumed}B) → lineSeq=${res.serverLineSeq}`,
   );
 
   if (res.acceptedEvents > 0) ingested.emit({ sessionId });
 }
 
-// ---------- scan + watch ----------
-
-async function enumerateJsonl(): Promise<string[]> {
+async function walkSessionFiles(
+  root: string,
+  predicate: (filePath: string) => boolean,
+): Promise<string[]> {
   const out: string[] = [];
-  let dirs: fs.Dirent[];
-  try {
-    dirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
-  } catch (err) {
-    console.error("[uploader] readdir projects failed", err);
-    return out;
-  }
-  for (const d of dirs) {
-    if (!d.isDirectory()) continue;
-    const subdir = path.join(PROJECTS_DIR, d.name);
+  const stack = [root];
+
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    let entries: fs.Dirent[];
     try {
-      const files = await fsp.readdir(subdir);
-      for (const f of files) {
-        const full = path.join(subdir, f);
-        if (isSessionJsonl(full)) out.push(full);
-      }
+      entries = await fsp.readdir(dir, { withFileTypes: true });
     } catch (err) {
-      console.error("[uploader] readdir failed", subdir, err);
+      console.error("[uploader] readdir failed", dir, err);
+      continue;
+    }
+
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+        continue;
+      }
+      if (entry.isFile() && predicate(full)) out.push(full);
     }
   }
+
   return out;
+}
+
+async function enumerateAllJsonl(): Promise<string[]> {
+  const [claude, codex] = await Promise.all([
+    walkSessionFiles(CLAUDE_PROJECTS_DIR, isClaudeSessionJsonl),
+    walkSessionFiles(CODEX_SESSIONS_DIR, isCodexSessionJsonl),
+  ]);
+  return [...claude, ...codex];
 }
 
 function schedule(filePath: string): void {
@@ -337,41 +430,56 @@ function schedule(filePath: string): void {
   );
 }
 
-function startWatcher(): void {
+function watchRoot(root: string): void {
   try {
-    watcher = fs.watch(PROJECTS_DIR, { recursive: true }, (_event, filename) => {
+    const watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
       if (!filename) return;
-      const full = path.join(PROJECTS_DIR, filename);
+      const full = path.join(root, filename);
       if (!isSessionJsonl(full)) return;
       schedule(full);
     });
     watcher.on("error", (err) => console.error("[uploader] watcher error", err));
+    watchers.push(watcher);
   } catch (err) {
-    console.error("[uploader] fs.watch failed", err);
+    console.error("[uploader] fs.watch failed", root, err);
   }
 }
 
 async function rescanAll(): Promise<void> {
-  const files = await enumerateJsonl();
-  console.log(`[uploader] rescan found ${files.length} jsonl files`);
-  for (const f of files) schedule(f);
+  const files = await enumerateAllJsonl();
+  console.log(`[uploader] rescan found ${files.length} session jsonl files`);
+  for (const filePath of files) schedule(filePath);
 }
 
-// ---------- public API ----------
+export function listTrackedSessions(): TrackedSessionInfo[] {
+  return Object.entries(state)
+    .filter(([, entry]) => entry.tracked === true && entry.lineSeq > 0)
+    .map(([sessionId, entry]) => ({
+      sessionId,
+      source: entry.source,
+      project: entry.project,
+      cwd: entry.cwd,
+      version: entry.version,
+      mtimeMs: entry.mtimeMs,
+    }));
+}
 
 export async function start(): Promise<void> {
   if (running) return;
   running = true;
   loadState();
-  const trackedRoots = localRepos.list().map((r) => r.localPath);
+  const trackedRoots = localRepos.list().map((repo) => repo.localPath);
   console.log(
-    `[uploader] starting, watching ${PROJECTS_DIR}, ` +
+    `[uploader] starting, watching ${CLAUDE_PROJECTS_DIR} and ${CODEX_SESSIONS_DIR}, ` +
       `tracked roots: ${trackedRoots.length ? trackedRoots.join(", ") : "(none)"}`,
   );
-  try {
-    await fsp.mkdir(PROJECTS_DIR, { recursive: true });
-  } catch (err) {
-    console.error("[uploader] mkdir projects failed", err);
+
+  for (const root of [CLAUDE_PROJECTS_DIR, CODEX_SESSIONS_DIR]) {
+    try {
+      await fsp.mkdir(root, { recursive: true });
+    } catch (err) {
+      console.error("[uploader] mkdir failed", root, err);
+    }
   }
 
   unsubTracked = localRepos.onChange(() => {
@@ -380,7 +488,8 @@ export async function start(): Promise<void> {
     void rescanAll();
   });
 
-  startWatcher();
+  watchRoot(CLAUDE_PROJECTS_DIR);
+  watchRoot(CODEX_SESSIONS_DIR);
   await rescanAll();
 }
 
@@ -389,9 +498,9 @@ export function stop(): void {
   running = false;
   unsubTracked?.();
   unsubTracked = null;
-  watcher?.close();
-  watcher = null;
-  for (const t of pending.values()) clearTimeout(t);
+  for (const watcher of watchers) watcher.close();
+  watchers = [];
+  for (const timer of pending.values()) clearTimeout(timer);
   pending.clear();
   if (persistTimer) {
     clearTimeout(persistTimer);
@@ -406,11 +515,6 @@ export function reset(): void {
   store.del(SYNC_STATE_KEY);
 }
 
-/**
- * True once we've successfully ingested ≥1 chunk for this session. Heartbeats
- * check this before firing — the server's heartbeats table has an FK to
- * sessions, so heartbeating a session we haven't ingested yields a 500.
- */
 export function hasIngested(sessionId: string): boolean {
   const entry = state[sessionId];
   return !!entry && entry.tracked === true && entry.lineSeq > 0;

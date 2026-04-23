@@ -12,7 +12,7 @@ import { sessions, events, heartbeats } from "../db/schema";
 import { apiKeyAuth } from "../auth/middleware";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { classifyEvent } from "./classifier";
-import { processEvents, type EventPayload } from "./aggregator";
+import { processEvents } from "./aggregator";
 import { matchSessionRepo } from "../social/github-sync";
 import { classifySessionState } from "../sessions/state";
 
@@ -141,10 +141,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
           }
         }
 
-        // Aggregate accepted events into session aggregates. The aggregator
-        // currently only understands Claude's event shape; Codex normalization
-        // will be added in a follow-up PR.
-        if (source === "claude" && acceptedPayloads.length > 0) {
+        if (acceptedPayloads.length > 0) {
           const [currentSession] = await db
             .select()
             .from(sessions)
@@ -152,10 +149,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             .limit(1);
 
           if (currentSession) {
-            const updates = processEvents(
-              currentSession,
-              acceptedPayloads as EventPayload[]
-            );
+            const updates = processEvents(source, currentSession, acceptedPayloads);
             await db
               .update(sessions)
               .set(updates)

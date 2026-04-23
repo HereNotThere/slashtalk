@@ -1,17 +1,11 @@
 import { SessionPool } from "./session-pool.ts";
 import { PresenceStore, type PresenceEvent } from "./presence.ts";
 import { log } from "./server.ts";
-import { extractBearer, loadAuthConfig, verifyToken, type AuthConfig } from "./auth.ts";
 import {
-  authorizationServerMetadata,
-  handleAuthorize,
-  handleGithubCallback,
-  handleRegister,
-  handleToken,
-  protectedResourceMetadata,
-} from "./mcp-oauth.ts";
-import { handleElectronStart, tryHandleElectronCallback } from "./electron-auth.ts";
-import { handleGithubAppCallback } from "./github-app-auth.ts";
+  extractBearer,
+  verifyApiKey,
+  type ApiKeyIdentity,
+} from "./api-key-auth.ts";
 import { installPage } from "./install-page.ts";
 import {
   handleList as handleAgentSessionList,
@@ -22,14 +16,16 @@ export type HttpOptions = {
   port: number;
   name: string;
   version: string;
+  /** Public URL used for the install page's copy-pasteable snippets. */
+  publicUrl?: string;
 };
 
 export function runHttp(options: HttpOptions): {
   pool: SessionPool;
   presence: PresenceStore;
-  auth: AuthConfig;
 } {
-  const auth = loadAuthConfig(options.port);
+  const publicUrl =
+    options.publicUrl ?? process.env["PUBLIC_URL"] ?? `http://localhost:${options.port}`;
   const presence = new PresenceStore();
   const pool = new SessionPool({
     name: options.name,
@@ -52,128 +48,59 @@ export function runHttp(options: HttpOptions): {
         return new Response(null, { status: 204, headers: cors });
       }
 
-      // Landing / install page
+      // Landing / install page.
       if ((url.pathname === "/" || url.pathname === "/install") && req.method === "GET") {
-        return withHeaders(installPage(auth.publicUrl), cors);
+        return withHeaders(installPage(publicUrl), cors);
       }
 
-      // OAuth discovery
-      if (url.pathname === "/.well-known/oauth-protected-resource" && req.method === "GET") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        return withHeaders(protectedResourceMetadata(auth), cors);
-      }
-      if (url.pathname === "/.well-known/oauth-authorization-server" && req.method === "GET") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        return withHeaders(authorizationServerMetadata(auth), cors);
-      }
-
-      // OAuth flow
-      if (url.pathname === "/register" && req.method === "POST") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        return withHeaders(await handleRegister(req), cors);
-      }
-      if (url.pathname === "/authorize" && req.method === "GET") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        return withHeaders(handleAuthorize(auth, url), cors);
-      }
-      if (url.pathname === "/token" && req.method === "POST") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        return withHeaders(await handleToken(auth, req), cors);
-      }
-      if (url.pathname === "/auth/github/callback" && req.method === "GET") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        const electron = await tryHandleElectronCallback(auth, url);
-        if (electron) return withHeaders(electron, cors);
-        return withHeaders(await handleGithubCallback(auth, url), cors);
-      }
-      if (url.pathname === "/auth/electron/start" && req.method === "GET") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        return withHeaders(handleElectronStart(auth, url), cors);
-      }
-      // GitHub OAuth App callback relay — for desktop clients connecting their
-      // GitHub account to a managed agent's vault. Doesn't require chatheads
-      // auth to be enabled; it's purely a URL relay.
-      if (url.pathname === "/auth/github-app/callback" && req.method === "GET") {
-        return withHeaders(handleGithubAppCallback(url), cors);
-      }
-
-      // Debug / identity
+      // Debug / identity probe.
       if (url.pathname === "/auth/whoami" && req.method === "GET") {
-        const payload = auth.enabled ? verifyBearer(req, auth) : null;
-        if (auth.enabled && !payload) {
-          return withHeaders(
-            json({ error: "unauthorized" }, 401, cors),
-            { "www-authenticate": wwwAuthenticate(auth) },
-          );
-        }
+        const identity = await resolveIdentity(req);
+        if (!identity) return withHeaders(unauthorized(cors), cors);
         return json(
-          payload
-            ? { userId: payload.sub, login: payload.sub, name: payload.name, avatarUrl: payload.avatar }
-            : { authDisabled: true },
+          {
+            userId: identity.userLogin,
+            login: identity.userLogin,
+            userDbId: identity.userId,
+            deviceId: identity.deviceId,
+            name: identity.profile?.name,
+            avatarUrl: identity.profile?.avatar,
+          },
           200,
           cors,
         );
       }
 
-      // MCP — single endpoint, identity from token
+      // MCP — identity from slashtalk-issued api key.
       if (url.pathname === "/mcp") {
-        let identity: { userId: string; profile?: { name?: string; avatar?: string; tz?: string } };
-        if (auth.enabled) {
-          const payload = verifyBearer(req, auth);
-          if (!payload) {
-            return withHeaders(
-              json({ error: "unauthorized" }, 401, cors),
-              { "www-authenticate": wwwAuthenticate(auth) },
-            );
-          }
-          identity = {
-            userId: payload.sub,
-            profile: {
-              name: payload.name,
-              avatar: payload.avatar,
-              tz: payload.tz,
-            },
-          };
-        } else {
-          // Auth-off dev fallback: allow a userId query param.
-          identity = { userId: url.searchParams.get("userId") ?? "anonymous" };
-        }
-        const res = await pool.handleRequest(req, identity);
+        const identity = await resolveIdentity(req);
+        if (!identity) return withHeaders(unauthorized(cors), cors);
+        const res = await pool.handleRequest(req, {
+          userId: identity.userLogin,
+          profile: identity.profile,
+        });
         return withHeaders(res, cors);
       }
 
-      // Agent sessions (managed-agent pointer + summary upsert). Bearer-auth
-      // per chatheadsAuth; identity comes from the token, never the body.
-      if (url.pathname === "/v1/agent_sessions" && req.method === "PUT") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        const payload = verifyBearer(req, auth);
-        if (!payload) {
+      // Agent sessions — managed-agent pointer + summary upsert / list.
+      if (url.pathname === "/v1/agent_sessions") {
+        const identity = await resolveIdentity(req);
+        if (!identity) return withHeaders(unauthorized(cors), cors);
+        if (req.method === "PUT") {
           return withHeaders(
-            json({ error: "unauthorized" }, 401, cors),
-            { "www-authenticate": wwwAuthenticate(auth) },
+            await handleAgentSessionUpsert(req, identity.userLogin),
+            cors,
           );
         }
-        return withHeaders(
-          await handleAgentSessionUpsert(req, payload.sub),
-          cors,
-        );
-      }
-      if (url.pathname === "/v1/agent_sessions" && req.method === "GET") {
-        if (!auth.enabled) return json({ error: "auth not configured" }, 501, cors);
-        const payload = verifyBearer(req, auth);
-        if (!payload) {
+        if (req.method === "GET") {
           return withHeaders(
-            json({ error: "unauthorized" }, 401, cors),
-            { "www-authenticate": wwwAuthenticate(auth) },
+            await handleAgentSessionList(url, identity.userLogin),
+            cors,
           );
         }
-        return withHeaders(
-          await handleAgentSessionList(url, payload.sub),
-          cors,
-        );
       }
 
-      // Presence
+      // Presence.
       if (url.pathname === "/presence" && req.method === "GET") {
         return json({ states: presence.snapshot() }, 200, cors);
       }
@@ -181,7 +108,7 @@ export function runHttp(options: HttpOptions): {
         return presenceStream(presence, cors);
       }
       if (url.pathname === "/healthz") {
-        return json({ ok: true, sessions: pool.size(), authEnabled: auth.enabled }, 200, cors);
+        return json({ ok: true, sessions: pool.size() }, 200, cors);
       }
 
       return new Response("Not Found", { status: 404, headers: cors });
@@ -191,21 +118,23 @@ export function runHttp(options: HttpOptions): {
   log("info", "ready", {
     transport: "http",
     port: options.port,
-    authEnabled: auth.enabled,
-    publicUrl: auth.publicUrl,
+    publicUrl,
   });
-  return { pool, presence, auth };
+  return { pool, presence };
 }
 
-function verifyBearer(req: Request, auth: AuthConfig) {
+async function resolveIdentity(req: Request): Promise<ApiKeyIdentity | null> {
   const token = extractBearer(req);
   if (!token) return null;
-  return verifyToken(token, auth.tokenSecret);
+  return verifyApiKey(token);
 }
 
-function wwwAuthenticate(auth: AuthConfig): string {
-  const metadataUrl = `${auth.publicUrl}/.well-known/oauth-protected-resource`;
-  return `Bearer realm="mcp", resource_metadata="${metadataUrl}"`;
+function unauthorized(cors: Record<string, string>): Response {
+  return json(
+    { error: "unauthorized" },
+    401,
+    { ...cors, "www-authenticate": 'Bearer realm="slashtalk-mcp"' },
+  );
 }
 
 function buildCorsHeaders(req: Request): Record<string, string> {

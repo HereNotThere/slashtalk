@@ -13,6 +13,9 @@ export type Avatar =
 
 export interface ChatHead {
   id: string;
+  /** "user" = person (peer or self). "repo" = GitHub project the user has
+   *  claimed. Kind picks the info-popover layout and routes session fetches. */
+  kind: "user" | "repo";
   label: string;
   tint: string;
   avatar: Avatar;
@@ -22,6 +25,9 @@ export interface ChatHead {
   /** Epoch ms when this teammate's most recent PR opened/merged event landed.
    *  Renderer treats it as transient (animates while it's < a few seconds old). */
   prActivityAt?: number;
+  /** Only set when kind === "repo". */
+  repoId?: number;
+  repoFullName?: string;
 }
 
 export type Unsubscribe = () => void;
@@ -79,11 +85,16 @@ export interface ChatHeadsBridge {
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
 
+  // Project heads — GitHub repos the user has claimed. Rendered below the
+  // teammate rail in the overlay; ignored by other windows.
+  listProjects: () => Promise<ChatHead[]>;
+  onProjectsUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
+
   // Info box (overlay → main). Show/hide are driven by hover; the rail keeps
   // the leave timer and asks main to hide after the user leaves the bubble
   // and doesn't re-enter the info panel. `infoHoverEnter/Leave` let the info
   // panel itself hold the window open while the cursor is over it.
-  showInfo: (index: number, bubbleScreenY?: number) => Promise<void>;
+  showInfo: (headId: string, bubbleScreenY?: number) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
 
@@ -113,8 +124,8 @@ export interface ChatHeadsBridge {
   onInfoHide: (cb: () => void) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
-  // Fetch sessions for a given chat head (signed-in user's own or a peer's
-  // that share a claimed repo with you).
+  // Fetch sessions for a given chat head (user: own or a peer's; repo: all
+  // sessions on that repo across peers + self).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
 

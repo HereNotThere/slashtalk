@@ -89,7 +89,11 @@ export function App(): JSX.Element {
       <div ref={contentRef}>
         <Header head={head} />
         <Divider />
-        <SessionsSection sessions={sessions} />
+        {head?.kind === "repo" ? (
+          <RepoSessionsSection sessions={sessions} />
+        ) : (
+          <SessionsSection sessions={sessions} />
+        )}
       </div>
     </div>
   );
@@ -100,6 +104,11 @@ function Divider(): JSX.Element {
 }
 
 function Header({ head }: { head: ChatHead | null }): JSX.Element {
+  if (head?.kind === "repo") return <RepoHeader head={head} />;
+  return <UserHeader head={head} />;
+}
+
+function UserHeader({ head }: { head: ChatHead | null }): JSX.Element {
   const name = head?.label ?? "—";
   const time = new Date().toLocaleTimeString([], {
     hour: "numeric",
@@ -123,6 +132,33 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
           )}
           <span className="shrink-0">{time}</span>
         </div>
+      </div>
+      <button
+        onClick={() => window.chatheads.hideInfo()}
+        className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
+        aria-label="Close"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+function RepoHeader({ head }: { head: ChatHead }): JSX.Element {
+  const full = head.repoFullName ?? head.label;
+  const slash = full.lastIndexOf("/");
+  const owner = slash >= 0 ? full.slice(0, slash) : "";
+  const name = slash >= 0 ? full.slice(slash + 1) : full;
+  return (
+    <div className="flex items-start gap-md px-lg pt-lg pb-md">
+      <Avatar head={head} />
+      <div className="flex-1 min-w-0">
+        <div className="text-[19px] font-bold leading-tight truncate">
+          {name}
+        </div>
+        {owner && (
+          <div className="mt-1 text-[12px] text-muted truncate">{owner}</div>
+        )}
       </div>
       <button
         onClick={() => window.chatheads.hideInfo()}
@@ -197,18 +233,13 @@ function SessionsSection({
   const hasMore = sessions.length > DEFAULT_SESSION_LIMIT;
   return (
     <div>
-      {visible.map((s, i) => (
-        <Fragment key={s.id}>
-          {i > 0 && <div className="mx-lg h-px bg-divider" />}
-          <SessionRow
-            session={s}
-            expanded={expandedId === s.id}
-            onToggle={() =>
-              setExpandedId((cur) => (cur === s.id ? null : s.id))
-            }
-          />
-        </Fragment>
-      ))}
+      <SessionList
+        sessions={visible}
+        expandedId={expandedId}
+        onToggle={(id) =>
+          setExpandedId((cur) => (cur === id ? null : id))
+        }
+      />
       {hasMore && (
         <>
           <div className="mx-lg h-px bg-divider" />
@@ -222,6 +253,116 @@ function SessionsSection({
         </>
       )}
     </div>
+  );
+}
+
+// "Current" = live or paused sessions (heartbeat still alive).
+// "Completed" = server-classified RECENT/ENDED.
+const ACTIVE_STATES = new Set<SessionState>([
+  SessionState.BUSY,
+  SessionState.ACTIVE,
+  SessionState.IDLE,
+]);
+
+function tsOf(s: InfoSession): number {
+  return s.lastTs ? new Date(s.lastTs).getTime() : 0;
+}
+
+function RepoSessionsSection({
+  sessions,
+}: {
+  sessions: InfoSession[] | null;
+}): JSX.Element {
+  // Expansion state is shared across the two groups so expanding one session
+  // collapses a previously-expanded one regardless of which group it's in.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (sessions == null) {
+    return (
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        Loading…
+      </div>
+    );
+  }
+  if (sessions.length === 0) {
+    return (
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        No sessions yet.
+      </div>
+    );
+  }
+
+  // Sort by lastTs desc within each group — most recent activity on top.
+  const active = sessions
+    .filter((s) => ACTIVE_STATES.has(s.state))
+    .sort((a, b) => tsOf(b) - tsOf(a));
+  const completed = sessions
+    .filter((s) => !ACTIVE_STATES.has(s.state))
+    .sort((a, b) => tsOf(b) - tsOf(a));
+
+  const onToggle = (id: string): void =>
+    setExpandedId((cur) => (cur === id ? null : id));
+
+  return (
+    <div>
+      {active.length > 0 && (
+        <>
+          <div className="px-lg pt-md pb-1">
+            <SubHeader>Active</SubHeader>
+          </div>
+          <SessionList
+            sessions={active}
+            expandedId={expandedId}
+            onToggle={onToggle}
+            showPerson
+          />
+        </>
+      )}
+      {active.length > 0 && completed.length > 0 && (
+        <div className="mx-lg my-md h-px bg-divider" />
+      )}
+      {completed.length > 0 && (
+        <>
+          <div className="px-lg pt-md pb-1">
+            <SubHeader>Completed</SubHeader>
+          </div>
+          <SessionList
+            sessions={completed}
+            expandedId={expandedId}
+            onToggle={onToggle}
+            showPerson
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function SessionList({
+  sessions,
+  expandedId,
+  onToggle,
+  showPerson = false,
+}: {
+  sessions: InfoSession[];
+  expandedId: string | null;
+  onToggle: (id: string) => void;
+  showPerson?: boolean;
+}): JSX.Element {
+  return (
+    <>
+      {sessions.map((s, i) => (
+        <Fragment key={s.id}>
+          {i > 0 && <div className="mx-lg h-px bg-divider" />}
+          <SessionRow
+            session={s}
+            expanded={expandedId === s.id}
+            onToggle={() => onToggle(s.id)}
+            showPerson={showPerson}
+          />
+        </Fragment>
+      ))}
+    </>
   );
 }
 
@@ -240,10 +381,12 @@ function SessionRow({
   session,
   expanded,
   onToggle,
+  showPerson = false,
 }: {
   session: InfoSession;
   expanded: boolean;
   onToggle: () => void;
+  showPerson?: boolean;
 }): JSX.Element {
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
@@ -256,6 +399,12 @@ function SessionRow({
   );
   const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
   const hasMeta = shrinkableParts.length > 0 || tokensLabel !== null;
+  // FeedSessionSnapshot carries the owner's github_login + avatar_url. Own
+  // sessions (SessionSnapshot) don't, so the byline silently no-ops for them.
+  const personLogin =
+    showPerson && "github_login" in session ? session.github_login : null;
+  const personAvatar =
+    showPerson && "avatar_url" in session ? session.avatar_url : null;
 
   return (
     <div className={expanded ? "bg-surface" : undefined}>
@@ -271,6 +420,25 @@ function SessionRow({
               {title}
             </div>
           </div>
+          {personLogin && (
+            <div
+              className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0"
+              style={showDot ? { marginLeft: 14 } : undefined}
+            >
+              {personAvatar ? (
+                <img
+                  src={personAvatar}
+                  alt=""
+                  className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <span className="w-3.5 h-3.5 rounded-full bg-surface shrink-0" />
+              )}
+              <span className="truncate font-medium text-fg/80">
+                {personLogin}
+              </span>
+            </div>
+          )}
           {session.description && (
             <div
               className="mt-1 text-[12px] text-muted line-clamp-2"

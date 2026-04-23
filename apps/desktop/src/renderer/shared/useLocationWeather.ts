@@ -33,6 +33,16 @@ function currentTimezone(): string | null {
   }
 }
 
+type GeocodeHit = { name?: string; latitude?: number; longitude?: number };
+type GeocodePayload = { results?: GeocodeHit[] };
+type IpPayload = {
+  city?: string;
+  latitude?: number;
+  longitude?: number;
+  error?: boolean;
+};
+type WeatherPayload = { current?: { weather_code?: number; is_day?: number } };
+
 export async function geocodeCity(
   city: string,
   fetcher: Fetcher = fetch,
@@ -42,8 +52,8 @@ export async function geocodeCity(
       `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&format=json`,
     );
     if (!r.ok) return null;
-    const data = await r.json();
-    const hit = data?.results?.[0];
+    const data = (await r.json()) as GeocodePayload;
+    const hit = data.results?.[0];
     if (!hit || typeof hit.latitude !== "number" || typeof hit.longitude !== "number") return null;
     return { city: hit.name ?? city, lat: hit.latitude, lon: hit.longitude };
   } catch {
@@ -51,12 +61,15 @@ export async function geocodeCity(
   }
 }
 
+// Fallback only — we prefer the OS timezone so the user's IP never leaves the
+// device in the common case. ipapi.co is used when the timezone is missing or
+// an Etc/* zone with no city component.
 export async function ipLocation(fetcher: Fetcher = fetch): Promise<ResolvedLocation | null> {
   try {
     const r = await fetcher("https://ipapi.co/json/");
     if (!r.ok) return null;
-    const data = await r.json();
-    if (data?.error) return null;
+    const data = (await r.json()) as IpPayload;
+    if (data.error) return null;
     if (
       typeof data.latitude !== "number" ||
       typeof data.longitude !== "number" ||
@@ -104,9 +117,9 @@ export async function fetchWeatherIconFresh(
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=weather_code,is_day`,
     );
     if (!r.ok) return null;
-    const data = await r.json();
-    const code = data?.current?.weather_code;
-    const isDay = data?.current?.is_day === 1;
+    const data = (await r.json()) as WeatherPayload;
+    const code = data.current?.weather_code;
+    const isDay = data.current?.is_day === 1;
     if (typeof code !== "number") return null;
     return iconForWeatherCode(code, isDay);
   } catch {
@@ -136,12 +149,6 @@ async function fetchWeatherIconCached(lat: number, lon: number): Promise<string 
   return icon;
 }
 
-export function __resetLocationWeatherCache(): void {
-  cachedLocation = null;
-  cachedWeather = null;
-  inflight = null;
-}
-
 export function useLocationWeather(): LocationWeather {
   const [state, setState] = useState<LocationWeather>({
     city: cachedLocation?.city ?? null,
@@ -158,8 +165,11 @@ export function useLocationWeather(): LocationWeather {
       if (cancelled || !icon) return;
       setState((s) => (s.icon === icon ? s : { ...s, icon }));
     };
+    // `inflight` dedups the two runs React 18 Strict Mode issues on mount (and
+    // any other concurrent mounts) — subscribers wait on the same promise and
+    // then snapshot from cache, instead of racing to the same APIs.
     if (inflight) {
-      inflight.then(() => {
+      inflight.finally(() => {
         if (cancelled) return;
         setState({
           city: cachedLocation?.city ?? null,

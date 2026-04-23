@@ -1,6 +1,6 @@
 import { SessionState } from "@slashtalk/shared";
 
-const HEARTBEAT_FRESH_S = 30;
+export const HEARTBEAT_FRESH_S = 30;
 const ACTIVE_WINDOW_S = 30;
 const RECENT_WINDOW_S = 3600; // 1 hour
 

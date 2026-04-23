@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type { ChatMessage } from "@slashtalk/shared";
 import type {
   AgentSummary,
   ChatHead,
@@ -6,6 +9,17 @@ import type {
 } from "../../shared/types";
 import { AgentChat } from "../info/AgentPanel";
 import { SendIcon } from "../shared/icons";
+
+const CITATION_TOKEN = /\[session:[0-9a-fA-F-]+\]/g;
+
+const MARKDOWN_CLASSES =
+  "prose prose-invert text-fg/90 break-words text-sm leading-relaxed " +
+  "[&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 " +
+  "[&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-code [&_code]:text-[0.9em] " +
+  "[&_pre]:bg-code [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-auto " +
+  "[&_pre_code]:bg-transparent [&_pre_code]:p-0 " +
+  "[&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold " +
+  "[&_a]:text-link [&_a]:underline hover:[&_a]:text-link-hover";
 
 export function App(): JSX.Element {
   const [payload, setPayload] = useState<ResponseOpenPayload | null>(null);
@@ -20,7 +34,11 @@ export function App(): JSX.Element {
     return <AgentResponse payload={payload} />;
   }
 
-  return <MessageResponse message={payload?.message ?? ""} />;
+  return (
+    <MessageResponse
+      message={payload?.kind === "message" ? payload.message : null}
+    />
+  );
 }
 
 function AgentResponse({
@@ -73,60 +91,89 @@ function AgentResponse({
   );
 }
 
-function MessageResponse({ message }: { message: string }): JSX.Element {
+function MessageResponse({ message }: { message: string | null }): JSX.Element {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [followUp, setFollowUp] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const handleFollowUpSend = (): void => {
-    if (followUp.trim()) {
-      console.log("Follow-up:", followUp);
-      setFollowUp("");
+  useEffect(() => {
+    if (!message) return;
+    const initial: ChatMessage[] = [{ role: "user", content: message }];
+    setMessages(initial);
+    setFollowUp("");
+    setError(null);
+    void ask(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages, loading]);
+
+  async function ask(history: ChatMessage[]): Promise<void> {
+    if (loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await window.chatheads.askChat(history);
+      setMessages((prev) => [...prev, res.message]);
+    } catch (err) {
+      setError((err as Error).message || "Something went wrong");
+    } finally {
+      setLoading(false);
     }
-  };
+  }
+
+  function handleFollowUpSend(): void {
+    const trimmed = followUp.trim();
+    if (!trimmed || loading) return;
+    const next: ChatMessage[] = [
+      ...messages,
+      { role: "user", content: trimmed },
+    ];
+    setMessages(next);
+    setFollowUp("");
+    void ask(next);
+  }
 
   return (
     <div className="flex flex-col h-screen bg-bg">
-      <div className="flex-1 overflow-auto px-lg py-lg space-y-lg min-w-0">
-        {message && (
-          <div className="flex justify-end mb-lg">
-            <div className="px-4 py-2.5 rounded-2xl bg-surface text-fg shadow-sm">
-              <p className="text-sm leading-relaxed">{message}</p>
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-auto px-lg py-lg space-y-lg min-w-0"
+      >
+        {messages.map((m, i) =>
+          m.role === "user" ? (
+            <div key={i} className="flex justify-end">
+              <div className="px-4 py-2.5 rounded-2xl bg-surface text-fg shadow-sm max-w-[85%]">
+                <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                  {m.content}
+                </p>
+              </div>
             </div>
+          ) : (
+            <div key={i} className={MARKDOWN_CLASSES}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {m.content.replace(CITATION_TOKEN, "")}
+              </ReactMarkdown>
+            </div>
+          ),
+        )}
+
+        {loading && (
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <span className="inline-block w-2 h-2 rounded-full bg-muted animate-pulse" />
+            <span>Thinking...</span>
           </div>
         )}
-        <p className="text-base leading-relaxed text-fg/90 break-words">
-          Three people. Fei opened feat/auth-cleanup 1h ago and has a live
-          session scaffolding the /signup route and OAuth buttons. PF is on
-          the same branch renaming design tokens, with an active overlap in
-          OAuthButtons.tsx. MJ closed the Auth0 → Firebase swap an hour ago;
-          the token refresh path is the relevant piece for you.
-        </p>
 
-        <div className="flex flex-wrap gap-md">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-surface">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-sm font-semibold shrink-0">
-              F
-            </div>
-            <span className="text-sm text-fg font-medium">
-              Fei · feat/auth-cleanup
-            </span>
+        {error && (
+          <div className="text-sm text-red-500 bg-red-500/10 px-3 py-2 rounded-md">
+            {error}
           </div>
-          <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-surface">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-semibold shrink-0">
-              PF
-            </div>
-            <span className="text-sm text-fg font-medium">
-              PF · feat/auth-cleanup
-            </span>
-          </div>
-          <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-surface">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-700 to-amber-900 flex items-center justify-center text-white text-sm font-semibold shrink-0">
-              M
-            </div>
-            <span className="text-sm text-fg font-medium">
-              MJ · mj/firebase-migrate
-            </span>
-          </div>
-        </div>
+        )}
       </div>
 
       <div className="flex-none px-lg py-lg border-t border-divider">
@@ -140,12 +187,14 @@ function MessageResponse({ message }: { message: string }): JSX.Element {
                 handleFollowUpSend();
               }
             }}
-            placeholder="Ask a follow-up..."
-            className="flex-1 bg-surface px-4 py-3 rounded-full border border-divider outline-none text-fg text-sm placeholder:text-muted focus:border-subtle transition-colors"
+            disabled={loading}
+            placeholder={loading ? "Waiting for reply..." : "Ask a follow-up..."}
+            className="flex-1 bg-surface px-4 py-3 rounded-full border border-divider outline-none text-fg text-sm placeholder:text-muted focus:border-subtle transition-colors disabled:opacity-50"
           />
           <button
             onClick={handleFollowUpSend}
-            className="w-12 h-12 rounded-full bg-chat flex items-center justify-center text-white hover:opacity-90 transition-opacity shrink-0"
+            disabled={loading || !followUp.trim()}
+            className="w-12 h-12 rounded-full bg-chat flex items-center justify-center text-white hover:opacity-90 transition-opacity shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="Send"
           >
             <SendIcon />

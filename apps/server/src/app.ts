@@ -7,6 +7,7 @@ import { ingestRoutes } from "./ingest/routes";
 import { socialRoutes } from "./social/routes";
 import { sessionRoutes } from "./sessions/routes";
 import { userRoutes, deviceReposRoutes } from "./user/routes";
+import { chatRoutes } from "./chat/routes";
 import { wsHandler } from "./ws/handler";
 import type { RedisBridge } from "./ws/redis-bridge";
 
@@ -30,5 +31,6 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(sessionRoutes(db))
     .use(userRoutes(db))
     .use(deviceReposRoutes(db))
+    .use(chatRoutes(db))
     .use(wsHandler(db, redis));
 }

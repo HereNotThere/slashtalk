@@ -391,7 +391,12 @@ function positionInfo(index: number, bubbleScreenY?: number): void {
   const cell = BUBBLE_SIZE + SPACING;
   const avatarTopY =
     bubbleScreenY ?? stackBounds.y + PADDING_Y + index * cell;
-  const infoY = Math.round(avatarTopY - 16);
+  const desiredY = Math.round(avatarTopY - 16);
+
+  // Clamp so the card's bottom stays within the work area minus 32px padding.
+  const bottomLimit = screenFrame.y + screenFrame.height - 32;
+  const maxY = bottomLimit - infoCurrentHeight;
+  const infoY = Math.min(desiredY, maxY);
 
   infoWindow.setBounds({
     x: Math.round(infoX),
@@ -831,6 +836,12 @@ ipcMain.handle("chat:hide", (): void => hideChat());
 ipcMain.handle("response:open", (_e, message: string): void => {
   showResponse({ kind: "message", message });
 });
+
+ipcMain.handle(
+  "chat:ask",
+  (_e, messages: Parameters<typeof backend.askChat>[0]) =>
+    backend.askChat(messages),
+);
 
 // -------- Dock to edge (drag → release → snap) --------
 
@@ -1496,6 +1507,7 @@ ws.onSessionUpdated((msg) => {
   // hover. scheduleInfoRefresh then coalesces any UI refresh for the
   // currently-selected head across bursty events.
   sessionCache.delete(rail.userHeadId(msg.github_login));
+  rail.refreshSoon();
   scheduleInfoRefresh(msg.session_id);
   broadcastToMain("ws:sessionUpdated", msg);
 });

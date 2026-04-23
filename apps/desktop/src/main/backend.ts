@@ -14,6 +14,9 @@ import http from "node:http";
 import os from "node:os";
 import type { AddressInfo } from "node:net";
 import type {
+  ChatAskRequest,
+  ChatAskResponse,
+  ChatMessage,
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
@@ -465,6 +468,7 @@ export async function ingestChunk(args: {
   project: string;
   fromLineSeq: number;
   prefixHash: string;
+  source?: "claude" | "codex";
   body: string;
 }): Promise<IngestResponse> {
   if (!creds) throw new Error("Not signed in");
@@ -473,6 +477,7 @@ export async function ingestChunk(args: {
     session: args.session,
     fromLineSeq: String(args.fromLineSeq),
     prefixHash: args.prefixHash,
+    source: args.source ?? "claude",
   });
   const res = await fetch(`${baseUrl()}/v1/ingest?${qs.toString()}`, {
     method: "POST",
@@ -494,6 +499,16 @@ export function fetchSyncState(): Promise<Record<string, SyncStateEntry>> {
   return jsonFetch<Record<string, SyncStateEntry>>("/v1/sync-state", {
     method: "GET",
     auth: "apiKey",
+  });
+}
+
+// ---------- Chat ----------
+
+export async function askChat(messages: ChatMessage[]): Promise<ChatAskResponse> {
+  const body: ChatAskRequest = { messages };
+  return jsonFetch<ChatAskResponse>("/api/chat/ask", {
+    method: "POST",
+    body,
   });
 }
 

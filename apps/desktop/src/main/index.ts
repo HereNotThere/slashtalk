@@ -352,7 +352,12 @@ function positionInfo(index: number, bubbleScreenY?: number): void {
   const cell = BUBBLE_SIZE + SPACING;
   const avatarTopY =
     bubbleScreenY ?? stackBounds.y + PADDING_Y + index * cell;
-  const infoY = Math.round(avatarTopY - 16);
+  const desiredY = Math.round(avatarTopY - 16);
+
+  // Clamp so the card's bottom stays within the work area minus 32px padding.
+  const bottomLimit = screenFrame.y + screenFrame.height - 32;
+  const maxY = bottomLimit - infoCurrentHeight;
+  const infoY = Math.min(desiredY, maxY);
 
   infoWindow.setBounds({
     x: Math.round(infoX),

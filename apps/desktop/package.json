@@ -30,7 +30,9 @@
     "asar": true,
     "mac": {
       "target": [
-        { "target": "dmg" }
+        {
+          "target": "dmg"
+        }
       ],
       "category": "public.app-category.developer-tools",
       "identity": null
@@ -39,6 +41,7 @@
   "trustedDependencies": ["electron", "esbuild"],
   "dependencies": {
     "@slashtalk/shared": "workspace:*",
+    "koffi": "^2.16.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

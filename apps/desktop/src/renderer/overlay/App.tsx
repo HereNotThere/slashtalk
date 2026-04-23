@@ -92,7 +92,7 @@ export function App(): JSX.Element {
   return (
     <div
       ref={stackRef}
-      className="flex flex-col items-center gap-sm p-xl box-border"
+      className="flex flex-col items-center gap-[14px] px-md py-lg box-border"
     >
       {heads.map((h) => (
         <Bubble key={h.id} head={h} />
@@ -109,13 +109,12 @@ function ChatBubble({ hidden }: { hidden: boolean }): JSX.Element {
       data-chat
       title="Ask your team"
       className={`
-        relative w-14 h-14 rounded-full cursor-pointer
+        relative w-[45px] h-[45px] rounded-full cursor-pointer
         flex items-center justify-center
-        bg-chat text-white
+        bg-black/15 text-white
         outline outline-1 -outline-offset-1 outline-bubble-outline
-        shadow-[0_2px_3px_rgba(0,0,0,0.15)]
         transition-transform duration-150 ease-out
-        hover:scale-[1.03] hover:bg-chat-hover
+        hover:scale-[1.03] hover:bg-black/20
         ${hidden ? "invisible" : ""}
       `}
     >
@@ -139,12 +138,10 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
       title={head.label}
       onMouseEnter={handleMouseEnter}
       className="
-        relative w-14 h-14 rounded-full cursor-pointer
+        relative w-[45px] h-[45px] rounded-full cursor-pointer
         flex items-center justify-center text-[28px]
         bg-bubble
         backdrop-blur-[18px] backdrop-saturate-[1.4]
-        outline outline-1 -outline-offset-1 outline-bubble-outline
-        shadow-[0_2px_3px_rgba(0,0,0,0.15)]
         transition-transform duration-150 ease-out
         hover:scale-[1.03]
       "

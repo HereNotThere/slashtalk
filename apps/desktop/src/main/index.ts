@@ -16,19 +16,22 @@ import * as localRepos from "./localRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
+import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
-// BUBBLE_SIZE ↔ `w-14 h-14` on Bubble/ChatBubble (56px),
-// SPACING ↔ `gap-sm` on the stack (8px),
-// PADDING ↔ `p-xl` on the stack (24px). Drift here = popovers misalign.
-const BUBBLE_SIZE = 56;
-const SPACING = 8;
-const PADDING = 24;
-const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING * 2;
+// BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/ChatBubble (45px),
+// SPACING ↔ `gap-[14px]` on the stack (14px),
+// PADDING_X ↔ `px-md` on the stack (12px),
+// PADDING_Y ↔ `py-lg` on the stack (16px). Drift here = popovers misalign.
+const BUBBLE_SIZE = 45;
+const SPACING = 14;
+const PADDING_X = 12;
+const PADDING_Y = 16;
+const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
 
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
-const INFO_GAP = 10;
+const INFO_GAP = 8; // distance from the pill's outer edge to the info window
 
 const CHAT_WIDTH = 560;
 const CHAT_HEIGHT = 80; // transparent window; pill + breathing room for CSS shadow
@@ -113,7 +116,7 @@ function createMainWindow(): void {
 // Overlay always renders heads plus the chat bubble at the bottom, so add 1.
 function overlayHeight(count: number): number {
   const n = count + 1;
-  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING * 2;
+  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING_Y * 2;
 }
 
 interface SavedPosition {
@@ -166,13 +169,31 @@ function ensureOverlay(): BrowserWindow {
     x: restored?.x ?? workArea.x + workArea.width - OVERLAY_WIDTH - 24,
     y: restored?.y ?? workArea.y + Math.floor((workArea.height - height) / 2),
     frame: false,
-    transparent: true,
-    hasShadow: false,
+    transparent: false,
+    // Never let the rail become key — macOS deepens the system shadow on
+    // focused windows, so without this the drop shadow visibly darkens
+    // whenever the user clicks the rail. Clicks still work for drag and
+    // bubble toggles.
+    focusable: false,
+    // System shadow — macOS derives it from the window's alpha mask, so
+    // with the rounded contentView + cleared NSWindow background the
+    // shadow follows the pill. Re-invalidated in setMacCornerRadius so
+    // macOS recomputes against the pill mask instead of the original
+    // rectangle.
+    hasShadow: true,
     alwaysOnTop: true,
     resizable: false,
     movable: false, // we drive drag manually via IPC + setPosition
     skipTaskbar: true,
     backgroundColor: "#00000000",
+    // Real macOS frost. CSS backdrop-filter is a no-op on non-vibrancy Electron
+    // windows, so the rail uses NSVisualEffectView as its single background.
+    // Vibrancy is a sibling NSView of the webContents, so CSS can't clip it —
+    // we reshape to a pill via `setMacCornerRadius` below instead.
+    // `hud` reads heavily translucent over arbitrary app windows, unlike
+    // `under-window` which only blurs the desktop wallpaper.
+    vibrancy: "hud",
+    visualEffectState: "active",
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -181,6 +202,15 @@ function ensureOverlay(): BrowserWindow {
 
   overlayWindow.setAlwaysOnTop(true, "floating");
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  // Pill ends — half the window width gives perfect semicircle caps at top
+  // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
+  // as soon as the BrowserWindow constructor returns.
+  setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
+    width: 1.5,
+    white: 1,
+    alpha: 0.33,
+  });
 
   loadRenderer(overlayWindow, "overlay");
 
@@ -262,14 +292,14 @@ function positionInfo(index: number): void {
   const screenMidX = screenFrame.x + screenFrame.width / 2;
   const alignRight = stackMidX < screenMidX;
 
-  const visualRight = stackBounds.x + stackBounds.width - PADDING;
-  const visualLeft = stackBounds.x + PADDING;
+  const pillRight = stackBounds.x + stackBounds.width;
+  const pillLeft = stackBounds.x;
   const infoX = alignRight
-    ? visualRight + INFO_GAP
-    : visualLeft - INFO_GAP - INFO_WIDTH;
+    ? pillRight + INFO_GAP
+    : pillLeft - INFO_GAP - INFO_WIDTH;
 
   const cell = BUBBLE_SIZE + SPACING;
-  const avatarTopY = stackBounds.y + PADDING + index * cell;
+  const avatarTopY = stackBounds.y + PADDING_Y + index * cell;
   const infoY = Math.round(avatarTopY - 16);
 
   // setBounds (vs setPosition) so we apply the latest tracked height atomically.
@@ -414,7 +444,7 @@ function positionChat(): void {
   const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
   const cell = BUBBLE_SIZE + SPACING;
   const bubbleCenterY =
-    stackBounds.y + PADDING + heads.length * cell + BUBBLE_SIZE / 2;
+    stackBounds.y + PADDING_Y + heads.length * cell + BUBBLE_SIZE / 2;
 
   const chatX =
     anchor === "left"

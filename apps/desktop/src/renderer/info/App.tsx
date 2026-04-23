@@ -86,12 +86,17 @@ function Divider(): JSX.Element {
 
 function Header({ head }: { head: ChatHead | null }): JSX.Element {
   const name = head?.label ?? "—";
-  const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const time = new Date().toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
   return (
     <div className="flex items-start gap-md px-lg pt-lg pb-md">
       <Avatar head={head} />
       <div className="flex-1 min-w-0">
-        <div className="text-[19px] font-bold leading-tight truncate">{name}</div>
+        <div className="text-[19px] font-bold leading-tight truncate">
+          {name}
+        </div>
         <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted whitespace-nowrap min-w-0">
           <span className="text-warning shrink-0">☀︎</span>
           <span className="truncate">New York</span>
@@ -200,9 +205,7 @@ function SessionRow({ session }: { session: InfoSession }): JSX.Element {
     <div>
       <div className="flex items-center gap-2">
         <Dot color={DOT_COLOR[session.state]} />
-        <div className="text-[14px] text-fg flex-1 truncate">
-          {title}
-        </div>
+        <div className="text-[14px] text-fg flex-1 truncate">{title}</div>
         <Chevron />
       </div>
       <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
@@ -210,8 +213,12 @@ function SessionRow({ session }: { session: InfoSession }): JSX.Element {
           <span className="inline-flex items-center gap-1.5 font-mono bg-code rounded-md px-1.5 py-0.5 text-fg/85 min-w-0 max-w-full whitespace-nowrap overflow-hidden">
             <BranchIcon />
             {repo && <span className="truncate">{repo}</span>}
-            {repo && session.branch && <span className="text-subtle shrink-0">·</span>}
-            {session.branch && <span className="truncate">{session.branch}</span>}
+            {repo && session.branch && (
+              <span className="text-subtle shrink-0">·</span>
+            )}
+            {session.branch && (
+              <span className="truncate">{session.branch}</span>
+            )}
           </span>
         )}
         <span className="text-subtle shrink-0">·</span>

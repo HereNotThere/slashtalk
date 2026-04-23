@@ -9,14 +9,39 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "dist": "electron-vite build && electron-builder",
+    "dist:mac": "electron-vite build && electron-builder --mac",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "bun run typecheck:node && bun run typecheck:web",
     "lint": "eslint ."
   },
+  "build": {
+    "appId": "com.slashtalk.desktop",
+    "productName": "Slashtalk",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "target": [
+        {
+          "target": "dmg"
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null
+    }
+  },
   "trustedDependencies": ["electron", "esbuild"],
   "dependencies": {
     "@slashtalk/shared": "workspace:*",
+    "koffi": "^2.16.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -28,6 +53,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "eslint": "^9.13.0",
     "eslint-plugin-react": "^7.37.1",

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import type { ChatHead } from '../../shared/types';
-import { useHeads } from '../shared/useHeads';
-import { useActivityBadgeUpdate } from '../shared/useActivityBadgeUpdate';
-import { SearchIcon } from '../shared/icons';
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type { ChatHead } from "../../shared/types";
+import { useHeads } from "../shared/useHeads";
+import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
+import { SearchIcon } from "../shared/icons";
 
 const DRAG_THRESHOLD = 4;
 // Slightly longer than the longest CSS animation (last ring delay 0.4s + 1.4s)
@@ -14,7 +14,7 @@ const SPARK_DISTANCE_PX = 28;
 // Compact "time since" — "now" / "5m" / "3h" / "2d".
 function formatAge(ms: number): string {
   const sec = Math.max(0, Math.floor(ms / 1000));
-  if (sec < 60) return 'now';
+  if (sec < 60) return "now";
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min}m`;
   const hr = Math.floor(min / 60);
@@ -42,11 +42,13 @@ export function App(): JSX.Element {
     const onDown = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       downPos = { x: e.screenX, y: e.screenY };
-      const target = e.target instanceof Element ? e.target.closest('[data-bubble]') : null;
-      downIsChat = target?.hasAttribute('data-chat') ?? false;
-      downBubbleIndex = target && !downIsChat && stackRef.current
-        ? Array.prototype.indexOf.call(stackRef.current.children, target)
-        : null;
+      const target =
+        e.target instanceof Element ? e.target.closest("[data-bubble]") : null;
+      downIsChat = target?.hasAttribute("data-chat") ?? false;
+      downBubbleIndex =
+        target && !downIsChat && stackRef.current
+          ? Array.prototype.indexOf.call(stackRef.current.children, target)
+          : null;
       dragging = false;
     };
 
@@ -64,7 +66,8 @@ export function App(): JSX.Element {
       if (e.button !== 0) return;
       if (dragging) void window.chatheads.dragEnd();
       else if (downIsChat) void window.chatheads.toggleChat();
-      else if (downBubbleIndex !== null) void window.chatheads.toggleInfo(downBubbleIndex);
+      else if (downBubbleIndex !== null)
+        void window.chatheads.toggleInfo(downBubbleIndex);
       downPos = null;
       downBubbleIndex = null;
       downIsChat = false;
@@ -79,22 +82,22 @@ export function App(): JSX.Element {
       dragging = false;
     };
 
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('blur', onBlur);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("blur", onBlur);
     return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('blur', onBlur);
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("blur", onBlur);
     };
   }, []);
 
   return (
     <div
       ref={stackRef}
-      className="flex flex-col items-center gap-sm p-xl box-border"
+      className="flex flex-col items-center gap-[14px] px-md py-lg box-border"
     >
       {heads.map((h) => (
         <Bubble key={h.id} head={h} />
@@ -111,13 +114,12 @@ function ChatBubble({ hidden }: { hidden: boolean }): JSX.Element {
       data-chat
       title="Ask your team"
       className={`
-        relative w-14 h-14 rounded-full cursor-pointer
+        relative w-[45px] h-[45px] rounded-full cursor-pointer
         flex items-center justify-center
-        bg-chat text-white
+        bg-black/15 text-white
         outline outline-1 -outline-offset-1 outline-bubble-outline
-        shadow-[0_2px_3px_rgba(0,0,0,0.15)]
         transition-transform duration-150 ease-out
-        hover:scale-[1.03] hover:bg-chat-hover
+        hover:scale-[1.03] hover:bg-black/20
         ${hidden ? "invisible" : ""}
       `}
     >
@@ -142,23 +144,23 @@ function Bubble({ head }: { head: ChatHead }): JSX.Element {
       title={head.label}
       onMouseEnter={handleMouseEnter}
       className="
-        relative w-14 h-14 rounded-full cursor-pointer
+        relative w-[45px] h-[45px] rounded-full cursor-pointer
         flex items-center justify-center text-[28px]
         bg-bubble
         backdrop-blur-[18px] backdrop-saturate-[1.4]
-        outline outline-1 -outline-offset-1 outline-bubble-outline
-        shadow-[0_2px_3px_rgba(0,0,0,0.15)]
         transition-transform duration-150 ease-out
         hover:scale-[1.03]
       "
     >
-      {head.avatar.type === 'emoji' ? (
+      {head.avatar.type === "emoji" ? (
         <>
           <div
             className="absolute inset-0 rounded-full opacity-[0.28] pointer-events-none"
             style={{ background: head.tint }}
           />
-          <span className="relative z-[1] leading-none pointer-events-none">{head.avatar.value}</span>
+          <span className="relative z-[1] leading-none pointer-events-none">
+            {head.avatar.value}
+          </span>
         </>
       ) : (
         <img

@@ -16,6 +16,7 @@ const DOT_COLOR: Record<SessionState, string> = {
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
+  const [visible, setVisible] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   useAutoResize();
 
@@ -23,8 +24,11 @@ export function App(): JSX.Element {
     const offShow = window.chatheads.onInfoShow((p) => {
       setHead(p.head);
       setSessions(p.sessions);
+      setVisible(true);
     });
-    const offHide = window.chatheads.onInfoHide(() => setHead(null));
+    // Keep head/sessions on hide so the last content fades out instead of
+    // collapsing; next show replaces them wholesale.
+    const offHide = window.chatheads.onInfoHide(() => setVisible(false));
     return () => {
       offShow();
       offHide();
@@ -42,12 +46,17 @@ export function App(): JSX.Element {
         if (!cancelled) setSessions([]);
       }
     };
-    // Initial payload is already sent by main; only refresh on interval.
+    // Main sends the cached payload (possibly null on cache miss). Load once
+    // immediately if sessions aren't in hand yet, and poll on interval after.
+    if (sessions === null) void load();
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
+    // sessions intentionally not a dep — we only want this to (re)run when
+    // the head changes; interval handles subsequent refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [head?.id]);
 
   useEffect(() => {
@@ -61,18 +70,17 @@ export function App(): JSX.Element {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        void window.chatheads.hideInfo();
-      }
-    };
-    document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
-  }, []);
-
   return (
-    <div ref={rootRef} className="bg-card rounded-lg">
+    <div
+      ref={rootRef}
+      onMouseEnter={() => void window.chatheads.infoHoverEnter()}
+      onMouseLeave={() => void window.chatheads.infoHoverLeave()}
+      className="bg-card rounded-lg transition-[opacity,transform] duration-75 ease-out"
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateX(0)" : "translateX(-4px)",
+      }}
+    >
       <Header head={head} />
       <Divider />
       <SessionsSection sessions={sessions} />
@@ -167,7 +175,7 @@ function SessionsSection({
 }): JSX.Element {
   const title = sessions == null ? "Sessions" : `Sessions · ${sessions.length}`;
   return (
-    <div className="px-lg pt-md pb-lg">
+    <div className="px-lg pt-md pb-lg min-h-[120px]">
       <SectionHeader title={title} trailing="last 24h" />
       <div className="mt-md space-y-lg">
         {sessions == null ? (

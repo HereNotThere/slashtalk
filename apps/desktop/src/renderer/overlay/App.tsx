@@ -5,7 +5,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import type { ChatHead } from "../../shared/types";
+import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useProjects } from "../shared/useProjects";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
@@ -48,29 +48,44 @@ export function App(): JSX.Element {
   const projects = useProjects();
   const stackRef = useRef<HTMLDivElement>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [dock, setDock] = useState<DockConfig>({
+    orientation: "vertical",
+    side: "end",
+  });
   const hoverShowTimer = useRef<number | null>(null);
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const prevTops = useRef<Map<string, number>>(new Map());
+  // FLIP "previous position" cache, keyed on id. We store the main-axis coord
+  // (top for vertical rail, left for horizontal) so a reorder that moves a
+  // bubble along the rail can animate from its old position.
+  const prevPos = useRef<Map<string, number>>(new Map());
   const prevIds = useRef<Set<string>>(new Set());
   const [replayToken, setReplayToken] = useState(0);
+  const isHorizontal = dock.orientation === "horizontal";
 
   // FLIP reorder + enter animation. Self (index 0) is tracked too now so it can
   // play its enter animation on first mount (or when replayed via debug); after
   // first paint its id is in prevIds so reorder/enter won't re-fire unless the
   // replay signal clears prevIds first.
+  //
+  // Axis-aware: for a vertical rail we track/animate `top`; for a horizontal
+  // rail we track/animate `left`. The enter animation uses the same axis so
+  // new bubbles slide in from the "upstream" direction of the rail.
   useLayoutEffect(() => {
     const forceAllEnter = replayToken > 0 && prevIds.current.size === 0;
+    const axis = isHorizontal ? "X" : "Y";
+    const enterOffset = isHorizontal ? "translateX(-6px)" : "translateY(-6px)";
 
-    const newTops = new Map<string, number>();
+    const newPos = new Map<string, number>();
     for (const [id, el] of bubbleRefs.current) {
-      newTops.set(id, el.getBoundingClientRect().top);
+      const rect = el.getBoundingClientRect();
+      newPos.set(id, isHorizontal ? rect.left : rect.top);
     }
 
     for (const [id, el] of bubbleRefs.current) {
       const isNew = forceAllEnter || !prevIds.current.has(id);
       if (isNew) {
         el.style.transition = "none";
-        el.style.transform = "scale(.4) translateY(-6px)";
+        el.style.transform = `scale(.4) ${enterOffset}`;
         el.style.opacity = "0";
         void el.getBoundingClientRect();
         requestAnimationFrame(() => {
@@ -80,28 +95,42 @@ export function App(): JSX.Element {
         });
         continue;
       }
-      const prev = prevTops.current.get(id);
-      const next = newTops.get(id);
+      const prev = prevPos.current.get(id);
+      const next = newPos.get(id);
       if (prev == null || next == null || prev === next) continue;
       const delta = prev - next;
       el.style.transition = "none";
-      el.style.transform = `translateY(${delta}px)`;
+      el.style.transform = `translate${axis}(${delta}px)`;
       void el.getBoundingClientRect();
       requestAnimationFrame(() => {
         el.style.transition = `transform ${REORDER_ANIM_MS}ms cubic-bezier(.2,.7,.2,1)`;
-        el.style.transform = "translateY(0)";
+        el.style.transform = "translate" + axis + "(0)";
       });
     }
 
-    prevTops.current = newTops;
+    prevPos.current = newPos;
     prevIds.current = new Set(bubbleRefs.current.keys());
-  }, [heads, projects, replayToken]);
+  }, [heads, projects, replayToken, isHorizontal]);
+
+  useEffect(() => {
+    return window.chatheads.onOverlayConfig((cfg) => {
+      // Orientation flip — reset FLIP caches so the first frame in the new
+      // layout doesn't try to animate bubbles from irrelevant prev positions.
+      setDock((prev) => {
+        if (prev.orientation !== cfg.orientation) {
+          prevPos.current.clear();
+          prevIds.current = new Set(bubbleRefs.current.keys());
+        }
+        return cfg;
+      });
+    });
+  }, []);
 
   // Debug: main tells us to replay the mount animation on all current heads.
   useEffect(() => {
     return window.chatheads.onDebugReplayEnter(() => {
       prevIds.current.clear();
-      prevTops.current.clear();
+      prevPos.current.clear();
       setReplayToken((n) => n + 1);
     });
   }, []);
@@ -162,7 +191,10 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  const hoverEnterBubble = (headId: string, bubbleScreenY: number): void => {
+  const hoverEnterBubble = (
+    headId: string,
+    bubbleScreen: { x: number; y: number },
+  ): void => {
     if (hoverShowTimer.current != null) {
       window.clearTimeout(hoverShowTimer.current);
     }
@@ -171,7 +203,7 @@ export function App(): JSX.Element {
     void window.chatheads.infoHoverEnter();
     hoverShowTimer.current = window.setTimeout(() => {
       hoverShowTimer.current = null;
-      void window.chatheads.showInfo(headId, bubbleScreenY);
+      void window.chatheads.showInfo(headId, bubbleScreen);
     }, HOVER_SHOW_DELAY_MS);
   };
 
@@ -193,22 +225,27 @@ export function App(): JSX.Element {
     e: React.MouseEvent<HTMLDivElement>,
   ): void => {
     const rect = e.currentTarget.getBoundingClientRect();
+    const screenX = Math.round(rect.left + window.screenX);
     const screenY = Math.round(rect.top + window.screenY);
-    hoverEnterBubble(headId, screenY);
+    hoverEnterBubble(headId, { x: screenX, y: screenY });
   };
 
   const self = heads[0];
   const peers = heads.slice(1);
 
-  // Outer fills the window height exactly. Self + chat are shrink-0; the peer
-  // list is a flex-1 scroll container that takes whatever's left. Using flex
-  // sizing instead of `maxHeight: calc(...)` avoids sub-pixel rounding that
-  // otherwise clipped the last peer by 1-2px and left a scroll stub.
+  // Outer fills the window exactly along the rail's main axis (height for
+  // vertical, width for horizontal). Self + chat are shrink-0; the peer list
+  // is a flex-1 scroll container that takes whatever's left. Using flex sizing
+  // instead of fixed maxs avoids sub-pixel rounding that otherwise clipped the
+  // last peer by 1-2px and left a scroll stub.
+  const stackClass = isHorizontal
+    ? "flex flex-row items-center gap-[14px] px-lg py-md box-border w-screen"
+    : "flex flex-col items-center gap-[14px] px-md py-lg box-border h-screen";
+  const peersClass = isHorizontal
+    ? "h-full flex-1 min-w-0 flex flex-row items-center gap-[14px] overflow-x-auto overflow-y-hidden no-scrollbar"
+    : "w-full flex-1 min-h-0 flex flex-col items-center gap-[14px] overflow-y-auto overflow-x-hidden no-scrollbar";
   return (
-    <div
-      ref={stackRef}
-      className="flex flex-col items-center gap-[14px] px-md py-lg box-border h-screen"
-    >
+    <div ref={stackRef} className={stackClass}>
       {self && (
         <div
           key={self.id}
@@ -225,12 +262,7 @@ export function App(): JSX.Element {
         </div>
       )}
       {(peers.length > 0 || projects.length > 0) && (
-        <div
-          className="
-            w-full flex-1 min-h-0 flex flex-col items-center gap-[14px]
-            overflow-y-auto overflow-x-hidden no-scrollbar
-          "
-        >
+        <div className={peersClass}>
           {peers.map((h) => (
             <div
               key={h.id}
@@ -246,7 +278,9 @@ export function App(): JSX.Element {
               />
             </div>
           ))}
-          {peers.length > 0 && projects.length > 0 && <RailSeparator />}
+          {peers.length > 0 && projects.length > 0 && (
+            <RailSeparator horizontal={isHorizontal} />
+          )}
           {projects.map((h) => (
             <div
               key={h.id}
@@ -270,10 +304,25 @@ export function App(): JSX.Element {
 }
 
 // Divider between the teammate row and the project row. Takes one extra
-// SPACING-row worth of vertical space in the flex stack (the flex `gap`
-// adds 14px above and below the 1px line); this matches the
-// SEPARATOR_EXTRA reserved in the main-process overlayHeight formula.
-function RailSeparator(): JSX.Element {
+// SPACING-row worth of space along the rail's main axis (the flex `gap` adds
+// 14px on each side of the 1px line); matches the SEPARATOR_EXTRA reserved in
+// the main-process overlay-size formula.
+function RailSeparator({
+  horizontal,
+}: {
+  horizontal: boolean;
+}): JSX.Element {
+  if (horizontal) {
+    return (
+      <div
+        className="h-full shrink-0 flex items-center justify-center"
+        style={{ width: 1 }}
+        aria-hidden
+      >
+        <div className="h-[60%] w-px bg-white/20 rounded-full" />
+      </div>
+    );
+  }
   return (
     <div
       className="w-full shrink-0 flex items-center justify-center"

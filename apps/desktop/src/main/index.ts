@@ -17,8 +17,11 @@ import type {
   AgentSessionSummary,
   AgentStreamEvent,
   AgentSummary,
+  ChatAnchor,
   ChatHead,
   CreateAgentInput,
+  DockConfig,
+  DockOrientation,
   InfoSession,
   McpTarget,
   ResponseOpenPayload,
@@ -200,13 +203,26 @@ function createMainWindow(): void {
 
 // -------- Overlay (bubbles) --------
 
-// Overlay always renders heads plus the chat bubble at the bottom, so add 1.
-// When there are any project heads we reserve one extra SPACING row for the
-// divider between peers and projects.
-function overlayHeight(count: number, projectCount = 0): number {
+// Overlay always renders heads plus the chat bubble at the end of the rail, so
+// add 1. This is the main-axis length (height for vertical rail, width for
+// horizontal). Cross-axis is always OVERLAY_WIDTH. When there are any project
+// heads we reserve one extra SPACING row for the divider between peers and
+// projects.
+function overlayLength(count: number, projectCount = 0): number {
   const n = count + projectCount + 1;
   const sep = projectCount > 0 ? SEPARATOR_EXTRA : 0;
   return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + sep + PADDING_Y * 2;
+}
+
+function overlaySize(
+  count: number,
+  projectCount: number,
+  orientation: DockOrientation,
+): { width: number; height: number } {
+  const length = overlayLength(count, projectCount);
+  return orientation === "vertical"
+    ? { width: OVERLAY_WIDTH, height: length }
+    : { width: length, height: OVERLAY_WIDTH };
 }
 
 interface SavedPosition {
@@ -261,15 +277,19 @@ function ensureOverlay(): BrowserWindow {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
 
   const display = screen.getPrimaryDisplay();
-  const { workArea } = display;
-  const height = overlayHeight(heads.length, projects.length);
   const restored = restoredOrigin();
+  // Classify the restored origin against the primary display's work area to
+  // pick the initial dock. First-run default: right edge (vertical+end).
+  const initialDock: DockConfig = restored
+    ? dockFromPoint(restored, display)
+    : { orientation: "vertical", side: "end" };
+  const bounds = computeDockBoundsOn(display, initialDock);
 
   overlayWindow = new BrowserWindow({
-    width: OVERLAY_WIDTH,
-    height,
-    x: restored?.x ?? workArea.x + workArea.width - OVERLAY_WIDTH - 24,
-    y: restored?.y ?? workArea.y + Math.floor((workArea.height - height) / 2),
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
     frame: false,
     transparent: false,
     // Never let the rail become key — macOS deepens the system shadow on
@@ -315,9 +335,14 @@ function ensureOverlay(): BrowserWindow {
 
   overlayWindow.on("closed", () => {
     overlayWindow = null;
+    lastSentDock = null;
     hideInfoNow();
     hideChat();
   });
+
+  // Tell the overlay renderer which dock it was born into so first paint uses
+  // the correct flex direction.
+  sendOverlayConfig();
 
   return overlayWindow;
 }
@@ -327,28 +352,48 @@ const OVERLAY_SCREEN_MARGIN = 40;
 function resizeOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const display = screen.getDisplayMatching(overlayWindow.getBounds());
-  const maxHeight = Math.max(
-    overlayHeight(0),
-    display.workArea.height - OVERLAY_SCREEN_MARGIN * 2,
+  const dock = currentDock();
+  const wa = display.workArea;
+  // Main-axis cap — leaves OVERLAY_SCREEN_MARGIN at each end.
+  const axisExtent =
+    dock.orientation === "vertical" ? wa.height : wa.width;
+  const maxLength = Math.max(
+    overlayLength(0),
+    axisExtent - OVERLAY_SCREEN_MARGIN * 2,
   );
-  const height = Math.min(
-    overlayHeight(heads.length, projects.length),
-    maxHeight,
+  const length = Math.min(
+    overlayLength(heads.length, projects.length),
+    maxLength,
   );
+  const size =
+    dock.orientation === "vertical"
+      ? { width: OVERLAY_WIDTH, height: length }
+      : { width: length, height: OVERLAY_WIDTH };
   const bounds = overlayWindow.getBounds();
-  // Keep the window inside the work area after a size change so the ask bubble
-  // never clips below the dock.
-  const minY = display.workArea.y + OVERLAY_SCREEN_MARGIN;
-  const maxY = display.workArea.y + display.workArea.height - height - OVERLAY_SCREEN_MARGIN;
-  const y = Math.max(minY, Math.min(bounds.y, maxY));
+  // Keep the rail inside the work area after a size change so the chat bubble
+  // never clips past the edge.
+  const axisPos =
+    dock.orientation === "vertical" ? bounds.y : bounds.x;
+  const axisMin =
+    (dock.orientation === "vertical" ? wa.y : wa.x) + OVERLAY_SCREEN_MARGIN;
+  const axisMax =
+    (dock.orientation === "vertical"
+      ? wa.y + wa.height - length
+      : wa.x + wa.width - length) - OVERLAY_SCREEN_MARGIN;
+  const clamped = Math.max(axisMin, Math.min(axisPos, axisMax));
+  const nextBounds =
+    dock.orientation === "vertical"
+      ? { x: bounds.x, y: clamped, width: size.width, height: size.height }
+      : { x: clamped, y: bounds.y, width: size.width, height: size.height };
   // `animate: true` uses macOS's native NSWindow animator (~200ms ease), which
   // reads as a fluid grow/shrink alongside the renderer's bubble enter/exit
   // animations. No-op on other platforms.
-  const animate = bounds.height !== height || bounds.y !== y;
-  overlayWindow.setBounds(
-    { x: bounds.x, y, width: OVERLAY_WIDTH, height },
-    animate,
-  );
+  const animate =
+    bounds.width !== nextBounds.width ||
+    bounds.height !== nextBounds.height ||
+    bounds.x !== nextBounds.x ||
+    bounds.y !== nextBounds.y;
+  overlayWindow.setBounds(nextBounds, animate);
 }
 
 function broadcastHeads(): void {
@@ -402,58 +447,79 @@ function ensureInfoWindow(): BrowserWindow {
   return infoWindow;
 }
 
-function positionInfo(headId: string, bubbleScreenY?: number): void {
+function positionInfo(
+  headId: string,
+  bubbleScreen?: { x: number; y: number },
+): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
   const stackBounds = overlayWindow.getBounds();
   const display = screen.getDisplayMatching(stackBounds);
   const screenFrame = display.workArea;
+  const dock = currentDock();
 
-  const stackMidX = stackBounds.x + stackBounds.width / 2;
-  const screenMidX = screenFrame.x + screenFrame.width / 2;
-  const alignRight = stackMidX < screenMidX;
-
-  const pillRight = stackBounds.x + stackBounds.width;
-  const pillLeft = stackBounds.x;
-  const infoX = alignRight
-    ? pillRight + INFO_GAP
-    : pillLeft - INFO_GAP - INFO_WIDTH;
-
-  // Prefer the renderer-reported screen-Y when available: with a scrollable
-  // peer list the index-based formula no longer reflects where the bubble
-  // actually sits. Fall back to a formula derived from the head's position in
-  // the combined (peers + projects) list — for callers that don't have a live
-  // DOM rect (e.g. reposition during overlay drag/slide).
+  // Fallback coord when the renderer didn't report a bubble rect (e.g.
+  // repositions during drag/slide). Derived from the head's position in the
+  // combined (peers + projects) list, plus the separator row if it falls on
+  // or past the divider.
   const cell = BUBBLE_SIZE + SPACING;
-  let avatarTopY = bubbleScreenY;
-  if (avatarTopY == null) {
-    const combined = allHeads();
-    const index = combined.findIndex((h) => h.id === headId);
-    const peersBeforeProjects = heads.length;
-    const crossesSep = index >= peersBeforeProjects && projects.length > 0;
-    avatarTopY =
-      stackBounds.y +
-      PADDING_Y +
-      Math.max(0, index) * cell +
-      (crossesSep ? SEPARATOR_EXTRA : 0);
+  const combined = allHeads();
+  const idx = combined.findIndex((h) => h.id === headId);
+  const peersBeforeProjects = heads.length;
+  const crossesSep = idx >= peersBeforeProjects && projects.length > 0;
+  const fallbackAxisOffset =
+    PADDING_Y +
+    Math.max(0, idx) * cell +
+    (crossesSep ? SEPARATOR_EXTRA : 0);
+
+  if (dock.orientation === "vertical") {
+    const infoX =
+      dock.side === "start"
+        ? stackBounds.x + stackBounds.width + INFO_GAP
+        : stackBounds.x - INFO_GAP - INFO_WIDTH;
+    const avatarTopY =
+      bubbleScreen?.y ?? stackBounds.y + fallbackAxisOffset;
+    const desiredY = Math.round(avatarTopY - 16);
+    const bottomLimit = screenFrame.y + screenFrame.height - 32;
+    const maxY = bottomLimit - infoCurrentHeight;
+    const infoY = Math.max(
+      screenFrame.y + 8,
+      Math.min(desiredY, maxY),
+    );
+    infoWindow.setBounds({
+      x: Math.round(infoX),
+      y: infoY,
+      width: INFO_WIDTH,
+      height: infoCurrentHeight,
+    });
+    return;
   }
-  const desiredY = Math.round(avatarTopY - 16);
 
-  // Clamp so the card's bottom stays within the work area minus 32px padding.
-  const bottomLimit = screenFrame.y + screenFrame.height - 32;
-  const maxY = bottomLimit - infoCurrentHeight;
-  const infoY = Math.min(desiredY, maxY);
-
+  // Horizontal: info sits below (top-docked) or above (bottom-docked) the
+  // rail. Anchor X to the bubble's screen-X when available.
+  const infoY =
+    dock.side === "start"
+      ? stackBounds.y + stackBounds.height + INFO_GAP
+      : stackBounds.y - INFO_GAP - infoCurrentHeight;
+  const avatarLeftX =
+    bubbleScreen?.x ?? stackBounds.x + fallbackAxisOffset;
+  const desiredX = Math.round(avatarLeftX - 16);
+  const rightLimit = screenFrame.x + screenFrame.width - 8;
+  const maxX = rightLimit - INFO_WIDTH;
+  const infoX = Math.max(screenFrame.x + 8, Math.min(desiredX, maxX));
   infoWindow.setBounds({
-    x: Math.round(infoX),
-    y: infoY,
+    x: infoX,
+    y: Math.round(infoY),
     width: INFO_WIDTH,
     height: infoCurrentHeight,
   });
 }
 
-async function showInfo(headId: string, bubbleScreenY?: number): Promise<void> {
+async function showInfo(
+  headId: string,
+  bubbleScreen?: { x: number; y: number },
+): Promise<void> {
   if (isDraggingStack) return;
   const head = findHead(headId);
   if (!head) return;
@@ -492,7 +558,7 @@ async function showInfo(headId: string, bubbleScreenY?: number): Promise<void> {
   // Animate position/size when switching heads on an already-visible window;
   // land-in-place on first appearance.
   const firstShow = !win.isVisible();
-  positionInfo(head.id, bubbleScreenY);
+  positionInfo(head.id, bubbleScreen);
   if (firstShow) win.showInactive();
 
   // Cache miss: fetch in the background and push the result to the renderer.
@@ -561,7 +627,8 @@ function repositionInfoIfVisible(): void {
 // The chat renderer paints its own pill + shadow; we just size + position the
 // frame.
 
-let lastSentChatAnchor: "left" | "right" | null = null;
+let lastSentChatAnchor: ChatAnchor | null = null;
+let lastSentDock: DockConfig | null = null;
 
 function ensureChatWindow(): BrowserWindow {
   if (chatWindow && !chatWindow.isDestroyed()) return chatWindow;
@@ -592,23 +659,22 @@ function ensureChatWindow(): BrowserWindow {
   chatWindow.on("blur", () => hideChat());
   chatWindow.on("closed", () => {
     chatWindow = null;
+    lastSentChatAnchor = null;
   });
 
   return chatWindow;
 }
 
-// Which side of the pill the leading search-icon circle sits on. Determined by
-// overlay position: rail on left half → pill extends right, icon on left side
-// of pill. Rail on right half → mirror so the pill extends inward.
-type ChatAnchor = "left" | "right";
-
-function chatAnchorFromOverlay(): ChatAnchor {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return "left";
-  const stackBounds = overlayWindow.getBounds();
-  const display = screen.getDisplayMatching(stackBounds);
-  const screenMidX = display.workArea.x + display.workArea.width / 2;
-  const stackMidX = stackBounds.x + stackBounds.width / 2;
-  return stackMidX < screenMidX ? "left" : "right";
+// Which end of the pill the leading search-icon circle sits at. Always chosen
+// so the icon overlaps the chat bubble on the rail, whichever edge the rail is
+// docked against. For vertical+start (left rail) the pill extends rightward
+// from the bubble (icon on left). For vertical+end, horizontal+start, and
+// horizontal+end the chat bubble is at the rail's "end" (bottom / right), so
+// the pill extends inward with the icon on its right.
+function chatAnchorFromDock(dock: DockConfig): ChatAnchor {
+  return dock.orientation === "vertical" && dock.side === "start"
+    ? "left"
+    : "right";
 }
 
 function positionChat(): void {
@@ -616,26 +682,43 @@ function positionChat(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
   const stackBounds = overlayWindow.getBounds();
-  const anchor = chatAnchorFromOverlay();
+  const dock = currentDock();
+  const anchor = chatAnchorFromDock(dock);
 
-  // Chat bubble is pinned to the bottom of the overlay window (flex-none in
-  // the renderer). Anchor from window bounds so this works whether content
-  // fits or the peer list is scrolling under a height cap.
-  const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
-  const bubbleCenterY =
-    stackBounds.y + stackBounds.height - PADDING_Y - BUBBLE_SIZE / 2;
+  if (dock.orientation === "vertical") {
+    // Chat bubble pinned to the bottom of the overlay (flex-none in the
+    // renderer). Anchor from window bounds so this works whether content
+    // fits or the peer list is scrolling under a height cap.
+    const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
+    const bubbleCenterY =
+      stackBounds.y + stackBounds.height - PADDING_Y - BUBBLE_SIZE / 2;
+    const chatX =
+      anchor === "left"
+        ? bubbleCenterX - CHAT_ICON_OFFSET
+        : bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
+    const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2);
+    chatWindow.setBounds({
+      x: Math.round(chatX),
+      y: chatY,
+      width: CHAT_WIDTH,
+      height: CHAT_HEIGHT,
+    });
+    return;
+  }
 
-  const chatX =
-    anchor === "left"
-      ? bubbleCenterX - CHAT_ICON_OFFSET
-      : bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
-  // Align pill top to avatar top. Chat window (80) is taller than the pill
-  // (56) by 24px, split 12/12 above and below by items-center + p-sm.
-  const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2);
-
+  // Horizontal rail: chat bubble pinned to the right end of the row. Pill
+  // lives on the inner side of the rail (below for top, above for bottom),
+  // extending leftward from the bubble.
+  const bubbleCenterX =
+    stackBounds.x + stackBounds.width - PADDING_Y - BUBBLE_SIZE / 2;
+  const chatX = bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
+  const chatY =
+    dock.side === "start"
+      ? stackBounds.y + stackBounds.height + INFO_GAP
+      : stackBounds.y - INFO_GAP - CHAT_HEIGHT;
   chatWindow.setBounds({
     x: Math.round(chatX),
-    y: chatY,
+    y: Math.round(chatY),
     width: CHAT_WIDTH,
     height: CHAT_HEIGHT,
   });
@@ -648,7 +731,7 @@ function broadcastChatVisible(visible: boolean): void {
 
 function sendChatConfig(): void {
   if (!chatWindow || chatWindow.isDestroyed()) return;
-  const anchor = chatAnchorFromOverlay();
+  const anchor = chatAnchorFromDock(currentDock());
   if (anchor === lastSentChatAnchor) return;
   lastSentChatAnchor = anchor;
   const send = (): void => {
@@ -656,6 +739,30 @@ function sendChatConfig(): void {
   };
   if (chatWindow.webContents.isLoading()) {
     chatWindow.webContents.once("did-finish-load", send);
+  } else {
+    send();
+  }
+}
+
+// Tell the overlay renderer which dock it's in so it can pick flex direction,
+// scroll axis, and FLIP-tracking axis. Only sent on change to avoid redundant
+// layout passes.
+function sendOverlayConfig(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const dock = currentDock();
+  if (
+    lastSentDock &&
+    lastSentDock.orientation === dock.orientation &&
+    lastSentDock.side === dock.side
+  ) {
+    return;
+  }
+  lastSentDock = dock;
+  const send = (): void => {
+    overlayWindow?.webContents.send("overlay:config", dock);
+  };
+  if (overlayWindow.webContents.isLoading()) {
+    overlayWindow.webContents.once("did-finish-load", send);
   } else {
     send();
   }
@@ -886,9 +993,9 @@ rail.onProjectsChange((next) => {
 
 ipcMain.handle(
   "heads:showInfo",
-  (_e, headId: string, bubbleScreenY?: number): void => {
+  (_e, headId: string, bubbleScreen?: { x: number; y: number }): void => {
     if (!findHead(headId)) return;
-    void showInfo(headId, bubbleScreenY);
+    void showInfo(headId, bubbleScreen);
   },
 );
 
@@ -911,8 +1018,6 @@ ipcMain.handle(
 
 // -------- Dock to edge (drag → release → snap) --------
 
-type DockSide = "left" | "right";
-
 function overlayDisplay(): Electron.Display {
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     return screen.getPrimaryDisplay();
@@ -920,33 +1025,112 @@ function overlayDisplay(): Electron.Display {
   return screen.getDisplayMatching(overlayWindow.getBounds());
 }
 
-function currentDockSide(): DockSide {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return "right";
-  const b = overlayWindow.getBounds();
-  const wa = overlayDisplay().workArea;
-  const overlayCenter = b.x + b.width / 2;
-  const screenCenter = wa.x + wa.width / 2;
-  return overlayCenter < screenCenter ? "left" : "right";
+// Which work-area edges are physically usable. A gap between `bounds` and
+// `workArea` on left / right / bottom means the macOS Dock sits on that edge
+// — we block docking there so the rail never lands on top of the system
+// Dock. The top gap is always the menu bar (thin, always present) which the
+// DOCK_EDGE_MARGIN already clears, so we leave top available.
+type Edge = "left" | "right" | "top" | "bottom";
+
+function availableDockEdges(display: Electron.Display): Set<Edge> {
+  const b = display.bounds;
+  const wa = display.workArea;
+  const edges = new Set<Edge>(["left", "right", "top", "bottom"]);
+  if (wa.x - b.x > 0) edges.delete("left");
+  if (b.x + b.width - (wa.x + wa.width) > 0) edges.delete("right");
+  if (b.y + b.height - (wa.y + wa.height) > 0) edges.delete("bottom");
+  return edges;
 }
 
-function computeDockBounds(side: DockSide): Electron.Rectangle {
-  const wa = overlayDisplay().workArea;
-  const height = overlayHeight(heads.length, projects.length);
-  const x =
-    side === "left"
-      ? wa.x + DOCK_EDGE_MARGIN
-      : wa.x + wa.width - OVERLAY_WIDTH - DOCK_EDGE_MARGIN;
-  const y = wa.y + Math.floor((wa.height - height) / 2);
-  return { x, y, width: OVERLAY_WIDTH, height };
+// Pick the nearest *allowed* work-area edge to the given point. Used during
+// drag (live placeholder) and at rest (current dock classification). When an
+// edge is blocked by the macOS Dock, its candidate is simply dropped — the
+// next-closest allowed edge wins, so dragging toward the blocked side snaps
+// elsewhere instead of overlapping system UI.
+function dockFromPoint(
+  p: { x: number; y: number },
+  display: Electron.Display,
+): DockConfig {
+  const wa = display.workArea;
+  const allowed = availableDockEdges(display);
+  const candidates: Array<{ d: number; dock: DockConfig }> = [];
+  if (allowed.has("left")) {
+    candidates.push({
+      d: p.x - wa.x,
+      dock: { orientation: "vertical", side: "start" },
+    });
+  }
+  if (allowed.has("right")) {
+    candidates.push({
+      d: wa.x + wa.width - p.x,
+      dock: { orientation: "vertical", side: "end" },
+    });
+  }
+  if (allowed.has("top")) {
+    candidates.push({
+      d: p.y - wa.y,
+      dock: { orientation: "horizontal", side: "start" },
+    });
+  }
+  if (allowed.has("bottom")) {
+    candidates.push({
+      d: wa.y + wa.height - p.y,
+      dock: { orientation: "horizontal", side: "end" },
+    });
+  }
+  // Defensive — shouldn't happen unless the whole display is reserved.
+  if (candidates.length === 0) return { orientation: "vertical", side: "end" };
+  candidates.sort((a, b) => a.d - b.d);
+  return candidates[0].dock;
+}
+
+function currentDock(): DockConfig {
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    return { orientation: "vertical", side: "end" };
+  }
+  const b = overlayWindow.getBounds();
+  const center = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  return dockFromPoint(center, overlayDisplay());
+}
+
+function computeDockBoundsOn(
+  display: Electron.Display,
+  dock: DockConfig,
+): Electron.Rectangle {
+  const wa = display.workArea;
+  const { width, height } = overlaySize(
+    heads.length,
+    projects.length,
+    dock.orientation,
+  );
+  if (dock.orientation === "vertical") {
+    const x =
+      dock.side === "start"
+        ? wa.x + DOCK_EDGE_MARGIN
+        : wa.x + wa.width - width - DOCK_EDGE_MARGIN;
+    const y = wa.y + Math.floor((wa.height - height) / 2);
+    return { x, y, width, height };
+  }
+  const y =
+    dock.side === "start"
+      ? wa.y + DOCK_EDGE_MARGIN
+      : wa.y + wa.height - height - DOCK_EDGE_MARGIN;
+  const x = wa.x + Math.floor((wa.width - width) / 2);
+  return { x, y, width, height };
+}
+
+function computeDockBounds(dock: DockConfig): Electron.Rectangle {
+  return computeDockBoundsOn(overlayDisplay(), dock);
 }
 
 function ensureDockPlaceholder(): BrowserWindow {
   if (dockPlaceholderWindow && !dockPlaceholderWindow.isDestroyed()) {
     return dockPlaceholderWindow;
   }
+  // Radius matches the overlay's pill cap (half the short axis = OVERLAY_WIDTH/2).
+  // Both orientations share the same short axis, so the same radius gives
+  // perfect semi-circle caps whether the placeholder is tall or wide.
   const radius = Math.round(OVERLAY_WIDTH / 2);
-  // Single-pill shape matched to the overlay. Loaded from a data URL so this
-  // stays self-contained — no new renderer entry to wire through vite.
   const html = `<!doctype html><html><head><style>
     html,body{margin:0;padding:0;background:transparent;overflow:hidden;height:100%;}
     .pill{
@@ -956,9 +1140,10 @@ function ensureDockPlaceholder(): BrowserWindow {
       background:rgba(255,255,255,0.05);
     }
   </style></head><body><div class="pill"></div></body></html>`;
+  const initialSize = overlaySize(heads.length, projects.length, "vertical");
   dockPlaceholderWindow = new BrowserWindow({
-    width: OVERLAY_WIDTH,
-    height: overlayHeight(heads.length, projects.length),
+    width: initialSize.width,
+    height: initialSize.height,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -989,7 +1174,7 @@ function ensureDockPlaceholder(): BrowserWindow {
 
 function updateDockPlaceholder(): void {
   const ph = ensureDockPlaceholder();
-  ph.setBounds(computeDockBounds(currentDockSide()));
+  ph.setBounds(computeDockBounds(currentDock()));
   if (!ph.isVisible()) ph.showInactive();
 }
 
@@ -1019,10 +1204,12 @@ function animateOverlayTo(
     }
     const t = Math.min(1, (Date.now() - t0) / duration);
     const e = ease(t);
-    overlayWindow.setPosition(
-      Math.round(start.x + (target.x - start.x) * e),
-      Math.round(start.y + (target.y - start.y) * e),
-    );
+    overlayWindow.setBounds({
+      x: Math.round(start.x + (target.x - start.x) * e),
+      y: Math.round(start.y + (target.y - start.y) * e),
+      width: Math.round(start.width + (target.width - start.width) * e),
+      height: Math.round(start.height + (target.height - start.height) * e),
+    });
     repositionInfoIfVisible();
     repositionChatIfVisible();
     if (t < 1) setTimeout(step, 16);
@@ -1067,7 +1254,13 @@ ipcMain.handle("drag:end", (): void => {
     return;
   }
 
-  const target = computeDockBounds(currentDockSide());
+  const target = computeDockBounds(currentDock());
+  // Push the new dock to the overlay renderer first so flex direction + FLIP
+  // tracking swap before the window resizes. The renderer will see the new
+  // size via its resize event during the animation, but with the right flex
+  // orientation already in place.
+  sendOverlayConfig();
+  sendChatConfig();
   // Keep isDraggingStack on through the slide so bubble hovers under the
   // moving window don't pop the info card mid-tween.
   animateOverlayTo(target, DOCK_ANIM_MS, () => {

@@ -92,12 +92,14 @@ export function App(): JSX.Element {
       }}
     >
       <div ref={contentRef}>
-        <Header head={head} />
-        <Divider />
         {head?.kind === "agent" ? (
           <AgentPanel head={head} />
         ) : (
-          <SessionsSection sessions={sessions} />
+          <>
+            <Header head={head} />
+            <Divider />
+            <SessionsSection sessions={sessions} />
+          </>
         )}
       </div>
     </div>

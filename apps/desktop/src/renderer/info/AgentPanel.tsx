@@ -122,6 +122,13 @@ function AgentHeader({
           <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-card border border-border text-muted">
             {(agent?.mode ?? "cloud") === "local" ? "Local" : "Cloud"}
           </span>
+          <button
+            onClick={() => void window.chatheads.hideInfo()}
+            className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
+            aria-label="Close"
+          >
+            x
+          </button>
         </div>
         {agent?.description && (
           <div className="text-[12px] text-muted mt-0.5 truncate">

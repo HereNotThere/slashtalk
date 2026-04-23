@@ -8,6 +8,7 @@ import {
   integer,
   uuid,
   jsonb,
+  numeric,
   primaryKey,
   index,
   uniqueIndex,
@@ -235,3 +236,31 @@ export const heartbeats = pgTable("heartbeats", {
   kind: text("kind"),
   updatedAt: timestamp("updated_at", { withTimezone: true }),
 });
+
+// ── Session Insights (LLM-derived) ──────────────────────────
+
+export const sessionInsights = pgTable(
+  "session_insights",
+  {
+    sessionId: uuid("session_id")
+      .references(() => sessions.sessionId, { onDelete: "cascade" })
+      .notNull(),
+    analyzerName: text("analyzer_name").notNull(),
+    analyzerVersion: text("analyzer_version").notNull(),
+    output: jsonb("output").notNull(),
+    inputLineSeq: bigint("input_line_seq", { mode: "number" })
+      .notNull()
+      .default(0),
+    model: text("model").notNull(),
+    tokensIn: integer("tokens_in").default(0),
+    tokensOut: integer("tokens_out").default(0),
+    tokensCacheRead: integer("tokens_cache_read").default(0),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 6 }).default("0"),
+    analyzedAt: timestamp("analyzed_at", { withTimezone: true }).defaultNow(),
+    errorText: text("error_text"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.sessionId, t.analyzerName] }),
+    index("session_insights_analyzed_at_idx").on(t.analyzedAt),
+  ],
+);

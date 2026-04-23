@@ -13,6 +13,13 @@ export const config = Object.freeze({
   encryptionKey: required("ENCRYPTION_KEY"),
   baseUrl: required("BASE_URL"),
   port: parseInt(process.env.PORT || "10000", 10),
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? null,
+  analyzerTickMs: parseInt(process.env.ANALYZER_TICK_MS || "300000", 10),
+  analyzerMaxSessionsPerTick: parseInt(
+    process.env.ANALYZER_MAX_SESSIONS_PER_TICK || "200",
+    10,
+  ),
+  analyzerConcurrency: parseInt(process.env.ANALYZER_CONCURRENCY || "5", 10),
 });
 
 export type Config = typeof config;

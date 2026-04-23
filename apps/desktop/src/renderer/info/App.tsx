@@ -276,6 +276,14 @@ function SessionRow({
               {title}
             </div>
           </div>
+          {session.description && (
+            <div
+              className="mt-1 text-[12px] text-muted line-clamp-2"
+              style={showDot ? { marginLeft: 14 } : undefined}
+            >
+              {session.description}
+            </div>
+          )}
           {hasMeta && (
             <div
               className="mt-px flex items-center gap-1.5 text-[11.5px] text-muted min-w-0"
@@ -306,11 +314,17 @@ function SessionRow({
 }
 
 function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
+  // Prefer the LLM rolling narrative; fall back to the raw user prompt only
+  // if it adds info beyond the title.
   const summary =
-    session.lastUserPrompt && session.lastUserPrompt !== session.title
+    session.rollingSummary ??
+    (session.lastUserPrompt && session.lastUserPrompt !== session.title
       ? session.lastUserPrompt
-      : null;
+      : null);
+  const highlights = session.highlights ?? [];
   const recent = session.recent ?? [];
+  const hasAnything =
+    Boolean(summary) || highlights.length > 0 || recent.length > 0;
   return (
     <div className="px-lg pb-lg space-y-md">
       {summary && (
@@ -319,6 +333,16 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
           <div className="mt-1 text-[13px] text-fg leading-relaxed whitespace-pre-wrap">
             {summary}
           </div>
+        </div>
+      )}
+      {highlights.length > 0 && (
+        <div>
+          <SubHeader>Highlights</SubHeader>
+          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside">
+            {highlights.map((h, i) => (
+              <li key={i}>{h}</li>
+            ))}
+          </ul>
         </div>
       )}
       {recent.length > 0 && (
@@ -331,7 +355,7 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
           </div>
         </div>
       )}
-      {!summary && recent.length === 0 && (
+      {!hasAnything && (
         <div className="text-[12px] text-subtle">No activity yet.</div>
       )}
     </div>

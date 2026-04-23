@@ -19,17 +19,19 @@ import * as heartbeat from "./heartbeat";
 import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
-// BUBBLE_SIZE ↔ `w-12 h-12` on Bubble/ChatBubble (48px),
-// SPACING ↔ `gap-sm` on the stack (8px),
-// PADDING ↔ `p-lg` on the stack (16px). Drift here = popovers misalign.
-const BUBBLE_SIZE = 48;
-const SPACING = 8;
-const PADDING = 16;
-const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING * 2;
+// BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/ChatBubble (45px),
+// SPACING ↔ `gap-[14px]` on the stack (14px),
+// PADDING_X ↔ `px-md` on the stack (12px),
+// PADDING_Y ↔ `py-lg` on the stack (16px). Drift here = popovers misalign.
+const BUBBLE_SIZE = 45;
+const SPACING = 14;
+const PADDING_X = 12;
+const PADDING_Y = 16;
+const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
 
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
-const INFO_GAP = 10;
+const INFO_GAP = 8; // distance from the pill's outer edge to the info window
 
 const CHAT_WIDTH = 560;
 const CHAT_HEIGHT = 80; // transparent window; pill + breathing room for CSS shadow
@@ -114,7 +116,7 @@ function createMainWindow(): void {
 // Overlay always renders heads plus the chat bubble at the bottom, so add 1.
 function overlayHeight(count: number): number {
   const n = count + 1;
-  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING * 2;
+  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING_Y * 2;
 }
 
 interface SavedPosition {
@@ -291,14 +293,14 @@ function positionInfo(index: number): void {
   const screenMidX = screenFrame.x + screenFrame.width / 2;
   const alignRight = stackMidX < screenMidX;
 
-  const visualRight = stackBounds.x + stackBounds.width - PADDING;
-  const visualLeft = stackBounds.x + PADDING;
+  const pillRight = stackBounds.x + stackBounds.width;
+  const pillLeft = stackBounds.x;
   const infoX = alignRight
-    ? visualRight + INFO_GAP
-    : visualLeft - INFO_GAP - INFO_WIDTH;
+    ? pillRight + INFO_GAP
+    : pillLeft - INFO_GAP - INFO_WIDTH;
 
   const cell = BUBBLE_SIZE + SPACING;
-  const avatarTopY = stackBounds.y + PADDING + index * cell;
+  const avatarTopY = stackBounds.y + PADDING_Y + index * cell;
   const infoY = Math.round(avatarTopY - 16);
 
   // setBounds (vs setPosition) so we apply the latest tracked height atomically.
@@ -443,7 +445,7 @@ function positionChat(): void {
   const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
   const cell = BUBBLE_SIZE + SPACING;
   const bubbleCenterY =
-    stackBounds.y + PADDING + heads.length * cell + BUBBLE_SIZE / 2;
+    stackBounds.y + PADDING_Y + heads.length * cell + BUBBLE_SIZE / 2;
 
   const chatX =
     anchor === "left"

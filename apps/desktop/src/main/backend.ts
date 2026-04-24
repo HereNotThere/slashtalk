@@ -489,7 +489,7 @@ export async function ingestChunk(args: {
   project: string;
   fromLineSeq: number;
   prefixHash: string;
-  source?: "claude" | "codex";
+  source?: "claude" | "codex" | "cursor";
   body: string;
 }): Promise<IngestResponse> {
   if (!creds) throw new Error("Not signed in");

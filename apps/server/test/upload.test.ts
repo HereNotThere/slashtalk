@@ -486,6 +486,116 @@ describe("NDJSON ingest", () => {
     expect(session.topFilesRead).toEqual({ [filePath]: 1 });
     expect(session.events).toBe(codexEvents.length);
   });
+
+  it("aggregates Cursor transcript sessions into the existing snapshot shape", async () => {
+    const [repo] = await db
+      .insert(repos)
+      .values({
+        githubId: 3012,
+        fullName: "shared-org/slashtalk-cursor",
+        owner: "shared-org",
+        name: "slashtalk-cursor",
+      })
+      .returning();
+
+    await db.insert(userRepos).values({
+      userId: aliceUserId,
+      repoId: repo.id,
+      permission: "push",
+    });
+
+    const repoRoot = "/Users/alice/work/slashtalk-cursor";
+    await db.insert(deviceRepoPaths).values({
+      deviceId: aliceDeviceId,
+      repoId: repo.id,
+      localPath: repoRoot,
+    });
+
+    const sessionId = "2d3e7a61-aab3-4295-b17e-1c4154ec29db";
+    const cwd = `${repoRoot}/apps/desktop`;
+    const readPath = `${repoRoot}/package.json`;
+    const editPath = `${cwd}/src/main/uploader.ts`;
+
+    const cursorEvents = [
+      {
+        timestamp: "2026-04-24T06:20:00Z",
+        role: "user",
+        cwd,
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "<user_query>\nadd Cursor transcript upload support\n</user_query>",
+            },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-04-24T06:20:03Z",
+        role: "assistant",
+        cwd,
+        message: {
+          content: [
+            { type: "text", text: "Checking the existing uploader." },
+            { type: "tool_use", name: "Read", input: { path: readPath } },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-04-24T06:20:05Z",
+        role: "assistant",
+        cwd,
+        message: {
+          content: [
+            { type: "text", text: "Applying the first patch." },
+            { type: "tool_use", name: "StrReplace", input: { path: editPath } },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-04-24T06:20:10Z",
+        role: "assistant",
+        cwd,
+        message: {
+          content: [{ type: "text", text: "Cursor ingest plumbing is in place." }],
+        },
+      },
+    ];
+
+    const res = await fetch(
+      `${baseUrl}/v1/ingest?project=${encodeURIComponent(
+        "-Users-alice-work-slashtalk-cursor-apps-desktop"
+      )}&session=${sessionId}&fromLineSeq=0&source=cursor`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          Authorization: `Bearer ${aliceApiKey}`,
+        },
+        body: makeNdjson(cursorEvents),
+      }
+    );
+    expect(res.status).toBe(200);
+
+    const [session] = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.sessionId, sessionId));
+
+    expect(session.source).toBe("cursor");
+    expect(session.provider).toBeNull();
+    expect(session.repoId).toBe(repo.id);
+    expect(session.cwd).toBe(cwd);
+    expect(session.userMsgs).toBe(1);
+    expect(session.assistantMsgs).toBe(3);
+    expect(session.toolCalls).toBe(2);
+    expect(session.toolErrors).toBe(0);
+    expect(session.title).toContain("add Cursor transcript upload support");
+    expect(session.lastUserPrompt).toContain("Cursor transcript upload support");
+    expect(session.topFilesRead).toEqual({ [readPath]: 1 });
+    expect(session.topFilesEdited).toEqual({ [editPath]: 1 });
+    expect(session.events).toBe(cursorEvents.length);
+  });
 });
 
 // ── Sync State ───────────────────────────────────────────────

@@ -1,6 +1,7 @@
-// Watches both Claude and Codex session JSONLs and ships new lines to
-// /v1/ingest. A session is only tracked if its cwd resolves under one of the
-// user's tracked local repo paths.
+// Watches Claude, Codex, and Cursor session JSONLs and ships new lines to
+// /v1/ingest. Claude/Codex only upload when the cwd is under a tracked repo;
+// Cursor uploads whenever we can resolve a cwd/project and sharing is decided
+// server-side via repo matching.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -16,6 +17,7 @@ import * as store from "./store";
 
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), ".codex", "sessions");
+const CURSOR_PROJECTS_DIR = path.join(os.homedir(), ".cursor", "projects");
 
 const PREFIX_BYTES = 4096; // what the server expects prefixHash to cover
 const HEADER_BYTES = 64 * 1024; // how far in we scan for source metadata
@@ -52,6 +54,8 @@ interface SessionSync {
 }
 
 type SyncState = Record<string, SessionSync>;
+
+type JsonObj = Record<string, unknown>;
 
 export interface TrackedSessionInfo {
   sessionId: string;
@@ -117,9 +121,14 @@ function slugifyPath(cwd: string): string {
   return cwd.replaceAll("/", "-");
 }
 
+function isObj(v: unknown): v is JsonObj {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 function sourceForPath(filePath: string): EventSource | null {
   if (filePath.startsWith(CLAUDE_PROJECTS_DIR + path.sep)) return "claude";
   if (filePath.startsWith(CODEX_SESSIONS_DIR + path.sep)) return "codex";
+  if (filePath.startsWith(CURSOR_PROJECTS_DIR + path.sep)) return "cursor";
   return null;
 }
 
@@ -134,15 +143,30 @@ function isCodexSessionJsonl(filePath: string): boolean {
   return CODEX_ROLLOUT_RE.test(path.basename(filePath));
 }
 
+function isCursorSessionJsonl(filePath: string): boolean {
+  const stem = path.basename(filePath, ".jsonl");
+  return (
+    filePath.includes(`${path.sep}agent-transcripts${path.sep}`) &&
+    filePath.endsWith(".jsonl") &&
+    UUID_RE.test(stem) &&
+    path.basename(path.dirname(filePath)) === stem
+  );
+}
+
 function isSessionJsonl(filePath: string): boolean {
   const source = sourceForPath(filePath);
   if (source === "claude") return isClaudeSessionJsonl(filePath);
   if (source === "codex") return isCodexSessionJsonl(filePath);
+  if (source === "cursor") return isCursorSessionJsonl(filePath);
   return false;
 }
 
 function sessionIdFromPath(filePath: string, source: EventSource): string | null {
   if (source === "claude") {
+    const sessionId = path.basename(filePath, ".jsonl");
+    return UUID_RE.test(sessionId) ? sessionId : null;
+  }
+  if (source === "cursor") {
     const sessionId = path.basename(filePath, ".jsonl");
     return UUID_RE.test(sessionId) ? sessionId : null;
   }
@@ -177,7 +201,9 @@ async function readHeader(
   const header =
     source === "claude"
       ? scanClaudeHeader(buf, filePath)
-      : scanCodexHeader(buf, filePath);
+      : source === "codex"
+        ? scanCodexHeader(buf, filePath)
+        : await scanCursorHeader(buf, filePath);
   return { hash, header };
 }
 
@@ -247,6 +273,111 @@ function scanCodexHeader(buf: Buffer, filePath: string): SessionHeader {
   };
 }
 
+function cursorWorkspaceRootFromFile(filePath: string): string | null {
+  const marker = `${path.sep}agent-transcripts${path.sep}`;
+  const idx = filePath.indexOf(marker);
+  return idx === -1 ? null : filePath.slice(0, idx);
+}
+
+async function readFirstBytes(filePath: string, limit: number): Promise<string | null> {
+  try {
+    const fh = await fsp.open(filePath, "r");
+    try {
+      const buf = Buffer.alloc(limit);
+      const { bytesRead } = await fh.read(buf, 0, limit, 0);
+      return buf.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+async function readCursorWorkspaceCwd(projectRoot: string): Promise<string | null> {
+  const terminalsDir = path.join(projectRoot, "terminals");
+  let entries: fs.Dirent[];
+  try {
+    entries = await fsp.readdir(terminalsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const files = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".txt"))
+      .map(async (entry) => {
+        const fullPath = path.join(terminalsDir, entry.name);
+        try {
+          const stat = await fsp.stat(fullPath);
+          return { fullPath, mtimeMs: stat.mtimeMs };
+        } catch {
+          return null;
+        }
+      }),
+  );
+
+  for (const file of files.filter(Boolean).sort((a, b) => b!.mtimeMs - a!.mtimeMs)) {
+    const text = await readFirstBytes(file!.fullPath, 1024);
+    if (!text) continue;
+    const match = text.match(/^cwd:\s*(.+)$/m);
+    if (match?.[1]) return match[1].trim();
+  }
+
+  return null;
+}
+
+function cursorPathFromToolInput(input: JsonObj | null): string | null {
+  if (!input) return null;
+  if (typeof input.target_directory === "string") return input.target_directory;
+  if (typeof input.file_path === "string") return path.dirname(input.file_path);
+  if (typeof input.path === "string") return path.dirname(input.path);
+  return null;
+}
+
+function scanCursorToolCwd(buf: Buffer): string | null {
+  const text = buf.toString("utf8");
+  let start = 0;
+  while (start < text.length) {
+    const nl = text.indexOf("\n", start);
+    if (nl === -1) break;
+    const line = text.slice(start, nl);
+    start = nl + 1;
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as {
+        role?: unknown;
+        message?: { content?: unknown };
+      };
+      if (!isObj(parsed.message) || !Array.isArray(parsed.message.content)) continue;
+      for (const block of parsed.message.content) {
+        if (!isObj(block) || block.type !== "tool_use") continue;
+        const candidate = cursorPathFromToolInput(
+          isObj(block.input) ? block.input : null,
+        );
+        if (candidate) return candidate;
+      }
+    } catch {
+      // Partial line — just keep scanning.
+    }
+  }
+  return null;
+}
+
+async function scanCursorHeader(buf: Buffer, filePath: string): Promise<SessionHeader> {
+  const sessionId = sessionIdFromPath(filePath, "cursor");
+  const workspaceRoot = cursorWorkspaceRootFromFile(filePath);
+  const cwd =
+    (workspaceRoot ? await readCursorWorkspaceCwd(workspaceRoot) : null) ??
+    scanCursorToolCwd(buf);
+  return {
+    sessionId,
+    cwd,
+    version: null,
+    project: cwd ? slugifyPath(cwd) : null,
+  };
+}
+
 // Claude's first JSONL line is often a `file-history-snapshot` event with no
 // cwd; the field lives on later events. Try parsing complete lines first and
 // fall back to a regex scan for truncated headers.
@@ -281,6 +412,59 @@ async function readTail(
   const lastNl = buf.lastIndexOf(0x0a);
   if (lastNl === -1) return null;
   return { chunk: buf.subarray(0, lastNl + 1), consumed: lastNl + 1 };
+}
+
+function shouldUploadSource(source: EventSource, cwd: string): boolean {
+  return source === "cursor" ? true : localRepos.isPathTracked(cwd);
+}
+
+function synthesizeCursorChunk(
+  chunk: Buffer,
+  stat: fs.Stats,
+  fromLineSeq: number,
+  cwd: string | null,
+  version: string | null,
+): string {
+  const raw = chunk.toString("utf8");
+  const lines = raw.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  const startMs =
+    Number.isFinite(stat.birthtimeMs) && stat.birthtimeMs > 0
+      ? stat.birthtimeMs
+      : stat.mtimeMs;
+
+  return (
+    lines
+      .map((line, i) => {
+        const ts = new Date(startMs + (fromLineSeq + i) * 1000).toISOString();
+        try {
+          const parsed = JSON.parse(line);
+          if (isObj(parsed)) {
+            return JSON.stringify({
+              timestamp: ts,
+              ...(cwd ? { cwd } : {}),
+              ...(version ? { version } : {}),
+              ...parsed,
+            });
+          }
+          return JSON.stringify({
+            timestamp: ts,
+            cwd,
+            version,
+            payload: parsed,
+          });
+        } catch {
+          return JSON.stringify({
+            timestamp: ts,
+            cwd,
+            version,
+            malformed: true,
+            raw: line,
+          });
+        }
+      })
+      .join("\n") + "\n"
+  );
 }
 
 async function syncFile(filePath: string): Promise<void> {
@@ -383,7 +567,7 @@ async function syncFileInner(filePath: string): Promise<void> {
       return;
     }
 
-    entry.tracked = localRepos.isPathTracked(header.cwd);
+    entry.tracked = shouldUploadSource(source, header.cwd);
     persistSoon();
     if (!entry.tracked) {
       console.log(
@@ -407,6 +591,16 @@ async function ingestTail(
   if (!entry.project || entry.byteOffset >= stat.size) return;
   const tail = await readTail(fd, entry.byteOffset, stat.size);
   if (!tail) return;
+  const body =
+    entry.source === "cursor"
+      ? synthesizeCursorChunk(
+          tail.chunk,
+          stat,
+          entry.lineSeq,
+          entry.cwd,
+          entry.version,
+        )
+      : tail.chunk.toString("utf8");
 
   const res = await backend.ingestChunk({
     source: entry.source,
@@ -414,7 +608,7 @@ async function ingestTail(
     project: entry.project,
     fromLineSeq: entry.lineSeq,
     prefixHash: entry.prefixHash,
-    body: tail.chunk.toString("utf8"),
+    body,
   });
 
   entry.byteOffset += tail.consumed;
@@ -460,11 +654,12 @@ async function walkSessionFiles(
 }
 
 async function enumerateAllJsonl(): Promise<string[]> {
-  const [claude, codex] = await Promise.all([
+  const [claude, codex, cursor] = await Promise.all([
     walkSessionFiles(CLAUDE_PROJECTS_DIR, isClaudeSessionJsonl),
     walkSessionFiles(CODEX_SESSIONS_DIR, isCodexSessionJsonl),
+    walkSessionFiles(CURSOR_PROJECTS_DIR, isCursorSessionJsonl),
   ]);
-  return [...claude, ...codex];
+  return [...claude, ...codex, ...cursor];
 }
 
 function schedule(filePath: string): void {
@@ -519,11 +714,11 @@ export async function start(): Promise<void> {
   loadState();
   const trackedRoots = localRepos.list().map((repo) => repo.localPath);
   console.log(
-    `[uploader] starting, watching ${CLAUDE_PROJECTS_DIR} and ${CODEX_SESSIONS_DIR}, ` +
+    `[uploader] starting, watching ${CLAUDE_PROJECTS_DIR}, ${CODEX_SESSIONS_DIR}, and ${CURSOR_PROJECTS_DIR}, ` +
       `tracked roots: ${trackedRoots.length ? trackedRoots.join(", ") : "(none)"}`,
   );
 
-  for (const root of [CLAUDE_PROJECTS_DIR, CODEX_SESSIONS_DIR]) {
+  for (const root of [CLAUDE_PROJECTS_DIR, CODEX_SESSIONS_DIR, CURSOR_PROJECTS_DIR]) {
     try {
       await fsp.mkdir(root, { recursive: true });
     } catch (err) {
@@ -539,6 +734,7 @@ export async function start(): Promise<void> {
 
   watchRoot(CLAUDE_PROJECTS_DIR);
   watchRoot(CODEX_SESSIONS_DIR);
+  watchRoot(CURSOR_PROJECTS_DIR);
   await rescanAll();
 }
 

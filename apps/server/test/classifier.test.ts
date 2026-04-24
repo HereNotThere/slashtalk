@@ -181,3 +181,28 @@ describe("classifier: codex", () => {
     expect(n.kind).toBe("token_usage");
   });
 });
+
+describe("classifier: cursor", () => {
+  it("classifies user and assistant transcript lines by role", () => {
+    const user = classifyEvent("cursor", {
+      timestamp: "2026-04-24T06:20:00Z",
+      role: "user",
+      message: { content: [{ type: "text", text: "hello" }] },
+    });
+    const assistant = classifyEvent("cursor", {
+      timestamp: "2026-04-24T06:20:03Z",
+      role: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Checking the uploader." },
+          { type: "tool_use", name: "Read", input: { path: "/tmp/x.ts" } },
+        ],
+      },
+    });
+    expect(user.kind).toBe("user_msg");
+    expect(user.rawType).toBe("user");
+    expect(assistant.kind).toBe("assistant_msg");
+    expect(assistant.rawType).toBe("assistant");
+    expect(assistant.callId).toBeNull();
+  });
+});

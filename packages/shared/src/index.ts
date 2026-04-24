@@ -10,7 +10,7 @@ export const SessionState = {
 export type SessionState = (typeof SessionState)[keyof typeof SessionState];
 
 /** Source of a session's JSONL events */
-export const SOURCES = ["claude", "codex"] as const;
+export const SOURCES = ["claude", "codex", "cursor"] as const;
 export type EventSource = (typeof SOURCES)[number];
 
 /** LLM provider a session's model belongs to */
@@ -66,6 +66,7 @@ export interface RecentEvent {
 /** Full session snapshot — shared between server API and desktop client */
 export interface SessionSnapshot {
   id: string;
+  source: EventSource;
   project: string;
   source: EventSource;
   title: string | null;

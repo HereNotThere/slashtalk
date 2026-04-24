@@ -23,7 +23,9 @@ export function classifyEvent(
   if (!isObj(event)) {
     return norm({ ts: new Date(), rawType: "unknown", kind: "unknown" });
   }
-  return source === "claude" ? classifyClaude(event) : classifyCodex(event);
+  if (source === "claude") return classifyClaude(event);
+  if (source === "codex") return classifyCodex(event);
+  return classifyCursor(event);
 }
 
 // ── Claude ─────────────────────────────────────────────────────
@@ -124,6 +126,26 @@ function classifyCodex(ev: JsonObj): NormalizedEvent {
     kind: codexKind(topType, payloadType, payload),
     turnId: asString(payload.turn_id),
     callId: asString(payload.call_id),
+  });
+}
+
+// ── Cursor ─────────────────────────────────────────────────────
+// Cursor agent transcripts are plain JSONL chat turns:
+// { timestamp?, role, cwd?, version?, message: { content: [...] } }
+// Tool uses are embedded inside assistant message content blocks.
+
+const CURSOR_ROLE_KIND: Record<string, EventKind> = {
+  user: "user_msg",
+  assistant: "assistant_msg",
+  system: "system",
+};
+
+function classifyCursor(ev: JsonObj): NormalizedEvent {
+  const role = asString(ev.role) ?? "unknown";
+  return norm({
+    ts: parseTs(ev.timestamp),
+    rawType: role,
+    kind: CURSOR_ROLE_KIND[role] ?? "unknown",
   });
 }
 

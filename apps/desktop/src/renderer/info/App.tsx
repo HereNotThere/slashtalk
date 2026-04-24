@@ -468,9 +468,15 @@ function SessionRow({
               )}
             </div>
           )}
-          {session.pr && <PrLink pr={session.pr} />}
         </div>
       </button>
+      {/* Anchor rendered as a sibling of the toggle button so we don't nest
+          interactive elements (browsers auto-correct / drop the inner one). */}
+      {session.pr && (
+        <div className="px-lg -mt-1 pb-md">
+          <PrLink pr={session.pr} />
+        </div>
+      )}
       {expanded && <ExpandedSession session={session} />}
     </div>
   );
@@ -496,7 +502,7 @@ function PrLink({
       target="_blank"
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
-      className="mt-1 inline-flex items-center gap-1.5 text-[11.5px] hover:underline min-w-0"
+      className="flex items-center gap-1.5 text-[11.5px] hover:underline min-w-0"
       title={pr.title}
     >
       <PrIcon className={`shrink-0 ${PR_STATE_COLOR[pr.state]}`} />

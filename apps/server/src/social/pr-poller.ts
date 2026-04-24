@@ -10,10 +10,16 @@
 // replaying old PRs. That's the right tradeoff for a near-real-time presence
 // signal — historical PRs don't need to fan out.
 
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "../db";
-import { users, repos, sessions, pullRequests } from "../db/schema";
+import {
+  users,
+  repos,
+  sessions,
+  pullRequests,
+  userRepos,
+} from "../db/schema";
 import { decryptGithubToken } from "../auth/tokens";
 import { config } from "../config";
 import type { RedisBridge } from "../ws/redis-bridge";
@@ -52,7 +58,9 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startPrPoller(db: Database, redis: RedisBridge): void {
   if (timer) return;
-  void tick(db, redis);
+  // Backfill first so sessions on existing branches have a PR link before the
+  // first event poll; then begin polling.
+  void backfillOpenPrs(db, redis).then(() => tick(db, redis));
   timer = setInterval(() => void tick(db, redis), POLL_INTERVAL_MS);
 }
 
@@ -131,24 +139,173 @@ async function pollUser(
   if (!Array.isArray(events) || events.length === 0) return;
 
   const previous = lastSeenIdByUser.get(u.id);
-  // First poll for this user: baseline only — don't replay history.
   lastSeenIdByUser.set(u.id, events[0]!.id);
-  if (!previous) return;
 
-  // Walk newest → oldest until we hit the prior watermark.
+  // On first poll we still persist PRs we see (so links show up), but skip the
+  // celebratory `pr_activity` fan-out to avoid replaying historical pops.
+  const isBaselineOnly = !previous;
+
   const fresh: GithubEvent[] = [];
   for (const ev of events) {
-    if (ev.id === previous) break;
+    if (previous && ev.id === previous) break;
     fresh.push(ev);
   }
   if (fresh.length === 0) return;
 
   for (const ev of fresh) {
     const msg = toPrMessage(ev);
-    if (!msg) continue;
-    await fanOut(db, redis, msg);
+    if (!isBaselineOnly && msg) {
+      await fanOut(db, redis, msg);
+    }
     await persistPrFromEvent(db, redis, ev);
   }
+}
+
+/**
+ * One-shot backfill on boot: for every claimed repo that at least one user has
+ * an OAuth token for, fetch open PRs and persist them. This closes the gap
+ * between server start and the first fresh PullRequestEvent — without it,
+ * sessions whose branch already has an open PR would show no link until that
+ * PR is touched again.
+ *
+ * Uses `read:user` tokens which can read public repos fine; private repos
+ * without `repo` scope silently 404/403 and are skipped.
+ */
+export async function backfillOpenPrs(
+  db: Database,
+  redis: RedisBridge,
+): Promise<void> {
+  let userRows: { id: number; githubLogin: string; githubToken: string }[];
+  try {
+    userRows = await db
+      .select({
+        id: users.id,
+        githubLogin: users.githubLogin,
+        githubToken: users.githubToken,
+      })
+      .from(users)
+      .where(isNotNull(users.githubToken));
+  } catch (err) {
+    console.warn("[pr-poller] backfill: load users failed:", (err as Error).message);
+    return;
+  }
+  if (userRows.length === 0) return;
+
+  const userIds = userRows.map((u) => u.id);
+  const repoRows = await db
+    .select({ id: repos.id, fullName: repos.fullName, userId: userRepos.userId })
+    .from(repos)
+    .innerJoin(userRepos, eq(userRepos.repoId, repos.id))
+    .where(inArray(userRepos.userId, userIds));
+
+  // Pick one token per repo (any claimed user will do for public repos).
+  const tokenByUserId = new Map<number, string>();
+  for (const u of userRows) {
+    try {
+      tokenByUserId.set(u.id, await decryptGithubToken(u.githubToken, config.encryptionKey));
+    } catch {
+      // Skip users whose token can't be decrypted.
+    }
+  }
+
+  const seenRepo = new Set<number>();
+  for (const r of repoRows) {
+    if (seenRepo.has(r.id)) continue;
+    seenRepo.add(r.id);
+    const token = tokenByUserId.get(r.userId);
+    if (!token) continue;
+    await backfillRepo(db, redis, r.id, r.fullName, token);
+    await sleep(PER_USER_DELAY_MS);
+  }
+}
+
+async function backfillRepo(
+  db: Database,
+  redis: RedisBridge,
+  repoId: number,
+  fullName: string,
+  token: string,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://api.github.com/repos/${fullName}/pulls?state=open&per_page=50`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          Authorization: `token ${token}`,
+          "User-Agent": "slashtalk-pr-poller",
+        },
+      },
+    );
+  } catch (err) {
+    console.warn(`[pr-poller] backfill ${fullName}: fetch failed:`, (err as Error).message);
+    return;
+  }
+  if (!res.ok) {
+    // 404/403 → no access (e.g. private repo w/o `repo` scope); just skip.
+    return;
+  }
+  const prs = (await res.json()) as Array<{
+    number: number;
+    title: string;
+    html_url: string;
+    state: "open" | "closed";
+    head?: { ref?: string };
+    user?: { login?: string };
+    updated_at: string;
+  }>;
+  if (!Array.isArray(prs) || prs.length === 0) return;
+
+  for (const pr of prs) {
+    const headRef = pr.head?.ref;
+    if (!headRef || !pr.number) continue;
+    await db
+      .insert(pullRequests)
+      .values({
+        repoId,
+        number: pr.number,
+        headRef,
+        title: pr.title ?? "",
+        url: pr.html_url,
+        state: "open",
+        authorLogin: pr.user?.login ?? "",
+        updatedAt: new Date(pr.updated_at),
+      })
+      .onConflictDoUpdate({
+        target: [pullRequests.repoId, pullRequests.number],
+        set: {
+          headRef,
+          title: pr.title ?? "",
+          url: pr.html_url,
+          state: "open",
+          authorLogin: pr.user?.login ?? "",
+          updatedAt: new Date(pr.updated_at),
+        },
+      });
+
+    const matches = await db
+      .select({
+        sessionId: sessions.sessionId,
+        userId: sessions.userId,
+        githubLogin: users.githubLogin,
+      })
+      .from(sessions)
+      .innerJoin(users, eq(users.id, sessions.userId))
+      .where(and(eq(sessions.repoId, repoId), eq(sessions.branch, headRef)));
+    for (const m of matches) {
+      const upd: SessionUpdatedMessage = {
+        type: "session_updated",
+        session_id: m.sessionId,
+        user_id: m.userId,
+        github_login: m.githubLogin,
+        repo_id: repoId,
+      };
+      await redis.publish(`repo:${repoId}`, upd);
+    }
+  }
+  console.log(`[pr-poller] backfilled ${prs.length} open PR(s) for ${fullName}`);
 }
 
 /**
@@ -212,6 +369,9 @@ export async function persistPrFromEvent(
         updatedAt: new Date(ev.created_at),
       },
     });
+  console.log(
+    `[pr-poller] upserted PR ${ev.repo.name}#${number} head=${headRef} state=${state}`,
+  );
 
   // Announce to every session on this (repo, branch) so the UI refreshes.
   const matches = await db

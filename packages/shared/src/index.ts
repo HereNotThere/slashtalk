@@ -117,6 +117,24 @@ export interface FeedUser {
   repos: string[];
 }
 
+/** GitHub org the user is a member of. */
+export interface OrgSummary {
+  login: string;
+  name: string | null;
+  avatarUrl: string;
+}
+
+/** Repo within an org as returned by GitHub's /orgs/:org/repos endpoint,
+ *  scoped to those readable by the authenticated user. */
+export interface OrgRepo {
+  repoId: number;
+  fullName: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  permission: "pull" | "triage" | "push" | "maintain" | "admin";
+}
+
 /** One managed-agent session stored in the MCP backend's agent_sessions table.
  *  Private agent sessions never reach the backend, so every row returned here
  *  is visibility='team'. Both server and desktop speak this shape so there is

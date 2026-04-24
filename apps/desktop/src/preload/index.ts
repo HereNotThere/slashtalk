@@ -26,6 +26,7 @@ import type {
   TrackedRepo,
   Unsubscribe,
 } from "../shared/types";
+import type { OrgRepo, OrgSummary } from "@slashtalk/shared";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
   const handler = (_e: Electron.IpcRendererEvent, payload: T): void =>
@@ -219,6 +220,28 @@ const bridge: ChatHeadsBridge = {
       ) as Promise<TrackedRepo[]>,
     onTrackedReposChange: (cb) =>
       subscribe<TrackedRepo[]>("backend:trackedRepos", cb),
+  },
+
+  orgs: {
+    list: () => ipcRenderer.invoke("orgs:list") as Promise<OrgSummary[]>,
+    activeOrg: () =>
+      ipcRenderer.invoke("orgs:activeOrg") as Promise<string | null>,
+    setActive: (login) =>
+      ipcRenderer.invoke("orgs:setActive", login) as Promise<void>,
+    onListChange: (cb) => subscribe<OrgSummary[]>("orgs:listChange", cb),
+    onActiveChange: (cb) => subscribe<string | null>("orgs:activeChange", cb),
+  },
+
+  repos: {
+    listForActiveOrg: () =>
+      ipcRenderer.invoke("repos:listForActiveOrg") as Promise<OrgRepo[]>,
+    selection: () =>
+      ipcRenderer.invoke("repos:selection") as Promise<string[]>,
+    toggle: (fullName) =>
+      ipcRenderer.invoke("repos:toggle", fullName) as Promise<string[]>,
+    onUpdate: (cb) => subscribe<OrgRepo[]>("repos:update", cb),
+    onSelectionChange: (cb) =>
+      subscribe<string[]>("repos:selectionChange", cb),
   },
 
   debug: {

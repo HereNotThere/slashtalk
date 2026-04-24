@@ -1,22 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { OrgRepo, OrgSummary } from "@slashtalk/shared";
-import type { BackendAuthState } from "../../shared/types";
+import { useEffect, useState } from "react";
+import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 
 export function App(): JSX.Element {
   useAutoResize();
 
   const auth = useBackendAuth();
-  const orgs = useOrgs();
-  const activeOrgLogin = useActiveOrg();
-  const repos = useOrgRepos();
-  const selected = useRepoSelection();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-
-  const activeOrg = useMemo(
-    () => orgs.find((o) => o.login === activeOrgLogin) ?? null,
-    [orgs, activeOrgLogin],
-  );
+  const repos = useTrackedRepos();
+  const selected = useSelection();
+  const [busy, setBusy] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   if (!auth.signedIn) {
     return (
@@ -28,25 +21,32 @@ export function App(): JSX.Element {
     );
   }
 
+  async function onAdd(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setAddError(null);
+    try {
+      await window.chatheads.backend.addLocalRepo();
+    } catch (err) {
+      setAddError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Shell>
-      <OrgHeader
-        orgs={orgs}
-        active={activeOrg}
-        open={dropdownOpen}
-        onToggle={() => setDropdownOpen((v) => !v)}
-        onPick={async (login) => {
-          setDropdownOpen(false);
-          await window.chatheads.orgs.setActive(login);
-        }}
-      />
+      <Header />
       <Divider />
       <Body
-        hasOrgs={orgs.length > 0}
-        activeOrg={activeOrgLogin}
         repos={repos}
         selected={selected}
+        onRemove={(repoId) =>
+          void window.chatheads.backend.removeLocalRepo(repoId)
+        }
       />
+      {addError ? <ErrorNote message={addError} /> : null}
+      <AddButton busy={busy} onClick={onAdd} />
       <Divider />
       <Footer />
     </Shell>
@@ -65,122 +65,10 @@ function Divider(): JSX.Element {
   return <div className="h-px bg-divider" />;
 }
 
-// ---------- Header + org switcher ----------
-
-function OrgHeader({
-  orgs,
-  active,
-  open,
-  onToggle,
-  onPick,
-}: {
-  orgs: OrgSummary[];
-  active: OrgSummary | null;
-  open: boolean;
-  onToggle: () => void;
-  onPick: (login: string) => void;
-}): JSX.Element {
-  const multi = orgs.length > 1;
-
-  if (orgs.length === 0) {
-    return (
-      <div className="px-1 py-1 text-[12px] text-fg/60">
-        No GitHub orgs found.
-      </div>
-    );
-  }
-
-  const label = active?.name ?? active?.login ?? "Pick an org";
-  const avatar = active?.avatarUrl ?? "";
-
+function Header(): JSX.Element {
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={multi ? onToggle : undefined}
-        disabled={!multi}
-        className={`
-          w-full flex items-center gap-2 px-1.5 py-1 rounded-md
-          bg-transparent border-none text-fg cursor-${multi ? "pointer" : "default"} [font:inherit]
-          ${multi ? "hover:bg-surface-strong" : ""}
-        `}
-      >
-        <OrgAvatar src={avatar} />
-        <span className="flex-1 text-left text-[13px] truncate">{label}</span>
-        {multi ? (
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 10 10"
-            className={`text-fg/50 transition-transform ${open ? "rotate-180" : ""}`}
-            aria-hidden
-          >
-            <path
-              d="M2 4 L5 7 L8 4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        ) : null}
-      </button>
-      {open && multi ? (
-        <OrgDropdown
-          orgs={orgs}
-          activeLogin={active?.login ?? null}
-          onPick={onPick}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function OrgAvatar({ src }: { src: string }): JSX.Element {
-  return (
-    <span className="w-5 h-5 rounded-full overflow-hidden inline-flex items-center justify-center bg-surface-strong">
-      {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : null}
-    </span>
-  );
-}
-
-function OrgDropdown({
-  orgs,
-  activeLogin,
-  onPick,
-}: {
-  orgs: OrgSummary[];
-  activeLogin: string | null;
-  onPick: (login: string) => void;
-}): JSX.Element {
-  return (
-    <div
-      className="
-        absolute left-0 right-0 top-full mt-1 z-10
-        rounded-md bg-surface-strong shadow-lg
-        max-h-[240px] overflow-y-auto
-        py-1
-      "
-    >
-      {orgs.map((o) => (
-        <button
-          key={o.login}
-          type="button"
-          onClick={() => onPick(o.login)}
-          className={`
-            w-full flex items-center gap-2 px-1.5 py-1.5
-            bg-transparent border-none text-fg cursor-pointer [font:inherit]
-            text-left
-            ${o.login === activeLogin ? "bg-surface-strong-hover" : "hover:bg-surface-strong-hover"}
-          `}
-        >
-          <OrgAvatar src={o.avatarUrl} />
-          <span className="flex-1 text-[13px] truncate">
-            {o.name ?? o.login}
-          </span>
-        </button>
-      ))}
+    <div className="px-1 py-0.5 text-[11px] uppercase tracking-wide text-fg/55">
+      Your repos
     </div>
   );
 }
@@ -188,64 +76,34 @@ function OrgDropdown({
 // ---------- Body ----------
 
 function Body({
-  hasOrgs,
-  activeOrg,
   repos,
   selected,
+  onRemove,
 }: {
-  hasOrgs: boolean;
-  activeOrg: string | null;
-  repos: OrgRepo[];
-  selected: Set<string>;
+  repos: TrackedRepo[];
+  selected: Set<number>;
+  onRemove: (repoId: number) => void;
 }): JSX.Element {
-  if (!hasOrgs) {
-    return (
-      <div className="px-1.5 py-1 text-[12px] text-fg/55">
-        Install slashtalk on a GitHub org to get started.
-      </div>
-    );
-  }
-  if (!activeOrg) {
-    return (
-      <div className="px-1.5 py-1 text-[12px] text-fg/55">
-        Pick an org above.
-      </div>
-    );
-  }
   if (repos.length === 0) {
     return (
-      <div className="px-1.5 py-1 text-[12px] text-fg/55">Loading repos…</div>
+      <div className="px-1.5 py-1 text-[12px] text-fg/55">
+        No repos added yet. Click &ldquo;Add local repo&rdquo; below.
+      </div>
     );
   }
-  return <RepoList repos={repos} selected={selected} />;
-}
-
-function RepoList({
-  repos,
-  selected,
-}: {
-  repos: OrgRepo[];
-  selected: Set<string>;
-}): JSX.Element {
-  const sorted = useMemo(() => {
-    const rank: Record<OrgRepo["permission"], number> = {
-      admin: 0,
-      maintain: 1,
-      push: 2,
-      triage: 3,
-      pull: 4,
-    };
-    return [...repos].sort((a, b) => {
-      const r = rank[a.permission] - rank[b.permission];
-      if (r !== 0) return r;
-      return a.name.localeCompare(b.name);
-    });
-  }, [repos]);
-
+  // Stable alpha order — repos don't reorder when selection flips.
+  const sorted = [...repos].sort((a, b) =>
+    a.fullName.localeCompare(b.fullName),
+  );
   return (
     <div className="flex flex-col gap-0.5 max-h-[320px] overflow-y-auto">
       {sorted.map((r) => (
-        <RepoRow key={r.fullName} repo={r} checked={selected.has(r.fullName)} />
+        <RepoRow
+          key={r.repoId}
+          repo={r}
+          checked={selected.has(r.repoId)}
+          onRemove={() => onRemove(r.repoId)}
+        />
       ))}
     </div>
   );
@@ -254,27 +112,64 @@ function RepoList({
 function RepoRow({
   repo,
   checked,
+  onRemove,
 }: {
-  repo: OrgRepo;
+  repo: TrackedRepo;
   checked: boolean;
+  onRemove: () => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={() => window.chatheads.repos.toggle(repo.fullName)}
+    <div
       className="
-        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
-        bg-transparent border-none text-fg cursor-pointer [font:inherit]
+        group w-full flex items-center gap-2 px-1.5 py-1 rounded-md
         hover:bg-surface-strong
-        text-left
       "
     >
-      <Checkbox checked={checked} />
-      <span className="flex-1 min-w-0 flex items-center gap-1 text-[13px]">
-        <span className="truncate">{repo.name}</span>
-        {repo.private ? <LockGlyph /> : null}
-      </span>
-    </button>
+      <button
+        type="button"
+        onClick={() => window.chatheads.trackedRepos.toggle(repo.repoId)}
+        className="
+          flex-1 min-w-0 flex items-center gap-2
+          bg-transparent border-none text-fg cursor-pointer [font:inherit]
+          text-left
+        "
+      >
+        <Checkbox checked={checked} />
+        <span className="flex-1 min-w-0 flex flex-col">
+          <span className="truncate text-[13px] leading-tight">
+            {repo.fullName}
+          </span>
+          <span className="truncate text-[11px] text-fg/45 leading-tight">
+            {repo.localPath}
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        title="Remove repo"
+        aria-label={`Remove ${repo.fullName}`}
+        className="
+          w-5 h-5 flex items-center justify-center rounded
+          bg-transparent border-none text-fg/40 cursor-pointer [font:inherit]
+          opacity-0 group-hover:opacity-100
+          hover:bg-surface-strong-hover hover:text-fg
+        "
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+          <path
+            d="M2 2 L8 8 M8 2 L2 8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -282,7 +177,7 @@ function Checkbox({ checked }: { checked: boolean }): JSX.Element {
   return (
     <span
       className={`
-        w-[14px] h-[14px] rounded-[3px] inline-flex items-center justify-center
+        w-[14px] h-[14px] rounded-[3px] inline-flex items-center justify-center flex-shrink-0
         ${checked ? "bg-fg text-bg" : "bg-transparent border border-fg/40"}
       `}
     >
@@ -302,23 +197,34 @@ function Checkbox({ checked }: { checked: boolean }): JSX.Element {
   );
 }
 
-function LockGlyph(): JSX.Element {
+function AddButton({
+  busy,
+  onClick,
+}: {
+  busy: boolean;
+  onClick: () => void;
+}): JSX.Element {
   return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
-      className="text-fg/45 flex-shrink-0"
-      aria-hidden
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      className="
+        w-full px-2.5 py-1.5 rounded-md
+        bg-surface-strong border-none text-fg cursor-pointer [font:inherit]
+        text-[13px]
+        hover:bg-surface-strong-hover
+        disabled:opacity-[0.5] disabled:cursor-default
+      "
     >
-      <rect x="2" y="5" width="6" height="4" rx="0.8" fill="currentColor" />
-      <path
-        d="M3.2 5 V3.6 A1.8 1.8 0 0 1 6.8 3.6 V5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-    </svg>
+      {busy ? "Choosing folder…" : "+ Add local repo"}
+    </button>
+  );
+}
+
+function ErrorNote({ message }: { message: string }): JSX.Element {
+  return (
+    <div className="px-1.5 py-1 text-[12px] text-red-500/90">{message}</div>
   );
 }
 
@@ -327,7 +233,7 @@ function LockGlyph(): JSX.Element {
 function SignedOutPrompt(): JSX.Element {
   return (
     <div className="flex flex-col gap-md px-1 py-1">
-      <div className="text-[13px] text-fg">Sign in to pick repos.</div>
+      <div className="text-[13px] text-fg">Sign in to add your repos.</div>
       <FooterButton onClick={() => window.chatheads.backend.signIn()}>
         Sign in with GitHub
       </FooterButton>
@@ -382,44 +288,22 @@ function useBackendAuth(): BackendAuthState {
   return state;
 }
 
-function useOrgs(): OrgSummary[] {
-  const [orgs, setOrgs] = useState<OrgSummary[]>([]);
+function useTrackedRepos(): TrackedRepo[] {
+  const [repos, setRepos] = useState<TrackedRepo[]>([]);
   useEffect(() => {
-    void window.chatheads.orgs.list().then(setOrgs);
-    return window.chatheads.orgs.onListChange(setOrgs);
-  }, []);
-  return orgs;
-}
-
-function useActiveOrg(): string | null {
-  const [active, setActive] = useState<string | null>(null);
-  useEffect(() => {
-    void window.chatheads.orgs.activeOrg().then(setActive);
-    return window.chatheads.orgs.onActiveChange(setActive);
-  }, []);
-  return active;
-}
-
-function useOrgRepos(): OrgRepo[] {
-  const [repos, setRepos] = useState<OrgRepo[]>([]);
-  useEffect(() => {
-    void window.chatheads.repos.listForActiveOrg().then(setRepos);
-    return window.chatheads.repos.onUpdate(setRepos);
+    void window.chatheads.backend.listTrackedRepos().then(setRepos);
+    return window.chatheads.backend.onTrackedReposChange(setRepos);
   }, []);
   return repos;
 }
 
-function useRepoSelection(): Set<string> {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Track current invocation to avoid clobbering fresh pushes with a stale
-  // promise resolution.
-  const seq = useRef(0);
+function useSelection(): Set<number> {
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   useEffect(() => {
-    const mine = ++seq.current;
-    void window.chatheads.repos.selection().then((list) => {
-      if (seq.current === mine) setSelected(new Set(list));
+    void window.chatheads.trackedRepos.selection().then((list) => {
+      setSelected(new Set(list));
     });
-    return window.chatheads.repos.onSelectionChange((list) =>
+    return window.chatheads.trackedRepos.onSelectionChange((list) =>
       setSelected(new Set(list)),
     );
   }, []);

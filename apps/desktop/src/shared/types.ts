@@ -4,8 +4,6 @@
 import type {
   AgentSessionRow,
   FeedSessionSnapshot,
-  OrgRepo,
-  OrgSummary,
   SessionSnapshot,
   SpotifyPresence,
 } from "@slashtalk/shared";
@@ -446,22 +444,14 @@ export interface ChatHeadsBridge {
     onTrackedReposChange: (cb: (repos: TrackedRepo[]) => void) => Unsubscribe;
   };
 
-  // Org-scoped repo picker (tray popup). Backend stays unfiltered — these
-  // endpoints only drive the client-side filter of the chathead rail so the
-  // user controls which teammates they see locally.
-  orgs: {
-    list: () => Promise<OrgSummary[]>;
-    activeOrg: () => Promise<string | null>;
-    setActive: (login: string) => Promise<void>;
-    onListChange: (cb: (orgs: OrgSummary[]) => void) => Unsubscribe;
-    onActiveChange: (cb: (login: string | null) => void) => Unsubscribe;
-  };
-  repos: {
-    listForActiveOrg: () => Promise<OrgRepo[]>;
-    selection: () => Promise<string[]>;
-    toggle: (fullName: string) => Promise<string[]>;
-    onUpdate: (cb: (repos: OrgRepo[]) => void) => Unsubscribe;
-    onSelectionChange: (cb: (selected: string[]) => void) => Unsubscribe;
+  // Tray-popup local-repo picker. Selection is a per-device filter on top of
+  // the tracked-repo list — it only drives which peers appear on the chathead
+  // rail (peers without a session in any selected repo drop off). Adding a
+  // new tracked repo auto-selects it; removing one drops it from the set.
+  trackedRepos: {
+    selection: () => Promise<number[]>;
+    toggle: (repoId: number) => Promise<number[]>;
+    onSelectionChange: (cb: (selected: number[]) => void) => Unsubscribe;
   };
 
   debug: {

@@ -9,7 +9,6 @@ import type { ChatHead, RailDebugSnapshot } from "../shared/types";
 import * as backend from "./backend";
 import * as agentStore from "./agentStore";
 import * as localRepos from "./localRepos";
-import * as orgRepos from "./orgRepos";
 import { createEmitter } from "./emitter";
 import type { LocalAgent } from "./agentStore";
 
@@ -269,15 +268,19 @@ async function refresh(): Promise<void> {
     );
     const self = selfHead(selfLastTs) ?? initialSelf;
 
-    // Client-side filter: drop peers with no session in a repo the user has
-    // selected in the tray popup. Backend returns the full org roster; this
-    // narrows it to the user's local "repos I care about today" set. When no
-    // org is active (pre-pick), we pass through unfiltered.
-    const activeOrg = orgRepos.getActiveOrg();
-    const selectedRepos = orgRepos.getSelectedFullNamesSet();
-    const filteredPeers = activeOrg
-      ? peers.filter((p) => p.repos.some((r) => selectedRepos.has(r)))
-      : peers;
+    // Client-side filter: drop peers whose sessions don't land on a repo the
+    // user has locally tracked AND left selected in the tray popup. Backend
+    // returns the full social graph (everyone sharing a repo with us) — this
+    // narrows to "people working on the repos I care about today." Before the
+    // user has tracked any local repo, pass through so the rail isn't empty.
+    const selectedRepos = localRepos.selectedFullNames();
+    const trackedCount = localRepos.list().length;
+    const filteredPeers =
+      trackedCount === 0
+        ? peers
+        : peers.filter((p) =>
+            p.repos.some((r) => selectedRepos.has(r.toLowerCase())),
+          );
 
     const peerHeads = filteredPeers.map((t) =>
       headForUser(
@@ -442,8 +445,7 @@ export function start(): void {
   backend.onChange(scheduleRefresh);
   agentStore.onChange(scheduleRefresh);
   localRepos.onChange(scheduleRefresh);
-  orgRepos.onActiveOrgChange(scheduleRefresh);
-  orgRepos.onSelectionChange(scheduleRefresh);
+  localRepos.onSelectionChange(scheduleRefresh);
   setInterval(() => void refresh(), POLL_INTERVAL_MS);
   setInterval(rebucketTick, REBUCKET_TICK_MS);
   void refresh();

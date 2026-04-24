@@ -20,8 +20,6 @@ import type {
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
-  OrgRepo,
-  OrgSummary,
   SessionSnapshot,
   SpotifyPresence,
   SyncStateEntry,
@@ -405,17 +403,6 @@ async function doRefresh(): Promise<boolean> {
 
 export function listRepos(): Promise<RepoSummary[]> {
   return jsonFetch<RepoSummary[]>("/api/me/repos", { method: "GET" });
-}
-
-export function listOrgs(): Promise<OrgSummary[]> {
-  return jsonFetch<OrgSummary[]>("/api/me/orgs", { method: "GET" });
-}
-
-export function listOrgRepos(org: string): Promise<OrgRepo[]> {
-  return jsonFetch<OrgRepo[]>(
-    `/api/me/orgs/${encodeURIComponent(org)}/repos`,
-    { method: "GET" },
-  );
 }
 
 export function claimRepo(fullName: string): Promise<RepoSummary> {

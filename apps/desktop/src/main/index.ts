@@ -1743,19 +1743,9 @@ function emitSessionsChange(agentId: string): void {
 }
 
 ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
-ipcMain.handle("chatheads:signIn", async () => {
-  await chatheadsAuth.signIn();
-  try {
-    await installMcp.install("claude-code", chatheadsAuth.getToken());
-  } catch (err) {
-    console.warn("auto-install after sign-in failed:", err);
-  }
-});
+ipcMain.handle("chatheads:signIn", () => chatheadsAuth.signIn());
 ipcMain.handle("chatheads:cancelSignIn", () => chatheadsAuth.cancelSignIn());
-ipcMain.handle("chatheads:signOut", async () => {
-  await chatheadsAuth.signOut();
-  await installMcp.uninstall("claude-code");
-});
+ipcMain.handle("chatheads:signOut", () => chatheadsAuth.signOut());
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
@@ -1771,10 +1761,19 @@ function applySyncForAuth(signedIn: boolean): void {
     void uploader.start();
     void heartbeat.start();
     ws.start();
+    const apiKey = backend.getApiKey();
+    if (apiKey) {
+      void installMcp
+        .install("claude-code", apiKey)
+        .catch((err) => console.warn("installMcp.install failed:", err));
+    }
   } else {
     heartbeat.stop();
     uploader.reset();
     ws.stop();
+    void installMcp
+      .uninstall("claude-code")
+      .catch((err) => console.warn("installMcp.uninstall failed:", err));
   }
 }
 

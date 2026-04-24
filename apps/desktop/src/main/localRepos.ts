@@ -240,7 +240,22 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
     throw new Error(`${fullName} is already tracked`);
   }
 
-  const claimed = await backend.claimRepo(fullName);
+  let claimed;
+  try {
+    claimed = await backend.claimRepo(fullName);
+  } catch (err) {
+    // The server-side claim-gate (core-beliefs #12) returns structured errors
+    // that carry a user-facing `message`. On `token_expired`, also flip the UI
+    // to signed-out — the stored OAuth token no longer sees this user's
+    // repos, so everything downstream is broken until they re-auth.
+    if (err instanceof backend.ClaimRepoError) {
+      if (err.kind === "token_expired") {
+        void backend.signOut().catch(() => {});
+      }
+      throw new Error(err.message);
+    }
+    throw err;
+  }
   const entry: TrackedRepo = {
     repoId: claimed.repoId,
     fullName: claimed.fullName,

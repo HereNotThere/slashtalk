@@ -405,11 +405,73 @@ export function listRepos(): Promise<RepoSummary[]> {
   return jsonFetch<RepoSummary[]>("/api/me/repos", { method: "GET" });
 }
 
-export function claimRepo(fullName: string): Promise<RepoSummary> {
-  return jsonFetch<RepoSummary>("/api/me/repos", {
-    method: "POST",
-    body: { fullName },
-  });
+/** Thrown by `claimRepo` with the server's structured error kind so callers
+ *  (e.g. the tray UI) can branch on `no_access` vs `token_expired` rather
+ *  than regexing the message. */
+export class ClaimRepoError extends Error {
+  constructor(
+    public readonly kind:
+      | "no_access"
+      | "token_expired"
+      | "rate_limited"
+      | "invalid_full_name"
+      | "upstream_unavailable"
+      | "unknown",
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "ClaimRepoError";
+  }
+}
+
+export async function claimRepo(fullName: string): Promise<RepoSummary> {
+  if (!creds) throw new Error("Not signed in");
+  const url = `${baseUrl()}/api/me/repos`;
+  const started = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Cookie: `session=${creds.jwt}`,
+      },
+      body: JSON.stringify({ fullName }),
+    });
+  } catch (err) {
+    logHttp(
+      "error",
+      "POST",
+      "/api/me/repos",
+      "network-error",
+      Date.now() - started,
+      err,
+    );
+    throw err;
+  }
+  const ms = Date.now() - started;
+  const text = await res.text();
+  logHttp("log", "POST", "/api/me/repos", String(res.status), ms);
+
+  if (res.ok) {
+    return text ? (JSON.parse(text) as RepoSummary) : (undefined as never);
+  }
+
+  // Server always returns structured { error, message } on non-2xx for this
+  // endpoint — see apps/server/src/user/routes.ts POST /api/me/repos.
+  let parsed: { error?: string; message?: string } | null = null;
+  try {
+    parsed = text ? (JSON.parse(text) as { error?: string; message?: string }) : null;
+  } catch {
+    parsed = null;
+  }
+  const kind = (parsed?.error ?? "unknown") as ClaimRepoError["kind"];
+  const message =
+    parsed?.message ??
+    `Claim failed (${res.status})`;
+  throw new ClaimRepoError(kind, message, res.status);
 }
 
 export async function listTeammates(): Promise<TeammateSummary[]> {

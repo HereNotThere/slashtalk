@@ -82,8 +82,10 @@ export const setupTokens = pgTable("setup_tokens", {
 
 export const repos = pgTable("repos", {
   id: serial("id").primaryKey(),
-  // githubId is only populated if we have push/repo scope — with read-only
-  // OAuth (read:user read:org) we identify repos by full_name instead.
+  // githubId is populated at claim time from `GET /repos/:owner/:name` once
+  // the user's OAuth token confirms access (see apps/server/src/user/routes.ts
+  // ::verifyRepoAccess). May be null for legacy rows predating the claim-gate;
+  // a backfill via scripts/reverify-claims.ts fills those on next sign-in.
   githubId: bigint("github_id", { mode: "number" }).unique(),
   fullName: text("full_name").unique().notNull(),
   owner: text("owner").notNull(),

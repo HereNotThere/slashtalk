@@ -139,14 +139,18 @@ const bridge: ChatHeadsBridge = {
   askChat: (messages: ChatMessage[]) =>
     ipcRenderer.invoke("chat:ask", messages) as Promise<ChatAskResponse>,
 
+  openSessionCard: (payload) =>
+    ipcRenderer.invoke("chat:openSessionCard", payload) as Promise<void>,
+
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 
   onInfoShow: (cb) =>
-    subscribe<{ head: ChatHead; sessions: InfoSession[] | null }>(
-      "info:show",
-      cb,
-    ),
+    subscribe<{
+      head: ChatHead;
+      sessions: InfoSession[] | null;
+      expandSessionId?: string | null;
+    }>("info:show", cb),
   onInfoHide: (cb) => {
     const handler = (): void => cb();
     ipcRenderer.on("info:hide", handler);

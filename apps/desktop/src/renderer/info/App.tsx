@@ -20,6 +20,10 @@ export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
   const [visible, setVisible] = useState(false);
+  const [expandRequest, setExpandRequest] = useState<{
+    id: string;
+    nonce: number;
+  } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Measure the inner content, not the card: the card is capped at max-h-screen
@@ -31,6 +35,14 @@ export function App(): JSX.Element {
       setHead(p.head);
       setSessions(p.sessions);
       setVisible(true);
+      // Re-request even when id matches a prior request — clicking the same
+      // card twice should re-expand if the user collapsed it in between.
+      if (p.expandSessionId) {
+        setExpandRequest((cur) => ({
+          id: p.expandSessionId!,
+          nonce: (cur?.nonce ?? 0) + 1,
+        }));
+      }
     });
     // Keep head/sessions on hide so the last content fades out instead of
     // collapsing; next show replaces them wholesale.
@@ -98,13 +110,19 @@ export function App(): JSX.Element {
           <>
             <Header head={head} />
             <Divider />
-            <RepoSessionsSection sessions={sessions} />
+            <RepoSessionsSection
+              sessions={sessions}
+              expandRequest={expandRequest}
+            />
           </>
         ) : (
           <>
             <Header head={head} />
             <Divider />
-            <SessionsSection sessions={sessions} />
+            <SessionsSection
+              sessions={sessions}
+              expandRequest={expandRequest}
+            />
           </>
         )}
       </div>
@@ -212,11 +230,23 @@ const DEFAULT_SESSION_LIMIT = 5;
 
 function SessionsSection({
   sessions,
+  expandRequest,
 }: {
   sessions: InfoSession[] | null;
+  expandRequest: { id: string; nonce: number } | null;
 }): JSX.Element {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+
+  // Honor external expand requests (e.g. from a chat-card click). Reveal the
+  // session if it's below the default limit, then expand it.
+  useEffect(() => {
+    if (!expandRequest || !sessions) return;
+    const idx = sessions.findIndex((s) => s.id === expandRequest.id);
+    if (idx < 0) return;
+    if (idx >= DEFAULT_SESSION_LIMIT) setShowAll(true);
+    setExpandedId(expandRequest.id);
+  }, [expandRequest, sessions]);
 
   if (sessions == null) {
     return (
@@ -276,12 +306,21 @@ function tsOf(s: InfoSession): number {
 
 function RepoSessionsSection({
   sessions,
+  expandRequest,
 }: {
   sessions: InfoSession[] | null;
+  expandRequest: { id: string; nonce: number } | null;
 }): JSX.Element {
   // Expansion state is shared across the two groups so expanding one session
   // collapses a previously-expanded one regardless of which group it's in.
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!expandRequest || !sessions) return;
+    if (sessions.some((s) => s.id === expandRequest.id)) {
+      setExpandedId(expandRequest.id);
+    }
+  }, [expandRequest, sessions]);
 
   if (sessions == null) {
     return (

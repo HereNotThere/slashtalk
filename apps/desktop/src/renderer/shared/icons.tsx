@@ -18,6 +18,25 @@ export function SearchIcon(): JSX.Element {
   );
 }
 
+export function CloseIcon(): JSX.Element {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M4 4 L12 12 M12 4 L4 12"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function SendIcon(): JSX.Element {
   return (
     <svg

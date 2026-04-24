@@ -122,20 +122,8 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
             </>
           )}
           <span className="shrink-0">{time}</span>
-          <span className="text-subtle shrink-0">·</span>
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-success/15 text-success text-[11px] font-medium shrink-0">
-            <Dot color="bg-success" />
-            active
-          </span>
         </div>
       </div>
-      <button
-        onClick={() => window.chatheads.hideInfo()}
-        className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
-        aria-label="Close"
-      >
-        ✕
-      </button>
     </div>
   );
 }
@@ -271,24 +259,18 @@ function SessionRow({
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            {showDot && <Dot color={DOT_COLOR[session.state]} />}
             <div className="text-[14px] font-medium text-fg flex-1 truncate">
               {title}
             </div>
+            {showDot && <Dot color={DOT_COLOR[session.state]} />}
           </div>
           {session.description && (
-            <div
-              className="mt-1 text-[12px] text-muted line-clamp-2"
-              style={showDot ? { marginLeft: 14 } : undefined}
-            >
+            <div className="mt-1 text-[12px] text-muted line-clamp-2">
               {session.description}
             </div>
           )}
           {hasMeta && (
-            <div
-              className="mt-px flex items-center gap-1.5 text-[11.5px] text-muted min-w-0"
-              style={showDot ? { marginLeft: 14 } : undefined}
-            >
+            <div className="mt-px flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
               {shrinkableParts.map((v, i) => (
                 <Fragment key={i}>
                   {i > 0 && <span className="text-subtle shrink-0">·</span>}
@@ -306,7 +288,6 @@ function SessionRow({
             </div>
           )}
         </div>
-        <Chevron open={expanded} />
       </button>
       {expanded && <ExpandedSession session={session} />}
     </div>
@@ -403,28 +384,6 @@ function fmtAgo(ts: string): string {
 
 function Dot({ color }: { color: string }): JSX.Element {
   return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />;
-}
-
-function Chevron({ open }: { open: boolean }): JSX.Element {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 14 14"
-      fill="none"
-      className="text-subtle shrink-0 transition-transform duration-150"
-      style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
-      aria-hidden
-    >
-      <path
-        d="M3.5 5.25 L7 8.75 L10.5 5.25"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 function ArrowIcon(): JSX.Element {

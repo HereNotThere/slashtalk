@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { SearchIcon, SendIcon } from "../shared/icons";
+import { CloseIcon, SendIcon } from "../shared/icons";
 
 // Pill-shaped input popover. Esc or blur (main handles blur) dismisses.
 // No submit handling yet — this is the visual shell; backend integration lands
@@ -55,9 +55,13 @@ export function App(): JSX.Element {
           ${mirrored ? "flex-row-reverse pr-2 pl-md" : "pl-2 pr-md"}
         `}
       >
-        <div className="w-10 h-10 rounded-full bg-surface flex items-center justify-center shrink-0 text-muted">
-          <SearchIcon />
-        </div>
+        <button
+          onClick={() => void window.chatheads.hideChat()}
+          className="w-10 h-10 rounded-full bg-surface flex items-center justify-center shrink-0 text-muted hover:opacity-70 transition-opacity cursor-pointer"
+          aria-label="Close"
+        >
+          <CloseIcon />
+        </button>
         <input
           ref={inputRef}
           value={value}

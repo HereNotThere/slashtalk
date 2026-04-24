@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ChatHead } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
-import { SearchIcon } from "../shared/icons";
+import { CloseIcon, SearchIcon } from "../shared/icons";
 
 const DRAG_THRESHOLD = 4;
 // Slightly longer than the longest CSS animation (last ring delay 0.4s + 1.4s)
@@ -129,29 +129,28 @@ export function App(): JSX.Element {
           onHoverLeave={hoverLeaveBubble}
         />
       ))}
-      <ChatBubble hidden={chatOpen} />
+      <ChatBubble open={chatOpen} />
     </div>
   );
 }
 
-function ChatBubble({ hidden }: { hidden: boolean }): JSX.Element {
+function ChatBubble({ open }: { open: boolean }): JSX.Element {
   return (
     <div
       data-bubble
       data-chat
-      title="Ask your team"
-      className={`
+      title={open ? "Close" : "Ask your team"}
+      className="
         relative w-[45px] h-[45px] rounded-full cursor-pointer
         flex items-center justify-center
         bg-black/15 text-white
         outline outline-1 -outline-offset-1 outline-bubble-outline
         transition-transform duration-150 ease-out
         hover:scale-[1.03] hover:bg-black/20
-        ${hidden ? "invisible" : ""}
-      `}
+      "
     >
       <div className="pointer-events-none scale-125">
-        <SearchIcon />
+        {open ? <CloseIcon /> : <SearchIcon />}
       </div>
     </div>
   );

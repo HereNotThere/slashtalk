@@ -330,6 +330,14 @@ export interface ChatHeadsBridge {
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
 
+  // Rail pin toggle. Pinned = always on top (default). Unpinned = rail acts
+  // like a normal app window, on top only when Slashtalk is focused.
+  rail: {
+    getPinned: () => Promise<boolean>;
+    setPinned: (pinned: boolean) => Promise<void>;
+    onPinnedChange: (cb: (pinned: boolean) => void) => Unsubscribe;
+  };
+
   // Project heads — GitHub repos the user has claimed. Rendered below the
   // teammate rail in the overlay; ignored by other windows.
   listProjects: () => Promise<ChatHead[]>;

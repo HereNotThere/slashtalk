@@ -45,7 +45,15 @@ import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
 import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
-import { setMacCornerRadius } from "./macCorners";
+import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
+
+declare global {
+  namespace Electron {
+    interface App {
+      isQuitting?: boolean;
+    }
+  }
+}
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
 // BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/ChatBubble (45px),
@@ -111,6 +119,119 @@ let infoHideGraceTimer: NodeJS.Timeout | null = null;
 let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
+const PINNED_KEY = "railPinned";
+
+// Pinned (default): rail floats above everything. Unpinned: rail behaves like
+// a normal app window — on top only when Slashtalk is focused.
+function getRailPinned(): boolean {
+  const v = store.get<boolean>(PINNED_KEY);
+  return v === undefined ? true : v;
+}
+
+function applyRailPinned(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const pinned = getRailPinned();
+  console.log(`[pin] applyRailPinned: target=${pinned} focused=${appIsFocused()}`);
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Rail floats when pinned always, or when unpinned-and-focused. Otherwise
+  // drops to normal so it sits behind frontmost app windows.
+  const shouldFloat = pinned || appIsFocused();
+  overlayWindow.setAlwaysOnTop(shouldFloat, "floating");
+  if (shouldFloat) overlayWindow.moveTop();
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
+  // Cursor polling runs in unpinned mode so the rail pops to floating when
+  // the cursor approaches it while Slashtalk is blurred — otherwise hover
+  // never fires cross-app.
+  if (pinned) stopHoverPolling();
+  else startHoverPolling();
+  const native = debugMacWindowState(overlayWindow);
+  console.log(
+    `[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`,
+  );
+}
+
+function appIsFocused(): boolean {
+  return BrowserWindow.getAllWindows().some(
+    (w) => !w.isDestroyed() && w.isFocused(),
+  );
+}
+
+// ---------- Cross-app hover polling ----------
+//
+// When the rail is unpinned and Slashtalk is blurred, the rail sits at normal
+// window level and macOS routes mouse events to the frontmost app's windows
+// above it. Hover never fires. To preserve hover-to-peek across apps, we poll
+// the cursor at 12.5Hz (cheap: one getCursorScreenPoint + rect test) and pop
+// the rail to floating level as soon as the cursor enters its bounds. When
+// the cursor leaves, we drop back after a short grace so the info popover
+// can take over tracking.
+
+const HOVER_POLL_INTERVAL_MS = 80;
+const HOVER_LEAVE_GRACE_MS = 200;
+// Pre-expand the hit rect slightly so we float just before the cursor crosses
+// the edge — otherwise the first pixel of entry gets eaten by the transition.
+const HOVER_EDGE_MARGIN = 6;
+
+let hoverPollTimer: NodeJS.Timeout | null = null;
+let hoverLeaveTimer: NodeJS.Timeout | null = null;
+
+function startHoverPolling(): void {
+  if (hoverPollTimer) return;
+  hoverPollTimer = setInterval(hoverPollTick, HOVER_POLL_INTERVAL_MS);
+}
+
+function stopHoverPolling(): void {
+  if (hoverPollTimer) {
+    clearInterval(hoverPollTimer);
+    hoverPollTimer = null;
+  }
+  if (hoverLeaveTimer) {
+    clearTimeout(hoverLeaveTimer);
+    hoverLeaveTimer = null;
+  }
+}
+
+function hoverPollTick(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  // Short-circuit when pinned or focused — the rail is already floating via
+  // normal pin/focus paths, so hover "just works" without our help.
+  if (getRailPinned() || appIsFocused()) return;
+  const cursor = screen.getCursorScreenPoint();
+  const b = overlayWindow.getBounds();
+  const inside =
+    cursor.x >= b.x - HOVER_EDGE_MARGIN &&
+    cursor.x <= b.x + b.width + HOVER_EDGE_MARGIN &&
+    cursor.y >= b.y - HOVER_EDGE_MARGIN &&
+    cursor.y <= b.y + b.height + HOVER_EDGE_MARGIN;
+  const isFloating = overlayWindow.isAlwaysOnTop();
+  if (inside && !isFloating) {
+    overlayWindow.setAlwaysOnTop(true, "floating");
+    overlayWindow.moveTop();
+    if (hoverLeaveTimer) {
+      clearTimeout(hoverLeaveTimer);
+      hoverLeaveTimer = null;
+    }
+  } else if (!inside && isFloating && !hoverLeaveTimer) {
+    hoverLeaveTimer = setTimeout(() => {
+      hoverLeaveTimer = null;
+      // Re-check state: don't drop if the user pinned or focused in the grace.
+      if (!overlayWindow || overlayWindow.isDestroyed()) return;
+      if (getRailPinned() || appIsFocused()) return;
+      overlayWindow.setAlwaysOnTop(false);
+    }, HOVER_LEAVE_GRACE_MS);
+  }
+}
+
+function broadcastRailPinned(): void {
+  const pinned = getRailPinned();
+  const targets = [overlayWindow, mainWindow, trayPopup].filter(
+    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
+  );
+  for (const w of targets) w.webContents.send("rail:pinned", pinned);
+}
 
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
@@ -198,6 +319,18 @@ function createMainWindow(): void {
     },
   });
   loadRenderer(mainWindow, "main");
+  // Hide-on-close rather than destroy. Rationale: the rail overlay is
+  // `focusable: false`, which Electron implements as NSPanel on macOS. An
+  // app whose only windows are NSPanels drops out of Cmd+Tab and the Dock's
+  // "Show All Windows". Keeping a hidden regular NSWindow around guarantees
+  // Slashtalk stays in the app switcher. Activating the app (dock/Cmd+Tab)
+  // shows it again.
+  mainWindow.on("close", (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      mainWindow?.hide();
+    }
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -305,7 +438,7 @@ function ensureOverlay(): BrowserWindow {
     // macOS recomputes against the pill mask instead of the original
     // rectangle.
     hasShadow: true,
-    alwaysOnTop: true,
+    alwaysOnTop: getRailPinned(),
     resizable: false,
     movable: false, // we drive drag manually via IPC + setPosition
     skipTaskbar: true,
@@ -324,8 +457,7 @@ function ensureOverlay(): BrowserWindow {
     },
   });
 
-  overlayWindow.setAlwaysOnTop(true, "floating");
-  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  applyRailPinned();
 
   // Pill ends — half the window width gives perfect semicircle caps at top
   // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
@@ -957,6 +1089,18 @@ function createTray(): void {
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
 ipcMain.handle("projects:list", (): ChatHead[] => projects);
+
+ipcMain.handle("rail:getPinned", (): boolean => {
+  const v = getRailPinned();
+  console.log(`[pin] ipc getPinned → ${v}`);
+  return v;
+});
+ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
+  console.log(`[pin] ipc setPinned(${pinned})`);
+  store.set(PINNED_KEY, !!pinned);
+  applyRailPinned();
+  broadcastRailPinned();
+});
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
 ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
@@ -1968,6 +2112,14 @@ function debugBackfillTimestamps(): void {
 }
 
 app.whenReady().then(() => {
+  // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
+  // "regular" but we set it explicitly, and force-show the dock icon in case
+  // something demoted us to accessory mode.
+  if (process.platform === "darwin") {
+    console.log("[app] setActivationPolicy(regular) + dock.show()");
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
   backend.restore();
   chatheadsAuth.restore();
   anthropic.restore();
@@ -1993,6 +2145,13 @@ app.whenReady().then(() => {
   }
 });
 
+app.on("before-quit", () => {
+  // Flag read by mainWindow's "close" handler to allow actual destruction
+  // during app quit (otherwise close is preventDefault'd and the app can't
+  // shut down cleanly).
+  app.isQuitting = true;
+});
+
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
 });
@@ -2003,6 +2162,32 @@ app.on("will-quit", () => {
 app.on("window-all-closed", () => {});
 
 app.on("activate", () => {
+  // Standard macOS reopen semantics: clicking the dock icon re-shows the
+  // main window. `createMainWindow` covers the (now-rare) case where it was
+  // actually destroyed.
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  else mainWindow.show();
+  else if (!mainWindow.isVisible()) mainWindow.show();
+  else mainWindow.focus();
+});
+
+// Unpinned mode: rail follows app focus. Float when active so hover works,
+// drop to normal when blurred so it sits behind other apps.
+app.on("did-become-active", () => {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (getRailPinned()) return;
+  overlayWindow.setAlwaysOnTop(true, "floating");
+  overlayWindow.moveTop();
+});
+
+app.on("did-resign-active", () => {
+  // Re-assert regular activation policy so the app survives the transition
+  // (macOS demotes us to accessory when the only visible window is a
+  // normal-level NSPanel).
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (getRailPinned()) return;
+  overlayWindow.setAlwaysOnTop(false);
 });

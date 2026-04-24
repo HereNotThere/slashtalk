@@ -4,6 +4,19 @@ import { useAutoResize } from "../shared/useAutoResize";
 
 export function App(): JSX.Element {
   useAutoResize();
+  const [pinned, setPinned] = useState<boolean>(true);
+
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.rail.getPinned().then((v) => {
+      if (alive) setPinned(v);
+    });
+    const off = window.chatheads.rail.onPinnedChange((v) => setPinned(v));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
 
   const auth = useBackendAuth();
   const repos = useTrackedRepos();
@@ -15,6 +28,14 @@ export function App(): JSX.Element {
     return (
       <Shell>
         <SignedOutPrompt />
+        <Divider />
+        <PinRow
+          pinned={pinned}
+          onChange={(v) => {
+            setPinned(v);
+            void window.chatheads.rail.setPinned(v);
+          }}
+        />
         <Divider />
         <Footer />
       </Shell>
@@ -47,6 +68,14 @@ export function App(): JSX.Element {
       />
       {addError ? <ErrorNote message={addError} /> : null}
       <AddButton busy={busy} onClick={onAdd} />
+      <Divider />
+      <PinRow
+        pinned={pinned}
+        onChange={(v) => {
+          setPinned(v);
+          void window.chatheads.rail.setPinned(v);
+        }}
+      />
       <Divider />
       <Footer />
     </Shell>
@@ -225,6 +254,32 @@ function AddButton({
 function ErrorNote({ message }: { message: string }): JSX.Element {
   return (
     <div className="px-1.5 py-1 text-[12px] text-red-500/90">{message}</div>
+  );
+}
+
+// ---------- Pin toggle ----------
+
+function PinRow({
+  pinned,
+  onChange,
+}: {
+  pinned: boolean;
+  onChange: (v: boolean) => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!pinned)}
+      className="
+        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
+        bg-transparent border-none text-fg cursor-pointer [font:inherit]
+        hover:bg-surface-strong
+        text-left
+      "
+    >
+      <Checkbox checked={pinned} />
+      <span className="flex-1 text-[13px]">Keep rail on top</span>
+    </button>
   );
 }
 

@@ -1893,7 +1893,6 @@ app.whenReady().then(() => {
   anthropic.restore();
   githubAuth.restore();
   localRepos.restore();
-  createMainWindow();
   createTray();
   rail.start();
   selfSession.start();

@@ -13,13 +13,50 @@ import { SendIcon } from "../shared/icons";
 const CITATION_TOKEN = /\[session:[0-9a-fA-F-]+\]/g;
 const CARDS_VISIBLE = 5;
 
+const SEND_GRADIENT = "var(--gradient-primary)";
+
+function SlashtalkSpinner(): JSX.Element {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 48 48"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className="slashtalk-spinner shrink-0"
+      aria-hidden
+    >
+      <rect width="48" height="48" rx="12" fill="url(#slashtalk-spinner-grad)" />
+      <circle className="dot-1" cx="13" cy="11" r="5" fill="white" />
+      <circle className="dot-2" cx="13" cy="24" r="5" fill="white" />
+      <circle className="dot-3" cx="13" cy="37" r="5" fill="white" />
+      <defs>
+        <linearGradient
+          id="slashtalk-spinner-grad"
+          x1="24"
+          y1="0"
+          x2="24"
+          y2="48"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#2ECF81" />
+          <stop offset="1" stopColor="#0BB764" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+const DEFAULT_GERUNDS = ["Thinking"];
+const GERUND_CYCLE_MS = 2200;
+
 const MARKDOWN_CLASSES =
-  "prose prose-invert text-fg/90 break-words text-sm leading-relaxed " +
-  "[&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 " +
+  "prose prose-invert text-fg/90 break-words text-[15px] leading-relaxed " +
+  "[&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-1 " +
   "[&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-code [&_code]:text-[0.9em] " +
   "[&_pre]:bg-code [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-auto " +
   "[&_pre_code]:bg-transparent [&_pre_code]:p-0 " +
-  "[&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold " +
+  "[&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-[15px] [&_h3]:font-semibold " +
   "[&_a]:text-link [&_a]:underline hover:[&_a]:text-link-hover";
 
 export function App(): JSX.Element {
@@ -97,7 +134,17 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
   const [followUp, setFollowUp] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [gerunds, setGerunds] = useState<string[]>(DEFAULT_GERUNDS);
+  const [gerundIdx, setGerundIdx] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!loading || gerunds.length <= 1) return;
+    const id = setInterval(() => {
+      setGerundIdx((i) => (i + 1) % gerunds.length);
+    }, GERUND_CYCLE_MS);
+    return () => clearInterval(id);
+  }, [loading, gerunds]);
 
   useEffect(() => {
     if (!message) return;
@@ -105,7 +152,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
     setMessages(initial);
     setFollowUp("");
     setError(null);
-    void ask(initial);
+    void ask(initial, message);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message]);
 
@@ -113,16 +160,28 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
 
-  async function ask(history: ChatMessage[]): Promise<void> {
+  async function ask(history: ChatMessage[], prompt: string): Promise<void> {
     if (loading) return;
     setLoading(true);
     setError(null);
+    setGerunds(DEFAULT_GERUNDS);
+    setGerundIdx(0);
+    const gerundPromise = window.chatheads
+      .fetchChatGerunds(prompt)
+      .then((words) => {
+        if (words && words.length > 0) {
+          setGerunds(words);
+          setGerundIdx(0);
+        }
+      })
+      .catch(() => {});
     try {
       const res = await window.chatheads.askChat(history);
       setMessages((prev) => [...prev, res.message]);
     } catch (err) {
       setError((err as Error).message || "Something went wrong");
     } finally {
+      void gerundPromise;
       setLoading(false);
     }
   }
@@ -136,7 +195,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
     ];
     setMessages(next);
     setFollowUp("");
-    void ask(next);
+    void ask(next, trimmed);
   }
 
   return (
@@ -149,7 +208,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
           m.role === "user" ? (
             <div key={i} className="flex justify-end">
               <div className="px-4 py-2.5 rounded-2xl bg-surface text-fg shadow-sm max-w-[85%]">
-                <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                <p className="text-[15px] leading-relaxed whitespace-pre-wrap break-words">
                   {m.content}
                 </p>
               </div>
@@ -169,14 +228,16 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
         )}
 
         {loading && (
-          <div className="flex items-center gap-2 text-sm text-muted">
-            <span className="inline-block w-2 h-2 rounded-full bg-muted animate-pulse" />
-            <span>Thinking...</span>
+          <div className="flex items-center gap-2.5 text-[14px]">
+            <SlashtalkSpinner />
+            <span className="shimmer-text italic">
+              {gerunds[gerundIdx] ?? gerunds[0]}...
+            </span>
           </div>
         )}
 
         {error && (
-          <div className="text-sm text-red-500 bg-red-500/10 px-3 py-2 rounded-md">
+          <div className="text-[14px] text-red-500 bg-red-500/10 px-3 py-2 rounded-md">
             {error}
           </div>
         )}
@@ -195,12 +256,13 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
             }}
             disabled={loading}
             placeholder={loading ? "Waiting for reply..." : "Ask a follow-up..."}
-            className="flex-1 bg-surface px-4 py-3 rounded-full border border-divider outline-none text-fg text-sm placeholder:text-muted focus:border-subtle transition-colors disabled:opacity-50"
+            className="flex-1 bg-surface px-4 py-3 rounded-full border border-divider outline-none text-fg text-[15px] placeholder:text-muted focus:border-subtle transition-colors disabled:opacity-50"
           />
           <button
             onClick={handleFollowUpSend}
             disabled={loading || !followUp.trim()}
-            className="w-12 h-12 rounded-full bg-chat flex items-center justify-center text-white hover:opacity-90 transition-opacity shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: SEND_GRADIENT }}
+            className="w-12 h-12 rounded-full flex items-center justify-center text-white shadow-[0_2px_6px_rgba(11,183,100,0.35)] hover:brightness-110 transition-[filter] shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="Send"
           >
             <SendIcon />

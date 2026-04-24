@@ -48,8 +48,9 @@
   --color-success: #37c76a;
   --color-warning: #e0a550;
   --color-info: #a78bdc;
-  --color-chat: #e6724a;
-  --color-chat-hover: #d9603a;
+  --color-chat: #1dc374;
+  --color-chat-hover: #0bb764;
+  --gradient-primary: linear-gradient(180deg, #2ecf81 0%, #0bb764 100%);
 
   /* translucent surfaces (used over vibrancy popover) */
   --color-surface: rgba(255, 255, 255, 0.06);

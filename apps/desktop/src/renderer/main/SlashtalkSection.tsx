@@ -3,7 +3,7 @@ import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 
 type Status = { kind: "ok" | "err"; text: string } | null;
 
-const PRIMARY_GRADIENT = "linear-gradient(180deg, #2ECF81 0%, #0BB764 100%)";
+const PRIMARY_GRADIENT = "var(--gradient-primary)";
 
 export function SlashtalkSection(): JSX.Element {
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });

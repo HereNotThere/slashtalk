@@ -6,3 +6,65 @@
     cursor: text;
   }
 }
+
+@keyframes slashtalk-dot {
+  0%, 60%, 100% {
+    opacity: 0.55;
+    transform: translateX(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateX(1.5px);
+  }
+}
+
+@keyframes slashtalk-icon-breathe {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(46, 207, 129, 0));
+  }
+  50% {
+    transform: scale(1.04);
+    filter: drop-shadow(0 0 6px rgba(46, 207, 129, 0.45));
+  }
+}
+
+.slashtalk-spinner {
+  animation: slashtalk-icon-breathe 2.4s ease-in-out infinite;
+}
+
+.slashtalk-spinner .dot-1 {
+  animation: slashtalk-dot 1.4s ease-in-out infinite;
+}
+.slashtalk-spinner .dot-2 {
+  animation: slashtalk-dot 1.4s ease-in-out 0.18s infinite;
+}
+.slashtalk-spinner .dot-3 {
+  animation: slashtalk-dot 1.4s ease-in-out 0.36s infinite;
+}
+
+@keyframes shimmer-text {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted) 0%,
+    var(--color-muted) 35%,
+    var(--color-fg) 50%,
+    var(--color-muted) 65%,
+    var(--color-muted) 100%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-text 3.2s linear infinite;
+}

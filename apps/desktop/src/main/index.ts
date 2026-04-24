@@ -29,6 +29,7 @@ import type {
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
+import * as orgRepos from "./orgRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
@@ -1851,9 +1852,31 @@ ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>
   localRepos.removeLocalRepo(repoId),
 );
 
+// -------- Org-scoped repo picker (tray popup) --------
+
+ipcMain.handle("orgs:list", () => orgRepos.getOrgs());
+ipcMain.handle("orgs:activeOrg", () => orgRepos.getActiveOrg());
+ipcMain.handle("orgs:setActive", (_e, login: string) =>
+  orgRepos.setActiveOrg(login),
+);
+ipcMain.handle("repos:listForActiveOrg", () => orgRepos.getReposForActiveOrg());
+ipcMain.handle("repos:selection", () => orgRepos.getSelectedFullNames());
+ipcMain.handle("repos:toggle", (_e, fullName: string) =>
+  orgRepos.toggleRepo(fullName),
+);
+
 function broadcastToMain(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
+  }
+}
+
+// Tray popup (statusbar renderer) is the primary consumer of orgs:* /
+// repos:* push channels. We still broadcast to main so any future settings
+// UI on the main window stays in sync without extra plumbing.
+function broadcastToTrayAndMain(channel: string, payload: unknown): void {
+  for (const w of [mainWindow, trayPopup]) {
+    if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
   }
 }
 
@@ -1870,7 +1893,23 @@ function broadcastAgentEvent(event: AgentStreamEvent): void {
 }
 
 backend.onChange((state) => broadcastToMain("backend:authState", state));
+// Tray popup shows sign-in state too — mirror to it so the CTA flips live.
+backend.onChange((state) =>
+  trayPopup && !trayPopup.isDestroyed()
+    ? trayPopup.webContents.send("backend:authState", state)
+    : undefined,
+);
 localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
+orgRepos.onOrgsChange((orgs) =>
+  broadcastToTrayAndMain("orgs:listChange", orgs),
+);
+orgRepos.onActiveOrgChange((login) =>
+  broadcastToTrayAndMain("orgs:activeChange", login),
+);
+orgRepos.onReposChange((repos) => broadcastToTrayAndMain("repos:update", repos));
+orgRepos.onSelectionChange((selected) =>
+  broadcastToTrayAndMain("repos:selectionChange", selected),
+);
 chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
 githubAuth.onChange((state) => broadcastToMain("github:state", state));
 anthropic.onConfiguredChange((configured) =>
@@ -1893,6 +1932,7 @@ app.whenReady().then(() => {
   anthropic.restore();
   githubAuth.restore();
   localRepos.restore();
+  orgRepos.start();
   createMainWindow();
   createTray();
   rail.start();

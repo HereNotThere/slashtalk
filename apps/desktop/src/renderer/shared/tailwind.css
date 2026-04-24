@@ -5,6 +5,15 @@
   50% { opacity: 1; }
 }
 
+/* Pulsing ring around a rail chathead whose user has a live session. Shares
+ * cadence with shimmer-char so the rail ring and the info popover's
+ * "working now…" label feel like one signal. Floor is a touch higher than the
+ * text shimmer because a thin ring reads as blinking at low opacity. */
+@keyframes live-ring {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * Design tokens. Defined as CSS variables so themes swap without re-rendering.
  * Default values = dark theme. Light theme overrides live below.

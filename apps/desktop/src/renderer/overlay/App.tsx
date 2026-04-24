@@ -405,7 +405,7 @@ function Bubble({
           className="w-full h-full rounded-full object-cover pointer-events-none"
         />
       )}
-      {head.lastActionAt != null && (
+      {head.lastActionAt != null && !head.live && (
         <div
           className="
             absolute bottom-0 right-0 z-[2]
@@ -417,6 +417,16 @@ function Bubble({
         >
           {formatAge(Date.now() - head.lastActionAt)}
         </div>
+      )}
+      {head.live === true && (
+        <div
+          aria-hidden
+          className="
+            absolute inset-[-2px] rounded-full
+            border-2 border-accent pointer-events-none z-[3]
+          "
+          style={{ animation: "live-ring 1.6s ease-in-out infinite" }}
+        />
       )}
       {celebrating != null && <PrCelebration key={celebrating} />}
     </div>

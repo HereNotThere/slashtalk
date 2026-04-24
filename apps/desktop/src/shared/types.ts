@@ -33,8 +33,10 @@ export interface ChatHead {
   /** Epoch ms when this teammate's most recent PR opened/merged event landed.
    *  Renderer treats it as transient (animates while it's < a few seconds old). */
   prActivityAt?: number;
-  /** True when this user currently has at least one active MCP session. Renders
-   *  a green presence dot on the bubble. */
+  /** True when this user has at least one BUSY/ACTIVE session in the latest
+   *  feed poll — i.e. they're "working now". Renders a pulsing blue ring around
+   *  the bubble on the rail and suppresses the "last session" timestamp badge
+   *  so the live state reads cleanly. */
   live?: boolean;
   /** Set when the agent streamed new content while its info panel was not
    *  open. Cleared when the user opens the panel. Agent heads only. */

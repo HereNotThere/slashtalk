@@ -10,6 +10,7 @@ import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
+import { Markdown } from "../shared/Markdown";
 import { BranchIcon, ClaudeIcon, OpenAIIcon } from "../shared/icons";
 
 const REFRESH_MS = 15_000;
@@ -504,7 +505,8 @@ function SessionRow({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
+        aria-expanded={expanded}
+        className={`w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-start gap-2 border-l-2 ${expanded ? "border-success/70" : "border-transparent"}`}
       >
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-medium text-fg truncate">
@@ -589,17 +591,19 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
       {summary && (
         <div>
           <SubHeader>Summary</SubHeader>
-          <div className="mt-1 text-[13px] text-fg leading-relaxed whitespace-pre-wrap">
+          <Markdown className="mt-1 text-[13px] [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
             {summary}
-          </div>
+          </Markdown>
         </div>
       )}
       {highlights.length > 0 && (
         <div>
           <SubHeader>Highlights</SubHeader>
-          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside">
+          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside marker:text-subtle">
             {highlights.map((h, i) => (
-              <li key={i}>{h}</li>
+              <li key={i}>
+                <Markdown inline>{h}</Markdown>
+              </li>
             ))}
           </ul>
         </div>

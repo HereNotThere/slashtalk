@@ -48,6 +48,16 @@ interface ClaudeEventPayload {
   };
 }
 
+interface CursorEventPayload {
+  timestamp?: string;
+  role?: string;
+  cwd?: string;
+  version?: string;
+  message?: {
+    content?: string | ContentBlock[];
+  };
+}
+
 type JsonObj = Record<string, unknown>;
 
 interface SessionUpdates {
@@ -259,8 +269,8 @@ function summarizeClaudeEvent(event: ClaudeEventPayload): string {
   return event.type;
 }
 
-const FILE_TOOLS_READ = new Set(["Read"]);
-const FILE_TOOLS_EDIT = new Set(["Edit", "MultiEdit"]);
+const FILE_TOOLS_READ = new Set(["Read", "Grep", "Glob"]);
+const FILE_TOOLS_EDIT = new Set(["Edit", "MultiEdit", "StrReplace"]);
 const FILE_TOOLS_WRITE = new Set(["Write"]);
 
 function processClaudeEvents(
@@ -377,6 +387,95 @@ function processClaudeEvents(
         });
         state.inTurn = true;
       }
+    }
+  }
+
+  return finalizeState(state);
+}
+
+function extractCursorText(event: CursorEventPayload): string | null {
+  const content = event.message?.content;
+  if (!content) return null;
+  if (typeof content === "string") return content;
+  const textBlocks = content.filter((block) => block.type === "text" && block.text);
+  return textBlocks.map((block) => block.text).join("\n") || null;
+}
+
+function summarizeCursorEvent(event: CursorEventPayload): string {
+  if (event.role === "user") {
+    const text = extractCursorText(event);
+    return text ? truncate(text, 80) : "(user message)";
+  }
+  if (event.role === "assistant") {
+    const content = event.message?.content;
+    if (Array.isArray(content)) {
+      const toolUse = content.find((block) => block.type === "tool_use");
+      if (toolUse) return `tool: ${toolUse.name}`;
+      const text = content.find((block) => block.type === "text" && block.text);
+      if (text?.text) return truncate(text.text, 80);
+    }
+    return "(assistant)";
+  }
+  return event.role ?? "unknown";
+}
+
+function cursorToolPath(block: ContentBlock): string | null {
+  if (typeof block.input?.["target_directory"] === "string") {
+    return block.input["target_directory"];
+  }
+  if (typeof block.input?.["file_path"] === "string") {
+    return block.input["file_path"];
+  }
+  if (typeof block.input?.["path"] === "string") {
+    return block.input["path"];
+  }
+  return null;
+}
+
+function processCursorEvents(
+  current: CurrentSession,
+  newEvents: unknown[],
+): SessionUpdates {
+  const state = initState(current);
+
+  for (const raw of newEvents) {
+    const event = raw as CursorEventPayload;
+    state.events++;
+    if (!event.timestamp) continue;
+    const ts = updateTimestamps(state, event.timestamp);
+    if (!ts) continue;
+
+    if (event.cwd) state.cwd = event.cwd;
+    if (event.version) state.version = event.version;
+
+    pushRecent(state, event.timestamp, event.role ?? "unknown", summarizeCursorEvent(event));
+
+    if (event.role === "user") {
+      state.userMsgs++;
+      const promptText = extractCursorText(event);
+      if (promptText) {
+        state.title ??= truncate(promptText.split("\n")[0] ?? promptText, 80);
+        state.lastUserPrompt = truncate(promptText, 800);
+      }
+      state.lastBoundaryTs = ts;
+      continue;
+    }
+
+    if (event.role !== "assistant") continue;
+    state.assistantMsgs++;
+
+    const content = event.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block.type !== "tool_use" || !block.name) continue;
+      state.toolCalls++;
+      incMap(state.toolUseNames, block.name);
+
+      const target = cursorToolPath(block);
+      if (!target) continue;
+      if (FILE_TOOLS_READ.has(block.name)) incMap(state.topFilesRead, target);
+      if (FILE_TOOLS_EDIT.has(block.name)) incMap(state.topFilesEdited, target);
+      if (FILE_TOOLS_WRITE.has(block.name)) incMap(state.topFilesWritten, target);
     }
   }
 
@@ -630,7 +729,7 @@ export function processEvents(
   current: CurrentSession,
   newEvents: unknown[],
 ): SessionUpdates {
-  return source === "claude"
-    ? processClaudeEvents(current, newEvents)
-    : processCodexEvents(current, newEvents);
+  if (source === "claude") return processClaudeEvents(current, newEvents);
+  if (source === "codex") return processCodexEvents(current, newEvents);
+  return processCursorEvents(current, newEvents);
 }

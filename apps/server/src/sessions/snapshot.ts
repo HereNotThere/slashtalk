@@ -5,7 +5,7 @@
 
 import { inArray } from "drizzle-orm";
 import { classifySessionState } from "./state";
-import type { SessionState } from "@slashtalk/shared";
+import type { EventSource, SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessionInsights } from "../db/schema";
 import {
@@ -15,6 +15,7 @@ import {
 
 interface SessionRow {
   sessionId: string;
+  source: EventSource;
   project: string;
   title: string | null;
   model: string | null;
@@ -155,6 +156,7 @@ export function buildSnapshot(
 
   return {
     id: session.sessionId,
+    source: session.source,
     project: session.project,
     title: summaryTitle ?? session.title,
     description: summaryDescription,

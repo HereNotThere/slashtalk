@@ -37,7 +37,11 @@ export const chatRoutes = (db: Database) =>
         try {
           const message = await runChatAgent({
             db,
-            userId: user.id,
+            user: {
+              id: user.id,
+              githubLogin: user.githubLogin,
+              displayName: user.displayName,
+            },
             messages,
           });
           return { message };

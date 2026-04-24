@@ -275,6 +275,53 @@ describe("chat tool: get_team_activity", () => {
     const alice = result.teammates.find((t) => t.login === "alice");
     expect(alice).toBeUndefined();
   });
+
+  it("scopes to a single teammate via login filter", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "bob",
+    });
+    expect(result.teammates.map((t) => t.login)).toEqual(["bob"]);
+    expect(result.teammates[0].sessions[0].id).toBe(BOB_SESSION);
+  });
+
+  it("returns empty when login filter names someone the caller can't see", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "ghost-user-does-not-exist",
+    });
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("scopes to a single repo via repoFullName filter", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      repoFullName: "team/slashtalk",
+    });
+    const sessionIds = result.teammates.flatMap((t) =>
+      t.sessions.map((s) => s.id),
+    );
+    expect(sessionIds).toContain(BOB_SESSION);
+    expect(sessionIds).not.toContain(OUTSIDER_SESSION);
+  });
+
+  it("returns empty when repoFullName filter names a repo the caller can't see", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      repoFullName: "other/secret",
+    });
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("includes enriched payload fields (source, topFilesEdited, toolErrors, truncated lastUserPrompt)", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
+    const bob = result.teammates.find((t) => t.login === "bob")!;
+    const s = bob.sessions[0];
+    expect(s.source).toBe("claude");
+    expect(Array.isArray(s.topFilesEdited)).toBe(true);
+    expect(typeof s.toolErrors).toBe("number");
+    expect(s.lastUserPrompt === null || typeof s.lastUserPrompt === "string").toBe(true);
+  });
 });
 
 describe("chat tool: get_session", () => {

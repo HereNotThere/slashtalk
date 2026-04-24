@@ -2,18 +2,22 @@ import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { loadInsightsForSessions, toSnapshot } from "../sessions/snapshot";
-import type { SessionState } from "@slashtalk/shared";
+import type { EventSource, SessionState } from "@slashtalk/shared";
+import { normalizeFullName } from "../social/github-sync";
 
 export interface TeamActivitySessionSummary {
   id: string;
   title: string | null;
   description: string | null;
   state: SessionState;
+  source: EventSource;
   repo: string | null;
   branch: string | null;
   lastTs: string | null;
   currentTool: string | null;
   lastUserPrompt: string | null;
+  topFilesEdited: string[];
+  toolErrors: number;
 }
 
 export interface TeamActivityTeammate {
@@ -33,9 +37,26 @@ export interface TeamActivityResult {
 export interface GetTeamActivityArgs {
   sinceHours?: number;
   state?: SessionState;
+  login?: string;
+  repoFullName?: string;
 }
 
 const SESSIONS_PER_USER_CAP = 3;
+const LAST_PROMPT_MAX_CHARS = 240;
+const TOP_FILES_IN_ROLLUP = 3;
+const DEFAULT_LOOKBACK_HOURS = 48;
+const MAX_LOOKBACK_HOURS = 168;
+
+export interface ChatToolContext {
+  /** Caller's visible repo IDs, if the runner already fetched them. Skips
+   *  a per-request DB round-trip when provided. */
+  visibleRepoIds?: number[];
+}
+
+function truncate(s: string | null, max: number): string | null {
+  if (!s) return s;
+  return s.length <= max ? s : s.slice(0, max - 1) + "…";
+}
 
 /**
  * Per-teammate roll-up of recent sessions across repos the caller can see.
@@ -46,25 +67,56 @@ export async function getTeamActivityImpl(
   db: Database,
   userId: number,
   args: GetTeamActivityArgs,
+  ctx?: ChatToolContext,
 ): Promise<TeamActivityResult> {
-  const sinceHours = args.sinceHours ?? 24;
+  const sinceHours = args.sinceHours ?? DEFAULT_LOOKBACK_HOURS;
   const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
 
-  const myRepoRows = await db
-    .select({ id: userRepos.repoId })
-    .from(userRepos)
-    .where(eq(userRepos.userId, userId));
-  const myRepoIds = myRepoRows.map((r) => r.id);
-  if (myRepoIds.length === 0) {
+  let repoIdScope: number[];
+  if (ctx?.visibleRepoIds) {
+    repoIdScope = ctx.visibleRepoIds;
+  } else {
+    const myRepoRows = await db
+      .select({ id: userRepos.repoId })
+      .from(userRepos)
+      .where(eq(userRepos.userId, userId));
+    repoIdScope = myRepoRows.map((r) => r.id);
+  }
+  if (repoIdScope.length === 0) {
     return { teammates: [], since: since.toISOString() };
   }
 
-  const peerRows = await db
-    .selectDistinct({ userId: userRepos.userId })
-    .from(userRepos)
-    .where(inArray(userRepos.repoId, myRepoIds));
-  const peerIds = peerRows.map((r) => r.userId);
-  if (peerIds.length === 0) {
+  if (args.repoFullName) {
+    const [repoRow] = await db
+      .select({ id: repos.id })
+      .from(repos)
+      .where(eq(repos.fullName, normalizeFullName(args.repoFullName)))
+      .limit(1);
+    if (!repoRow || !repoIdScope.includes(repoRow.id)) {
+      return { teammates: [], since: since.toISOString() };
+    }
+    repoIdScope = [repoRow.id];
+  }
+
+  let userIdScope: number[];
+  if (args.login) {
+    const [userRow] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.githubLogin, args.login))
+      .limit(1);
+    if (!userRow) {
+      return { teammates: [], since: since.toISOString() };
+    }
+    userIdScope = [userRow.id];
+  } else {
+    const peerRows = await db
+      .selectDistinct({ userId: userRepos.userId })
+      .from(userRepos)
+      .where(inArray(userRepos.repoId, repoIdScope));
+    userIdScope = peerRows.map((r) => r.userId);
+  }
+  if (userIdScope.length === 0) {
     return { teammates: [], since: since.toISOString() };
   }
 
@@ -73,8 +125,8 @@ export async function getTeamActivityImpl(
     .from(sessions)
     .where(
       and(
-        inArray(sessions.userId, peerIds),
-        inArray(sessions.repoId, myRepoIds),
+        inArray(sessions.userId, userIdScope),
+        inArray(sessions.repoId, repoIdScope),
         gt(sessions.lastTs, since),
       ),
     )
@@ -97,7 +149,7 @@ export async function getTeamActivityImpl(
         avatarUrl: users.avatarUrl,
       })
       .from(users)
-      .where(inArray(users.id, peerIds)),
+      .where(inArray(users.id, userIdScope)),
     repoIdsInUse.length
       ? db
           .select({ id: repos.id, fullName: repos.fullName })
@@ -128,11 +180,16 @@ export async function getTeamActivityImpl(
       title: snapshot.title,
       description: snapshot.description,
       state: snapshot.state,
+      source: s.source,
       repo: s.repoId ? (repoMap.get(s.repoId)?.fullName ?? null) : null,
       branch: snapshot.branch,
       lastTs: snapshot.lastTs,
       currentTool: snapshot.currentTool?.name ?? null,
-      lastUserPrompt: snapshot.lastUserPrompt,
+      lastUserPrompt: truncate(snapshot.lastUserPrompt, LAST_PROMPT_MAX_CHARS),
+      topFilesEdited: snapshot.topFilesEdited
+        .slice(0, TOP_FILES_IN_ROLLUP)
+        .map(([path]) => path),
+      toolErrors: snapshot.toolErrors,
     });
     byUser.set(s.userId, arr);
   }
@@ -241,25 +298,37 @@ export interface ChatToolDefinition {
 export function buildChatTools(
   db: Database,
   userId: number,
+  ctx?: ChatToolContext,
 ): ChatToolDefinition[] {
   return [
     {
       name: "get_team_activity",
       description:
-        "Per-teammate roll-up of recent Claude Code sessions across repos you share with your team. Call this first for open-ended questions about what the team is working on. Returns teammates (including yourself) with up to 3 recent sessions each.",
+        "Per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Returns teammates (including the caller) with up to 3 recent sessions each. Each session carries title, description, state, repo, branch, lastTs, current tool, a truncated last user prompt, top edited files, tool-error count, and source (claude|codex). Filter by login or repoFullName to scope the answer; prefer those filters over fetching everyone and filtering locally.",
       input_schema: {
         type: "object",
         properties: {
           sinceHours: {
             type: "integer",
             minimum: 1,
-            maximum: 168,
-            description: "Lookback window in hours; default 24",
+            maximum: MAX_LOOKBACK_HOURS,
+            description:
+              "Lookback window in hours; default 48. Use a smaller value for 'right now' questions; larger (up to 168) for 'catch me up' over days.",
           },
           state: {
             type: "string",
             enum: ["busy", "active", "idle", "recent"],
             description: "Filter to a single session state",
+          },
+          login: {
+            type: "string",
+            description:
+              "GitHub login to scope the answer to a single teammate. Pass the bare login, not `@login`.",
+          },
+          repoFullName: {
+            type: "string",
+            description:
+              "owner/name to scope the answer to a single repo. Must be a repo the caller can see.",
           },
         },
       },
@@ -268,6 +337,7 @@ export function buildChatTools(
           db,
           userId,
           input as GetTeamActivityArgs,
+          ctx,
         );
         return { content: JSON.stringify(result) };
       },

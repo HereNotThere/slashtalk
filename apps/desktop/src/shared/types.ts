@@ -4,6 +4,8 @@
 import type {
   AgentSessionRow,
   FeedSessionSnapshot,
+  OrgRepo,
+  OrgSummary,
   SessionSnapshot,
   SpotifyPresence,
 } from "@slashtalk/shared";
@@ -376,6 +378,11 @@ export interface ChatHeadsBridge {
     login: string;
   }) => Promise<void>;
 
+  // LLM-picked "thinking state" phrases for the loading indicator, describing
+  // what the assistant is actually doing for this specific prompt. The UI
+  // cycles through them. Server guarantees a non-empty array.
+  fetchChatGerunds: (prompt: string) => Promise<string[]>;
+
   // Drag (overlay → main)
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;
@@ -437,6 +444,24 @@ export interface ChatHeadsBridge {
     addLocalRepo: () => Promise<TrackedRepo | null>;
     removeLocalRepo: (repoId: number) => Promise<TrackedRepo[]>;
     onTrackedReposChange: (cb: (repos: TrackedRepo[]) => void) => Unsubscribe;
+  };
+
+  // Org-scoped repo picker (tray popup). Backend stays unfiltered — these
+  // endpoints only drive the client-side filter of the chathead rail so the
+  // user controls which teammates they see locally.
+  orgs: {
+    list: () => Promise<OrgSummary[]>;
+    activeOrg: () => Promise<string | null>;
+    setActive: (login: string) => Promise<void>;
+    onListChange: (cb: (orgs: OrgSummary[]) => void) => Unsubscribe;
+    onActiveChange: (cb: (login: string | null) => void) => Unsubscribe;
+  };
+  repos: {
+    listForActiveOrg: () => Promise<OrgRepo[]>;
+    selection: () => Promise<string[]>;
+    toggle: (fullName: string) => Promise<string[]>;
+    onUpdate: (cb: (repos: OrgRepo[]) => void) => Unsubscribe;
+    onSelectionChange: (cb: (selected: string[]) => void) => Unsubscribe;
   };
 
   debug: {

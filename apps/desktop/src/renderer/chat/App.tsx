@@ -76,10 +76,11 @@ export function App(): JSX.Element {
         {value.trim() ? (
           <button
             onClick={handleSend}
+            style={{ background: "var(--gradient-primary)" }}
             className="
-              w-10 h-10 rounded-full bg-chat flex items-center justify-center
-              shrink-0 text-white shadow-[0_2px_4px_rgba(0,0,0,0.2)]
-              hover:opacity-90 transition-opacity cursor-pointer
+              w-10 h-10 rounded-full flex items-center justify-center
+              shrink-0 text-white shadow-[0_2px_6px_rgba(11,183,100,0.35)]
+              hover:brightness-110 transition-[filter] cursor-pointer
             "
             aria-label="Send"
           >

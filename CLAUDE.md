@@ -63,6 +63,8 @@ bun run typecheck
 ### OAuth is identity-only
 `/auth/github` requests **`read:user read:org` only** — no `repo` scope. We **cannot** call `/user/repos` or read repo contents server-side. Repos are **claimed** on demand: the desktop app reads a local clone's `.git/config`, extracts `owner/name`, and POSTs `/api/me/repos { fullName }`. The user proves possession by being able to clone it — GitHub gated access at clone time. `repos.github_id` is therefore nullable; don't treat its absence as a bug. The old `syncUserRepos` / `POST /api/me/sync-repos` are gone.
 
+Two **display-only** GitHub proxy endpoints exist for the tray popup repo picker: `GET /api/me/orgs` and `GET /api/me/orgs/:org/repos`. They decrypt the user's stored OAuth token and proxy `GET /user/orgs` / `GET /orgs/:org/repos` with a 60s in-memory cache. They do **not** feed the social graph or write anything — `/api/feed/users` keeps returning the full org roster. The picker drives a client-only filter in `apps/desktop/src/main/rail.ts`.
+
 ### Desktop auth flow
 On sign-in: (1) opens browser to `${BACKEND}/auth/github?desktop_port=NNNN` (loopback port chosen by OS), (2) `/auth/github/callback` redirects to `http://127.0.0.1:NNNN/callback?jwt=…&refreshToken=…&login=…` instead of setting cookies, (3) desktop calls `POST /api/me/setup-token` with the JWT, then `POST /v1/auth/exchange` with the setup token to get `{ apiKey, deviceId }`. Both credential sets live in Electron `safeStorage` (Keychain/DPAPI/libsecret). JWT goes to `/api/me/*` as `Cookie: session=…`; API key goes to `/v1/*` as `Authorization: Bearer …`. JWT refresh in `apps/desktop/src/main/backend.ts` is single-flight — concurrent 401s share one `/auth/refresh` call.
 
@@ -183,8 +185,9 @@ apps/desktop/src/
 │   ├── uploader.ts      # ~/.claude/projects watcher → /v1/ingest, strict tracking
 │   ├── heartbeat.ts     # ~/.claude/sessions watcher → /v1/heartbeat
 │   ├── ws.ts            # WS client (uses `ws` package, NOT global WebSocket)
-│   ├── rail.ts          # derived heads list, PR activity animation buffer
+│   ├── rail.ts          # derived heads list, PR activity animation buffer, client-side peer filter by orgRepos selection
 │   ├── localRepos.ts    # tracked repos store, .git/config parsing, worktree resolution
+│   ├── orgRepos.ts      # active-org + per-org selected-repo set for the tray popup filter (persisted in store.ts)
 │   ├── safeStore.ts     # encrypted creds via Electron safeStorage
 │   ├── store.ts         # plaintext JSON in app.getPath('userData')
 │   ├── macCorners.ts    # Cocoa FFI for overlay corner radius (vibrancy can't use CSS clip)
@@ -196,7 +199,7 @@ apps/desktop/src/
     ├── chat/            # input pill (560×80 transparent)
     ├── response/        # full-window response viewer
     ├── main/            # config UI, sign-in, tracked repos
-    ├── statusbar/       # tray menu
+    ├── statusbar/       # tray popup: org switcher + per-repo toggles (drives rail.ts filter)
     └── shared/          # tailwind.css, common components
 ```
 
@@ -254,6 +257,7 @@ Things that are **built and shipping**:
 - LLM analyzer scheduler with `summary` + `rolling_summary`, persisted to `session_insights`, fanned out as `session_insights_updated`.
 - PR poller → `pr_activity` → desktop celebration animation.
 - Desktop rail with 7 windows, drag-to-edge dock, hover-to-peek info popover, sign-in flow, tracked repos UI, WS reconnect with backoff.
+- Tray popup = org-scoped repo picker: pick one active GitHub org, toggle which repos of that org you want in your view. Filter applies client-side in `rail.ts` (peers without a session in any selected repo drop off). Backend stays unfiltered — everyone in your org is still visible on the feed.
 
 Things that are **not built or are rough**:
 - "Fork Session" CTA — not implemented anywhere.

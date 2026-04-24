@@ -4,7 +4,7 @@ import { SlashtalkSection } from "./SlashtalkSection";
 import { AgentsSection } from "./AgentsSection";
 import type { BackendAuthState, ChatHead } from "../../shared/types";
 
-const PRIMARY_GRADIENT = "linear-gradient(180deg, #2ECF81 0%, #0BB764 100%)";
+const PRIMARY_GRADIENT = "var(--gradient-primary)";
 
 export function App(): JSX.Element {
   const heads = useHeads();

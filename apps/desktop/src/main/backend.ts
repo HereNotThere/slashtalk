@@ -20,6 +20,8 @@ import type {
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
+  OrgRepo,
+  OrgSummary,
   SessionSnapshot,
   SpotifyPresence,
   SyncStateEntry,
@@ -405,6 +407,17 @@ export function listRepos(): Promise<RepoSummary[]> {
   return jsonFetch<RepoSummary[]>("/api/me/repos", { method: "GET" });
 }
 
+export function listOrgs(): Promise<OrgSummary[]> {
+  return jsonFetch<OrgSummary[]>("/api/me/orgs", { method: "GET" });
+}
+
+export function listOrgRepos(org: string): Promise<OrgRepo[]> {
+  return jsonFetch<OrgRepo[]>(
+    `/api/me/orgs/${encodeURIComponent(org)}/repos`,
+    { method: "GET" },
+  );
+}
+
 export function claimRepo(fullName: string): Promise<RepoSummary> {
   return jsonFetch<RepoSummary>("/api/me/repos", {
     method: "POST",
@@ -518,6 +531,23 @@ export async function askChat(messages: ChatMessage[]): Promise<ChatAskResponse>
     method: "POST",
     body,
   });
+}
+
+export async function fetchChatGerunds(prompt: string): Promise<string[]> {
+  const fallback = ["Thinking"];
+  try {
+    const res = await jsonFetch<{ words?: unknown }>("/api/chat/gerund", {
+      method: "POST",
+      body: { prompt },
+    });
+    if (!Array.isArray(res.words)) return fallback;
+    const words = res.words.filter(
+      (w): w is string => typeof w === "string" && w.length > 0,
+    );
+    return words.length > 0 ? words : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function sendHeartbeat(body: {

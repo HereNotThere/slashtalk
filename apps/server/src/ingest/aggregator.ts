@@ -236,22 +236,96 @@ function extractClaudeUserPromptText(event: ClaudeEventPayload): string | null {
   return textBlocks.map((block) => block.text).join("\n") || null;
 }
 
-function summarizeClaudeEvent(event: ClaudeEventPayload): string {
+function shortenPath(raw: string): string {
+  const normalized = raw.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length === 0) return raw;
+  if (parts.length === 1) return parts[0]!;
+  const tail = parts.slice(-2).join("/");
+  return tail;
+}
+
+function stringInput(input: Record<string, unknown> | undefined, key: string): string | null {
+  if (!input) return null;
+  const v = input[key];
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function summarizeToolUse(name: string, input: Record<string, unknown> | undefined): string {
+  switch (name) {
+    case "Edit":
+    case "MultiEdit":
+    case "Write":
+    case "Read": {
+      const path =
+        stringInput(input, "file_path") ?? stringInput(input, "path");
+      return path ? `${name} ${shortenPath(path)}` : name;
+    }
+    case "NotebookEdit": {
+      const path = stringInput(input, "notebook_path");
+      return path ? `NotebookEdit ${shortenPath(path)}` : name;
+    }
+    case "Bash": {
+      const cmd = stringInput(input, "command");
+      return cmd
+        ? truncate(`Bash: ${cmd.replace(/\s+/g, " ").trim()}`, 80)
+        : "Bash";
+    }
+    case "Grep": {
+      const pattern = stringInput(input, "pattern");
+      return pattern ? truncate(`Grep ${pattern}`, 80) : "Grep";
+    }
+    case "Glob": {
+      const pattern = stringInput(input, "pattern");
+      return pattern ? truncate(`Glob ${pattern}`, 80) : "Glob";
+    }
+    case "WebFetch": {
+      const url = stringInput(input, "url");
+      return url ? truncate(`WebFetch ${url}`, 80) : "WebFetch";
+    }
+    case "WebSearch": {
+      const query = stringInput(input, "query");
+      return query ? truncate(`WebSearch ${query}`, 80) : "WebSearch";
+    }
+    case "Task":
+    case "Agent": {
+      const subagent = stringInput(input, "subagent_type");
+      const description = stringInput(input, "description");
+      const label = subagent ? `Task (${subagent})` : "Task";
+      return description ? truncate(`${label}: ${description}`, 80) : label;
+    }
+    default:
+      return name;
+  }
+}
+
+function isOnlyToolResultUserEvent(event: ClaudeEventPayload): boolean {
+  const content = event.message?.content;
+  if (!Array.isArray(content) || content.length === 0) return false;
+  return content.every((block) => block.type === "tool_result");
+}
+
+function summarizeClaudeEvent(event: ClaudeEventPayload): string | null {
   if (event.type === "user") {
     const text = extractClaudeUserPromptText(event);
-    return text ? truncate(text, 80) : "(user message)";
+    if (text) return truncate(text, 80);
+    // Tool-result echoes are plumbing, not activity — drop them so the feed
+    // stays legible instead of every turn showing "(user message)".
+    if (isOnlyToolResultUserEvent(event)) return null;
+    return "(user message)";
   }
   if (event.type === "assistant") {
     const content = event.message?.content;
     if (Array.isArray(content)) {
       const toolUse = content.find((block) => block.type === "tool_use");
-      if (toolUse) return `tool: ${toolUse.name}`;
+      if (toolUse?.name) return summarizeToolUse(toolUse.name, toolUse.input);
       const thinking = content.find((block) => block.type === "thinking");
-      if (thinking) return "thinking...";
+      if (thinking) return "thinking…";
       const text = content.find((block) => block.type === "text" && block.text);
       if (text?.text) return truncate(text.text, 80);
     }
-    return "(assistant)";
+    // Stop-boundary or otherwise empty assistant turn — skip.
+    return null;
   }
   if (event.type === "attachment" && event.attachment?.type === "queued_command") {
     return `queued: ${truncate(event.attachment.prompt ?? "", 60)}`;
@@ -281,7 +355,10 @@ function processClaudeEvents(
     if (event.gitBranch) state.branch = event.gitBranch;
     if (event.version) state.version = event.version;
 
-    pushRecent(state, event.timestamp, event.type, summarizeClaudeEvent(event));
+    const summary = summarizeClaudeEvent(event);
+    if (summary !== null) {
+      pushRecent(state, event.timestamp, event.type, summary);
+    }
 
     if (event.type === "user") {
       if (!event.isSidechain) state.userMsgs++;

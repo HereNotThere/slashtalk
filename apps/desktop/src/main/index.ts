@@ -44,6 +44,8 @@ import * as agentIngest from "./agentIngest";
 import * as summarize from "./summarize";
 import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
+import * as spotify from "./spotify";
+import * as peerPresence from "./peerPresence";
 import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -552,13 +554,16 @@ async function showInfo(
   const cachedHeight = infoHeightByHead.get(head.id);
   if (cachedHeight) infoCurrentHeight = cachedHeight;
 
-  // Send cached sessions immediately if we have them; renderer handles the
-  // `null` case by loading on its own effect.
+  // Send cached sessions + current Spotify presence immediately; renderer
+  // handles the `null` cases by loading on its own effect.
   const cached = sessionCache.get(head.id) ?? null;
+  const login = rail.parseUserHeadId(head.id);
+  const spotifyPresence = login ? peerPresence.get(login) : null;
   win.webContents.send("info:show", {
     head,
     sessions: cached,
     expandSessionId: expandSessionId ?? null,
+    spotify: spotifyPresence,
   });
 
   // Animate position/size when switching heads on an already-visible window;
@@ -576,10 +581,12 @@ async function showInfo(
     void fetchSessionsForHead(head.id).then((loaded) => {
       if (selectedHeadId !== head.id) return;
       if (!infoWindow || infoWindow.isDestroyed()) return;
+      const refreshedLogin = rail.parseUserHeadId(head.id);
       infoWindow.webContents.send("info:show", {
         head,
         sessions: loaded,
         expandSessionId: expandSessionId ?? null,
+        spotify: refreshedLogin ? peerPresence.get(refreshedLogin) : null,
       });
     });
   }
@@ -1041,6 +1048,10 @@ ipcMain.handle(
   "chat:ask",
   (_e, messages: Parameters<typeof backend.askChat>[0]) =>
     backend.askChat(messages),
+);
+
+ipcMain.handle("chat:gerund", (_e, prompt: string) =>
+  backend.fetchChatGerunds(prompt),
 );
 
 // -------- Dock to edge (drag → release → snap) --------
@@ -1744,19 +1755,23 @@ function emitSessionsChange(agentId: string): void {
 }
 
 ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
-ipcMain.handle("chatheads:signIn", async () => {
-  await chatheadsAuth.signIn();
-  try {
-    await installMcp.install("claude-code", chatheadsAuth.getToken());
-  } catch (err) {
-    console.warn("auto-install after sign-in failed:", err);
-  }
-});
+ipcMain.handle("chatheads:signIn", () => chatheadsAuth.signIn());
 ipcMain.handle("chatheads:cancelSignIn", () => chatheadsAuth.cancelSignIn());
-ipcMain.handle("chatheads:signOut", async () => {
-  await chatheadsAuth.signOut();
-  await installMcp.uninstall("claude-code");
+ipcMain.handle("chatheads:signOut", () => chatheadsAuth.signOut());
+
+// Push a presence update into the info window only while it's showing the
+// head whose login just changed. Fallback poll lives in the renderer.
+peerPresence.onChange(({ login, presence }) => {
+  if (!infoWindow || infoWindow.isDestroyed() || !selectedHeadId) return;
+  const shownLogin = rail.parseUserHeadId(selectedHeadId);
+  if (shownLogin !== login) return;
+  infoWindow.webContents.send("info:presence", { login, spotify: presence });
 });
+
+ipcMain.handle(
+  "spotify:forLogin",
+  (_e, login: string) => peerPresence.get(login),
+);
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
@@ -1771,11 +1786,24 @@ function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
     void uploader.start();
     void heartbeat.start();
+    void spotify.start();
+    void peerPresence.start();
     ws.start();
+    const apiKey = backend.getApiKey();
+    if (apiKey) {
+      void installMcp
+        .install("claude-code", apiKey)
+        .catch((err) => console.warn("installMcp.install failed:", err));
+    }
   } else {
     heartbeat.stop();
     uploader.reset();
+    spotify.stop();
+    peerPresence.stop();
     ws.stop();
+    void installMcp
+      .uninstall("claude-code")
+      .catch((err) => console.warn("installMcp.uninstall failed:", err));
   }
 }
 
@@ -1857,7 +1885,12 @@ async function refreshInfoNow(): Promise<void> {
     const sessions = await fetchSessionsForHead(head.id);
     if (selectedHeadId !== head.id) return;
     if (!infoWindow || infoWindow.isDestroyed()) return;
-    infoWindow.webContents.send("info:show", { head, sessions });
+    const refreshLogin = rail.parseUserHeadId(head.id);
+    infoWindow.webContents.send("info:show", {
+      head,
+      sessions,
+      spotify: refreshLogin ? peerPresence.get(refreshLogin) : null,
+    });
   } catch (e) {
     console.warn("[ws] refreshInfoNow failed:", e);
   }

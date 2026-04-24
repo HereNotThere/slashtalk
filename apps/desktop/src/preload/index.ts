@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ChatAskResponse, ChatMessage } from "@slashtalk/shared";
+import type { ChatAskResponse, ChatMessage, SpotifyPresence } from "@slashtalk/shared";
 import type {
   AgentHistoryPage,
   AgentSessionRow,
@@ -143,6 +143,9 @@ const bridge: ChatHeadsBridge = {
   openSessionCard: (payload) =>
     ipcRenderer.invoke("chat:openSessionCard", payload) as Promise<void>,
 
+  fetchChatGerunds: (prompt: string) =>
+    ipcRenderer.invoke("chat:gerund", prompt) as Promise<string[]>,
+
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 
@@ -151,12 +154,18 @@ const bridge: ChatHeadsBridge = {
       head: ChatHead;
       sessions: InfoSession[] | null;
       expandSessionId?: string | null;
+      spotify: SpotifyPresence | null;
     }>("info:show", cb),
   onInfoHide: (cb) => {
     const handler = (): void => cb();
     ipcRenderer.on("info:hide", handler);
     return () => ipcRenderer.off("info:hide", handler);
   },
+  onInfoPresence: (cb) =>
+    subscribe<{ login: string; spotify: SpotifyPresence | null }>(
+      "info:presence",
+      cb,
+    ),
   hideInfo: () => ipcRenderer.invoke("info:hide") as Promise<void>,
 
   listSessionsForHead: (headId) =>
@@ -169,6 +178,12 @@ const bridge: ChatHeadsBridge = {
     ipcRenderer.invoke("agentSessions:forAgent", agentId) as Promise<
       AgentSessionRow[]
     >,
+
+  getSpotifyForLogin: (login) =>
+    ipcRenderer.invoke(
+      "spotify:forLogin",
+      login,
+    ) as Promise<SpotifyPresence | null>,
 
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,

@@ -1,10 +1,16 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { SessionState } from "@slashtalk/shared";
-import type { EventSource, RecentEvent, TokenUsage } from "@slashtalk/shared";
+import type {
+  EventSource,
+  RecentEvent,
+  SpotifyPresence,
+  TokenUsage,
+} from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
+import { Markdown } from "../shared/Markdown";
 import { BranchIcon, ClaudeIcon, OpenAIIcon } from "../shared/icons";
 
 const REFRESH_MS = 15_000;
@@ -17,6 +23,7 @@ export function App(): JSX.Element {
     id: string;
     nonce: number;
   } | null>(null);
+  const [spotify, setSpotify] = useState<SpotifyPresence | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Measure the inner content, not the card: the card is capped at max-h-screen
@@ -27,6 +34,7 @@ export function App(): JSX.Element {
     const offShow = window.chatheads.onInfoShow((p) => {
       setHead(p.head);
       setSessions(p.sessions);
+      setSpotify(p.spotify);
       setVisible(true);
       // Re-request even when id matches a prior request — clicking the same
       // card twice should re-expand if the user collapsed it in between.
@@ -37,12 +45,21 @@ export function App(): JSX.Element {
         }));
       }
     });
-    // Keep head/sessions on hide so the last content fades out instead of
-    // collapsing; next show replaces them wholesale.
+    // Keep head/sessions/spotify on hide so the last content fades out instead
+    // of collapsing; next show replaces them wholesale.
     const offHide = window.chatheads.onInfoHide(() => setVisible(false));
+    const offPresence = window.chatheads.onInfoPresence((p) => {
+      // Main already filtered to the visible head, but double-check in case
+      // a hide → show raced between the two events.
+      setHead((h) => {
+        if (h && h.label === p.login) setSpotify(p.spotify);
+        return h;
+      });
+    });
     return () => {
       offShow();
       offHide();
+      offPresence();
     };
   }, []);
 
@@ -55,8 +72,13 @@ export function App(): JSX.Element {
     let cancelled = false;
     const load = async (): Promise<void> => {
       try {
-        const rows = await window.chatheads.listSessionsForHead(head.id);
-        if (!cancelled) setSessions(rows);
+        const [rows, sp] = await Promise.all([
+          window.chatheads.listSessionsForHead(head.id),
+          window.chatheads.getSpotifyForLogin(head.label),
+        ]);
+        if (cancelled) return;
+        setSessions(rows);
+        setSpotify(sp);
       } catch {
         if (!cancelled) setSessions([]);
       }
@@ -72,7 +94,7 @@ export function App(): JSX.Element {
     // sessions intentionally not a dep — we only want this to (re)run when
     // the head changes; interval handles subsequent refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [head?.id]);
+  }, [head?.id, head?.label]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
@@ -111,6 +133,7 @@ export function App(): JSX.Element {
         ) : (
           <>
             <Header head={head} />
+            {spotify && <NowPlaying track={spotify} />}
             <Divider />
             <SessionsSection
               sessions={sessions}
@@ -120,6 +143,44 @@ export function App(): JSX.Element {
         )}
       </div>
     </div>
+  );
+}
+
+function NowPlaying({ track }: { track: SpotifyPresence }): JSX.Element {
+  const open = (): void => {
+    void window.chatheads.openExternal(track.url);
+  };
+  return (
+    <button
+      onClick={open}
+      title={`Open on Spotify: ${track.name} — ${track.artist}`}
+      className="w-full text-left px-lg pb-md flex items-center gap-2 min-w-0 group cursor-pointer"
+    >
+      <SpotifyIcon />
+      <div className="flex-1 min-w-0 text-[12.5px] leading-tight truncate">
+        <span className="text-fg font-medium">{track.name}</span>
+        <span className="text-subtle"> — </span>
+        <span className="text-muted">{track.artist}</span>
+      </div>
+      <span className="text-subtle text-[11px] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        open ↗
+      </span>
+    </button>
+  );
+}
+
+function SpotifyIcon(): JSX.Element {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="#1DB954"
+      className="shrink-0"
+      aria-hidden
+    >
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.586 14.424a.623.623 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 1 1-.277-1.215c3.809-.871 7.077-.496 9.713 1.115a.623.623 0 0 1 .206.857zm1.223-2.723a.78.78 0 0 1-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 1 1-.45-1.494c3.633-1.102 8.147-.568 11.232 1.328a.78.78 0 0 1 .255 1.075zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.935.935 0 1 1-.542-1.79c3.532-1.072 9.404-.865 13.115 1.338a.935.935 0 0 1-.956 1.608z" />
+    </svg>
   );
 }
 
@@ -444,7 +505,8 @@ function SessionRow({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
+        aria-expanded={expanded}
+        className={`w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-start gap-2 border-l-2 ${expanded ? "border-success/70" : "border-transparent"}`}
       >
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-medium text-fg truncate">
@@ -529,17 +591,19 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
       {summary && (
         <div>
           <SubHeader>Summary</SubHeader>
-          <div className="mt-1 text-[13px] text-fg leading-relaxed whitespace-pre-wrap">
+          <Markdown className="mt-1 text-[13px] [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
             {summary}
-          </div>
+          </Markdown>
         </div>
       )}
       {highlights.length > 0 && (
         <div>
           <SubHeader>Highlights</SubHeader>
-          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside">
+          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside marker:text-subtle">
             {highlights.map((h, i) => (
-              <li key={i}>{h}</li>
+              <li key={i}>
+                <Markdown inline>{h}</Markdown>
+              </li>
             ))}
           </ul>
         </div>

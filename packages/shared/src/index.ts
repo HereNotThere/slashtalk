@@ -272,3 +272,15 @@ export interface ApiError {
   error: string;
   message: string;
 }
+
+/** Spotify "now playing" broadcast from a desktop client. Null clears. */
+export interface SpotifyPresence {
+  trackId: string;
+  name: string;
+  artist: string;
+  /** https://open.spotify.com/track/<id> — safe to open in a browser. */
+  url: string;
+  isPlaying: boolean;
+  /** ISO-8601. Server stamps this on write. */
+  updatedAt: string;
+}

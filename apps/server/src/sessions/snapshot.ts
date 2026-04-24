@@ -5,7 +5,7 @@
 
 import { inArray } from "drizzle-orm";
 import { classifySessionState } from "./state";
-import type { SessionState, EventSource } from "@slashtalk/shared";
+import type { EventSource, SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessionInsights } from "../db/schema";
 import {

@@ -340,6 +340,16 @@ export interface ChatHeadsBridge {
     onPinnedChange: (cb: (pinned: boolean) => void) => Unsubscribe;
   };
 
+  // Opt-in toggle for broadcasting the user's Spotify "Now Playing" to peers.
+  // Off by default — flipping on triggers the macOS Automation permission
+  // dialog. Non-macOS clients see isSupported = false.
+  spotifyShare: {
+    isSupported: () => Promise<boolean>;
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => Promise<void>;
+    onEnabledChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+  };
+
   // Project heads — GitHub repos the user has claimed. Rendered below the
   // teammate rail in the overlay; ignored by other windows.
   listProjects: () => Promise<ChatHead[]>;

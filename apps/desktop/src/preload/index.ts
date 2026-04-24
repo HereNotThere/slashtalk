@@ -117,6 +117,16 @@ const bridge: ChatHeadsBridge = {
     onPinnedChange: (cb) => subscribe<boolean>("rail:pinned", cb),
   },
 
+  spotifyShare: {
+    isSupported: () =>
+      ipcRenderer.invoke("spotify:isSupported") as Promise<boolean>,
+    getEnabled: () =>
+      ipcRenderer.invoke("spotify:getShareEnabled") as Promise<boolean>,
+    setEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke("spotify:setShareEnabled", enabled) as Promise<void>,
+    onEnabledChange: (cb) => subscribe<boolean>("spotify:shareEnabled", cb),
+  },
+
   listProjects: () =>
     ipcRenderer.invoke("projects:list") as Promise<ChatHead[]>,
   onProjectsUpdate: (cb) => subscribe<ChatHead[]>("projects:update", cb),

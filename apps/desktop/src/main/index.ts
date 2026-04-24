@@ -120,12 +120,28 @@ let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
 const PINNED_KEY = "railPinned";
+const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
 
 // Pinned (default): rail floats above everything. Unpinned: rail behaves like
 // a normal app window — on top only when Slashtalk is focused.
 function getRailPinned(): boolean {
   const v = store.get<boolean>(PINNED_KEY);
   return v === undefined ? true : v;
+}
+
+// Opt-in: off by default so the macOS Automation permission dialog only fires
+// when the user explicitly ticks the toggle in the tray popup.
+function getSpotifyShareEnabled(): boolean {
+  return store.get<boolean>(SPOTIFY_SHARE_KEY) ?? false;
+}
+
+function updateSpotifyRunning(): void {
+  const shouldRun =
+    backend.getAuthState().signedIn &&
+    getSpotifyShareEnabled() &&
+    process.platform === "darwin";
+  if (shouldRun) void spotify.start();
+  else spotify.stop();
 }
 
 function applyRailPinned(): void {
@@ -1102,6 +1118,29 @@ ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
   broadcastRailPinned();
 });
 
+ipcMain.handle("spotify:isSupported", (): boolean => process.platform === "darwin");
+ipcMain.handle("spotify:getShareEnabled", (): boolean => getSpotifyShareEnabled());
+ipcMain.handle(
+  "spotify:setShareEnabled",
+  async (_e, enabled: boolean): Promise<void> => {
+    const next = !!enabled;
+    const prev = getSpotifyShareEnabled();
+    if (prev === next) return;
+    store.set(SPOTIFY_SHARE_KEY, next);
+    broadcastToTrayAndMain("spotify:shareEnabled", next);
+    // Turning off while signed in: clear peers immediately so the card
+    // disappears in seconds instead of waiting for the 120s Redis TTL.
+    if (prev && !next && backend.getAuthState().signedIn) {
+      try {
+        await backend.postSpotifyPresence(null);
+      } catch (err) {
+        console.warn("[spotify] clear on disable failed", err);
+      }
+    }
+    updateSpotifyRunning();
+  },
+);
+
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
 ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
 ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());
@@ -1929,7 +1968,7 @@ function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
     void uploader.start();
     void heartbeat.start();
-    void spotify.start();
+    updateSpotifyRunning();
     void peerPresence.start();
     ws.start();
     const apiKey = backend.getApiKey();
@@ -1941,7 +1980,7 @@ function applySyncForAuth(signedIn: boolean): void {
   } else {
     heartbeat.stop();
     uploader.reset();
-    spotify.stop();
+    updateSpotifyRunning();
     peerPresence.stop();
     ws.stop();
     void installMcp

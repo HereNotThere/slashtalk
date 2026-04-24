@@ -5,6 +5,8 @@ import { useAutoResize } from "../shared/useAutoResize";
 export function App(): JSX.Element {
   useAutoResize();
   const [pinned, setPinned] = useState<boolean>(true);
+  const [spotifySupported, setSpotifySupported] = useState<boolean>(false);
+  const [spotifyShare, setSpotifyShare] = useState<boolean>(false);
 
   useEffect(() => {
     let alive = true;
@@ -18,11 +20,33 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.spotifyShare.isSupported().then((v) => {
+      if (alive) setSpotifySupported(v);
+    });
+    void window.chatheads.spotifyShare.getEnabled().then((v) => {
+      if (alive) setSpotifyShare(v);
+    });
+    const off = window.chatheads.spotifyShare.onEnabledChange((v) =>
+      setSpotifyShare(v),
+    );
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
   const auth = useBackendAuth();
   const repos = useTrackedRepos();
   const selected = useSelection();
   const [busy, setBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  const onSpotifyShareChange = (v: boolean): void => {
+    setSpotifyShare(v);
+    void window.chatheads.spotifyShare.setEnabled(v);
+  };
 
   if (!auth.signedIn) {
     return (
@@ -36,6 +60,12 @@ export function App(): JSX.Element {
             void window.chatheads.rail.setPinned(v);
           }}
         />
+        {spotifySupported ? (
+          <SpotifyShareRow
+            enabled={spotifyShare}
+            onChange={onSpotifyShareChange}
+          />
+        ) : null}
         <Divider />
         <Footer />
       </Shell>
@@ -76,6 +106,12 @@ export function App(): JSX.Element {
           void window.chatheads.rail.setPinned(v);
         }}
       />
+      {spotifySupported ? (
+        <SpotifyShareRow
+          enabled={spotifyShare}
+          onChange={onSpotifyShareChange}
+        />
+      ) : null}
       <Divider />
       <Footer />
     </Shell>
@@ -279,6 +315,31 @@ function PinRow({
     >
       <Checkbox checked={pinned} />
       <span className="flex-1 text-[13px]">Keep rail on top</span>
+    </button>
+  );
+}
+
+function SpotifyShareRow({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!enabled)}
+      title={enabled ? undefined : "macOS will ask for automation permission"}
+      className="
+        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
+        bg-transparent border-none text-fg cursor-pointer [font:inherit]
+        hover:bg-surface-strong
+        text-left
+      "
+    >
+      <Checkbox checked={enabled} />
+      <span className="flex-1 text-[13px]">Share Spotify Now Playing</span>
     </button>
   );
 }

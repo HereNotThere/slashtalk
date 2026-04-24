@@ -1,0 +1,45 @@
+ioredis — our version: ^5.6.0
+
+Used for pub/sub fan-out from ingest + heartbeat + analyzer scheduler +
+PR poller to every subscribed WebSocket.
+
+Two connections
+---------------
+
+ioredis subscriber-mode is stateful: a client that has SUBSCRIBE'd
+cannot issue regular commands. We therefore instantiate separate `pub`
+and `sub` clients in apps/server/src/ws/redis-bridge.ts.
+
+Soft-fail contract
+------------------
+
+`RedisBridge.publish()` and `RedisBridge.subscribe()` swallow errors
+(connection refused, timeout, etc.) so the HTTP API stays up when Redis
+is down or flaky. Every caller can assume publish() never throws.
+
+- Raw  `await redis.publish(...)`  is FORBIDDEN outside redis-bridge.ts.
+  On disconnect it throws and 500s the caller. See core-beliefs.md #7.
+
+Channel design
+--------------
+
+(see docs/RELIABILITY.md for the full table)
+
+- repo:<id>        — session_updated (ingest + heartbeat),
+                     session_insights_updated (analyzer scheduler),
+                     pr_activity (PR poller)
+- user:<userId>    — reserved, unused today
+
+Server → client is one-way; the server sends `{type:"ping"}` every 30 s
+as WS keepalive.
+
+Where we use it
+---------------
+
+- apps/server/src/ws/redis-bridge.ts  — the bridge + soft-fail
+- apps/server/src/ws/handler.ts       — WS → Redis sub wiring
+- apps/server/src/ingest/routes.ts    — publishes session_updated
+- apps/server/src/analyzers/publish.ts
+- apps/server/src/social/pr-poller.ts
+
+Upstream: https://github.com/redis/ioredis

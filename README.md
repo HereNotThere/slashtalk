@@ -143,25 +143,27 @@ bun test --cwd apps/server
 
 ## Project structure
 
+See [`AGENTS.md`](AGENTS.md) for the full map and per-workspace pointers.
+
 ```
 slashtalk/
-├── packages/shared/        # Shared TypeScript types
-├── apps/
-│   ├── server/             # ElysiaJS backend
-│   │   └── src/
-│   │       ├── index.ts          # Entry point
-│   │       ├── app.ts            # App factory (for testing)
-│   │       ├── config.ts         # Env var loading
-│   │       ├── db/               # Drizzle schema + client
-│   │       ├── auth/             # GitHub OAuth, JWT, API keys
-│   │       ├── ingest/           # NDJSON upload + aggregator
-│   │       ├── social/           # Feed, repo sync
-│   │       ├── sessions/         # Session routes, state, snapshots
-│   │       ├── user/             # Profile, devices, setup tokens
-│   │       ├── ws/               # WebSocket + Redis pub/sub
-│   │       └── install/          # CLI install script
-│   └── desktop/            # Electron app (future)
-└── specs/                  # Design specs
+├── AGENTS.md               # Canonical entry for agents (Claude Code, Codex, …)
+├── ARCHITECTURE.md         # Domain map: ingest, sessions, analyzers, ws, …
+├── CLAUDE.md               # Thin redirect + load-bearing memories
+├── docs/                   # System of record — design docs, specs, references
+│   ├── design-docs/        # core-beliefs.md + topic-level decisions
+│   ├── product-specs/      # backend.md (ex-specs/backend.spec.md), upload.md
+│   ├── exec-plans/         # active/, completed/, tech-debt-tracker.md
+│   ├── generated/          # db-schema.md (auto-generated from Drizzle)
+│   ├── references/         # 3rd-party lib notes (Elysia, Drizzle, …)
+│   ├── RELIABILITY.md      # resume protocol, heartbeat state machine
+│   ├── SECURITY.md         # tokens, encryption, PII
+│   └── QUALITY_SCORE.md    # per-domain health grades
+├── packages/shared/        # Source-only TS types
+└── apps/
+    ├── server/             # ElysiaJS backend (auth, ingest, sessions, ws, analyzers)
+    ├── desktop/            # Electron overlay, 7 BrowserWindows
+    └── mcp/                # MCP server (being consolidated into server)
 ```
 
 ## Key scripts

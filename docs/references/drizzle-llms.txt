@@ -1,0 +1,42 @@
+Drizzle ORM — our versions:
+  drizzle-orm ^0.43.0, drizzle-kit ^0.31.0, drizzle-typebox ^0.2.0
+
+Schema source of truth: apps/server/src/db/schema.ts
+Generated SQL + meta:    apps/server/drizzle/
+Generated doc:           docs/generated/db-schema.md
+
+Workflow
+--------
+
+1. Edit apps/server/src/db/schema.ts.
+2. From apps/server/:  bun run db:generate
+   - Emits SQL + meta/_journal.json update + a new snapshot.
+3. Review the generated SQL. For renames or destructive ops, regenerate
+   with:  bunx drizzle-kit generate --custom --name=<slug>
+4. Apply:  bun run db:migrate
+5. Refresh the agent-readable schema:  bun run gen:db-schema
+6. Commit schema.ts + generated SQL + meta updates + db-schema.md as
+   ONE commit.
+
+Rules (core-beliefs.md #4)
+--------------------------
+
+- Never hand-edit apps/server/drizzle/meta/_journal.json.
+- Never hand-edit apps/server/drizzle/meta/*_snapshot.json.
+- Never rename or resequence committed migration files.
+- The `when` field in the journal MUST remain monotonic. Violating this
+  caused a past incident; memory key `feedback_drizzle_journal_when`.
+- A broken migration is fixed by adding a corrective migration, never
+  by rewriting or deleting one.
+
+Query patterns
+--------------
+
+- Import tables:  `import { users, sessions } from "./db/schema"`.
+- Select:         `db.select().from(sessions).where(eq(sessions.userId, id))`.
+- Composite PK:   inside the table callback,
+                   `(t) => [primaryKey({ columns: [t.a, t.b] })]`.
+- Compound index: `(t) => [index("name").on(t.col1, t.col2)]`.
+- See schema.ts for every pattern already in use.
+
+Upstream docs: https://orm.drizzle.team

@@ -66,10 +66,6 @@ const PADDING_X = 12;
 const PADDING_Y = 16;
 const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
 
-// Extra vertical space the separator between peers and projects occupies.
-// Counts as one extra SPACING row (14px) — matches the other gaps visually.
-const SEPARATOR_EXTRA = SPACING;
-
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
 const INFO_GAP = 8; // distance from the pill's outer edge to the info window
@@ -331,7 +327,6 @@ let tray: Tray | null = null;
 let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
-let projects: ChatHead[] = [];
 let selectedHeadId: string | null = null;
 const sessionCache = new Map<string, InfoSession[]>();
 
@@ -354,12 +349,8 @@ function isLocalAgent(a: { mode?: "cloud" | "local" }): boolean {
 
 const streamingAgents = new Set<string>();
 
-function allHeads(): ChatHead[] {
-  return [...heads, ...projects];
-}
-
 function findHead(id: string): ChatHead | undefined {
-  return allHeads().find((h) => h.id === id);
+  return heads.find((h) => h.id === id);
 }
 
 let dragOffset: { dx: number; dy: number } | null = null;
@@ -429,21 +420,17 @@ function createMainWindow(): void {
 
 // Overlay always renders heads plus the chat bubble at the end of the rail, so
 // add 1. This is the main-axis length (height for vertical rail, width for
-// horizontal). Cross-axis is always OVERLAY_WIDTH. When there are any project
-// heads we reserve one extra SPACING row for the divider between peers and
-// projects.
-function overlayLength(count: number, projectCount = 0): number {
-  const n = count + projectCount + 1;
-  const sep = projectCount > 0 ? SEPARATOR_EXTRA : 0;
-  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + sep + PADDING_Y * 2;
+// horizontal). Cross-axis is always OVERLAY_WIDTH.
+function overlayLength(count: number): number {
+  const n = count + 1;
+  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING_Y * 2;
 }
 
 function overlaySize(
   count: number,
-  projectCount: number,
   orientation: DockOrientation,
 ): { width: number; height: number } {
-  const length = overlayLength(count, projectCount);
+  const length = overlayLength(count);
   return orientation === "vertical"
     ? { width: OVERLAY_WIDTH, height: length }
     : { width: length, height: OVERLAY_WIDTH };
@@ -589,7 +576,7 @@ function resizeOverlay(): void {
     axisExtent - OVERLAY_SCREEN_MARGIN * 2,
   );
   const length = Math.min(
-    overlayLength(heads.length, projects.length),
+    overlayLength(heads.length),
     maxLength,
   );
   const size =
@@ -628,13 +615,6 @@ function broadcastHeads(): void {
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
   for (const w of targets) w.webContents.send("heads:update", heads);
-}
-
-function broadcastProjects(): void {
-  // Only the overlay renders projects. Keep statusbar/main windows on the
-  // user-head list so "Active teammates" doesn't start listing repos.
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("projects:update", projects);
 }
 
 // -------- Info box --------
@@ -687,18 +667,11 @@ function positionInfo(
   const dock = currentDock();
 
   // Fallback coord when the renderer didn't report a bubble rect (e.g.
-  // repositions during drag/slide). Derived from the head's position in the
-  // combined (peers + projects) list, plus the separator row if it falls on
-  // or past the divider.
+  // repositions during drag/slide). Derived from the head's position on the
+  // rail.
   const cell = BUBBLE_SIZE + SPACING;
-  const combined = allHeads();
-  const idx = combined.findIndex((h) => h.id === headId);
-  const peersBeforeProjects = heads.length;
-  const crossesSep = idx >= peersBeforeProjects && projects.length > 0;
-  const fallbackAxisOffset =
-    PADDING_Y +
-    Math.max(0, idx) * cell +
-    (crossesSep ? SEPARATOR_EXTRA : 0);
+  const idx = heads.findIndex((h) => h.id === headId);
+  const fallbackAxisOffset = PADDING_Y + Math.max(0, idx) * cell;
 
   if (dock.orientation === "vertical") {
     const infoX =
@@ -1191,7 +1164,6 @@ function handleTrayClick(bounds: Electron.Rectangle): void {
 // -------- IPC --------
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
-ipcMain.handle("projects:list", (): ChatHead[] => projects);
 
 ipcMain.handle("rail:getPinned", (): boolean => {
   const v = getRailPinned();
@@ -1265,7 +1237,7 @@ rail.onChange((next) => {
   // Keep the grace timestamp current while the user is working, so "15 min
   // after the last session ended" measures from the most recent live poll.
   if (rail.isSelfLive()) lastActivityTs = Date.now();
-  if (heads.length === 0 && projects.length === 0) {
+  if (heads.length === 0) {
     overlayWindow?.close();
     overlayWindow = null;
   } else {
@@ -1280,26 +1252,6 @@ rail.onChange((next) => {
     if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
   }
   broadcastHeads();
-});
-
-rail.onProjectsChange((next) => {
-  projects = next;
-  if (selectedHeadId && !findHead(selectedHeadId)) {
-    hideInfoNow();
-  }
-  if (heads.length === 0 && projects.length === 0) {
-    overlayWindow?.close();
-    overlayWindow = null;
-  } else if (overlayWindow && !overlayWindow.isDestroyed()) {
-    resizeOverlay();
-    repositionInfoIfVisible();
-    repositionChatIfVisible();
-  }
-  // Pre-warm session cache for repo heads too so hover is instant.
-  for (const h of projects) {
-    if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
-  }
-  broadcastProjects();
 });
 
 ipcMain.handle(
@@ -1422,11 +1374,7 @@ function computeDockBoundsOn(
   dock: DockConfig,
 ): Electron.Rectangle {
   const wa = display.workArea;
-  const { width, height } = overlaySize(
-    heads.length,
-    projects.length,
-    dock.orientation,
-  );
+  const { width, height } = overlaySize(heads.length, dock.orientation);
   if (dock.orientation === "vertical") {
     const x =
       dock.side === "start"
@@ -1464,7 +1412,7 @@ function ensureDockPlaceholder(): BrowserWindow {
       background:rgba(255,255,255,0.05);
     }
   </style></head><body><div class="pill"></div></body></html>`;
-  const initialSize = overlaySize(heads.length, projects.length, "vertical");
+  const initialSize = overlaySize(heads.length, "vertical");
   dockPlaceholderWindow = new BrowserWindow({
     width: initialSize.width,
     height: initialSize.height,
@@ -1676,19 +1624,6 @@ async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
         state.user.githubLogin === login
           ? await backend.listOwnSessions()
           : await backend.listFeedSessionsForUser(login);
-      sessionCache.set(headId, sessions);
-      return sessions;
-    } catch {
-      return [];
-    }
-  }
-
-  const repoId = rail.parseRepoHeadId(headId);
-  if (repoId != null) {
-    const head = projects.find((h) => h.id === headId);
-    if (!head?.repoFullName) return [];
-    try {
-      const sessions = await backend.listFeedSessionsForRepo(head.repoFullName);
       sessionCache.set(headId, sessions);
       return sessions;
     } catch {
@@ -2124,11 +2059,6 @@ ws.onSessionUpdated((msg) => {
   // hover. scheduleInfoRefresh then coalesces any UI refresh for the
   // currently-selected head across bursty events.
   sessionCache.delete(rail.userHeadId(msg.github_login));
-  // Also invalidate the repo-head cache — a session update changes what the
-  // project popover should render too.
-  if (msg.repo_id != null) {
-    sessionCache.delete(rail.repoHeadId(msg.repo_id));
-  }
   rail.refreshSoon();
   scheduleInfoRefresh(msg.session_id);
   broadcastToMain("ws:sessionUpdated", msg);
@@ -2181,8 +2111,6 @@ async function refreshInfoNow(): Promise<void> {
     console.warn("[ws] refreshInfoNow failed:", e);
   }
 }
-ipcMain.handle("backend:listRepos", () => backend.listRepos());
-
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());
 ipcMain.handle("backend:addLocalRepo", () => localRepos.addLocalRepo());
 ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>

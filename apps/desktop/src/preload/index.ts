@@ -22,7 +22,6 @@ import type {
   McpTargetState,
   RailDebugSnapshot,
   ResponseOpenPayload,
-  RepoSummary,
   TrackedRepo,
   Unsubscribe,
 } from "../shared/types";
@@ -133,10 +132,6 @@ const bridge: ChatHeadsBridge = {
     onEnabledChange: (cb) => subscribe<boolean>("spotify:shareEnabled", cb),
   },
 
-  listProjects: () =>
-    ipcRenderer.invoke("projects:list") as Promise<ChatHead[]>,
-  onProjectsUpdate: (cb) => subscribe<ChatHead[]>("projects:update", cb),
-
   showInfo: (headId, bubbleScreen) =>
     ipcRenderer.invoke(
       "heads:showInfo",
@@ -230,9 +225,6 @@ const bridge: ChatHeadsBridge = {
       ipcRenderer.invoke("backend:cancelSignIn") as Promise<void>,
     signOut: () => ipcRenderer.invoke("backend:signOut") as Promise<void>,
     onAuthState: (cb) => subscribe<BackendAuthState>("backend:authState", cb),
-
-    listRepos: () =>
-      ipcRenderer.invoke("backend:listRepos") as Promise<RepoSummary[]>,
 
     listTrackedRepos: () =>
       ipcRenderer.invoke("backend:listTrackedRepos") as Promise<TrackedRepo[]>,

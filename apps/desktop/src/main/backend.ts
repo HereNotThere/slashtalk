@@ -417,10 +417,6 @@ async function doRefresh(): Promise<boolean> {
 
 // ---------- Public API ----------
 
-export function listRepos(): Promise<RepoSummary[]> {
-  return jsonFetch<RepoSummary[]>("/api/me/repos", { method: "GET" });
-}
-
 /** Thrown by `claimRepo` with the server's structured error kind so callers
  *  (e.g. the tray UI) can branch on `no_access` vs `token_expired` rather
  *  than regexing the message. */
@@ -504,13 +500,6 @@ export function listFeedSessionsForUser(
   login: string,
 ): Promise<FeedSessionSnapshot[]> {
   const qs = new URLSearchParams({ user: login });
-  return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
-}
-
-export function listFeedSessionsForRepo(
-  fullName: string,
-): Promise<FeedSessionSnapshot[]> {
-  const qs = new URLSearchParams({ repo: fullName });
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
 

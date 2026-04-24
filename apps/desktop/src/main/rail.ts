@@ -62,10 +62,8 @@ function sortByBucket(
 }
 
 let heads: ChatHead[] = [];
-let projects: ChatHead[] = [];
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 const changes = createEmitter<ChatHead[]>();
-const projectChanges = createEmitter<ChatHead[]>();
 
 let lastSnapshot: RailDebugSnapshot = { at: null, peers: null, error: null };
 
@@ -92,15 +90,12 @@ const DEBUG_TINTS = [
 
 export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
-export const onProjectsChange = projectChanges.on;
-export const listProjects = (): ChatHead[] => projects;
 // Self is always at heads[0] when signed in, with `live` set only while the
 // user has a BUSY/ACTIVE feed session. Drives the rail's session-only mode.
 export const isSelfLive = (): boolean => heads[0]?.live === true;
 
 const USER_HEAD_PREFIX = "user:";
 const AGENT_HEAD_PREFIX = "agent:";
-const REPO_HEAD_PREFIX = "repo:";
 
 export function userHeadId(login: string): string {
   return `${USER_HEAD_PREFIX}${login}`;
@@ -120,23 +115,6 @@ export function parseAgentHeadId(headId: string): string | null {
   return headId.startsWith(AGENT_HEAD_PREFIX)
     ? headId.slice(AGENT_HEAD_PREFIX.length)
     : null;
-}
-
-export function repoHeadId(repoId: number): string {
-  return `${REPO_HEAD_PREFIX}${repoId}`;
-}
-
-export function parseRepoHeadId(headId: string): number | null {
-  if (!headId.startsWith(REPO_HEAD_PREFIX)) return null;
-  const n = Number(headId.slice(REPO_HEAD_PREFIX.length));
-  return Number.isFinite(n) ? n : null;
-}
-
-function repoOwnerAvatarUrl(owner: string): string {
-  // GitHub serves an org/user avatar at this URL regardless of the specific
-  // repo; the repos table has no avatar column so we derive one. s=90 gives
-  // retina-clean rendering at our 45px bubble size.
-  return `https://avatars.githubusercontent.com/${encodeURIComponent(owner)}?s=90&v=4`;
 }
 
 function headForUser(
@@ -167,24 +145,6 @@ function headForAgent(agent: LocalAgent): ChatHead {
     avatar: { type: "emoji", value: initial },
     kind: "agent",
     lastActionAt: agent.createdAt,
-  };
-}
-
-function headForRepo(
-  repoId: number,
-  fullName: string,
-  owner: string,
-  lastActivityAt?: number | null,
-): ChatHead {
-  return {
-    id: repoHeadId(repoId),
-    kind: "repo",
-    label: fullName,
-    tint: "transparent",
-    avatar: { type: "remote", value: repoOwnerAvatarUrl(owner) },
-    repoId,
-    repoFullName: fullName,
-    ...(lastActivityAt != null && { lastActionAt: lastActivityAt }),
   };
 }
 
@@ -227,19 +187,12 @@ function apply(next: ChatHead[]): void {
   changes.emit(heads);
 }
 
-function applyProjects(next: ChatHead[]): void {
-  if (sameHeads(projects, next)) return;
-  projects = next;
-  projectChanges.emit(projects);
-}
-
 async function refresh(): Promise<void> {
   const initialSelf = selfHead();
   if (!initialSelf) {
     console.log("[rail] refresh skipped — not signed in");
     lastSnapshot = { at: Date.now(), peers: null, error: "not signed in" };
     apply([]);
-    applyProjects([]);
     return;
   }
   console.log(`[rail] refresh as ${initialSelf.label}`);
@@ -250,20 +203,15 @@ async function refresh(): Promise<void> {
     now,
   );
   try {
-    // Fetch peers, feed, and claimed repos in parallel. Each peer's / repo's
-    // "last activity" is the timestamp of the most recent session in the feed
-    // keyed by login / repo_full_name — no dedicated backend field needed.
-    const [peers, feedSessions, repos] = await Promise.all([
+    // Fetch peers and feed in parallel. Each peer's "last activity" is the
+    // timestamp of the most recent session in the feed keyed by login — no
+    // dedicated backend field needed.
+    const [peers, feedSessions] = await Promise.all([
       backend.listTeammates(),
       backend.listFeedSessions(),
-      backend.listRepos().catch((err) => {
-        console.warn("[rail] listRepos failed:", err);
-        return [];
-      }),
     ]);
 
     const latestByLogin = new Map<string, number>();
-    const latestByRepo = new Map<string, number>();
     // Live = user has at least one session in BUSY/ACTIVE state. Matches the
     // "working now" label shown in the info popover so the rail and popover
     // agree on who's actively coding right now.
@@ -276,10 +224,6 @@ async function refresh(): Promise<void> {
       const ts = new Date(s.lastTs).getTime();
       const prevU = latestByLogin.get(s.github_login) ?? 0;
       if (ts > prevU) latestByLogin.set(s.github_login, ts);
-      if (s.repo_full_name) {
-        const prevR = latestByRepo.get(s.repo_full_name) ?? 0;
-        if (ts > prevR) latestByRepo.set(s.repo_full_name, ts);
-      }
     }
 
     lastSnapshot = { at: Date.now(), peers, error: null };
@@ -316,23 +260,12 @@ async function refresh(): Promise<void> {
     for (const fake of debugFakes) peerHeads.push(fake);
     const sortedPeers = sortByBucket(peerHeads, heads, now);
     apply([self, ...agentHeads, ...sortedPeers]);
-
-    const projectHeads = repos.map((r) =>
-      headForRepo(
-        r.repoId,
-        r.fullName,
-        r.owner,
-        latestByRepo.get(r.fullName) ?? null,
-      ),
-    );
-    applyProjects(sortByBucket(projectHeads, projects, now));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     lastSnapshot = { at: Date.now(), peers: null, error: message };
     console.error("[rail] listTeammates failed:", err);
     // Keep showing self + agents so the rail doesn't flash.
     apply([initialSelf, ...agentHeads]);
-    applyProjects([]);
   }
 }
 
@@ -458,9 +391,6 @@ function rebucketTick(): void {
     const [self, ...rest] = heads;
     const sorted = sortByBucket(rest, rest, now);
     apply([self, ...sorted]);
-  }
-  if (projects.length > 0) {
-    applyProjects(sortByBucket(projects, projects, now));
   }
 }
 

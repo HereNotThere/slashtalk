@@ -260,7 +260,12 @@ export const userRoutes = (db: Database) =>
       if (cached && Date.now() - cached.at < ORGS_TTL_MS) return cached.value;
 
       const token = await fetchUserGithubToken(db, user.id);
-      if (!token) return [];
+      if (!token) {
+        console.warn(
+          `[orgs] user=${user.githubLogin} has no stored GitHub token — returning []`,
+        );
+        return [];
+      }
 
       let res: Response;
       try {
@@ -268,11 +273,25 @@ export const userRoutes = (db: Database) =>
           "https://api.github.com/user/orgs?per_page=100",
           { headers: githubHeaders(token) },
         );
-      } catch {
+      } catch (err) {
+        console.warn(
+          `[orgs] user=${user.githubLogin} fetch threw:`,
+          (err as Error).message,
+        );
         return [];
       }
-      if (res.status === 401 || res.status === 403) return [];
-      if (!res.ok) return [];
+      if (res.status === 401 || res.status === 403) {
+        console.warn(
+          `[orgs] user=${user.githubLogin} GitHub ${res.status} — token likely lacks read:org or was revoked`,
+        );
+        return [];
+      }
+      if (!res.ok) {
+        console.warn(
+          `[orgs] user=${user.githubLogin} GitHub ${res.status}`,
+        );
+        return [];
+      }
 
       const raw = (await res.json().catch(() => null)) as RawGithubOrg[] | null;
       if (!Array.isArray(raw)) return [];
@@ -284,6 +303,9 @@ export const userRoutes = (db: Database) =>
           name: o.name ?? null,
           avatarUrl: o.avatar_url ?? "",
         }));
+      console.log(
+        `[orgs] user=${user.githubLogin} fetched ${value.length} orgs from GitHub`,
+      );
       orgsCache.set(user.id, { at: Date.now(), value });
       return value;
     })

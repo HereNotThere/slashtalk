@@ -84,8 +84,8 @@ function OrgHeader({
 
   if (orgs.length === 0) {
     return (
-      <div className="px-1 py-1 text-[12px] text-fg/60">
-        No GitHub orgs found.
+      <div className="px-1 py-1 text-[13px] text-fg/70">
+        Not a member of any GitHub org.
       </div>
     );
   }
@@ -200,8 +200,27 @@ function Body({
 }): JSX.Element {
   if (!hasOrgs) {
     return (
-      <div className="px-1.5 py-1 text-[12px] text-fg/55">
-        Install slashtalk on a GitHub org to get started.
+      <div className="px-1.5 py-2 flex flex-col gap-1.5 text-[12px] text-fg/60">
+        <span>
+          GitHub returned no org memberships for your account.
+        </span>
+        <span>
+          If you expect to see one, re-authorize slashtalk on{" "}
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              void window.chatheads.openExternal(
+                "https://github.com/settings/applications",
+              );
+            }}
+            className="underline"
+          >
+            github.com/settings/applications
+          </a>{" "}
+          — the app needs the{" "}
+          <code className="text-[11px]">read:org</code> scope.
+        </span>
       </div>
     );
   }

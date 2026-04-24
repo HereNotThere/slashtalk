@@ -277,6 +277,22 @@ function logHttp(
   else console[level](prefix);
 }
 
+/** Thrown by `jsonFetch` on any non-2xx response after the single-flight
+ *  JWT-refresh has been tried. Extends `Error` so older callers that just
+ *  read `.message` keep working; new callers can read `status` and `body`
+ *  to branch on structured server errors without regexing the message. */
+export class HttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: string,
+    method: string,
+    path: string,
+  ) {
+    super(`${method} ${path} failed (${status}): ${body}`);
+    this.name = "HttpError";
+  }
+}
+
 function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
   return doJsonFetch<T>(path, opts, false);
 }
@@ -324,7 +340,7 @@ async function doJsonFetch<T>(
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     logHttp("error", opts.method, path, String(res.status), ms, text.slice(0, 500));
-    throw new Error(`${opts.method} ${path} failed (${res.status}): ${text}`);
+    throw new HttpError(res.status, text, opts.method, path);
   }
 
   if (res.status === 204) {
@@ -426,52 +442,41 @@ export class ClaimRepoError extends Error {
 }
 
 export async function claimRepo(fullName: string): Promise<RepoSummary> {
-  if (!creds) throw new Error("Not signed in");
-  const url = `${baseUrl()}/api/me/repos`;
-  const started = Date.now();
-  let res: Response;
   try {
-    res = await fetch(url, {
+    // Delegates to `jsonFetch` so the JWT single-flight refresh-on-401
+    // (doJsonFetch line 318) still runs before we treat a 401 as GitHub-side
+    // token_expired. Without this, a slashtalk-JWT expiry during a claim
+    // would misfire as "your GitHub token is stale."
+    return await jsonFetch<RepoSummary>("/api/me/repos", {
       method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Cookie: `session=${creds.jwt}`,
-      },
-      body: JSON.stringify({ fullName }),
+      body: { fullName },
     });
   } catch (err) {
-    logHttp(
-      "error",
-      "POST",
-      "/api/me/repos",
-      "network-error",
-      Date.now() - started,
-      err,
-    );
+    if (err instanceof HttpError) {
+      const parsed = parseClaimError(err.body);
+      const kind = (parsed?.error ?? "unknown") as ClaimRepoError["kind"];
+      throw new ClaimRepoError(
+        kind,
+        parsed?.message ?? `Claim failed (${err.status})`,
+        err.status,
+      );
+    }
     throw err;
   }
-  const ms = Date.now() - started;
-  const text = await res.text();
-  logHttp("log", "POST", "/api/me/repos", String(res.status), ms);
+}
 
-  if (res.ok) {
-    return text ? (JSON.parse(text) as RepoSummary) : (undefined as never);
-  }
+interface ClaimErrorBody {
+  error?: string;
+  message?: string;
+}
 
-  // Server always returns structured { error, message } on non-2xx for this
-  // endpoint — see apps/server/src/user/routes.ts POST /api/me/repos.
-  let parsed: { error?: string; message?: string } | null = null;
+function parseClaimError(body: string): ClaimErrorBody | null {
+  if (!body) return null;
   try {
-    parsed = text ? (JSON.parse(text) as { error?: string; message?: string }) : null;
+    return JSON.parse(body) as ClaimErrorBody;
   } catch {
-    parsed = null;
+    return null;
   }
-  const kind = (parsed?.error ?? "unknown") as ClaimRepoError["kind"];
-  const message =
-    parsed?.message ??
-    `Claim failed (${res.status})`;
-  throw new ClaimRepoError(kind, message, res.status);
 }
 
 export async function listTeammates(): Promise<TeammateSummary[]> {

@@ -127,6 +127,16 @@ function repoOkBody(fullName: string, id: number, priv = false): unknown {
   };
 }
 
+async function expectError(
+  res: Response,
+  status: number,
+  kind: string,
+): Promise<void> {
+  expect(res.status).toBe(status);
+  const body = (await res.json()) as { error: string };
+  expect(body.error).toBe(kind);
+}
+
 describe("POST /api/me/repos — claim gate", () => {
   it("accepts a claim when GitHub returns 200 and persists canonical metadata", async () => {
     repoResponse = { status: 200, body: repoOkBody("Acme/Alpha", 12345, true) };
@@ -162,10 +172,7 @@ describe("POST /api/me/repos — claim gate", () => {
   it("rejects with 403 no_access when GitHub returns 404 — no user_repos row created", async () => {
     repoResponse = { status: 404, body: { message: "Not Found" } };
 
-    const res = await claim("acme/secret");
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("no_access");
+    await expectError(await claim("acme/secret"), 403, "no_access");
 
     const rows = await db
       .select()
@@ -178,10 +185,7 @@ describe("POST /api/me/repos — claim gate", () => {
   it("rejects with 401 token_expired when GitHub returns 401", async () => {
     repoResponse = { status: 401, body: { message: "Bad credentials" } };
 
-    const res = await claim("acme/x");
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("token_expired");
+    await expectError(await claim("acme/x"), 401, "token_expired");
 
     const rows = await db
       .select()
@@ -192,18 +196,11 @@ describe("POST /api/me/repos — claim gate", () => {
 
   it("rejects with 502 upstream_unavailable on GitHub 5xx", async () => {
     repoResponse = { status: 503, body: { message: "Service Unavailable" } };
-
-    const res = await claim("acme/x");
-    expect(res.status).toBe(502);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("upstream_unavailable");
+    await expectError(await claim("acme/x"), 502, "upstream_unavailable");
   });
 
   it("rejects with 400 invalid_full_name before hitting GitHub", async () => {
-    const res = await claim("not-a-valid-slug");
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("invalid_full_name");
+    await expectError(await claim("not-a-valid-slug"), 400, "invalid_full_name");
     expect(repoFetchCount).toBe(0);
   });
 
@@ -224,9 +221,6 @@ describe("POST /api/me/repos — claim gate", () => {
       expect(r.status).toBe(200);
     }
     repoResponse = { status: 200, body: repoOkBody("acme/r30", 1030) };
-    const blocked = await claim("acme/r30");
-    expect(blocked.status).toBe(429);
-    const body = (await blocked.json()) as { error: string };
-    expect(body.error).toBe("rate_limited");
+    await expectError(await claim("acme/r30"), 429, "rate_limited");
   });
 });

@@ -46,6 +46,27 @@ const claimVerifyCache = new Map<
 const CLAIM_RATE_WINDOW_MS = 60 * 60 * 1000;
 const CLAIM_RATE_MAX = 30;
 const claimRateBuckets = new Map<number, number[]>();
+// When the maps grow past this, run a full sweep to drop expired entries.
+// Memory protection for a long-lived single process.
+const SWEEP_THRESHOLD = 5_000;
+
+function sweepClaimCaches(now: number): void {
+  if (
+    claimRateBuckets.size < SWEEP_THRESHOLD &&
+    claimVerifyCache.size < SWEEP_THRESHOLD
+  ) {
+    return;
+  }
+  const rateCutoff = now - CLAIM_RATE_WINDOW_MS;
+  for (const [userId, ts] of claimRateBuckets) {
+    const fresh = ts.filter((t) => t > rateCutoff);
+    if (fresh.length === 0) claimRateBuckets.delete(userId);
+    else if (fresh.length !== ts.length) claimRateBuckets.set(userId, fresh);
+  }
+  for (const [key, entry] of claimVerifyCache) {
+    if (now - entry.at >= CLAIM_VERIFY_TTL_MS) claimVerifyCache.delete(key);
+  }
+}
 
 /** Test-only: reset the GitHub-proxy caches + claim-gate state so assertions
  *  don't bleed across cases. No production path calls this. */
@@ -57,9 +78,12 @@ export function __clearOrgCaches(): void {
 }
 
 /** Returns true if `userId` is under the per-hour claim cap; records the
- *  attempt as a side-effect. Trims stale timestamps opportunistically. */
+ *  attempt as a side-effect. Trims stale timestamps opportunistically; drops
+ *  the bucket entirely when no fresh entries remain so dormant users don't
+ *  linger in memory forever. */
 function recordClaimAttempt(userId: number): boolean {
   const now = Date.now();
+  sweepClaimCaches(now);
   const cutoff = now - CLAIM_RATE_WINDOW_MS;
   const prior = claimRateBuckets.get(userId) ?? [];
   const fresh = prior.filter((t) => t > cutoff);
@@ -165,7 +189,9 @@ async function fetchUserGithubToken(
   }
 }
 
-function githubHeaders(token: string): Record<string, string> {
+/** Standard headers for every user-token GitHub API call. Exported so the
+ *  one-shot `scripts/reverify-claims.ts` uses the same shape. */
+export function githubHeaders(token: string): Record<string, string> {
   return {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -275,17 +301,8 @@ export const userRoutes = (db: Database) =>
         .where(eq(userRepos.userId, user.id));
     })
 
-    // POST /api/me/repos — claim a repo by "owner/name".
-    //
-    // This endpoint is the single gate between a desktop-initiated repo claim
-    // and any cross-user data access. Downstream routes (/api/feed*,
-    // /api/session/:id, WS `repo:<id>` subscriptions) all authorize reads via
-    // a `user_repos` row — so an unverified claim would leak one user's
-    // sessions to another. We verify the caller can see the repo on GitHub
-    // using their own OAuth token, and fail closed on anything else.
-    //
-    // See docs/SECURITY.md § Repo-claim verification and
-    // docs/design-docs/core-beliefs.md §§ 11-13.
+    // POST /api/me/repos — claim a repo by "owner/name". See
+    // docs/SECURITY.md § Repo-claim verification and core-beliefs §§ 11-13.
     .post(
       "/repos",
       async ({ user, body, set }) => {
@@ -311,13 +328,17 @@ export const userRoutes = (db: Database) =>
 
         // Cache lookup: a desktop double-click or retry shouldn't double-hit
         // GitHub. Keyed by (userId, lowercased fullName) — GitHub's repo
-        // namespace is case-insensitive.
+        // namespace is case-insensitive. Stale entries are dropped on access.
         const cacheKey = `${user.id}:${normalizedFullName}`;
         const cached = claimVerifyCache.get(cacheKey);
-        let verified: VerifiedRepo | null =
-          cached && Date.now() - cached.at < CLAIM_VERIFY_TTL_MS
-            ? cached.value
-            : null;
+        let verified: VerifiedRepo | null = null;
+        if (cached) {
+          if (Date.now() - cached.at < CLAIM_VERIFY_TTL_MS) {
+            verified = cached.value;
+          } else {
+            claimVerifyCache.delete(cacheKey);
+          }
+        }
 
         if (!verified) {
           const token = await fetchUserGithubToken(db, user.id);
@@ -404,9 +425,6 @@ export const userRoutes = (db: Database) =>
       {
         body: t.Object({
           fullName: t.String({ minLength: 3, maxLength: 140 }),
-          // Kept for wire compatibility with older desktop builds; the server
-          // now derives `private` from GitHub's response, so this is ignored.
-          private: t.Optional(t.Boolean()),
         }),
       }
     )

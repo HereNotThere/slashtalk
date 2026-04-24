@@ -19,6 +19,7 @@ import { db } from "../src/db";
 import { repos, userRepos, users } from "../src/db/schema";
 import { decryptGithubToken } from "../src/auth/tokens";
 import { config } from "../src/config";
+import { githubHeaders } from "../src/user/routes";
 
 interface Row {
   userId: number;
@@ -43,28 +44,30 @@ const BATCH_SIZE = 10;
 // a bad parallel batch from stampeding.
 const BATCH_SLEEP_MS = 100;
 
-function githubHeaders(token: string): Record<string, string> {
-  return {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    Authorization: `token ${token}`,
-    "User-Agent": "slashtalk-reverify",
-  };
+// Decrypt each user's token once per run instead of per row. A user with
+// 50 claims would otherwise run WebCrypto 50 times.
+const tokenCache = new Map<number, Promise<string | null>>();
+
+function decryptOnce(
+  userId: number,
+  ciphertext: string | null,
+): Promise<string | null> {
+  const hit = tokenCache.get(userId);
+  if (hit) return hit;
+  const promise = ciphertext
+    ? decryptGithubToken(ciphertext, config.encryptionKey).catch(
+        () => null as string | null,
+      )
+    : Promise.resolve<string | null>(null);
+  tokenCache.set(userId, promise);
+  return promise;
 }
 
 type CheckResult = "keep" | "revoke" | "reauth" | "error";
 
 async function checkOne(row: Row): Promise<CheckResult> {
-  if (!row.tokenCiphertext) return "reauth";
-  let token: string;
-  try {
-    token = await decryptGithubToken(
-      row.tokenCiphertext,
-      config.encryptionKey,
-    );
-  } catch {
-    return "error";
-  }
+  const token = await decryptOnce(row.userId, row.tokenCiphertext);
+  if (!token) return "reauth";
   let res: Response;
   try {
     res = await fetch(

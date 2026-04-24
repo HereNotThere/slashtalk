@@ -45,6 +45,20 @@ export interface ChatHead {
 
 export type Unsubscribe = () => void;
 
+// Rail dock placement. `orientation` = which axis the rail runs along;
+// `side` = which end of the perpendicular axis it's pinned to
+// (start = top for horizontal / left for vertical, end = bottom / right).
+export type DockOrientation = "vertical" | "horizontal";
+export type DockSide = "start" | "end";
+export interface DockConfig {
+  orientation: DockOrientation;
+  side: DockSide;
+}
+
+// Chat pill layout hint. `anchor` = which end of the pill the search-icon
+// circle sits at so it overlaps the chat bubble on the rail.
+export type ChatAnchor = "left" | "right";
+
 // slashtalk backend types
 export interface BackendUser {
   githubLogin: string;
@@ -324,7 +338,12 @@ export interface ChatHeadsBridge {
   // the leave timer and asks main to hide after the user leaves the bubble
   // and doesn't re-enter the info panel. `infoHoverEnter/Leave` let the info
   // panel itself hold the window open while the cursor is over it.
-  showInfo: (headId: string, bubbleScreenY?: number) => Promise<void>;
+  // Both axes of the bubble's screen-space top-left are reported so main can
+  // align the popover against whichever axis matches the current dock.
+  showInfo: (
+    headId: string,
+    bubbleScreen?: { x: number; y: number },
+  ) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
 
@@ -335,8 +354,11 @@ export interface ChatHeadsBridge {
   onChatState: (cb: (state: { visible: boolean }) => void) => Unsubscribe;
   /** Chat renderer subscribes so it can mirror layout based on rail side. */
   onChatConfig: (
-    cb: (cfg: { anchor: "left" | "right" }) => void,
+    cb: (cfg: { anchor: ChatAnchor }) => void,
   ) => Unsubscribe;
+  /** Overlay renderer subscribes to learn the current dock so it can swap
+   *  flex direction / scroll axis / FLIP tracking. */
+  onOverlayConfig: (cb: (cfg: DockConfig) => void) => Unsubscribe;
 
   // Response window (chat/agent pop-out → main → response)
   openResponse: (message: string) => Promise<void>;

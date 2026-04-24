@@ -7,10 +7,12 @@ import type {
   AgentStreamEvent,
   AgentSummary,
   BackendAuthState,
+  ChatAnchor,
   ChatHead,
   ChatHeadsAuthState,
   ChatHeadsBridge,
   CreateAgentInput,
+  DockConfig,
   GithubConnectState,
   GithubPendingConnect,
   InfoSession,
@@ -112,11 +114,11 @@ const bridge: ChatHeadsBridge = {
     ipcRenderer.invoke("projects:list") as Promise<ChatHead[]>,
   onProjectsUpdate: (cb) => subscribe<ChatHead[]>("projects:update", cb),
 
-  showInfo: (headId, bubbleScreenY) =>
+  showInfo: (headId, bubbleScreen) =>
     ipcRenderer.invoke(
       "heads:showInfo",
       headId,
-      bubbleScreenY,
+      bubbleScreen,
     ) as Promise<void>,
   infoHoverEnter: () =>
     ipcRenderer.invoke("info:hoverEnter") as Promise<void>,
@@ -127,7 +129,8 @@ const bridge: ChatHeadsBridge = {
   hideChat: () => ipcRenderer.invoke("chat:hide") as Promise<void>,
   onChatState: (cb) => subscribe<{ visible: boolean }>("chat:state", cb),
   onChatConfig: (cb) =>
-    subscribe<{ anchor: "left" | "right" }>("chat:config", cb),
+    subscribe<{ anchor: ChatAnchor }>("chat:config", cb),
+  onOverlayConfig: (cb) => subscribe<DockConfig>("overlay:config", cb),
 
   openResponse: (message) =>
     ipcRenderer.invoke("response:open", message) as Promise<void>,

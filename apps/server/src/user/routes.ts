@@ -30,11 +30,146 @@ const ORGS_TTL_MS = 60_000;
 const orgsCache = new Map<number, { at: number; value: OrgSummary[] }>();
 const orgReposCache = new Map<string, { at: number; value: OrgRepo[] }>();
 
-/** Test-only: reset the GitHub-proxy caches so assertions don't bleed
- *  across cases. No production path calls this. */
+// Claim-verification cache: dedups a repeated `GET /repos/:owner/:name` for
+// the same (user, fullName) pair (desktop double-clicks, retry-on-failure).
+// Keyed by `${userId}:${fullName-lower}`.
+const CLAIM_VERIFY_TTL_MS = 60_000;
+const claimVerifyCache = new Map<
+  string,
+  { at: number; value: VerifiedRepo }
+>();
+
+// Per-user rate-limit for `POST /api/me/repos`. Blocks an adversary with a
+// stolen JWT from enumerating private repos by brute-forcing fullNames.
+// Token-bucket, in-memory only (sufficient for single-node deploy; revisit
+// if we go multi-node before shipping a durable store).
+const CLAIM_RATE_WINDOW_MS = 60 * 60 * 1000;
+const CLAIM_RATE_MAX = 30;
+const claimRateBuckets = new Map<number, number[]>();
+// When the maps grow past this, run a full sweep to drop expired entries.
+// Memory protection for a long-lived single process.
+const SWEEP_THRESHOLD = 5_000;
+
+function sweepClaimCaches(now: number): void {
+  if (
+    claimRateBuckets.size < SWEEP_THRESHOLD &&
+    claimVerifyCache.size < SWEEP_THRESHOLD
+  ) {
+    return;
+  }
+  const rateCutoff = now - CLAIM_RATE_WINDOW_MS;
+  for (const [userId, ts] of claimRateBuckets) {
+    const fresh = ts.filter((t) => t > rateCutoff);
+    if (fresh.length === 0) claimRateBuckets.delete(userId);
+    else if (fresh.length !== ts.length) claimRateBuckets.set(userId, fresh);
+  }
+  for (const [key, entry] of claimVerifyCache) {
+    if (now - entry.at >= CLAIM_VERIFY_TTL_MS) claimVerifyCache.delete(key);
+  }
+}
+
+/** Test-only: reset the GitHub-proxy caches + claim-gate state so assertions
+ *  don't bleed across cases. No production path calls this. */
 export function __clearOrgCaches(): void {
   orgsCache.clear();
   orgReposCache.clear();
+  claimVerifyCache.clear();
+  claimRateBuckets.clear();
+}
+
+/** Returns true if `userId` is under the per-hour claim cap; records the
+ *  attempt as a side-effect. Trims stale timestamps opportunistically; drops
+ *  the bucket entirely when no fresh entries remain so dormant users don't
+ *  linger in memory forever. */
+function recordClaimAttempt(userId: number): boolean {
+  const now = Date.now();
+  sweepClaimCaches(now);
+  const cutoff = now - CLAIM_RATE_WINDOW_MS;
+  const prior = claimRateBuckets.get(userId) ?? [];
+  const fresh = prior.filter((t) => t > cutoff);
+  if (fresh.length >= CLAIM_RATE_MAX) {
+    claimRateBuckets.set(userId, fresh);
+    return false;
+  }
+  fresh.push(now);
+  claimRateBuckets.set(userId, fresh);
+  return true;
+}
+
+interface VerifiedRepo {
+  githubId: number;
+  fullName: string; // GitHub's canonical casing
+  owner: string;
+  name: string;
+  private: boolean;
+}
+
+type VerifyOutcome =
+  | { ok: true; repo: VerifiedRepo }
+  | { ok: false; kind: "no_access" | "token_expired" | "upstream_unavailable" };
+
+/** Ask GitHub, using the user's stored OAuth token, whether they can see
+ *  `owner/name`. 200 = yes (canonical repo data returned); 404 = no (fail
+ *  closed); 401/403 = token bad (caller should re-auth); fetch/5xx errors
+ *  = upstream unavailable (retry later). Never falls back to "accept." */
+async function verifyRepoAccess(
+  token: string,
+  owner: string,
+  name: string,
+): Promise<VerifyOutcome> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+      { headers: githubHeaders(token) },
+    );
+  } catch (err) {
+    console.warn(
+      `[claim] fetch /repos/${owner}/${name} threw:`,
+      (err as Error).message,
+    );
+    return { ok: false, kind: "upstream_unavailable" };
+  }
+  if (res.status === 404) {
+    return { ok: false, kind: "no_access" };
+  }
+  if (res.status === 401 || res.status === 403) {
+    console.warn(
+      `[claim] GitHub ${res.status} on /repos/${owner}/${name} — token stale or scope missing`,
+    );
+    return { ok: false, kind: "token_expired" };
+  }
+  if (!res.ok) {
+    console.warn(`[claim] GitHub ${res.status} on /repos/${owner}/${name}`);
+    return { ok: false, kind: "upstream_unavailable" };
+  }
+  const raw = (await res.json().catch(() => null)) as {
+    id?: number;
+    full_name?: string;
+    name?: string;
+    owner?: { login?: string };
+    private?: boolean;
+  } | null;
+  if (
+    !raw ||
+    typeof raw.id !== "number" ||
+    !raw.full_name ||
+    !raw.name ||
+    !raw.owner?.login
+  ) {
+    console.warn(`[claim] malformed body from /repos/${owner}/${name}`);
+    return { ok: false, kind: "upstream_unavailable" };
+  }
+  return {
+    ok: true,
+    repo: {
+      githubId: raw.id,
+      fullName: raw.full_name,
+      owner: raw.owner.login,
+      name: raw.name,
+      private: raw.private ?? false,
+    },
+  };
 }
 
 async function fetchUserGithubToken(
@@ -54,7 +189,9 @@ async function fetchUserGithubToken(
   }
 }
 
-function githubHeaders(token: string): Record<string, string> {
+/** Standard headers for every user-token GitHub API call. Exported so the
+ *  one-shot `scripts/reverify-claims.ts` uses the same shape. */
+export function githubHeaders(token: string): Record<string, string> {
   return {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -164,29 +301,102 @@ export const userRoutes = (db: Database) =>
         .where(eq(userRepos.userId, user.id));
     })
 
-    // POST /api/me/repos — claim a repo by "owner/name". Upserts into the
-    // repos table and asserts the calling user tracks it. No GitHub API call
-    // happens here — under read-only OAuth we can't verify repo access
-    // server-side, so the client proves possession another way (e.g. the
-    // desktop app only offers repos it found via a local .git/config).
+    // POST /api/me/repos — claim a repo by "owner/name". See
+    // docs/SECURITY.md § Repo-claim verification and core-beliefs §§ 11-13.
     .post(
       "/repos",
       async ({ user, body, set }) => {
         const raw = body.fullName.trim();
         if (!FULL_NAME.test(raw)) {
           set.status = 400;
-          return { error: "fullName must be in owner/name form" };
+          return {
+            error: "invalid_full_name",
+            message: "fullName must be in owner/name form",
+          };
         }
-        const fullName = normalizeFullName(raw);
-        const [ownerLogin, name] = fullName.split("/");
 
+        if (!recordClaimAttempt(user.id)) {
+          set.status = 429;
+          return {
+            error: "rate_limited",
+            message: `Too many claim attempts. Limit is ${CLAIM_RATE_MAX} per hour.`,
+          };
+        }
+
+        const normalizedFullName = normalizeFullName(raw);
+        const [rawOwner, rawName] = raw.split("/");
+
+        // Cache lookup: a desktop double-click or retry shouldn't double-hit
+        // GitHub. Keyed by (userId, lowercased fullName) — GitHub's repo
+        // namespace is case-insensitive. Stale entries are dropped on access.
+        const cacheKey = `${user.id}:${normalizedFullName}`;
+        const cached = claimVerifyCache.get(cacheKey);
+        let verified: VerifiedRepo | null = null;
+        if (cached) {
+          if (Date.now() - cached.at < CLAIM_VERIFY_TTL_MS) {
+            verified = cached.value;
+          } else {
+            claimVerifyCache.delete(cacheKey);
+          }
+        }
+
+        if (!verified) {
+          const token = await fetchUserGithubToken(db, user.id);
+          if (!token) {
+            set.status = 401;
+            return {
+              error: "token_expired",
+              message: "Re-sign in to slashtalk.",
+            };
+          }
+          const outcome = await verifyRepoAccess(token, rawOwner, rawName);
+          if (!outcome.ok) {
+            if (outcome.kind === "no_access") {
+              set.status = 403;
+              return {
+                error: "no_access",
+                message: "GitHub doesn't show you have access to this repo.",
+              };
+            }
+            if (outcome.kind === "token_expired") {
+              set.status = 401;
+              return {
+                error: "token_expired",
+                message: "Re-sign in to slashtalk.",
+              };
+            }
+            set.status = 502;
+            return {
+              error: "upstream_unavailable",
+              message: "Couldn't reach GitHub. Try again.",
+            };
+          }
+          verified = outcome.repo;
+          claimVerifyCache.set(cacheKey, { at: Date.now(), value: verified });
+        }
+
+        // Use GitHub's canonical casing / numeric id for DB storage. The
+        // `repos.fullName` unique constraint is case-sensitive at the SQL
+        // level, so we normalize to lowercase to keep dedupe consistent with
+        // the rest of the codebase (normalizeFullName everywhere).
+        const canonicalFullName = normalizeFullName(verified.fullName);
         const [repo] = await db
           .insert(repos)
-          .values({ fullName, owner: ownerLogin, name, private: body.private ?? false })
+          .values({
+            fullName: canonicalFullName,
+            owner: verified.owner,
+            name: verified.name,
+            private: verified.private,
+            githubId: verified.githubId,
+          })
           .onConflictDoUpdate({
             target: repos.fullName,
-            // touch so returning() always yields the row
-            set: { owner: ownerLogin, name },
+            set: {
+              owner: verified.owner,
+              name: verified.name,
+              private: verified.private,
+              githubId: verified.githubId,
+            },
           })
           .returning();
 
@@ -215,7 +425,6 @@ export const userRoutes = (db: Database) =>
       {
         body: t.Object({
           fullName: t.String({ minLength: 3, maxLength: 140 }),
-          private: t.Optional(t.Boolean()),
         }),
       }
     )

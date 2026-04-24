@@ -94,3 +94,36 @@ A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, n
 **Why.** Agent-to-agent review relies on diffs that can be read end-to-end in under a minute. Large PRs compound review latency quadratically.
 
 **How to apply.** Aim for <300 changed lines. Split refactors from feature work. Split docs-only changes from code changes.
+
+---
+
+## 11. Identity is user OAuth. No GitHub App.
+
+**Why.** Requiring an org-admin install gates adoption on someone other than the end user. slashtalk's promise is that any signed-in user can use it on any repo they personally can see — whether that repo is public, in an org that allows third-party OAuth apps, or in their own account.
+
+**How to apply.**
+- OAuth scope stays `read:user read:org` ([docs/SECURITY.md § OAuth scope](../SECURITY.md)).
+- Every GitHub API call uses the calling user's own decrypted token. The single code path that decrypts a user token is [`fetchUserGithubToken`](../../apps/server/src/user/routes.ts); use it everywhere.
+- Never add a GitHub App client ID, `installation_id`, `/app/installations` call, or org-level consent flow.
+
+---
+
+## 12. Repo access is verified, not asserted.
+
+**Why.** `user_repos` is the single authorization source for the feed, session, event, and WebSocket channels. A row must represent a user GitHub has confirmed can read the repo — otherwise every downstream check becomes a sieve. A pre-gate bug in [PR #85](https://github.com/HereNotThere/slashtalk/pull/85) let any JWT holder claim any `owner/name` and inherit the real collaborators' visibility.
+
+**How to apply.**
+- [`POST /api/me/repos`](../../apps/server/src/user/routes.ts) calls `GET /repos/:owner/:name` with the user's OAuth token and requires `200` before inserting a `user_repos` row. `404` = fail closed with 403 `no_access`. `401/403` = fail closed with 401 `token_expired`. Never fall back to "accept."
+- Never hand-insert `user_repos` rows from migrations, seed scripts, or other routes; go through the same gate (or run [`scripts/reverify-claims.ts`](../../apps/server/scripts/reverify-claims.ts) afterward to catch drift).
+- A per-user rate limit on the claim endpoint stops brute-force repo enumeration with a stolen JWT.
+
+---
+
+## 13. `user_repos` is the only authorization for cross-user reads.
+
+**Why.** Sessions, events, and WS fan-out channels (`repo:<id>`) all assume that a `user_repos` row = "this user is a legitimate reader of this repo." Any read path that doesn't join through `user_repos` silently leaks one user's data to another.
+
+**How to apply.**
+- Every route that returns another user's data — [`/api/feed`](../../apps/server/src/social/routes.ts), `/api/feed?user=` / `?repo=`, [`/api/feed/users`](../../apps/server/src/social/routes.ts), [`/api/session/:id`](../../apps/server/src/sessions/routes.ts), `/api/session/:id/events` — joins on or filters by `user_repos` scoped to the caller.
+- The WS channel subscription list in [`ws/handler.ts`](../../apps/server/src/ws/handler.ts) is built from `user_repos` only.
+- When adding a new cross-user surface, trace the authorization path back to `user_repos` before merging.

@@ -6,10 +6,30 @@ Threat model, secret handling, and credential storage for slashtalk.
 
 `GET /auth/github` requests **`read:user read:org` only** — no `repo` scope. Consequences:
 
-- We **cannot** call GitHub's `/user/repos` or read repo contents server-side.
-- Repos are **claimed** on demand: the desktop app reads a local clone's `.git/config`, extracts `owner/name`, and POSTs `/api/me/repos { fullName }`. The user proves possession by being able to clone it — GitHub already gated access at clone time.
-- `repos.github_id` is therefore nullable (we don't always know the numeric ID); code must not treat its absence as a bug.
+- We **cannot** read repo contents server-side. We **can** call `GET /repos/:owner/:name` and `GET /user/orgs` to confirm visibility; both are how the claim-gate and org picker verify access.
+- Repos are **claimed** on demand: the desktop app reads a local clone's `.git/config`, extracts `owner/name`, and POSTs `/api/me/repos { fullName }`. The server verifies possession at claim time by calling `GET /repos/:owner/:name` with the user's stored OAuth token — see § Repo-claim verification.
+- `repos.github_id` is populated from that verification response. Legacy rows predating the claim-gate may be null; a backfill via [`scripts/reverify-claims.ts`](../apps/server/scripts/reverify-claims.ts) closes that gap.
 - Historical `syncUserRepos` / `POST /api/me/sync-repos` have been removed.
+
+## Repo-claim verification
+
+`POST /api/me/repos` is the single gate between a desktop-initiated repo claim and any cross-user data access. Downstream routes (`/api/feed*`, `/api/session/:id`, `/api/session/:id/events`, WS `repo:<id>` subscriptions) all authorize reads via a `user_repos` row, so an unverified claim would let any JWT holder read another user's sessions. The server therefore confirms the caller can see the repo on GitHub before creating the `user_repos` row.
+
+- The handler decrypts `users.github_token` via `fetchUserGithubToken` and calls `GET https://api.github.com/repos/:owner/:name`.
+- `200` → accept. Persist `repos.github_id`, canonical `repos.owner`/`repos.name`, and `repos.private` from the response body.
+- `404` → reject with **403 `no_access`**. The caller does not have visibility on GitHub; we must not grant visibility here.
+- `401` / `403` from GitHub → reject with **401 `token_expired`**. The desktop surfaces a re-sign-in prompt and calls `backend.signOut()`.
+- Fetch errors or 5xx from GitHub → reject with **502 `upstream_unavailable`**. The desktop shows a retry hint.
+- A per-user **30-claims-per-hour rate limit** guards against brute-force repo-name enumeration with a stolen JWT.
+- A 60-second (userId, fullName) cache dedups retries (desktop double-clicks) without re-hitting GitHub.
+
+The claim endpoint responds with structured `{ error, message }` JSON on every non-2xx outcome so the desktop can branch on `error` and display `message` verbatim.
+
+The `/v1/devices/:id/repos` endpoint relies transitively on this gate: it only accepts `repoId`s the caller already tracks in `user_repos`, so there is no path that inserts a device-level registration for a repo the user hasn't verified-claimed.
+
+A one-shot maintenance script — [`scripts/reverify-claims.ts`](../apps/server/scripts/reverify-claims.ts) — re-verifies every pre-existing `user_repos` row against GitHub and deletes rows where the stored token no longer has access. Run once before deploying the gated claim endpoint, and again any time we suspect pre-gate leaks may have been persisted.
+
+See also core-beliefs [#11](design-docs/core-beliefs.md#11-identity-is-user-oauth-no-github-app), [#12](design-docs/core-beliefs.md#12-repo-access-is-verified-not-asserted), [#13](design-docs/core-beliefs.md#13-user_repos-is-the-only-authorization-for-cross-user-reads).
 
 ## Token storage and hashing
 

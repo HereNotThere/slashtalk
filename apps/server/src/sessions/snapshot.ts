@@ -15,7 +15,6 @@ import {
 
 interface SessionRow {
   sessionId: string;
-  source: EventSource;
   project: string;
   source: EventSource;
   title: string | null;
@@ -157,7 +156,6 @@ export function buildSnapshot(
 
   return {
     id: session.sessionId,
-    source: session.source,
     project: session.project,
     source: session.source,
     title: summaryTitle ?? session.title,

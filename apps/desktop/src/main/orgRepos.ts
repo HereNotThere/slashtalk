@@ -58,6 +58,18 @@ export function getSelectedFullNames(): string[] {
   return [...getSelectedFullNamesSet()];
 }
 
+/** Selection as a lowercase Set, for comparing against repo fullNames that
+ *  arrive from sources with differing casing. GitHub keeps owner/name in
+ *  whatever case the user typed at repo creation; `/api/feed/users` lowercases
+ *  via the server's normalizeFullName. A literal Set lookup between the two
+ *  misses every match. */
+export function getSelectedFullNamesLowerSet(): Set<string> {
+  const src = getSelectedFullNamesSet();
+  const out = new Set<string>();
+  for (const v of src) out.add(v.toLowerCase());
+  return out;
+}
+
 /** True once we have a non-empty repo list for the currently active org.
  *  The rail filter keys on this: it only narrows peers when we actually
  *  have data to narrow by. A pending fetch, a permissions error, or a

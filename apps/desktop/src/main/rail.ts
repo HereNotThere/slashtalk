@@ -227,9 +227,17 @@ async function refresh(): Promise<void> {
     // Without that check, a restored-from-store activeOrg combined with a
     // still-pending or scope-blocked GitHub fetch would silently drop every
     // peer from the rail — breaking the core "teammates list" feature.
+    //
+    // Compare case-insensitively: GitHub full names are case-insensitive, but
+    // /api/feed/users returns them lowercased (via the server's normalization)
+    // while /api/me/orgs/:org/repos preserves GitHub's natural owner/name
+    // casing. A literal set lookup across those two sources yields zero
+    // overlap and drops every peer.
     const filteredPeers = orgRepos.hasLoadedReposForActiveOrg()
       ? peers.filter((p) =>
-          p.repos.some((r) => orgRepos.getSelectedFullNamesSet().has(r)),
+          p.repos.some((r) =>
+            orgRepos.getSelectedFullNamesLowerSet().has(r.toLowerCase()),
+          ),
         )
       : peers;
 

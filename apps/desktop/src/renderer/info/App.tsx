@@ -15,7 +15,6 @@ import { BranchIcon, ClaudeIcon, OpenAIIcon } from "../shared/icons";
 
 const REFRESH_MS = 15_000;
 
-
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
@@ -502,17 +501,12 @@ function SessionRow({
     showPerson && "avatar_url" in session ? session.avatar_url : null;
 
   return (
-    <div
-      className={`relative ${expanded ? "bg-surface" : ""}`}
-    >
-      {expanded && (
-        <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-success/70" />
-      )}
+    <div className={expanded ? "bg-surface" : undefined}>
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-start gap-2"
+        className={`w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-start gap-2 border-l-2 ${expanded ? "border-success/70" : "border-transparent"}`}
       >
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-medium text-fg truncate">
@@ -597,7 +591,7 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
       {summary && (
         <div>
           <SubHeader>Summary</SubHeader>
-          <Markdown className="mt-1 text-[13px] text-fg/90 leading-relaxed [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-code [&_code]:text-[0.9em] [&_a]:text-link [&_a]:underline hover:[&_a]:text-link-hover [&_strong]:font-semibold [&_strong]:text-fg break-words">
+          <Markdown className="mt-1 text-[13px] [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
             {summary}
           </Markdown>
         </div>
@@ -608,9 +602,7 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
           <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside marker:text-subtle">
             {highlights.map((h, i) => (
               <li key={i}>
-                <Markdown className="inline [&_p]:inline [&_p]:my-0 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-code [&_code]:text-[0.9em] [&_a]:text-link [&_a]:underline hover:[&_a]:text-link-hover [&_strong]:font-semibold [&_strong]:text-fg break-words">
-                  {h}
-                </Markdown>
+                <Markdown inline>{h}</Markdown>
               </li>
             ))}
           </ul>

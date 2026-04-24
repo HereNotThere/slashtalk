@@ -396,9 +396,17 @@ function processClaudeEvents(
 function extractCursorText(event: CursorEventPayload): string | null {
   const content = event.message?.content;
   if (!content) return null;
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return normalizeCursorPrompt(content);
   const textBlocks = content.filter((block) => block.type === "text" && block.text);
-  return textBlocks.map((block) => block.text).join("\n") || null;
+  const text = textBlocks.map((block) => block.text).join("\n");
+  return normalizeCursorPrompt(text);
+}
+
+function normalizeCursorPrompt(text: string): string | null {
+  const trimmed = text.trim();
+  const userQuery = trimmed.match(/^<user_query>\s*([\s\S]*?)\s*<\/user_query>$/);
+  if (userQuery?.[1]) return userQuery[1].trim() || null;
+  return trimmed || null;
 }
 
 function summarizeCursorEvent(event: CursorEventPayload): string {

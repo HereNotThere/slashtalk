@@ -378,6 +378,11 @@ export interface ChatHeadsBridge {
     login: string;
   }) => Promise<void>;
 
+  // LLM-picked "thinking state" phrases for the loading indicator, describing
+  // what the assistant is actually doing for this specific prompt. The UI
+  // cycles through them. Server guarantees a non-empty array.
+  fetchChatGerunds: (prompt: string) => Promise<string[]>;
+
   // Drag (overlay → main)
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;

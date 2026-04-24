@@ -143,6 +143,9 @@ const bridge: ChatHeadsBridge = {
   openSessionCard: (payload) =>
     ipcRenderer.invoke("chat:openSessionCard", payload) as Promise<void>,
 
+  fetchChatGerunds: (prompt: string) =>
+    ipcRenderer.invoke("chat:gerund", prompt) as Promise<string[]>,
+
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 

@@ -1050,6 +1050,10 @@ ipcMain.handle(
     backend.askChat(messages),
 );
 
+ipcMain.handle("chat:gerund", (_e, prompt: string) =>
+  backend.fetchChatGerunds(prompt),
+);
+
 // -------- Dock to edge (drag → release → snap) --------
 
 function overlayDisplay(): Electron.Display {

@@ -533,6 +533,23 @@ export async function askChat(messages: ChatMessage[]): Promise<ChatAskResponse>
   });
 }
 
+export async function fetchChatGerunds(prompt: string): Promise<string[]> {
+  const fallback = ["Thinking"];
+  try {
+    const res = await jsonFetch<{ words?: unknown }>("/api/chat/gerund", {
+      method: "POST",
+      body: { prompt },
+    });
+    if (!Array.isArray(res.words)) return fallback;
+    const words = res.words.filter(
+      (w): w is string => typeof w === "string" && w.length > 0,
+    );
+    return words.length > 0 ? words : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function sendHeartbeat(body: {
   sessionId: string;
   pid?: number;

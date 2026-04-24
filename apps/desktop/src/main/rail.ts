@@ -5,6 +5,7 @@
 // with you. Refreshed on auth changes, on local-repo changes, and on a 30s
 // poll as a fallback until WebSocket user_updated events are wired.
 
+import { SessionState } from "@slashtalk/shared";
 import type { ChatHead, RailDebugSnapshot } from "../shared/types";
 import * as backend from "./backend";
 import * as agentStore from "./agentStore";
@@ -139,6 +140,7 @@ function headForUser(
   login: string,
   avatarUrl: string,
   lastActivityAt?: number | null,
+  isLive?: boolean,
 ): ChatHead {
   const prAt = prActivityByLogin.get(login);
   return {
@@ -149,6 +151,7 @@ function headForUser(
     avatar: { type: "remote", value: avatarUrl },
     ...(lastActivityAt != null && { lastActionAt: lastActivityAt }),
     ...(prAt != null && { prActivityAt: prAt }),
+    ...(isLive === true && { live: true }),
   };
 }
 
@@ -182,10 +185,18 @@ function headForRepo(
   };
 }
 
-function selfHead(lastActivityAt?: number | null): ChatHead | null {
+function selfHead(
+  lastActivityAt?: number | null,
+  isLive?: boolean,
+): ChatHead | null {
   const state = backend.getAuthState();
   if (!state.signedIn) return null;
-  return headForUser(state.user.githubLogin, state.user.avatarUrl, lastActivityAt);
+  return headForUser(
+    state.user.githubLogin,
+    state.user.avatarUrl,
+    lastActivityAt,
+    isLive,
+  );
 }
 
 function sameHeads(a: ChatHead[], b: ChatHead[]): boolean {
@@ -250,7 +261,14 @@ async function refresh(): Promise<void> {
 
     const latestByLogin = new Map<string, number>();
     const latestByRepo = new Map<string, number>();
+    // Live = user has at least one session in BUSY/ACTIVE state. Matches the
+    // "working now" label shown in the info popover so the rail and popover
+    // agree on who's actively coding right now.
+    const liveByLogin = new Set<string>();
     for (const s of feedSessions) {
+      if (s.state === SessionState.BUSY || s.state === SessionState.ACTIVE) {
+        liveByLogin.add(s.github_login);
+      }
       if (!s.lastTs) continue;
       const ts = new Date(s.lastTs).getTime();
       const prevU = latestByLogin.get(s.github_login) ?? 0;
@@ -266,7 +284,8 @@ async function refresh(): Promise<void> {
     console.log(
       `[rail] self=${initialSelf.label} selfLastTs=${selfLastTs} feedCount=${feedSessions.length} latestByLogin=${JSON.stringify([...latestByLogin.entries()])}`,
     );
-    const self = selfHead(selfLastTs) ?? initialSelf;
+    const self =
+      selfHead(selfLastTs, liveByLogin.has(initialSelf.label)) ?? initialSelf;
 
     // Client-side filter: drop peers whose sessions don't land on a repo the
     // user has locally tracked AND left selected in the tray popup. Backend
@@ -287,6 +306,7 @@ async function refresh(): Promise<void> {
         t.githubLogin,
         t.avatarUrl,
         latestByLogin.get(t.githubLogin) ?? null,
+        liveByLogin.has(t.githubLogin),
       ),
     );
     // Merge debug fakes into the peer list so they survive the poll refresh.

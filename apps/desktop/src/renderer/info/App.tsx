@@ -285,17 +285,14 @@ function SessionsSection({
   );
 }
 
-// "Current" = live or paused sessions (heartbeat still alive).
-// "Completed" = server-classified RECENT/ENDED.
+// "Active" = live (currently working or just-active). IDLE means the developer
+// has moved on, so it groups with completed. The server already sorts by state
+// priority (busy → active → idle → recent → ended, lastTs desc within each),
+// so we just partition in arrival order — no client-side resort.
 const ACTIVE_STATES = new Set<SessionState>([
   SessionState.BUSY,
   SessionState.ACTIVE,
-  SessionState.IDLE,
 ]);
-
-function tsOf(s: InfoSession): number {
-  return s.lastTs ? new Date(s.lastTs).getTime() : 0;
-}
 
 function RepoSessionsSection({
   sessions,
@@ -330,13 +327,9 @@ function RepoSessionsSection({
     );
   }
 
-  // Sort by lastTs desc within each group — most recent activity on top.
-  const active = sessions
-    .filter((s) => ACTIVE_STATES.has(s.state))
-    .sort((a, b) => tsOf(b) - tsOf(a));
-  const completed = sessions
-    .filter((s) => !ACTIVE_STATES.has(s.state))
-    .sort((a, b) => tsOf(b) - tsOf(a));
+  // Partition only — server order is authoritative.
+  const active = sessions.filter((s) => ACTIVE_STATES.has(s.state));
+  const completed = sessions.filter((s) => !ACTIVE_STATES.has(s.state));
 
   const onToggle = (id: string): void =>
     setExpandedId((cur) => (cur === id ? null : id));

@@ -1,20 +1,13 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { SessionState } from "@slashtalk/shared";
-import type { RecentEvent, TokenUsage } from "@slashtalk/shared";
+import type { EventSource, RecentEvent, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
+import { BranchIcon, ClaudeIcon, OpenAIIcon } from "../shared/icons";
 
 const REFRESH_MS = 15_000;
-
-const DOT_COLOR: Record<SessionState, string> = {
-  [SessionState.BUSY]: "bg-success",
-  [SessionState.ACTIVE]: "bg-success",
-  [SessionState.IDLE]: "bg-warning",
-  [SessionState.RECENT]: "bg-muted",
-  [SessionState.ENDED]: "bg-muted",
-};
 
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
@@ -85,7 +78,7 @@ export function App(): JSX.Element {
       ref={rootRef}
       onMouseEnter={() => void window.chatheads.infoHoverEnter()}
       onMouseLeave={() => void window.chatheads.infoHoverLeave()}
-      className="bg-card rounded-3xl max-h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out"
+      className="bg-card rounded-3xl h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out"
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? "translateX(0)" : "translateX(-4px)",
@@ -397,14 +390,9 @@ function SessionRow({
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
   const tokenStr = fmtTokens(session.tokens);
-  const showDot =
-    session.state === SessionState.ACTIVE ||
-    session.state === SessionState.BUSY;
-  const shrinkableParts = [repo, session.branch].filter(
-    (v): v is string => Boolean(v),
-  );
   const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
-  const hasMeta = shrinkableParts.length > 0 || tokensLabel !== null;
+  const status = statusLabel(session);
+  const hasLocator = Boolean(repo) || Boolean(session.branch);
   // FeedSessionSnapshot carries the owner's github_login + avatar_url. Own
   // sessions (SessionSnapshot) don't, so the byline silently no-ops for them.
   const personLogin =
@@ -420,17 +408,11 @@ function SessionRow({
         className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
       >
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <div className="text-[14px] font-medium text-fg flex-1 truncate">
-              {title}
-            </div>
-            {showDot && <Dot color={DOT_COLOR[session.state]} />}
+          <div className="text-[14px] font-medium text-fg truncate">
+            {title}
           </div>
           {personLogin && (
-            <div
-              className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0"
-              style={showDot ? { marginLeft: 14 } : undefined}
-            >
+            <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
               {personAvatar ? (
                 <img
                   src={personAvatar}
@@ -450,21 +432,34 @@ function SessionRow({
               {session.description}
             </div>
           )}
-          {hasMeta && (
-            <div className="mt-px flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
-              {shrinkableParts.map((v, i) => (
-                <Fragment key={i}>
-                  {i > 0 && <span className="text-subtle shrink-0">·</span>}
-                  <span className="truncate min-w-0">{v}</span>
-                </Fragment>
-              ))}
-              {tokensLabel && (
-                <>
-                  {shrinkableParts.length > 0 && (
-                    <span className="text-subtle shrink-0">·</span>
-                  )}
-                  <span className="shrink-0">{tokensLabel}</span>
-                </>
+          {hasLocator && (
+            <div className="mt-1 flex min-w-0">
+              <span className="inline-flex items-center gap-1 font-mono text-[10.5px] leading-none px-1.5 py-0.5 rounded bg-surface/70 text-fg/75 min-w-0 max-w-full">
+                {repo && <span className="truncate">{repo}</span>}
+                {repo && session.branch && (
+                  <span className="text-subtle shrink-0 px-0.5">·</span>
+                )}
+                {session.branch && (
+                  <>
+                    <span className="text-subtle shrink-0">
+                      <BranchIcon />
+                    </span>
+                    <span className="truncate">{session.branch}</span>
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+          {(status !== null || tokensLabel !== null) && (
+            <div className="mt-1 flex items-center gap-2 text-[11.5px] text-subtle min-w-0">
+              <ProviderIcon source={session.source} />
+              {tokensLabel && <span className="shrink-0">{tokensLabel}</span>}
+              {status && (
+                <span
+                  className={`shrink-0 ml-auto ${status.isLive ? "text-accent" : ""}`}
+                >
+                  {status.isLive ? <WorkingIndicator /> : status.text}
+                </span>
               )}
             </div>
           )}
@@ -555,6 +550,82 @@ function fmtTokens(tokens: TokenUsage | undefined): string | null {
   return `${total}`;
 }
 
+interface StatusInfo {
+  text: string;
+  isLive: boolean;
+}
+
+function statusLabel(s: InfoSession): StatusInfo | null {
+  switch (s.state) {
+    case SessionState.BUSY:
+    case SessionState.ACTIVE:
+      return { text: "working now", isLive: true };
+    case SessionState.IDLE:
+      return {
+        text: s.idleS != null ? `idle ${fmtDuration(s.idleS)}` : "idle",
+        isLive: false,
+      };
+    case SessionState.RECENT:
+      return s.lastTs
+        ? { text: `paused ${fmtAgo(s.lastTs)}`, isLive: false }
+        : null;
+    case SessionState.ENDED:
+      return s.lastTs
+        ? { text: `ended ${fmtAgo(s.lastTs)}`, isLive: false }
+        : null;
+    default:
+      return null;
+  }
+}
+
+function WorkingIndicator(): JSX.Element {
+  const text = "working now...";
+  const duration = 1.6;
+  const step = 0.08;
+  return (
+    <span aria-label={text}>
+      {Array.from(text).map((ch, i) => {
+        const style: CSSProperties = {
+          animation: `shimmer-char ${duration}s ease-in-out infinite`,
+          animationDelay: `${i * step}s`,
+          display: "inline-block",
+          whiteSpace: "pre",
+        };
+        return (
+          <span key={i} style={style} aria-hidden>
+            {ch}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function ProviderIcon({ source }: { source: EventSource }): JSX.Element {
+  const label = source === "codex" ? "OpenAI Codex" : "Claude Code";
+  return (
+    <span
+      className="shrink-0 text-subtle"
+      title={label}
+      aria-label={label}
+    >
+      {source === "codex" ? <OpenAIIcon /> : <ClaudeIcon />}
+    </span>
+  );
+}
+
+function fmtDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  if (h < 24) return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  return `${d}d`;
+}
+
 function fmtAgo(ts: string): string {
   const diff = Date.now() - new Date(ts).getTime();
   const s = Math.max(0, Math.floor(diff / 1000));
@@ -568,10 +639,6 @@ function fmtAgo(ts: string): string {
   if (roundedH < 24) return `${roundedH}h ago`;
   const d = Math.floor(roundedH / 24);
   return `${d}d ago`;
-}
-
-function Dot({ color }: { color: string }): JSX.Element {
-  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />;
 }
 
 function ArrowIcon(): JSX.Element {

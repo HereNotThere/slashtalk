@@ -67,6 +67,7 @@ export interface RecentEvent {
 export interface SessionSnapshot {
   id: string;
   project: string;
+  source: EventSource;
   title: string | null;
   description: string | null;
   rollingSummary: string | null;

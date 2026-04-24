@@ -1,19 +1,17 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { SessionState } from "@slashtalk/shared";
-import type { RecentEvent, TokenUsage } from "@slashtalk/shared";
+import type { EventSource, RecentEvent, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
+import { Markdown } from "../shared/Markdown";
 
 const REFRESH_MS = 15_000;
 
-const DOT_COLOR: Record<SessionState, string> = {
-  [SessionState.BUSY]: "bg-success",
-  [SessionState.ACTIVE]: "bg-success",
-  [SessionState.IDLE]: "bg-warning",
-  [SessionState.RECENT]: "bg-muted",
-  [SessionState.ENDED]: "bg-muted",
+const SOURCE_META: Record<EventSource, { label: string; tone: string }> = {
+  claude: { label: "Claude", tone: "text-[#d4824c]" },
+  codex: { label: "Codex", tone: "text-[#38b48c]" },
 };
 
 export function App(): JSX.Element {
@@ -436,14 +434,13 @@ function SessionRow({
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
   const tokenStr = fmtTokens(session.tokens);
-  const showDot =
-    session.state === SessionState.ACTIVE ||
-    session.state === SessionState.BUSY;
+  const sourceMeta = SOURCE_META[session.source];
   const shrinkableParts = [repo, session.branch].filter(
     (v): v is string => Boolean(v),
   );
   const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
-  const hasMeta = shrinkableParts.length > 0 || tokensLabel !== null;
+  const hasMeta =
+    Boolean(sourceMeta) || shrinkableParts.length > 0 || tokensLabel !== null;
   // FeedSessionSnapshot carries the owner's github_login + avatar_url. Own
   // sessions (SessionSnapshot) don't, so the byline silently no-ops for them.
   const personLogin =
@@ -452,24 +449,28 @@ function SessionRow({
     showPerson && "avatar_url" in session ? session.avatar_url : null;
 
   return (
-    <div className={expanded ? "bg-surface" : undefined}>
+    <div
+      className={`relative ${expanded ? "bg-surface" : ""}`}
+    >
+      {expanded && (
+        <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-success/70" />
+      )}
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
+        aria-expanded={expanded}
+        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-start gap-2"
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <div className="text-[14px] font-medium text-fg flex-1 truncate">
               {title}
             </div>
-            {showDot && <Dot color={DOT_COLOR[session.state]} />}
+            <StatePill session={session} />
+            <Chevron open={expanded} />
           </div>
           {personLogin && (
-            <div
-              className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0"
-              style={showDot ? { marginLeft: 14 } : undefined}
-            >
+            <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
               {personAvatar ? (
                 <img
                   src={personAvatar}
@@ -491,19 +492,18 @@ function SessionRow({
           )}
           {hasMeta && (
             <div className="mt-px flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
-              {shrinkableParts.map((v, i) => (
-                <Fragment key={i}>
-                  {i > 0 && <span className="text-subtle shrink-0">·</span>}
-                  <span className="truncate min-w-0">{v}</span>
-                </Fragment>
-              ))}
-              {tokensLabel && (
-                <>
-                  {shrinkableParts.length > 0 && (
-                    <span className="text-subtle shrink-0">·</span>
-                  )}
-                  <span className="shrink-0">{tokensLabel}</span>
-                </>
+              {joinWithDots(
+                [
+                  sourceMeta && (
+                    <span className={`font-medium shrink-0 ${sourceMeta.tone}`}>
+                      {sourceMeta.label}
+                    </span>
+                  ),
+                  ...shrinkableParts.map((v) => (
+                    <span className="truncate min-w-0">{v}</span>
+                  )),
+                  tokensLabel && <span className="shrink-0">{tokensLabel}</span>,
+                ].filter((n): n is JSX.Element => Boolean(n)),
               )}
             </div>
           )}
@@ -511,6 +511,81 @@ function SessionRow({
       </button>
       {expanded && <ExpandedSession session={session} />}
     </div>
+  );
+}
+
+const PILL_BASE =
+  "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10.5px] font-medium shrink-0";
+
+function joinWithDots(nodes: JSX.Element[]): JSX.Element[] {
+  const out: JSX.Element[] = [];
+  nodes.forEach((node, i) => {
+    if (i > 0) {
+      out.push(
+        <span key={`dot-${i}`} className="text-subtle shrink-0">
+          ·
+        </span>,
+      );
+    }
+    out.push(<Fragment key={`n-${i}`}>{node}</Fragment>);
+  });
+  return out;
+}
+
+function StatePill({ session }: { session: InfoSession }): JSX.Element | null {
+  const { state, currentTool, idleS } = session;
+  if (state === SessionState.BUSY || state === SessionState.ACTIVE) {
+    const busy = state === SessionState.BUSY;
+    const label = busy
+      ? currentTool?.name
+        ? `running ${currentTool.name}`
+        : "thinking"
+      : "live";
+    return (
+      <span className={`${PILL_BASE} bg-success/15 text-success`}>
+        <span
+          className={`w-1.5 h-1.5 rounded-full bg-success ${busy ? "animate-pulse" : ""}`}
+        />
+        {label}
+      </span>
+    );
+  }
+  if (state === SessionState.IDLE) {
+    const mins = idleS && idleS > 0 ? Math.max(1, Math.round(idleS / 60)) : null;
+    return (
+      <span className="text-[10.5px] font-medium text-warning shrink-0">
+        {mins ? `idle ${mins}m` : "idle"}
+      </span>
+    );
+  }
+  if (state === SessionState.ENDED) {
+    return (
+      <span className="text-[10.5px] font-medium text-subtle shrink-0">
+        ended
+      </span>
+    );
+  }
+  return null;
+}
+
+function Chevron({ open }: { open: boolean }): JSX.Element {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      className={`text-subtle shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+      aria-hidden
+    >
+      <path
+        d="M3.5 2 L6.5 5 L3.5 8"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
@@ -534,17 +609,21 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
       {summary && (
         <div>
           <SubHeader>Summary</SubHeader>
-          <div className="mt-1 text-[13px] text-fg leading-relaxed whitespace-pre-wrap">
+          <Markdown className="mt-1 text-[13px] text-fg/90 leading-relaxed [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-code [&_code]:text-[0.9em] [&_a]:text-link [&_a]:underline hover:[&_a]:text-link-hover [&_strong]:font-semibold [&_strong]:text-fg break-words">
             {summary}
-          </div>
+          </Markdown>
         </div>
       )}
       {highlights.length > 0 && (
         <div>
           <SubHeader>Highlights</SubHeader>
-          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside">
+          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside marker:text-subtle">
             {highlights.map((h, i) => (
-              <li key={i}>{h}</li>
+              <li key={i}>
+                <Markdown className="inline [&_p]:inline [&_p]:my-0 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-code [&_code]:text-[0.9em] [&_a]:text-link [&_a]:underline hover:[&_a]:text-link-hover [&_strong]:font-semibold [&_strong]:text-fg break-words">
+                  {h}
+                </Markdown>
+              </li>
             ))}
           </ul>
         </div>
@@ -607,10 +686,6 @@ function fmtAgo(ts: string): string {
   if (roundedH < 24) return `${roundedH}h ago`;
   const d = Math.floor(roundedH / 24);
   return `${d}d ago`;
-}
-
-function Dot({ color }: { color: string }): JSX.Element {
-  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />;
 }
 
 function ArrowIcon(): JSX.Element {

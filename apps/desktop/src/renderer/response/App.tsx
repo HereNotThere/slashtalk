@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "../shared/Markdown";
 import type { ChatMessage, SessionCard, SessionState } from "@slashtalk/shared";
 import type {
   AgentSummary,
@@ -12,15 +11,6 @@ import { SendIcon } from "../shared/icons";
 
 const CITATION_TOKEN = /\[session:[0-9a-fA-F-]+\]/g;
 const CARDS_VISIBLE = 5;
-
-const MARKDOWN_CLASSES =
-  "prose prose-invert text-fg/90 break-words text-sm leading-relaxed " +
-  "[&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 " +
-  "[&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-code [&_code]:text-[0.9em] " +
-  "[&_pre]:bg-code [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-auto " +
-  "[&_pre_code]:bg-transparent [&_pre_code]:p-0 " +
-  "[&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold " +
-  "[&_a]:text-link [&_a]:underline hover:[&_a]:text-link-hover";
 
 export function App(): JSX.Element {
   const [payload, setPayload] = useState<ResponseOpenPayload | null>(null);
@@ -156,11 +146,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
             </div>
           ) : (
             <div key={i} className="space-y-md">
-              <div className={MARKDOWN_CLASSES}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {m.content.replace(CITATION_TOKEN, "")}
-                </ReactMarkdown>
-              </div>
+              <Markdown>{m.content.replace(CITATION_TOKEN, "")}</Markdown>
               {m.cards && m.cards.length > 0 && (
                 <SessionCardStack cards={m.cards} />
               )}

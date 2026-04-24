@@ -24,6 +24,8 @@ interface Bindings {
   msgSend_pd: (obj: bigint, sel: bigint, arg: number) => void;
   msgSend_ppp: (obj: bigint, sel: bigint, arg: bigint) => void;
   msgSend_pdd: (obj: bigint, sel: bigint, a: number, b: number) => bigint;
+  msgSend_pp_long: (obj: bigint, sel: bigint) => number;
+  msgSend_pp_ulong: (obj: bigint, sel: bigint) => bigint;
 }
 
 let bindings: Bindings | null = null;
@@ -70,8 +72,35 @@ function load(): Bindings | null {
       "double",
       "double",
     ]),
+    msgSend_pp_long: objc.func("objc_msgSend", "long", [
+      "intptr_t",
+      "intptr_t",
+    ]),
+    msgSend_pp_ulong: objc.func("objc_msgSend", "uint64", [
+      "intptr_t",
+      "intptr_t",
+    ]),
   };
   return bindings;
+}
+
+export function debugMacWindowState(win: BrowserWindow): {
+  level: number;
+  collectionBehavior: string;
+} | null {
+  const b = load();
+  if (!b) return null;
+  const contentView = readPointer(win.getNativeWindowHandle());
+  const nsWindow = b.msgSend_pp(contentView, b.sel_registerName("window"));
+  if (!nsWindow) return null;
+  const level = Number(
+    b.msgSend_pp_long(nsWindow, b.sel_registerName("level")),
+  );
+  const cb = b.msgSend_pp_ulong(
+    nsWindow,
+    b.sel_registerName("collectionBehavior"),
+  );
+  return { level, collectionBehavior: `0x${cb.toString(16)}` };
 }
 
 function readPointer(buf: Buffer): bigint {

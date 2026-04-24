@@ -111,6 +111,13 @@ const bridge: ChatHeadsBridge = {
   list: () => ipcRenderer.invoke("heads:list") as Promise<ChatHead[]>,
   onUpdate: (cb) => subscribe<ChatHead[]>("heads:update", cb),
 
+  rail: {
+    getPinned: () => ipcRenderer.invoke("rail:getPinned") as Promise<boolean>,
+    setPinned: (pinned: boolean) =>
+      ipcRenderer.invoke("rail:setPinned", pinned) as Promise<void>,
+    onPinnedChange: (cb) => subscribe<boolean>("rail:pinned", cb),
+  },
+
   listProjects: () =>
     ipcRenderer.invoke("projects:list") as Promise<ChatHead[]>,
   onProjectsUpdate: (cb) => subscribe<ChatHead[]>("projects:update", cb),

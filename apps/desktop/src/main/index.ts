@@ -46,7 +46,15 @@ import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
 import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
-import { setMacCornerRadius } from "./macCorners";
+import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
+
+declare global {
+  namespace Electron {
+    interface App {
+      isQuitting?: boolean;
+    }
+  }
+}
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
 // BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/ChatBubble (45px),
@@ -112,6 +120,43 @@ let infoHideGraceTimer: NodeJS.Timeout | null = null;
 let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
+const PINNED_KEY = "railPinned";
+
+// Pinned (default): rail floats above everything. Unpinned: rail behaves like
+// a normal app window — on top only when Slashtalk is focused.
+function getRailPinned(): boolean {
+  const v = store.get<boolean>(PINNED_KEY);
+  return v === undefined ? true : v;
+}
+
+function applyRailPinned(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const pinned = getRailPinned();
+  console.log(`[pin] applyRailPinned: target=${pinned}`);
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlayWindow.setAlwaysOnTop(pinned, "floating");
+  if (!pinned) overlayWindow.moveTop();
+  // Dropping the rail from floating to normal level can cause macOS to
+  // reclassify the app as accessory when no regular NSWindow is visible
+  // (main window may be hidden). Re-assert regular policy + dock.show() to
+  // keep Slashtalk in Cmd+Tab and the Dock.
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
+  const native = debugMacWindowState(overlayWindow);
+  console.log(
+    `[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level} nativeCB=${native?.collectionBehavior}`,
+  );
+}
+
+function broadcastRailPinned(): void {
+  const pinned = getRailPinned();
+  const targets = [overlayWindow, mainWindow, trayPopup].filter(
+    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
+  );
+  for (const w of targets) w.webContents.send("rail:pinned", pinned);
+}
 
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
@@ -199,6 +244,18 @@ function createMainWindow(): void {
     },
   });
   loadRenderer(mainWindow, "main");
+  // Hide-on-close rather than destroy. Rationale: the rail overlay is
+  // `focusable: false`, which Electron implements as NSPanel on macOS. An
+  // app whose only windows are NSPanels drops out of Cmd+Tab and the Dock's
+  // "Show All Windows". Keeping a hidden regular NSWindow around guarantees
+  // Slashtalk stays in the app switcher. Activating the app (dock/Cmd+Tab)
+  // shows it again.
+  mainWindow.on("close", (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      mainWindow?.hide();
+    }
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -306,7 +363,7 @@ function ensureOverlay(): BrowserWindow {
     // macOS recomputes against the pill mask instead of the original
     // rectangle.
     hasShadow: true,
-    alwaysOnTop: true,
+    alwaysOnTop: getRailPinned(),
     resizable: false,
     movable: false, // we drive drag manually via IPC + setPosition
     skipTaskbar: true,
@@ -325,8 +382,7 @@ function ensureOverlay(): BrowserWindow {
     },
   });
 
-  overlayWindow.setAlwaysOnTop(true, "floating");
-  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  applyRailPinned();
 
   // Pill ends — half the window width gives perfect semicircle caps at top
   // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
@@ -958,6 +1014,18 @@ function createTray(): void {
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
 ipcMain.handle("projects:list", (): ChatHead[] => projects);
+
+ipcMain.handle("rail:getPinned", (): boolean => {
+  const v = getRailPinned();
+  console.log(`[pin] ipc getPinned → ${v}`);
+  return v;
+});
+ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
+  console.log(`[pin] ipc setPinned(${pinned})`);
+  store.set(PINNED_KEY, !!pinned);
+  applyRailPinned();
+  broadcastRailPinned();
+});
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
 ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
@@ -1978,6 +2046,14 @@ function debugBackfillTimestamps(): void {
 }
 
 app.whenReady().then(() => {
+  // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
+  // "regular" but we set it explicitly, and force-show the dock icon in case
+  // something demoted us to accessory mode.
+  if (process.platform === "darwin") {
+    console.log("[app] setActivationPolicy(regular) + dock.show()");
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
   backend.restore();
   chatheadsAuth.restore();
   anthropic.restore();
@@ -2004,6 +2080,13 @@ app.whenReady().then(() => {
   }
 });
 
+app.on("before-quit", () => {
+  // Flag read by mainWindow's "close" handler to allow actual destruction
+  // during app quit (otherwise close is preventDefault'd and the app can't
+  // shut down cleanly).
+  app.isQuitting = true;
+});
+
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
 });
@@ -2014,6 +2097,18 @@ app.on("will-quit", () => {
 app.on("window-all-closed", () => {});
 
 app.on("activate", () => {
+  // Standard macOS reopen semantics: clicking the dock icon re-shows the
+  // main window. `createMainWindow` covers the (now-rare) case where it was
+  // actually destroyed.
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  else mainWindow.show();
+  else if (!mainWindow.isVisible()) mainWindow.show();
+  else mainWindow.focus();
+});
+
+// When unpinned and the user cmd-tabs or clicks the dock back to Slashtalk,
+// raise the rail alongside whichever window macOS is focusing.
+app.on("did-become-active", () => {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (getRailPinned()) return;
+  overlayWindow.moveTop();
 });

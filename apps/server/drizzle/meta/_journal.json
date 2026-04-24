@@ -36,6 +36,13 @@
       "when": 1777219200002,
       "tag": "0004_confused_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777039050717,
+      "tag": "0005_sharp_valkyrie",
+      "breakpoints": true
     }
   ]
 }

@@ -63,6 +63,17 @@ export interface RecentEvent {
   summary: string;
 }
 
+/** PR linked to a session via (repo_id, branch). Populated only when the
+ *  pr-poller has seen a PR whose head ref matches the session's branch on the
+ *  session's repo — absence means "not known", not "no PR". */
+export interface SessionPr {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  authorLogin: string;
+}
+
 /** Full session snapshot — shared between server API and desktop client */
 export interface SessionSnapshot {
   id: string;
@@ -98,6 +109,7 @@ export interface SessionSnapshot {
   topFilesWritten: [string, number][];
   toolUseNames: [string, number][];
   recent: RecentEvent[];
+  pr: SessionPr | null;
 }
 
 /** Feed-augmented session snapshot (includes social graph fields) */

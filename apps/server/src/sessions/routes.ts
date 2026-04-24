@@ -4,7 +4,11 @@ import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessions, events, heartbeats, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { toSnapshot, loadInsightsForSessions } from "./snapshot";
+import {
+  toSnapshot,
+  loadInsightsForSessions,
+  loadPrsForSessions,
+} from "./snapshot";
 
 const SESSION_STATE_VALUES = Object.values(SessionState);
 
@@ -33,10 +37,23 @@ export const sessionRoutes = (db: Database) =>
             : [];
         const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
         const insightsMap = await loadInsightsForSessions(db, sessionIds);
+        const prMap = await loadPrsForSessions(
+          db,
+          rows.map((r) => ({
+            sessionId: r.sessionId,
+            repoId: r.repoId,
+            branch: r.branch,
+          })),
+        );
 
         let snapshots = rows.map((s) => {
           const hb = hbMap.get(s.sessionId) ?? null;
-          return toSnapshot(s, hb, insightsMap.get(s.sessionId) ?? null);
+          return toSnapshot(
+            s,
+            hb,
+            insightsMap.get(s.sessionId) ?? null,
+            prMap.get(s.sessionId) ?? null,
+          );
         });
 
         if (query.state) {
@@ -102,10 +119,18 @@ export const sessionRoutes = (db: Database) =>
           .limit(1);
 
         const insightsMap = await loadInsightsForSessions(db, [params.id]);
+        const prMap = await loadPrsForSessions(db, [
+          {
+            sessionId: session.sessionId,
+            repoId: session.repoId,
+            branch: session.branch,
+          },
+        ]);
         return toSnapshot(
           session,
           hb ?? null,
           insightsMap.get(params.id) ?? null,
+          prMap.get(params.id) ?? null,
         );
       },
       { params: t.Object({ id: t.String() }) }

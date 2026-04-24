@@ -10,14 +10,17 @@
 // replaying old PRs. That's the right tradeoff for a near-real-time presence
 // signal — historical PRs don't need to fan out.
 
-import { isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "../db";
-import { users, repos } from "../db/schema";
+import { users, repos, sessions, pullRequests } from "../db/schema";
 import { decryptGithubToken } from "../auth/tokens";
 import { config } from "../config";
 import type { RedisBridge } from "../ws/redis-bridge";
-import type { PrActivityMessage } from "@slashtalk/shared";
+import type {
+  PrActivityMessage,
+  SessionUpdatedMessage,
+} from "@slashtalk/shared";
 
 const POLL_INTERVAL_MS = 60_000;
 // Stagger users so we don't pin a single tick at hundreds of req/sec.
@@ -37,6 +40,9 @@ export interface GithubEvent {
       title?: string;
       html_url?: string;
       number?: number;
+      state?: "open" | "closed";
+      head?: { ref?: string };
+      user?: { login?: string };
     };
   };
 }
@@ -141,6 +147,94 @@ async function pollUser(
     const msg = toPrMessage(ev);
     if (!msg) continue;
     await fanOut(db, redis, msg);
+    await persistPrFromEvent(db, redis, ev);
+  }
+}
+
+/**
+ * Upsert the PR into `pull_requests` and publish `session_updated` for every
+ * session whose (repo_id, branch) matches the PR's head ref so clients
+ * re-fetch and render the new PR link.
+ *
+ * Accepts opened / reopened / closed events (merged or not) — we want the
+ * link visible regardless of state, just marked accordingly. Silently skips
+ * if we lack head.ref (some older events omit it).
+ */
+export async function persistPrFromEvent(
+  db: Database,
+  redis: RedisBridge,
+  ev: GithubEvent,
+): Promise<void> {
+  if (ev.type !== "PullRequestEvent") return;
+  const pr = ev.payload.pull_request;
+  const action = ev.payload.action;
+  if (!pr) return;
+  const headRef = pr.head?.ref;
+  if (!headRef) return;
+  const number = pr.number ?? ev.payload.number;
+  if (!number) return;
+
+  let state: "open" | "closed" | "merged";
+  if (action === "opened" || action === "reopened") state = "open";
+  else if (action === "closed") state = pr.merged ? "merged" : "closed";
+  else return; // ignore edited/labeled/synchronize/etc.
+
+  const [repoRow] = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(eqLower(repos.fullName, ev.repo.name))
+    .limit(1);
+  if (!repoRow) return;
+
+  const url = pr.html_url ?? `https://github.com/${ev.repo.name}/pull/${number}`;
+  const authorLogin = pr.user?.login ?? ev.actor.login;
+
+  await db
+    .insert(pullRequests)
+    .values({
+      repoId: repoRow.id,
+      number,
+      headRef,
+      title: pr.title ?? "",
+      url,
+      state,
+      authorLogin,
+      updatedAt: new Date(ev.created_at),
+    })
+    .onConflictDoUpdate({
+      target: [pullRequests.repoId, pullRequests.number],
+      set: {
+        headRef,
+        title: pr.title ?? "",
+        url,
+        state,
+        authorLogin,
+        updatedAt: new Date(ev.created_at),
+      },
+    });
+
+  // Announce to every session on this (repo, branch) so the UI refreshes.
+  const matches = await db
+    .select({
+      sessionId: sessions.sessionId,
+      userId: sessions.userId,
+      githubLogin: users.githubLogin,
+    })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .where(
+      and(eq(sessions.repoId, repoRow.id), eq(sessions.branch, headRef)),
+    );
+
+  for (const m of matches) {
+    const upd: SessionUpdatedMessage = {
+      type: "session_updated",
+      session_id: m.sessionId,
+      user_id: m.userId,
+      github_login: m.githubLogin,
+      repo_id: repoRow.id,
+    };
+    await redis.publish(`repo:${repoRow.id}`, upd);
   }
 }
 

@@ -237,6 +237,32 @@ export const heartbeats = pgTable("heartbeats", {
   updatedAt: timestamp("updated_at", { withTimezone: true }),
 });
 
+// ── Pull Requests ───────────────────────────────────────────
+
+/** PRs seen by the social/pr-poller. Persisted so we can render a PR link
+ *  alongside any session whose (repo_id, branch) matches head_ref. The poller
+ *  only sees recent events from user activity feeds, so coverage is best-effort
+ *  — absence here does not mean "no PR exists", only "we haven't seen one". */
+export const pullRequests = pgTable(
+  "pull_requests",
+  {
+    repoId: integer("repo_id")
+      .references(() => repos.id, { onDelete: "cascade" })
+      .notNull(),
+    number: integer("number").notNull(),
+    headRef: text("head_ref").notNull(),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    state: text("state").$type<"open" | "closed" | "merged">().notNull(),
+    authorLogin: text("author_login").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.repoId, t.number] }),
+    index("pull_requests_repo_head_ref_idx").on(t.repoId, t.headRef),
+  ],
+);
+
 // ── Session Insights (LLM-derived) ──────────────────────────
 
 export const sessionInsights = pgTable(

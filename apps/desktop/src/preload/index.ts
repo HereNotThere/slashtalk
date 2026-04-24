@@ -115,6 +115,12 @@ const bridge: ChatHeadsBridge = {
     setPinned: (pinned: boolean) =>
       ipcRenderer.invoke("rail:setPinned", pinned) as Promise<void>,
     onPinnedChange: (cb) => subscribe<boolean>("rail:pinned", cb),
+    getSessionOnlyMode: () =>
+      ipcRenderer.invoke("rail:getSessionOnlyMode") as Promise<boolean>,
+    setSessionOnlyMode: (enabled: boolean) =>
+      ipcRenderer.invoke("rail:setSessionOnlyMode", enabled) as Promise<void>,
+    onSessionOnlyModeChange: (cb) =>
+      subscribe<boolean>("rail:sessionOnlyMode", cb),
   },
 
   spotifyShare: {

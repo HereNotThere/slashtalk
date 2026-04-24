@@ -94,6 +94,9 @@ export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
 export const onProjectsChange = projectChanges.on;
 export const listProjects = (): ChatHead[] => projects;
+// Self is always at heads[0] when signed in, with `live` set only while the
+// user has a BUSY/ACTIVE feed session. Drives the rail's session-only mode.
+export const isSelfLive = (): boolean => heads[0]?.live === true;
 
 const USER_HEAD_PREFIX = "user:";
 const AGENT_HEAD_PREFIX = "agent:";

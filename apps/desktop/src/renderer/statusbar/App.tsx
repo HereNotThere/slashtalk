@@ -5,6 +5,7 @@ import { useAutoResize } from "../shared/useAutoResize";
 export function App(): JSX.Element {
   useAutoResize();
   const [pinned, setPinned] = useState<boolean>(true);
+  const [sessionOnly, setSessionOnly] = useState<boolean>(false);
   const [spotifySupported, setSpotifySupported] = useState<boolean>(false);
   const [spotifyShare, setSpotifyShare] = useState<boolean>(false);
 
@@ -14,6 +15,20 @@ export function App(): JSX.Element {
       if (alive) setPinned(v);
     });
     const off = window.chatheads.rail.onPinnedChange((v) => setPinned(v));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.rail.getSessionOnlyMode().then((v) => {
+      if (alive) setSessionOnly(v);
+    });
+    const off = window.chatheads.rail.onSessionOnlyModeChange((v) =>
+      setSessionOnly(v),
+    );
     return () => {
       alive = false;
       off();
@@ -48,6 +63,11 @@ export function App(): JSX.Element {
     void window.chatheads.spotifyShare.setEnabled(v);
   };
 
+  const onSessionOnlyChange = (v: boolean): void => {
+    setSessionOnly(v);
+    void window.chatheads.rail.setSessionOnlyMode(v);
+  };
+
   if (!auth.signedIn) {
     return (
       <Shell>
@@ -59,6 +79,11 @@ export function App(): JSX.Element {
             setPinned(v);
             void window.chatheads.rail.setPinned(v);
           }}
+        />
+        <SessionOnlyRow
+          enabled={sessionOnly}
+          disabled={pinned}
+          onChange={onSessionOnlyChange}
         />
         {spotifySupported ? (
           <SpotifyShareRow
@@ -105,6 +130,11 @@ export function App(): JSX.Element {
           setPinned(v);
           void window.chatheads.rail.setPinned(v);
         }}
+      />
+      <SessionOnlyRow
+        enabled={sessionOnly}
+        disabled={pinned}
+        onChange={onSessionOnlyChange}
       />
       {spotifySupported ? (
         <SpotifyShareRow
@@ -340,6 +370,38 @@ function SpotifyShareRow({
     >
       <Checkbox checked={enabled} />
       <span className="flex-1 text-[13px]">Share Spotify Now Playing</span>
+    </button>
+  );
+}
+
+function SessionOnlyRow({
+  enabled,
+  disabled,
+  onChange,
+}: {
+  enabled: boolean;
+  disabled: boolean;
+  onChange: (v: boolean) => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onChange(!enabled)}
+      title={
+        disabled
+          ? "Turn off \u201cKeep rail on top\u201d to use this mode"
+          : undefined
+      }
+      className={`
+        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
+        bg-transparent border-none text-fg [font:inherit]
+        text-left
+        ${disabled ? "opacity-40 cursor-default" : "cursor-pointer hover:bg-surface-strong"}
+      `}
+    >
+      <Checkbox checked={enabled} />
+      <span className="flex-1 text-[13px]">Show rail only during active sessions</span>
     </button>
   );
 }

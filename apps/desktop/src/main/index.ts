@@ -120,13 +120,27 @@ let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
 const PINNED_KEY = "railPinned";
+const SESSION_ONLY_KEY = "railSessionOnlyMode";
 const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
+
+// 15-min grace window after the user's last active session ends (or after they
+// force-open via the tray). Inside the window the rail stays visible; outside
+// it auto-hides in session-only mode.
+const SESSION_GRACE_MS = 15 * 60 * 1000;
 
 // Pinned (default): rail floats above everything. Unpinned: rail behaves like
 // a normal app window — on top only when Slashtalk is focused.
 function getRailPinned(): boolean {
   const v = store.get<boolean>(PINNED_KEY);
   return v === undefined ? true : v;
+}
+
+// Opt-in "show only during active sessions" mode. When on AND the rail is not
+// pinned, the rail stays hidden until the signed-in user has a BUSY/ACTIVE
+// session (or force-opens via the tray), then auto-hides 15 min after the
+// last session ends. Pinned wins; this preference is ignored while pinned.
+function getRailSessionOnlyMode(): boolean {
+  return store.get<boolean>(SESSION_ONLY_KEY) ?? false;
 }
 
 // Opt-in: off by default so the macOS Automation permission dialog only fires
@@ -167,6 +181,55 @@ function applyRailPinned(): void {
   console.log(
     `[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`,
   );
+}
+
+// ---------- Session-only rail visibility ----------
+//
+// When session-only mode is on and the rail is not pinned, the rail hides
+// until the signed-in user has an active session (or they force-open via the
+// tray). A single 15-minute grace timer keeps the rail visible briefly after
+// the last session ends, so short breaks don't thrash show/hide.
+
+let graceTimer: NodeJS.Timeout | null = null;
+let lastActivityTs = 0;
+
+function cancelGraceTimer(): void {
+  if (graceTimer) {
+    clearTimeout(graceTimer);
+    graceTimer = null;
+  }
+}
+
+function scheduleGraceHide(): void {
+  cancelGraceTimer();
+  const remaining = Math.max(0, SESSION_GRACE_MS - (Date.now() - lastActivityTs));
+  graceTimer = setTimeout(() => {
+    graceTimer = null;
+    resolveRailVisibility();
+  }, remaining);
+}
+
+function resolveRailVisibility(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+
+  const pinned = getRailPinned();
+  const sessionOnly = getRailSessionOnlyMode();
+  const selfLive = rail.isSelfLive();
+
+  let visible: boolean;
+  if (pinned || !sessionOnly || selfLive) {
+    visible = true;
+  } else {
+    visible = Date.now() - lastActivityTs < SESSION_GRACE_MS;
+  }
+
+  if (visible && !overlayWindow.isVisible()) overlayWindow.show();
+  else if (!visible && overlayWindow.isVisible()) overlayWindow.hide();
+
+  // Only arm the grace timer while in the session-only grace window (visible
+  // but no live session). Any other state cancels it.
+  if (visible && sessionOnly && !pinned && !selfLive) scheduleGraceHide();
+  else cancelGraceTimer();
 }
 
 function appIsFocused(): boolean {
@@ -212,6 +275,9 @@ function stopHoverPolling(): void {
 
 function hoverPollTick(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  // Session-only mode hides the rail via overlayWindow.hide(); there's no
+  // visible target for hover-to-peek, so skip the cursor math entirely.
+  if (!overlayWindow.isVisible()) return;
   // Short-circuit when pinned or focused — the rail is already floating via
   // normal pin/focus paths, so hover "just works" without our help.
   if (getRailPinned() || appIsFocused()) return;
@@ -241,12 +307,19 @@ function hoverPollTick(): void {
   }
 }
 
-function broadcastRailPinned(): void {
-  const pinned = getRailPinned();
+function broadcastToRailTargets<T>(channel: string, payload: T): void {
   const targets = [overlayWindow, mainWindow, trayPopup].filter(
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
-  for (const w of targets) w.webContents.send("rail:pinned", pinned);
+  for (const w of targets) w.webContents.send(channel, payload);
+}
+
+function broadcastRailPinned(): void {
+  broadcastToRailTargets("rail:pinned", getRailPinned());
+}
+
+function broadcastRailSessionOnlyMode(): void {
+  broadcastToRailTargets("rail:sessionOnlyMode", getRailSessionOnlyMode());
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -459,6 +532,9 @@ function ensureOverlay(): BrowserWindow {
     movable: false, // we drive drag manually via IPC + setPosition
     skipTaskbar: true,
     backgroundColor: "#00000000",
+    // Start hidden so session-only mode can keep us that way without a flash
+    // on first poll. resolveRailVisibility() below decides the initial state.
+    show: false,
     // Real macOS frost. CSS backdrop-filter is a no-op on non-vibrancy Electron
     // windows, so the rail uses NSVisualEffectView as its single background.
     // Vibrancy is a sibling NSView of the webContents, so CSS can't clip it —
@@ -474,6 +550,7 @@ function ensureOverlay(): BrowserWindow {
   });
 
   applyRailPinned();
+  resolveRailVisibility();
 
   // Pill ends — half the window width gives perfect semicircle caps at top
   // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
@@ -1097,8 +1174,18 @@ function createTray(): void {
 
   tray = new Tray(icon);
   tray.setToolTip("ChatHeads");
-  tray.on("click", (_e, bounds) => toggleTrayPopup(bounds));
-  tray.on("right-click", (_e, bounds) => toggleTrayPopup(bounds));
+  tray.on("click", (_e, bounds) => handleTrayClick(bounds));
+  tray.on("right-click", (_e, bounds) => handleTrayClick(bounds));
+}
+
+// In session-only mode the tray click is the user's escape hatch: it
+// force-shows the rail and resets the 15-min grace timer. Outside that mode
+// the lastActivityTs bump is inert — resolveRailVisibility ignores it while
+// pinned or with session-only off.
+function handleTrayClick(bounds: Electron.Rectangle): void {
+  lastActivityTs = Date.now();
+  toggleTrayPopup(bounds);
+  resolveRailVisibility();
 }
 
 // -------- IPC --------
@@ -1115,8 +1202,21 @@ ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
   console.log(`[pin] ipc setPinned(${pinned})`);
   store.set(PINNED_KEY, !!pinned);
   applyRailPinned();
+  resolveRailVisibility();
   broadcastRailPinned();
 });
+
+ipcMain.handle("rail:getSessionOnlyMode", (): boolean =>
+  getRailSessionOnlyMode(),
+);
+ipcMain.handle(
+  "rail:setSessionOnlyMode",
+  (_e, enabled: boolean): void => {
+    store.set(SESSION_ONLY_KEY, !!enabled);
+    resolveRailVisibility();
+    broadcastRailSessionOnlyMode();
+  },
+);
 
 ipcMain.handle("spotify:isSupported", (): boolean => process.platform === "darwin");
 ipcMain.handle("spotify:getShareEnabled", (): boolean => getSpotifyShareEnabled());
@@ -1162,12 +1262,16 @@ rail.onChange((next) => {
     hideInfoNow();
   }
   debugBackfillTimestamps();
+  // Keep the grace timestamp current while the user is working, so "15 min
+  // after the last session ended" measures from the most recent live poll.
+  if (rail.isSelfLive()) lastActivityTs = Date.now();
   if (heads.length === 0 && projects.length === 0) {
     overlayWindow?.close();
     overlayWindow = null;
   } else {
     ensureOverlay();
     resizeOverlay();
+    resolveRailVisibility();
     repositionInfoIfVisible();
     repositionChatIfVisible();
   }

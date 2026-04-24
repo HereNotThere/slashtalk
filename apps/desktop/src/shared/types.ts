@@ -334,10 +334,16 @@ export interface ChatHeadsBridge {
 
   // Rail pin toggle. Pinned = always on top (default). Unpinned = rail acts
   // like a normal app window, on top only when Slashtalk is focused.
+  // sessionOnlyMode: when on AND unpinned, the rail stays hidden until the
+  // user has an active Claude Code session (or force-opens via the tray),
+  // then auto-hides 15 min after the last session ends.
   rail: {
     getPinned: () => Promise<boolean>;
     setPinned: (pinned: boolean) => Promise<void>;
     onPinnedChange: (cb: (pinned: boolean) => void) => Unsubscribe;
+    getSessionOnlyMode: () => Promise<boolean>;
+    setSessionOnlyMode: (enabled: boolean) => Promise<void>;
+    onSessionOnlyModeChange: (cb: (enabled: boolean) => void) => Unsubscribe;
   };
 
   // Opt-in toggle for broadcasting the user's Spotify "Now Playing" to peers.

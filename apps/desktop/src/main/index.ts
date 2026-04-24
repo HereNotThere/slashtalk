@@ -2112,3 +2112,13 @@ app.on("did-become-active", () => {
   if (getRailPinned()) return;
   overlayWindow.moveTop();
 });
+
+// macOS demotes the app to accessory when its only remaining visible window
+// is a normal-level NSPanel (which is exactly our unpinned rail — focusable
+// false becomes NSPanel). Re-assert regular policy on every blur so we
+// survive the demotion attempt and stay in Cmd+Tab and the Dock.
+app.on("did-resign-active", () => {
+  if (process.platform !== "darwin") return;
+  app.setActivationPolicy("regular");
+  void app.dock?.show();
+});

@@ -59,7 +59,7 @@ export interface DockConfig {
 }
 
 // Chat pill layout hint. `anchor` = which end of the pill the search-icon
-// circle sits at so it overlaps the chat bubble on the rail.
+// circle sits at so it overlaps the search bubble on the rail.
 export type ChatAnchor = "left" | "right";
 
 // slashtalk backend types
@@ -150,11 +150,13 @@ export interface AgentSummary {
   id: string;
   name: string;
   description?: string;
+  systemPrompt: string;
   model: string;
   createdAt: number;
   mode?: AgentMode;
   cwd?: string;
   visibility?: AgentVisibility;
+  mcpServers?: McpServerInput[];
 }
 
 export interface SessionUsage {
@@ -194,6 +196,16 @@ export interface CreateAgentInput {
   model?: string;
   mcpServers?: McpServerInput[];
   mode?: AgentMode;
+  cwd?: string;
+  visibility?: AgentVisibility;
+}
+
+export interface UpdateAgentInput {
+  name: string;
+  description?: string;
+  systemPrompt: string;
+  model?: string;
+  mcpServers?: McpServerInput[];
   cwd?: string;
   visibility?: AgentVisibility;
 }
@@ -308,6 +320,7 @@ export interface ChatHeadsBridge {
     onConfiguredChange: (cb: (configured: boolean) => void) => Unsubscribe;
     list: () => Promise<AgentSummary[]>;
     create: (input: CreateAgentInput) => Promise<AgentSummary>;
+    update: (id: string, input: UpdateAgentInput) => Promise<AgentSummary>;
     remove: (id: string) => Promise<void>;
     send: (agentId: string, text: string, sessionId?: string | null) => Promise<void>;
     history: (
@@ -362,6 +375,10 @@ export interface ChatHeadsBridge {
   /** Overlay renderer subscribes to learn the current dock so it can swap
    *  flex direction / scroll axis / FLIP tracking. */
   onOverlayConfig: (cb: (cfg: DockConfig) => void) => Unsubscribe;
+
+  // Agent creation affordance (overlay → main window).
+  openAgentCreator: () => Promise<void>;
+  onOpenAgentCreator: (cb: () => void) => Unsubscribe;
 
   // Response window (chat/agent pop-out → main → response)
   openResponse: (message: string) => Promise<void>;

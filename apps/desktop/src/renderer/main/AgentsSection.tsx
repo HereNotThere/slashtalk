@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AGENT_TEMPLATES,
   type AgentTemplate,
@@ -18,14 +18,22 @@ import type {
 } from "../../shared/types";
 
 type Toast = { kind: "ok" | "err"; text: string } | null;
+const DEFAULT_CLOUD_MODEL = "claude-haiku-4-5";
+const DEFAULT_LOCAL_MODEL = "claude-sonnet-4-6";
 
-export function AgentsSection(): JSX.Element {
+export function AgentsSection({
+  openCreatorSignal = 0,
+}: {
+  openCreatorSignal?: number;
+}): JSX.Element {
+  const sectionRef = useRef<HTMLElement>(null);
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [trackedRepos, setTrackedRepos] = useState<TrackedRepo[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [showKeyForm, setShowKeyForm] = useState(false);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
 
   useEffect(() => {
@@ -46,6 +54,13 @@ export function AgentsSection(): JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    if (openCreatorSignal === 0) return;
+    setEditingAgentId(null);
+    setShowCreate(true);
+    sectionRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [openCreatorSignal]);
+
   const removeAgent = async (agent: AgentSummary): Promise<void> => {
     if (!confirm(`Remove "${agent.name}"?`)) return;
     setToast(null);
@@ -58,7 +73,7 @@ export function AgentsSection(): JSX.Element {
   };
 
   return (
-    <section className="bg-card rounded-2xl p-4 mt-4">
+    <section ref={sectionRef} className="bg-card rounded-2xl p-4 mt-4">
       <div className="flex items-center gap-2 mb-3">
         <div>
           <h2 className="m-0 text-[15px] font-semibold">Agents</h2>
@@ -73,7 +88,10 @@ export function AgentsSection(): JSX.Element {
           {configured ? "API key" : "Add API key"}
         </button>
         <button
-          onClick={() => setShowCreate((v) => !v)}
+          onClick={() => {
+            setEditingAgentId(null);
+            setShowCreate((v) => !v);
+          }}
           disabled={!auth.signedIn}
           className="
             bg-button border border-border text-fg
@@ -117,6 +135,19 @@ export function AgentsSection(): JSX.Element {
         />
       )}
 
+      {editingAgentId && (
+        <EditAgentForm
+          agent={agents.find((agent) => agent.id === editingAgentId) ?? null}
+          trackedRepos={trackedRepos}
+          onSaved={(agentName) => {
+            setEditingAgentId(null);
+            setToast({ kind: "ok", text: `Saved ${agentName}` });
+          }}
+          onCancel={() => setEditingAgentId(null)}
+          onError={(message) => setToast({ kind: "err", text: message })}
+        />
+      )}
+
       <div className="flex flex-col gap-1.5 mt-3">
         {agents.length === 0 ? (
           <div className="text-[12px] text-subtle">
@@ -128,6 +159,10 @@ export function AgentsSection(): JSX.Element {
             <AgentRow
               key={agent.id}
               agent={agent}
+              onEdit={() => {
+                setShowCreate(false);
+                setEditingAgentId(agent.id);
+              }}
               onRemove={() => void removeAgent(agent)}
             />
           ))
@@ -149,9 +184,11 @@ export function AgentsSection(): JSX.Element {
 
 function AgentRow({
   agent,
+  onEdit,
   onRemove,
 }: {
   agent: AgentSummary;
+  onEdit: () => void;
   onRemove: () => void;
 }): JSX.Element {
   return (
@@ -171,6 +208,13 @@ function AgentRow({
       <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border text-muted">
         {agent.visibility ?? "private"}
       </span>
+      <button
+        onClick={onEdit}
+        className="bg-transparent border-none text-subtle cursor-pointer hover:text-fg text-[11px]"
+        title="Edit"
+      >
+        Edit
+      </button>
       <button
         onClick={onRemove}
         className="bg-transparent border-none text-subtle cursor-pointer hover:text-fg"
@@ -278,6 +322,9 @@ function CreateAgentForm({
   const [description, setDescription] = useState("");
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState<AgentMode>(cloudAvailable ? "cloud" : "local");
+  const [model, setModel] = useState(
+    cloudAvailable ? DEFAULT_CLOUD_MODEL : DEFAULT_LOCAL_MODEL,
+  );
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
   const [cwd, setCwd] = useState("");
   const [mcpServers, setMcpServers] = useState<McpServerInput[]>([]);
@@ -286,6 +333,18 @@ function CreateAgentForm({
   useEffect(() => {
     if (!cloudAvailable && mode === "cloud") setMode("local");
   }, [cloudAvailable, mode]);
+
+  useEffect(() => {
+    setModel((current) => {
+      if (mode === "cloud" && current === DEFAULT_LOCAL_MODEL) {
+        return DEFAULT_CLOUD_MODEL;
+      }
+      if (mode === "local" && current === DEFAULT_CLOUD_MODEL) {
+        return DEFAULT_LOCAL_MODEL;
+      }
+      return current;
+    });
+  }, [mode]);
 
   const applyTemplate = (template: AgentTemplate): void => {
     setName(template.name);
@@ -304,6 +363,7 @@ function CreateAgentForm({
         name: name.trim(),
         description: description.trim() || undefined,
         systemPrompt: prompt.trim(),
+        model: model.trim() || undefined,
         mode,
         visibility,
         ...(mode === "local"
@@ -361,6 +421,14 @@ function CreateAgentForm({
           placeholder="Watch for drift between docs/api-spec.md and handlers. Open a small PR when they diverge."
           rows={4}
           className="w-full px-3 py-2 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent resize-none leading-snug"
+        />
+      </Field>
+      <Field label="Model">
+        <input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder={mode === "local" ? DEFAULT_LOCAL_MODEL : DEFAULT_CLOUD_MODEL}
+          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] font-mono outline-none focus:border-accent"
         />
       </Field>
       <Field label="Runtime">
@@ -431,6 +499,169 @@ function CreateAgentForm({
         className="w-full py-2.5 bg-fg text-bg rounded-lg text-[13px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
       >
         {busy ? "Creating..." : "Create agent"}
+      </button>
+    </div>
+  );
+}
+
+function EditAgentForm({
+  agent,
+  trackedRepos,
+  onSaved,
+  onCancel,
+  onError,
+}: {
+  agent: AgentSummary | null;
+  trackedRepos: TrackedRepo[];
+  onSaved: (agentName: string) => void;
+  onCancel: () => void;
+  onError: (message: string) => void;
+}): JSX.Element | null {
+  const [name, setName] = useState(agent?.name ?? "");
+  const [description, setDescription] = useState(agent?.description ?? "");
+  const [prompt, setPrompt] = useState(agent?.systemPrompt ?? "");
+  const [model, setModel] = useState(agent?.model ?? "");
+  const [visibility, setVisibility] = useState<AgentVisibility>(
+    agent?.visibility ?? "private",
+  );
+  const [cwd, setCwd] = useState(agent?.cwd ?? "");
+  const [mcpServers, setMcpServers] = useState<McpServerInput[]>(
+    agent?.mcpServers ?? [],
+  );
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setName(agent?.name ?? "");
+    setDescription(agent?.description ?? "");
+    setPrompt(agent?.systemPrompt ?? "");
+    setModel(agent?.model ?? "");
+    setVisibility(agent?.visibility ?? "private");
+    setCwd(agent?.cwd ?? "");
+    setMcpServers(agent?.mcpServers ?? []);
+  }, [agent]);
+
+  if (!agent) return null;
+
+  const mode = agent.mode ?? "cloud";
+  const canSubmit = name.trim() && prompt.trim() && !busy;
+
+  const submit = async (): Promise<void> => {
+    if (!canSubmit) return;
+    setBusy(true);
+    try {
+      const updated = await window.chatheads.agents.update(agent.id, {
+        name: name.trim(),
+        description: description.trim() || undefined,
+        systemPrompt: prompt.trim(),
+        model: model.trim() || undefined,
+        visibility,
+        ...(mode === "local"
+          ? { cwd: cwd.trim() || undefined }
+          : { mcpServers }),
+      });
+      onSaved(updated.name);
+    } catch (err) {
+      onError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-surface border border-border rounded-xl p-3 mb-3 flex flex-col gap-3">
+      <div className="flex items-start gap-2">
+        <div>
+          <div className="text-[12px] font-semibold">Edit agent</div>
+          <div className="text-[11px] text-subtle">
+            {mode === "local"
+              ? "Updates apply to the next local run."
+              : "Updates are saved to Anthropic Managed Agents."}
+          </div>
+        </div>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="ml-auto bg-transparent border-none text-subtle hover:text-fg text-[12px] cursor-pointer disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+
+      <Field label="Name">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent"
+        />
+      </Field>
+      <Field label="Description">
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent"
+        />
+      </Field>
+      <Field label="Prompt">
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={4}
+          className="w-full px-3 py-2 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent resize-none leading-snug"
+        />
+      </Field>
+      <Field label="Model">
+        <input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder={mode === "local" ? DEFAULT_LOCAL_MODEL : DEFAULT_CLOUD_MODEL}
+          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] font-mono outline-none focus:border-accent"
+        />
+      </Field>
+      <Field label="Visibility">
+        <div className="flex gap-1.5">
+          <ModeButton
+            active={visibility === "private"}
+            onClick={() => setVisibility("private")}
+            title="Sessions stay on your machine."
+          >
+            Private
+          </ModeButton>
+          <ModeButton
+            active={visibility === "team"}
+            onClick={() => setVisibility("team")}
+            title="Teammates see post-session summaries."
+          >
+            Team
+          </ModeButton>
+        </div>
+      </Field>
+      {mode === "local" ? (
+        <Field label="Working directory">
+          <CwdPicker value={cwd} onChange={setCwd} trackedRepos={trackedRepos} />
+        </Field>
+      ) : (
+        <McpServersField
+          servers={mcpServers}
+          onAdd={(server) =>
+            setMcpServers((prev) =>
+              prev.some((item) => item.name === server.name)
+                ? prev
+                : [...prev, server],
+            )
+          }
+          onRemove={(nameToRemove) =>
+            setMcpServers((prev) =>
+              prev.filter((server) => server.name !== nameToRemove),
+            )
+          }
+        />
+      )}
+      <button
+        onClick={() => void submit()}
+        disabled={!canSubmit}
+        className="w-full py-2.5 bg-fg text-bg rounded-lg text-[13px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+      >
+        {busy ? "Saving..." : "Save changes"}
       </button>
     </div>
   );

@@ -9,7 +9,7 @@ import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useProjects } from "../shared/useProjects";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
-import { CloseIcon, SearchIcon } from "../shared/icons";
+import { CloseIcon, PlusIcon, SearchIcon } from "../shared/icons";
 
 const DRAG_THRESHOLD = 4;
 const REORDER_ANIM_MS = 280;
@@ -141,7 +141,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     let downPos: { x: number; y: number } | null = null;
-    let downIsChat = false;
+    let downAction: "search" | "create" | null = null;
     let dragging = false;
 
     const onDown = (e: MouseEvent): void => {
@@ -149,7 +149,11 @@ export function App(): JSX.Element {
       downPos = { x: e.screenX, y: e.screenY };
       const target =
         e.target instanceof Element ? e.target.closest("[data-bubble]") : null;
-      downIsChat = target?.hasAttribute("data-chat") ?? false;
+      downAction = target?.hasAttribute("data-search")
+        ? "search"
+        : target?.hasAttribute("data-create")
+          ? "create"
+          : null;
       dragging = false;
     };
 
@@ -166,16 +170,17 @@ export function App(): JSX.Element {
     const onUp = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       if (dragging) void window.chatheads.dragEnd();
-      else if (downIsChat) void window.chatheads.toggleChat();
+      else if (downAction === "search") void window.chatheads.toggleChat();
+      else if (downAction === "create") void window.chatheads.openAgentCreator();
       downPos = null;
-      downIsChat = false;
+      downAction = null;
       dragging = false;
     };
 
     const onBlur = (): void => {
       if (dragging) void window.chatheads.dragEnd();
       downPos = null;
-      downIsChat = false;
+      downAction = null;
       dragging = false;
     };
 
@@ -246,6 +251,7 @@ export function App(): JSX.Element {
     : "w-full flex-1 min-h-0 flex flex-col items-center gap-[14px] overflow-y-auto overflow-x-hidden no-scrollbar";
   return (
     <div ref={stackRef} className={stackClass}>
+      <SearchBubble open={chatOpen} />
       {self && (
         <div
           key={self.id}
@@ -298,7 +304,7 @@ export function App(): JSX.Element {
           ))}
         </div>
       )}
-      <ChatBubble open={chatOpen} />
+      <CreateBubble />
     </div>
   );
 }
@@ -334,12 +340,12 @@ function RailSeparator({
   );
 }
 
-function ChatBubble({ open }: { open: boolean }): JSX.Element {
+function SearchBubble({ open }: { open: boolean }): JSX.Element {
   return (
     <div
       data-bubble
-      data-chat
-      title={open ? "Close" : "Ask your team"}
+      data-search
+      title={open ? "Close search" : "Search your team"}
       className="
         relative w-[45px] h-[45px] rounded-full cursor-pointer
         flex items-center justify-center
@@ -351,6 +357,28 @@ function ChatBubble({ open }: { open: boolean }): JSX.Element {
     >
       <div className="pointer-events-none scale-125">
         {open ? <CloseIcon /> : <SearchIcon />}
+      </div>
+    </div>
+  );
+}
+
+function CreateBubble(): JSX.Element {
+  return (
+    <div
+      data-bubble
+      data-create
+      title="Create an agent"
+      className="
+        relative w-[45px] h-[45px] rounded-full cursor-pointer
+        flex items-center justify-center
+        bg-black/15 text-white
+        outline outline-1 -outline-offset-1 outline-bubble-outline
+        transition-transform duration-150 ease-out
+        hover:scale-[1.03] hover:bg-black/20
+      "
+    >
+      <div className="pointer-events-none scale-125">
+        <PlusIcon />
       </div>
     </div>
   );

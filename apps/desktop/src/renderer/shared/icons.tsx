@@ -37,6 +37,25 @@ export function CloseIcon(): JSX.Element {
   );
 }
 
+export function PlusIcon(): JSX.Element {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M8 3.2 V12.8 M3.2 8 H12.8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function RepoIcon(): JSX.Element {
   return (
     <svg

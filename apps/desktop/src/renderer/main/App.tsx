@@ -10,10 +10,17 @@ export function App(): JSX.Element {
   const heads = useHeads();
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
   const [signingIn, setSigningIn] = useState(false);
+  const [agentCreatorSignal, setAgentCreatorSignal] = useState(0);
 
   useEffect(() => {
     void window.chatheads.backend.getAuthState().then(setAuth);
     return window.chatheads.backend.onAuthState(setAuth);
+  }, []);
+
+  useEffect(() => {
+    return window.chatheads.onOpenAgentCreator(() => {
+      setAgentCreatorSignal((value) => value + 1);
+    });
   }, []);
 
   if (!auth.signedIn) {
@@ -72,7 +79,7 @@ export function App(): JSX.Element {
       </header>
 
       <SlashtalkSection />
-      <AgentsSection />
+      <AgentsSection openCreatorSignal={agentCreatorSignal} />
 
       <SectionHeading>Active ({heads.length})</SectionHeading>
       <div className="flex flex-col gap-1.5">

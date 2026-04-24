@@ -221,12 +221,16 @@ async function refresh(): Promise<void> {
 
     // Client-side filter: drop peers with no session in a repo the user has
     // selected in the tray popup. Backend returns the full org roster; this
-    // narrows it to the user's local "repos I care about today" set. When no
-    // org is active (pre-pick), we pass through unfiltered.
-    const activeOrg = orgRepos.getActiveOrg();
-    const selectedRepos = orgRepos.getSelectedFullNamesSet();
-    const filteredPeers = activeOrg
-      ? peers.filter((p) => p.repos.some((r) => selectedRepos.has(r)))
+    // narrows it to the user's local "repos I care about today" set.
+    //
+    // Only filter when we actually have repo data for the active org.
+    // Without that check, a restored-from-store activeOrg combined with a
+    // still-pending or scope-blocked GitHub fetch would silently drop every
+    // peer from the rail — breaking the core "teammates list" feature.
+    const filteredPeers = orgRepos.hasLoadedReposForActiveOrg()
+      ? peers.filter((p) =>
+          p.repos.some((r) => orgRepos.getSelectedFullNamesSet().has(r)),
+        )
       : peers;
 
     const peerHeads = filteredPeers.map((t) =>

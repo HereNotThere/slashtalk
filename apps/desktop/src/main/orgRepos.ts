@@ -58,6 +58,19 @@ export function getSelectedFullNames(): string[] {
   return [...getSelectedFullNamesSet()];
 }
 
+/** True once we have a non-empty repo list for the currently active org.
+ *  The rail filter keys on this: it only narrows peers when we actually
+ *  have data to narrow by. A pending fetch, a permissions error, or a
+ *  scope-blocked OAuth token all land as "empty" on the desktop — and we
+ *  treat those the same as "not loaded" so the rail never silently empties.
+ *  A genuine zero-repo org is rare and indistinguishable from an error, so
+ *  we lean toward over-showing peers rather than hiding them. */
+export function hasLoadedReposForActiveOrg(): boolean {
+  if (!activeOrg) return false;
+  const list = reposByOrg.get(activeOrg);
+  return !!list && list.length > 0;
+}
+
 function persistActiveOrg(): void {
   if (activeOrg == null) store.del(ACTIVE_ORG_KEY);
   else store.set(ACTIVE_ORG_KEY, activeOrg);

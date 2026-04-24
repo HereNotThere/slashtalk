@@ -330,8 +330,8 @@ async function readCursorWorkspaceCwd(projectRoot: string): Promise<string | nul
 function cursorPathFromToolInput(input: JsonObj | null): string | null {
   if (!input) return null;
   if (typeof input.target_directory === "string") return input.target_directory;
-  if (typeof input.file_path === "string") return input.file_path;
-  if (typeof input.path === "string") return input.path;
+  if (typeof input.file_path === "string") return path.dirname(input.file_path);
+  if (typeof input.path === "string") return path.dirname(input.path);
   return null;
 }
 

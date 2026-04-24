@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { ChatHead } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
+import { useProjects } from "../shared/useProjects";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
 import { CloseIcon, SearchIcon } from "../shared/icons";
 
 const DRAG_THRESHOLD = 4;
+const REORDER_ANIM_MS = 280;
+const ENTER_ANIM_MS = 280;
+const ENTER_EASE = "cubic-bezier(.25, .9, .3, 1.1)";
 // Slightly longer than the longest CSS animation (last ring delay 0.4s + 1.4s)
 // so the markup stays mounted until the animation visually finishes.
 const PR_CELEBRATION_MS = 2000;
@@ -35,9 +45,66 @@ function formatAge(ms: number): string {
 //   main, with a short enter delay and a longer leave grace (main-side).
 export function App(): JSX.Element {
   const heads = useHeads();
+  const projects = useProjects();
   const stackRef = useRef<HTMLDivElement>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const hoverShowTimer = useRef<number | null>(null);
+  const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const prevTops = useRef<Map<string, number>>(new Map());
+  const prevIds = useRef<Set<string>>(new Set());
+  const [replayToken, setReplayToken] = useState(0);
+
+  // FLIP reorder + enter animation. Self (index 0) is tracked too now so it can
+  // play its enter animation on first mount (or when replayed via debug); after
+  // first paint its id is in prevIds so reorder/enter won't re-fire unless the
+  // replay signal clears prevIds first.
+  useLayoutEffect(() => {
+    const forceAllEnter = replayToken > 0 && prevIds.current.size === 0;
+
+    const newTops = new Map<string, number>();
+    for (const [id, el] of bubbleRefs.current) {
+      newTops.set(id, el.getBoundingClientRect().top);
+    }
+
+    for (const [id, el] of bubbleRefs.current) {
+      const isNew = forceAllEnter || !prevIds.current.has(id);
+      if (isNew) {
+        el.style.transition = "none";
+        el.style.transform = "scale(.4) translateY(-6px)";
+        el.style.opacity = "0";
+        void el.getBoundingClientRect();
+        requestAnimationFrame(() => {
+          el.style.transition = `transform ${ENTER_ANIM_MS}ms ${ENTER_EASE}, opacity ${ENTER_ANIM_MS}ms ease-out`;
+          el.style.transform = "scale(1) translateY(0)";
+          el.style.opacity = "1";
+        });
+        continue;
+      }
+      const prev = prevTops.current.get(id);
+      const next = newTops.get(id);
+      if (prev == null || next == null || prev === next) continue;
+      const delta = prev - next;
+      el.style.transition = "none";
+      el.style.transform = `translateY(${delta}px)`;
+      void el.getBoundingClientRect();
+      requestAnimationFrame(() => {
+        el.style.transition = `transform ${REORDER_ANIM_MS}ms cubic-bezier(.2,.7,.2,1)`;
+        el.style.transform = "translateY(0)";
+      });
+    }
+
+    prevTops.current = newTops;
+    prevIds.current = new Set(bubbleRefs.current.keys());
+  }, [heads, projects, replayToken]);
+
+  // Debug: main tells us to replay the mount animation on all current heads.
+  useEffect(() => {
+    return window.chatheads.onDebugReplayEnter(() => {
+      prevIds.current.clear();
+      prevTops.current.clear();
+      setReplayToken((n) => n + 1);
+    });
+  }, []);
 
   useEffect(() => {
     return window.chatheads.onChatState(({ visible }) => setChatOpen(visible));
@@ -95,7 +162,7 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  const hoverEnterBubble = (index: number): void => {
+  const hoverEnterBubble = (headId: string, bubbleScreenY: number): void => {
     if (hoverShowTimer.current != null) {
       window.clearTimeout(hoverShowTimer.current);
     }
@@ -104,7 +171,7 @@ export function App(): JSX.Element {
     void window.chatheads.infoHoverEnter();
     hoverShowTimer.current = window.setTimeout(() => {
       hoverShowTimer.current = null;
-      void window.chatheads.showInfo(index);
+      void window.chatheads.showInfo(headId, bubbleScreenY);
     }, HOVER_SHOW_DELAY_MS);
   };
 
@@ -116,20 +183,104 @@ export function App(): JSX.Element {
     void window.chatheads.infoHoverLeave();
   };
 
+  const registerBubble = (id: string) => (el: HTMLDivElement | null): void => {
+    if (el) bubbleRefs.current.set(id, el);
+    else bubbleRefs.current.delete(id);
+  };
+
+  const handleBubbleEnter = (
+    headId: string,
+    e: React.MouseEvent<HTMLDivElement>,
+  ): void => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const screenY = Math.round(rect.top + window.screenY);
+    hoverEnterBubble(headId, screenY);
+  };
+
+  const self = heads[0];
+  const peers = heads.slice(1);
+
+  // Outer fills the window height exactly. Self + chat are shrink-0; the peer
+  // list is a flex-1 scroll container that takes whatever's left. Using flex
+  // sizing instead of `maxHeight: calc(...)` avoids sub-pixel rounding that
+  // otherwise clipped the last peer by 1-2px and left a scroll stub.
   return (
     <div
       ref={stackRef}
-      className="flex flex-col items-center gap-[14px] px-md py-lg box-border"
+      className="flex flex-col items-center gap-[14px] px-md py-lg box-border h-screen"
     >
-      {heads.map((h, i) => (
-        <Bubble
-          key={h.id}
-          head={h}
-          onHoverEnter={() => hoverEnterBubble(i)}
-          onHoverLeave={hoverLeaveBubble}
-        />
-      ))}
+      {self && (
+        <div
+          key={self.id}
+          ref={registerBubble(self.id)}
+          className="shrink-0"
+          onMouseEnter={(e) => handleBubbleEnter(self.id, e)}
+          onMouseLeave={hoverLeaveBubble}
+        >
+          <Bubble
+            head={self}
+            onHoverEnter={() => {}}
+            onHoverLeave={() => {}}
+          />
+        </div>
+      )}
+      {(peers.length > 0 || projects.length > 0) && (
+        <div
+          className="
+            w-full flex-1 min-h-0 flex flex-col items-center gap-[14px]
+            overflow-y-auto overflow-x-hidden no-scrollbar
+          "
+        >
+          {peers.map((h) => (
+            <div
+              key={h.id}
+              ref={registerBubble(h.id)}
+              className="shrink-0"
+              onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
+              onMouseLeave={hoverLeaveBubble}
+            >
+              <Bubble
+                head={h}
+                onHoverEnter={() => {}}
+                onHoverLeave={() => {}}
+              />
+            </div>
+          ))}
+          {peers.length > 0 && projects.length > 0 && <RailSeparator />}
+          {projects.map((h) => (
+            <div
+              key={h.id}
+              ref={registerBubble(h.id)}
+              className="shrink-0"
+              onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
+              onMouseLeave={hoverLeaveBubble}
+            >
+              <Bubble
+                head={h}
+                onHoverEnter={() => {}}
+                onHoverLeave={() => {}}
+              />
+            </div>
+          ))}
+        </div>
+      )}
       <ChatBubble open={chatOpen} />
+    </div>
+  );
+}
+
+// Divider between the teammate row and the project row. Takes one extra
+// SPACING-row worth of vertical space in the flex stack (the flex `gap`
+// adds 14px above and below the 1px line); this matches the
+// SEPARATOR_EXTRA reserved in the main-process overlayHeight formula.
+function RailSeparator(): JSX.Element {
+  return (
+    <div
+      className="w-full shrink-0 flex items-center justify-center"
+      style={{ height: 1 }}
+      aria-hidden
+    >
+      <div className="w-[60%] h-px bg-white/20 rounded-full" />
     </div>
   );
 }
@@ -208,7 +359,7 @@ function Bubble({
       {head.lastActionAt != null && (
         <div
           className="
-            absolute -bottom-0.5 -right-0.5 z-[2]
+            absolute bottom-0 right-0 z-[2]
             px-1.5 py-px rounded-full
             bg-gray-700/85 text-white text-[9px] font-light leading-none
             border border-gray-600/60

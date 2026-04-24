@@ -3,13 +3,26 @@ import {
   BrowserWindow,
   Tray,
   nativeImage,
+  nativeTheme,
   ipcMain,
   screen,
   clipboard,
   shell,
+  dialog,
+  globalShortcut,
 } from "electron";
 import path from "node:path";
-import type { ChatHead, InfoSession } from "../shared/types";
+import type {
+  AgentHistoryPage,
+  AgentSessionSummary,
+  AgentStreamEvent,
+  AgentSummary,
+  ChatHead,
+  CreateAgentInput,
+  InfoSession,
+  McpTarget,
+  ResponseOpenPayload,
+} from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
@@ -17,6 +30,16 @@ import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
 import * as ws from "./ws";
+import * as installMcp from "./installMcp";
+import * as chatheadsAuth from "./chatheadsAuth";
+import * as selfSession from "./selfSession";
+import * as anthropic from "./anthropic";
+import * as localAgent from "./localAgent";
+import * as agentStore from "./agentStore";
+import * as agentIngest from "./agentIngest";
+import * as summarize from "./summarize";
+import * as githubAuth from "./githubDeviceAuth";
+import type { LocalAgent } from "./agentStore";
 import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -29,6 +52,10 @@ const SPACING = 14;
 const PADDING_X = 12;
 const PADDING_Y = 16;
 const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
+
+// Extra vertical space the separator between peers and projects occupies.
+// Counts as one extra SPACING row (14px) — matches the other gaps visually.
+const SEPARATOR_EXTRA = SPACING;
 
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
@@ -89,9 +116,36 @@ let tray: Tray | null = null;
 let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
+let projects: ChatHead[] = [];
 let selectedHeadId: string | null = null;
 const sessionCache = new Map<string, InfoSession[]>();
 
+function toAgentSummary(a: LocalAgent): AgentSummary {
+  return {
+    id: a.id,
+    name: a.name,
+    description: a.description,
+    model: a.model,
+    createdAt: a.createdAt,
+    mode: a.mode ?? "cloud",
+    cwd: a.cwd,
+    visibility: a.visibility ?? "private",
+  };
+}
+
+function isLocalAgent(a: { mode?: "cloud" | "local" }): boolean {
+  return a.mode === "local";
+}
+
+const streamingAgents = new Set<string>();
+
+function allHeads(): ChatHead[] {
+  return [...heads, ...projects];
+}
+
+function findHead(id: string): ChatHead | undefined {
+  return allHeads().find((h) => h.id === id);
+}
 
 let dragOffset: { dx: number; dy: number } | null = null;
 let dragTicker: ReturnType<typeof setInterval> | null = null;
@@ -147,9 +201,12 @@ function createMainWindow(): void {
 // -------- Overlay (bubbles) --------
 
 // Overlay always renders heads plus the chat bubble at the bottom, so add 1.
-function overlayHeight(count: number): number {
-  const n = count + 1;
-  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING_Y * 2;
+// When there are any project heads we reserve one extra SPACING row for the
+// divider between peers and projects.
+function overlayHeight(count: number, projectCount = 0): number {
+  const n = count + projectCount + 1;
+  const sep = projectCount > 0 ? SEPARATOR_EXTRA : 0;
+  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + sep + PADDING_Y * 2;
 }
 
 interface SavedPosition {
@@ -188,12 +245,24 @@ function saveOverlayPosition(): void {
   store.set(POSITION_KEY, payload);
 }
 
+// White rim over the `hud` vibrancy. In dark mode the stroke reads as a bright
+// hairline, so keep it faint; in light mode the same stroke gets buried by the
+// material and needs more alpha to remain visible.
+function applyOverlayRim(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
+    width: 1.5,
+    white: 1,
+    alpha: nativeTheme.shouldUseDarkColors ? 0.12 : 0.33,
+  });
+}
+
 function ensureOverlay(): BrowserWindow {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
 
   const display = screen.getPrimaryDisplay();
   const { workArea } = display;
-  const height = overlayHeight(heads.length);
+  const height = overlayHeight(heads.length, projects.length);
   const restored = restoredOrigin();
 
   overlayWindow = new BrowserWindow({
@@ -239,11 +308,8 @@ function ensureOverlay(): BrowserWindow {
   // Pill ends — half the window width gives perfect semicircle caps at top
   // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
   // as soon as the BrowserWindow constructor returns.
-  setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
-    width: 1.5,
-    white: 1,
-    alpha: 0.33,
-  });
+  applyOverlayRim();
+  nativeTheme.on("updated", applyOverlayRim);
 
   loadRenderer(overlayWindow, "overlay");
 
@@ -256,16 +322,33 @@ function ensureOverlay(): BrowserWindow {
   return overlayWindow;
 }
 
+const OVERLAY_SCREEN_MARGIN = 40;
+
 function resizeOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const height = overlayHeight(heads.length);
+  const display = screen.getDisplayMatching(overlayWindow.getBounds());
+  const maxHeight = Math.max(
+    overlayHeight(0),
+    display.workArea.height - OVERLAY_SCREEN_MARGIN * 2,
+  );
+  const height = Math.min(
+    overlayHeight(heads.length, projects.length),
+    maxHeight,
+  );
   const bounds = overlayWindow.getBounds();
-  overlayWindow.setBounds({
-    x: bounds.x,
-    y: bounds.y,
-    width: OVERLAY_WIDTH,
-    height,
-  });
+  // Keep the window inside the work area after a size change so the ask bubble
+  // never clips below the dock.
+  const minY = display.workArea.y + OVERLAY_SCREEN_MARGIN;
+  const maxY = display.workArea.y + display.workArea.height - height - OVERLAY_SCREEN_MARGIN;
+  const y = Math.max(minY, Math.min(bounds.y, maxY));
+  // `animate: true` uses macOS's native NSWindow animator (~200ms ease), which
+  // reads as a fluid grow/shrink alongside the renderer's bubble enter/exit
+  // animations. No-op on other platforms.
+  const animate = bounds.height !== height || bounds.y !== y;
+  overlayWindow.setBounds(
+    { x: bounds.x, y, width: OVERLAY_WIDTH, height },
+    animate,
+  );
 }
 
 function broadcastHeads(): void {
@@ -273,6 +356,13 @@ function broadcastHeads(): void {
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
   for (const w of targets) w.webContents.send("heads:update", heads);
+}
+
+function broadcastProjects(): void {
+  // Only the overlay renders projects. Keep statusbar/main windows on the
+  // user-head list so "Active teammates" doesn't start listing repos.
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send("projects:update", projects);
 }
 
 // -------- Info box --------
@@ -312,7 +402,7 @@ function ensureInfoWindow(): BrowserWindow {
   return infoWindow;
 }
 
-function positionInfo(index: number): void {
+function positionInfo(headId: string, bubbleScreenY?: number): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
@@ -330,12 +420,31 @@ function positionInfo(index: number): void {
     ? pillRight + INFO_GAP
     : pillLeft - INFO_GAP - INFO_WIDTH;
 
+  // Prefer the renderer-reported screen-Y when available: with a scrollable
+  // peer list the index-based formula no longer reflects where the bubble
+  // actually sits. Fall back to a formula derived from the head's position in
+  // the combined (peers + projects) list — for callers that don't have a live
+  // DOM rect (e.g. reposition during overlay drag/slide).
   const cell = BUBBLE_SIZE + SPACING;
-  const avatarTopY = stackBounds.y + PADDING_Y + index * cell;
-  const infoY = Math.round(avatarTopY - 16);
+  let avatarTopY = bubbleScreenY;
+  if (avatarTopY == null) {
+    const combined = allHeads();
+    const index = combined.findIndex((h) => h.id === headId);
+    const peersBeforeProjects = heads.length;
+    const crossesSep = index >= peersBeforeProjects && projects.length > 0;
+    avatarTopY =
+      stackBounds.y +
+      PADDING_Y +
+      Math.max(0, index) * cell +
+      (crossesSep ? SEPARATOR_EXTRA : 0);
+  }
+  const desiredY = Math.round(avatarTopY - 16);
 
-  // Instant setBounds — macOS's native animate=true runs ~300ms and isn't
-  // tunable. The CSS opacity fade on the renderer covers the content swap.
+  // Clamp so the card's bottom stays within the work area minus 32px padding.
+  const bottomLimit = screenFrame.y + screenFrame.height - 32;
+  const maxY = bottomLimit - infoCurrentHeight;
+  const infoY = Math.min(desiredY, maxY);
+
   infoWindow.setBounds({
     x: Math.round(infoX),
     y: infoY,
@@ -344,9 +453,9 @@ function positionInfo(index: number): void {
   });
 }
 
-async function showInfo(index: number): Promise<void> {
+async function showInfo(headId: string, bubbleScreenY?: number): Promise<void> {
   if (isDraggingStack) return;
-  const head = heads[index];
+  const head = findHead(headId);
   if (!head) return;
 
   // Cancel any pending hide so fast re-entry just swaps content.
@@ -383,12 +492,21 @@ async function showInfo(index: number): Promise<void> {
   // Animate position/size when switching heads on an already-visible window;
   // land-in-place on first appearance.
   const firstShow = !win.isVisible();
-  positionInfo(index);
+  positionInfo(head.id, bubbleScreenY);
   if (firstShow) win.showInactive();
 
-  // Cache miss: fetch in the background; renderer's head-effect also kicks a
-  // fetch, but this warms the cache for future hovers of the same head.
-  if (!cached) void fetchSessionsForHead(head.id);
+  // Cache miss: fetch in the background and push the result to the renderer.
+  // The renderer's load-effect is keyed on head.id, so a re-hover of the same
+  // head after the cache was cleared (e.g. by uploader.onIngested) won't
+  // re-fire it — without this push the renderer sits on "Loading…" (and any
+  // expanded row is hidden) until the 15s poll ticks.
+  if (!cached) {
+    void fetchSessionsForHead(head.id).then((loaded) => {
+      if (selectedHeadId !== head.id) return;
+      if (!infoWindow || infoWindow.isDestroyed()) return;
+      infoWindow.webContents.send("info:show", { head, sessions: loaded });
+    });
+  }
 }
 
 function scheduleHideInfo(): void {
@@ -433,9 +551,8 @@ function hideInfoNow(): void {
 
 function repositionInfoIfVisible(): void {
   if (!selectedHeadId) return;
-  const idx = heads.findIndex((h) => h.id === selectedHeadId);
-  if (idx === -1) return;
-  positionInfo(idx);
+  if (!findHead(selectedHeadId)) return;
+  positionInfo(selectedHeadId);
 }
 
 // -------- Chat input popover --------
@@ -509,12 +626,12 @@ function positionChat(): void {
   const stackBounds = overlayWindow.getBounds();
   const anchor = chatAnchorFromOverlay();
 
-  // Chat bubble sits at the last rail cell — index === heads.length. Its center
-  // on screen is the target we align the pill's leading icon to.
+  // Chat bubble is pinned to the bottom of the overlay window (flex-none in
+  // the renderer). Anchor from window bounds so this works whether content
+  // fits or the peer list is scrolling under a height cap.
   const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
-  const cell = BUBBLE_SIZE + SPACING;
   const bubbleCenterY =
-    stackBounds.y + PADDING_Y + heads.length * cell + BUBBLE_SIZE / 2;
+    stackBounds.y + stackBounds.height - PADDING_Y - BUBBLE_SIZE / 2;
 
   const chatX =
     anchor === "left"
@@ -616,10 +733,10 @@ function ensureResponseWindow(): BrowserWindow {
   return responseWindow;
 }
 
-function showResponse(message: string): void {
+function showResponse(payload: ResponseOpenPayload): void {
   const win = ensureResponseWindow();
   const send = (): void => {
-    win.webContents.send("response:open", { message });
+    win.webContents.send("response:open", payload);
   };
   if (win.webContents.isLoading()) {
     win.webContents.once("did-finish-load", send);
@@ -716,18 +833,30 @@ function createTray(): void {
 // -------- IPC --------
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
+ipcMain.handle("projects:list", (): ChatHead[] => projects);
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
 ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
+ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());
+ipcMain.handle("debug:addFakeTeammate", () => rail.debugAddFakeTeammate());
+ipcMain.handle("debug:removeFakeTeammate", () =>
+  rail.debugRemoveFakeTeammate(),
+);
+ipcMain.handle("debug:replayEnterAnimation", () => replayEnterAnimation());
+
+function replayEnterAnimation(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send("debug:replayEnter");
+}
 
 rail.onChange((next) => {
   heads = next;
   // Drop info-window selection if the targeted head left the graph.
-  if (selectedHeadId && !heads.some((h) => h.id === selectedHeadId)) {
+  if (selectedHeadId && !findHead(selectedHeadId)) {
     hideInfoNow();
   }
   debugBackfillTimestamps();
-  if (heads.length === 0) {
+  if (heads.length === 0 && projects.length === 0) {
     overlayWindow?.close();
     overlayWindow = null;
   } else {
@@ -743,11 +872,33 @@ rail.onChange((next) => {
   broadcastHeads();
 });
 
-ipcMain.handle("heads:showInfo", (_e, index: number): void => {
-  const head = heads[index];
-  if (!head) return;
-  void showInfo(index);
+rail.onProjectsChange((next) => {
+  projects = next;
+  if (selectedHeadId && !findHead(selectedHeadId)) {
+    hideInfoNow();
+  }
+  if (heads.length === 0 && projects.length === 0) {
+    overlayWindow?.close();
+    overlayWindow = null;
+  } else if (overlayWindow && !overlayWindow.isDestroyed()) {
+    resizeOverlay();
+    repositionInfoIfVisible();
+    repositionChatIfVisible();
+  }
+  // Pre-warm session cache for repo heads too so hover is instant.
+  for (const h of projects) {
+    if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
+  }
+  broadcastProjects();
 });
+
+ipcMain.handle(
+  "heads:showInfo",
+  (_e, headId: string, bubbleScreenY?: number): void => {
+    if (!findHead(headId)) return;
+    void showInfo(headId, bubbleScreenY);
+  },
+);
 
 ipcMain.handle("info:hide", (): void => scheduleHideInfo());
 ipcMain.handle("info:hoverEnter", (): void => cancelHideInfo());
@@ -757,8 +908,14 @@ ipcMain.handle("chat:toggle", (): void => toggleChat());
 ipcMain.handle("chat:hide", (): void => hideChat());
 
 ipcMain.handle("response:open", (_e, message: string): void => {
-  showResponse(message);
+  showResponse({ kind: "message", message });
 });
+
+ipcMain.handle(
+  "chat:ask",
+  (_e, messages: Parameters<typeof backend.askChat>[0]) =>
+    backend.askChat(messages),
+);
 
 // -------- Dock to edge (drag → release → snap) --------
 
@@ -782,7 +939,7 @@ function currentDockSide(): DockSide {
 
 function computeDockBounds(side: DockSide): Electron.Rectangle {
   const wa = overlayDisplay().workArea;
-  const height = overlayHeight(heads.length);
+  const height = overlayHeight(heads.length, projects.length);
   const x =
     side === "left"
       ? wa.x + DOCK_EDGE_MARGIN
@@ -809,7 +966,7 @@ function ensureDockPlaceholder(): BrowserWindow {
   </style></head><body><div class="pill"></div></body></html>`;
   dockPlaceholderWindow = new BrowserWindow({
     width: OVERLAY_WIDTH,
-    height: overlayHeight(heads.length),
+    height: overlayHeight(heads.length, projects.length),
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -945,6 +1102,18 @@ ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
 });
 
+ipcMain.handle(
+  "dialog:selectDirectory",
+  async (_e, defaultPath?: string): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      title: "Choose working directory",
+      ...(defaultPath ? { defaultPath } : {}),
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0] ?? null;
+  },
+);
 
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
@@ -988,20 +1157,37 @@ async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
   const cached = sessionCache.get(headId);
   if (cached) return cached;
 
-  const login = rail.parseUserHeadId(headId);
-  if (!login) return [];
   const state = backend.getAuthState();
   if (!state.signedIn) return [];
-  try {
-    const sessions =
-      state.user.githubLogin === login
-        ? await backend.listOwnSessions()
-        : await backend.listFeedSessionsForUser(login);
-    sessionCache.set(headId, sessions);
-    return sessions;
-  } catch {
-    return [];
+
+  const login = rail.parseUserHeadId(headId);
+  if (login) {
+    try {
+      const sessions =
+        state.user.githubLogin === login
+          ? await backend.listOwnSessions()
+          : await backend.listFeedSessionsForUser(login);
+      sessionCache.set(headId, sessions);
+      return sessions;
+    } catch {
+      return [];
+    }
   }
+
+  const repoId = rail.parseRepoHeadId(headId);
+  if (repoId != null) {
+    const head = projects.find((h) => h.id === headId);
+    if (!head?.repoFullName) return [];
+    try {
+      const sessions = await backend.listFeedSessionsForRepo(head.repoFullName);
+      sessionCache.set(headId, sessions);
+      return sessions;
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 ipcMain.handle("sessions:forHead", async (_e, headId: string): Promise<InfoSession[]> => {
@@ -1011,6 +1197,353 @@ ipcMain.handle("sessions:forHead", async (_e, headId: string): Promise<InfoSessi
 // Preload sessions for a head on hover to avoid flicker when opening info window
 ipcMain.handle("sessions:preload", async (_e, headId: string): Promise<void> => {
   void fetchSessionsForHead(headId);
+});
+
+ipcMain.handle(
+  "agentSessions:forAgent",
+  async (_e, agentId: string) => agentIngest.listForAgent(agentId),
+);
+
+ipcMain.handle("mcp:install", (_e, target: McpTarget) =>
+  installMcp.install(target, chatheadsAuth.getToken()),
+);
+ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) =>
+  installMcp.uninstall(target),
+);
+ipcMain.handle("mcp:status", () => installMcp.status());
+ipcMain.handle("mcp:url", () => installMcp.mcpUrl());
+ipcMain.handle("mcp:detailForHead", (_e, _headId: string) =>
+  Promise.resolve(null),
+);
+
+ipcMain.handle("github:isConfigured", () => githubAuth.isConfigured());
+ipcMain.handle("github:getState", () => githubAuth.getState());
+ipcMain.handle("github:connect", () => githubAuth.startConnect());
+ipcMain.handle("github:cancelConnect", () => githubAuth.cancelConnect());
+ipcMain.handle("github:disconnect", () => githubAuth.disconnect());
+
+ipcMain.handle("agents:isConfigured", () => anthropic.isConfigured());
+ipcMain.handle("agents:setApiKey", async (_e, key: string): Promise<void> => {
+  await anthropic.setApiKey(key);
+});
+ipcMain.handle("agents:clearApiKey", () => anthropic.clearApiKey());
+ipcMain.handle("agents:list", () => agentStore.list().map(toAgentSummary));
+ipcMain.handle(
+  "agents:create",
+  async (_e, input: CreateAgentInput): Promise<AgentSummary> => {
+    const visibility = input.visibility ?? "private";
+    if (input.mode === "local") {
+      const created = localAgent.createAgent(input);
+      const row: LocalAgent = {
+        id: created.id,
+        name: created.name,
+        description: created.description,
+        systemPrompt: created.systemPrompt,
+        model: created.model,
+        createdAt: Date.now(),
+        sessions: [],
+        mode: "local",
+        cwd: created.cwd,
+        visibility,
+      };
+      agentStore.add(row);
+      return toAgentSummary(row);
+    }
+
+    const created = await anthropic.createAgent({
+      name: input.name,
+      description: input.description,
+      systemPrompt: input.systemPrompt,
+      model: input.model,
+      mcpServers: input.mcpServers,
+    });
+    const row: LocalAgent = {
+      id: created.id,
+      name: created.name,
+      description: created.description,
+      systemPrompt: created.systemPrompt,
+      model: created.model,
+      createdAt: Date.now(),
+      sessions: [],
+      mode: "cloud",
+      visibility,
+    };
+    agentStore.add(row);
+    return toAgentSummary(row);
+  },
+);
+ipcMain.handle("agents:remove", async (_e, id: string): Promise<void> => {
+  const row = agentStore.get(id);
+  if (row && isLocalAgent(row)) {
+    for (const s of row.sessions) localAgent.archiveSession(s.id);
+  } else {
+    try {
+      await anthropic.archiveAgent(id);
+    } catch (err) {
+      console.warn("archive agent failed (continuing):", err);
+    }
+  }
+  streamingAgents.delete(id);
+  agentStore.remove(id);
+});
+ipcMain.handle(
+  "agents:history",
+  async (
+    _e,
+    agentId: string,
+    sessionId?: string | null,
+    cursor?: string | null,
+  ): Promise<AgentHistoryPage> => {
+    const row = agentStore.get(agentId);
+    const targetSessionId = sessionId ?? row?.activeSessionId;
+    if (!row || !targetSessionId) return { msgs: [], nextCursor: null };
+    if (isLocalAgent(row)) {
+      return localAgent.loadSessionMessages(targetSessionId, cursor);
+    }
+    try {
+      return await anthropic.loadSessionMessages(targetSessionId, cursor);
+    } catch (err) {
+      console.warn("history load failed:", err);
+      return { msgs: [], nextCursor: null };
+    }
+  },
+);
+ipcMain.handle(
+  "agents:send",
+  async (
+    _e,
+    agentId: string,
+    text: string,
+    requestedSessionId?: string | null,
+  ) => {
+    const row = agentStore.get(agentId);
+    if (!row) throw new Error("Unknown agent");
+    streamingAgents.add(agentId);
+    try {
+      let sessionId = requestedSessionId ?? row.activeSessionId;
+      if (!sessionId) {
+        sessionId = isLocalAgent(row)
+          ? localAgent.localSessionId()
+          : (await anthropic.startSession(agentId)).sessionId;
+        const createdAt = Date.now();
+        agentStore.addSession(agentId, { id: sessionId, createdAt });
+        agentIngest.upsertSessionStart(row, sessionId, createdAt);
+        emitSessionsChange(agentId);
+      } else if (requestedSessionId) {
+        agentStore.setActiveSession(agentId, requestedSessionId);
+      }
+
+      const latestRow = agentStore.get(agentId) ?? row;
+      const session = latestRow.sessions.find((s) => s.id === sessionId);
+      if (session && !session.title) {
+        const title = truncateTitle(text);
+        agentStore.setSessionTitle(agentId, sessionId, title);
+        emitSessionsChange(agentId);
+        if (!isLocalAgent(row)) {
+          anthropic.updateSessionTitle(sessionId, title).catch((err) => {
+            console.warn("server title update failed:", err);
+          });
+        }
+      }
+
+      const streamSessionId = sessionId;
+      const handleEvent = (e: anthropic.AgentStreamEvent): void => {
+        const payload: AgentStreamEvent = { ...e, agentId };
+        broadcastAgentEvent(payload);
+        if (e.kind === "usage") {
+          agentStore.addSessionUsage(agentId, streamSessionId, {
+            input: e.input,
+            output: e.output,
+          });
+          emitSessionsChange(agentId);
+        }
+        if (e.kind === "done" || e.kind === "error") {
+          streamingAgents.delete(agentId);
+        }
+      };
+
+      if (isLocalAgent(row)) {
+        void localAgent.sendMessage(streamSessionId, text, row, handleEvent);
+      } else {
+        void anthropic.sendMessage(streamSessionId, text, handleEvent);
+      }
+    } catch (err) {
+      streamingAgents.delete(agentId);
+      throw err;
+    }
+  },
+);
+ipcMain.handle(
+  "agents:listSessions",
+  (_e, agentId: string): AgentSessionSummary[] => {
+    const row = agentStore.get(agentId);
+    if (row && !isLocalAgent(row)) void refreshSessionsFromServer(agentId);
+    return row?.sessions ?? [];
+  },
+);
+
+const pendingArchive = new Set<string>();
+const PENDING_ARCHIVE_TTL_MS = 30_000;
+
+async function refreshSessionsFromServer(agentId: string): Promise<void> {
+  try {
+    const server = await anthropic.listAgentSessions(agentId);
+    const active = server.filter(
+      (s) => s.archivedAt == null && !pendingArchive.has(s.id),
+    );
+    agentStore.reconcileSessions(
+      agentId,
+      active.map((s) => ({
+        id: s.id,
+        createdAt: s.createdAt,
+        title: s.title ?? undefined,
+      })),
+    );
+    emitSessionsChange(agentId);
+  } catch (err) {
+    console.warn("session reconcile failed:", err);
+  }
+}
+
+ipcMain.handle(
+  "agents:popOut",
+  (_e, agentId: string, sessionId: string): void => {
+    agentStore.setActiveSession(agentId, sessionId);
+    showResponse({ kind: "agent", agentId, sessionId });
+  },
+);
+
+ipcMain.handle(
+  "agents:removeSession",
+  async (_e, agentId: string, sessionId: string): Promise<void> => {
+    const row = agentStore.get(agentId);
+    if (row && isLocalAgent(row)) {
+      agentStore.removeSession(agentId, sessionId);
+      emitSessionsChange(agentId);
+      localAgent.archiveSession(sessionId);
+      return;
+    }
+
+    pendingArchive.add(sessionId);
+    setTimeout(() => pendingArchive.delete(sessionId), PENDING_ARCHIVE_TTL_MS);
+
+    const isTeamCloud = !!row && (row.visibility ?? "private") === "team";
+    const startedAtMs =
+      row?.sessions.find((s) => s.id === sessionId)?.createdAt ?? Date.now();
+    const agentSnapshot = row;
+
+    agentStore.removeSession(agentId, sessionId);
+    emitSessionsChange(agentId);
+
+    try {
+      await anthropic.archiveSession(sessionId);
+    } catch (err) {
+      console.warn("archive session failed (continuing):", err);
+    }
+
+    if (isTeamCloud && agentSnapshot) {
+      void finalizeTeamSession(agentSnapshot, sessionId, startedAtMs);
+    }
+  },
+);
+
+async function finalizeTeamSession(
+  agent: LocalAgent,
+  sessionId: string,
+  startedAtMs: number,
+): Promise<void> {
+  const endedAt = new Date().toISOString();
+  const base = {
+    agent_id: agent.id,
+    session_id: sessionId,
+    mode: "cloud" as const,
+    visibility: "team" as const,
+    name: agent.name,
+    started_at: new Date(startedAtMs).toISOString(),
+    ended_at: endedAt,
+    last_activity: endedAt,
+  };
+  try {
+    const { summary, model } = await summarize.summarizeCloudSession(sessionId);
+    await agentIngest.upsertSession({
+      ...base,
+      summary,
+      summary_model: model,
+      summary_ts: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn("[summarize] failed:", err);
+    await agentIngest.upsertSession(base);
+  }
+}
+
+ipcMain.handle(
+  "agents:newSession",
+  async (_e, agentId: string): Promise<AgentSessionSummary> => {
+    const row = agentStore.get(agentId);
+    if (!row) throw new Error("Unknown agent");
+    const id = isLocalAgent(row)
+      ? localAgent.localSessionId()
+      : (await anthropic.startSession(agentId)).sessionId;
+    const session: AgentSessionSummary = { id, createdAt: Date.now() };
+    agentStore.addSession(agentId, session);
+    agentIngest.upsertSessionStart(row, id, session.createdAt);
+    emitSessionsChange(agentId);
+    return session;
+  },
+);
+
+ipcMain.handle(
+  "agents:selectSession",
+  (_e, agentId: string, sessionId: string): void => {
+    agentStore.setActiveSession(agentId, sessionId);
+    emitSessionsChange(agentId);
+  },
+);
+
+ipcMain.handle(
+  "agents:ensureSessionUsage",
+  async (_e, agentId: string, sessionId: string): Promise<void> => {
+    const row = agentStore.get(agentId);
+    const session = row?.sessions.find((s) => s.id === sessionId);
+    if (!row || !session || session.tokens) return;
+    if (isLocalAgent(row)) return;
+    try {
+      const total = await anthropic.sumSessionUsage(sessionId);
+      agentStore.setSessionUsage(agentId, sessionId, total);
+      emitSessionsChange(agentId);
+    } catch (err) {
+      console.warn("backfill usage failed:", err);
+    }
+  },
+);
+
+function truncateTitle(text: string): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= 60 ? clean : clean.slice(0, 57) + "...";
+}
+
+function emitSessionsChange(agentId: string): void {
+  const sessions = agentStore.get(agentId)?.sessions ?? [];
+  const payload = { agentId, sessions };
+  for (const w of agentConsumerWindows()) {
+    w.webContents.send("agents:sessionsChange", payload);
+  }
+}
+
+ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
+ipcMain.handle("chatheads:signIn", async () => {
+  await chatheadsAuth.signIn();
+  try {
+    await installMcp.install("claude-code", chatheadsAuth.getToken());
+  } catch (err) {
+    console.warn("auto-install after sign-in failed:", err);
+  }
+});
+ipcMain.handle("chatheads:cancelSignIn", () => chatheadsAuth.cancelSignIn());
+ipcMain.handle("chatheads:signOut", async () => {
+  await chatheadsAuth.signOut();
+  await installMcp.uninstall("claude-code");
 });
 
 // slashtalk backend
@@ -1065,6 +1598,12 @@ ws.onSessionUpdated((msg) => {
   // hover. scheduleInfoRefresh then coalesces any UI refresh for the
   // currently-selected head across bursty events.
   sessionCache.delete(rail.userHeadId(msg.github_login));
+  // Also invalidate the repo-head cache — a session update changes what the
+  // project popover should render too.
+  if (msg.repo_id != null) {
+    sessionCache.delete(rail.repoHeadId(msg.repo_id));
+  }
+  rail.refreshSoon();
   scheduleInfoRefresh(msg.session_id);
   broadcastToMain("ws:sessionUpdated", msg);
 });
@@ -1125,8 +1664,28 @@ function broadcastToMain(channel: string, payload: unknown): void {
   }
 }
 
+function agentConsumerWindows(): BrowserWindow[] {
+  return [mainWindow, infoWindow, responseWindow].filter(
+    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
+  );
+}
+
+function broadcastAgentEvent(event: AgentStreamEvent): void {
+  for (const w of agentConsumerWindows()) {
+    w.webContents.send("agents:event", event);
+  }
+}
+
 backend.onChange((state) => broadcastToMain("backend:authState", state));
 localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
+chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
+githubAuth.onChange((state) => broadcastToMain("github:state", state));
+anthropic.onConfiguredChange((configured) =>
+  broadcastToMain("agents:configured", configured),
+);
+agentStore.onChange((agents) =>
+  broadcastToMain("agents:listChange", agents.map(toAgentSummary)),
+);
 
 // -------- Lifecycle --------
 
@@ -1137,11 +1696,33 @@ function debugBackfillTimestamps(): void {
 
 app.whenReady().then(() => {
   backend.restore();
+  chatheadsAuth.restore();
+  anthropic.restore();
+  githubAuth.restore();
   localRepos.restore();
   createMainWindow();
   createTray();
   rail.start();
+  selfSession.start();
   applySyncForAuth(backend.getAuthState().signedIn);
+
+  // DEV ONLY — rail test shortcuts. Remove before shipping.
+  if (!app.isPackaged) {
+    const bindings: Array<[string, () => void]> = [
+      ["CommandOrControl+Shift+R", () => rail.debugShuffleRail()],
+      ["CommandOrControl+Shift+J", () => rail.debugAddFakeTeammate()],
+      ["CommandOrControl+Shift+L", () => rail.debugRemoveFakeTeammate()],
+      ["CommandOrControl+Shift+K", () => replayEnterAnimation()],
+    ];
+    for (const [accel, fn] of bindings) {
+      const ok = globalShortcut.register(accel, fn);
+      if (!ok) console.warn(`[debug] failed to register ${accel}`);
+    }
+  }
+});
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });
 
 // Keep the app alive when all windows close — the mere presence of a

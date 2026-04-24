@@ -116,6 +116,25 @@ export interface FeedUser {
   repos: string[];
 }
 
+/** One managed-agent session stored in the MCP backend's agent_sessions table.
+ *  Private agent sessions never reach the backend, so every row returned here
+ *  is visibility='team'. Both server and desktop speak this shape so there is
+ *  no skew between the PUT payload and GET response. */
+export interface AgentSessionRow {
+  user_login: string;
+  agent_id: string;
+  session_id: string;
+  mode: "cloud" | "local";
+  visibility: "private" | "team";
+  name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  last_activity: string;
+  summary: string | null;
+  summary_model: string | null;
+  summary_ts: string | null;
+}
+
 /** Ingest response */
 export interface IngestResponse {
   acceptedEvents: number;
@@ -168,6 +187,37 @@ export interface SessionUpdatedMessage {
   last_ts?: string;
   /** Present when fired from heartbeat state-change */
   state?: SessionState;
+}
+
+/**
+ * Chat (team-presence Q&A). The server is stateless: the client owns the
+ * thread and re-sends the full `messages` array on every turn. Tool turns
+ * are hidden from the client — only user-visible text + citations come back.
+ */
+export interface ChatCitation {
+  sessionId: string;
+  reason: string;
+}
+
+export interface ChatUserMessage {
+  role: "user";
+  content: string;
+}
+
+export interface ChatAssistantMessage {
+  role: "assistant";
+  content: string;
+  citations?: ChatCitation[];
+}
+
+export type ChatMessage = ChatUserMessage | ChatAssistantMessage;
+
+export interface ChatAskRequest {
+  messages: ChatMessage[];
+}
+
+export interface ChatAskResponse {
+  message: ChatAssistantMessage;
 }
 
 /** Standard API response wrapper */

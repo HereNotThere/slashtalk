@@ -6,6 +6,7 @@ import {
   users,
   repos,
   userRepos,
+  deviceRepoPaths,
   sessions,
   setupTokens,
   heartbeats,
@@ -314,6 +315,176 @@ describe("NDJSON ingest", () => {
     const data = (await res.json()) as IngestResponse;
     expect(data.acceptedEvents).toBe(0);
     expect(data.duplicateEvents).toBe(1);
+  });
+
+  it("aggregates Codex sessions into the existing snapshot shape", async () => {
+    const [repo] = await db
+      .insert(repos)
+      .values({
+        githubId: 3011,
+        fullName: "shared-org/slashtalk",
+        owner: "shared-org",
+        name: "slashtalk",
+      })
+      .returning();
+
+    await db.insert(userRepos).values({
+      userId: aliceUserId,
+      repoId: repo.id,
+      permission: "push",
+    });
+
+    const repoRoot = "/Users/alice/work/slashtalk";
+    await db.insert(deviceRepoPaths).values({
+      deviceId: aliceDeviceId,
+      repoId: repo.id,
+      localPath: repoRoot,
+    });
+
+    const sessionId = "019dbb09-1397-78e1-aaa2-45a904cd7c13";
+    const turnId = "019dbb0a-a118-76d3-8a89-90061518a673";
+    const cwd = `${repoRoot}/apps/server`;
+    const filePath = `${cwd}/src/ingest/routes.ts`;
+
+    const codexEvents = [
+      {
+        timestamp: "2026-04-23T15:52:09.302Z",
+        type: "session_meta",
+        payload: {
+          id: sessionId,
+          timestamp: "2026-04-23T15:50:27.485Z",
+          cwd,
+          cli_version: "0.122.0",
+          model_provider: "openai",
+        },
+      },
+      {
+        timestamp: "2026-04-23T15:52:09.302Z",
+        type: "event_msg",
+        payload: {
+          type: "task_started",
+          turn_id: turnId,
+          started_at: 1776959529,
+        },
+      },
+      {
+        timestamp: "2026-04-23T15:52:09.302Z",
+        type: "turn_context",
+        payload: {
+          turn_id: turnId,
+          cwd,
+          model: "gpt-5.4",
+          approval_policy: "on-request",
+        },
+      },
+      {
+        timestamp: "2026-04-23T15:52:09.303Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          message:
+            "Please add Codex session upload support to the existing session pipeline.",
+        },
+      },
+      {
+        timestamp: "2026-04-23T15:52:15.759Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: JSON.stringify({
+            cmd: "sed -n '1,260p' apps/server/src/ingest/routes.ts",
+            workdir: cwd,
+          }),
+          call_id: "call_33C86MJossOpYI3KWDTxTJeB",
+        },
+      },
+      {
+        timestamp: "2026-04-23T15:52:28.480Z",
+        type: "event_msg",
+        payload: {
+          type: "exec_command_end",
+          call_id: "call_33C86MJossOpYI3KWDTxTJeB",
+          turn_id: turnId,
+          cwd,
+          exit_code: 0,
+          parsed_cmd: [{ type: "read", path: filePath }],
+        },
+      },
+      {
+        timestamp: "2026-04-23T15:52:28.889Z",
+        type: "event_msg",
+        payload: {
+          type: "agent_message",
+          message: "I’m wiring Codex into the existing ingest pipeline.",
+        },
+      },
+      {
+        timestamp: "2026-04-23T15:53:03.729Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 42378,
+              cached_input_tokens: 34688,
+              output_tokens: 231,
+              reasoning_output_tokens: 25,
+            },
+          },
+        },
+      },
+      {
+        timestamp: "2026-04-23T15:55:40.691Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: turnId,
+          completed_at: 1776959740,
+        },
+      },
+    ];
+
+    const res = await fetch(
+      `${baseUrl}/v1/ingest?project=${encodeURIComponent(
+        "-Users-alice-work-slashtalk-apps-server"
+      )}&session=${sessionId}&fromLineSeq=0&source=codex`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          Authorization: `Bearer ${aliceApiKey}`,
+        },
+        body: makeNdjson(codexEvents),
+      }
+    );
+    expect(res.status).toBe(200);
+
+    const [session] = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.sessionId, sessionId));
+
+    expect(session.source).toBe("codex");
+    expect(session.provider).toBe("openai");
+    expect(session.repoId).toBe(repo.id);
+    expect(session.cwd).toBe(cwd);
+    expect(session.version).toBe("0.122.0");
+    expect(session.model).toBe("gpt-5.4");
+    expect(session.userMsgs).toBe(1);
+    expect(session.assistantMsgs).toBe(1);
+    expect(session.toolCalls).toBe(1);
+    expect(session.toolErrors).toBe(0);
+    expect(session.tokensIn).toBe(42378);
+    expect(session.tokensCacheRead).toBe(34688);
+    expect(session.tokensOut).toBe(231);
+    expect(session.tokensReasoning).toBe(25);
+    expect(session.title).toContain("Please add Codex session upload support");
+    expect(session.lastUserPrompt).toContain("Codex session upload support");
+    expect(session.inTurn).toBe(false);
+    expect(session.currentTurnId).toBeNull();
+    expect(session.topFilesRead).toEqual({ [filePath]: 1 });
+    expect(session.events).toBe(codexEvents.length);
   });
 });
 

@@ -2,13 +2,14 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { SessionState } from "@slashtalk/shared";
 import type { RecentEvent, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
+import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
 
 const REFRESH_MS = 15_000;
 
 const DOT_COLOR: Record<SessionState, string> = {
-  [SessionState.BUSY]: "bg-warning",
+  [SessionState.BUSY]: "bg-success",
   [SessionState.ACTIVE]: "bg-success",
   [SessionState.IDLE]: "bg-warning",
   [SessionState.RECENT]: "bg-muted",
@@ -42,6 +43,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!head) return;
+    if (head.kind === "agent") {
+      setSessions([]);
+      return;
+    }
     let cancelled = false;
     const load = async (): Promise<void> => {
       try {
@@ -87,9 +92,21 @@ export function App(): JSX.Element {
       }}
     >
       <div ref={contentRef}>
-        <Header head={head} />
-        <Divider />
-        <SessionsSection sessions={sessions} />
+        {head?.kind === "agent" ? (
+          <AgentPanel head={head} />
+        ) : head?.kind === "repo" ? (
+          <>
+            <Header head={head} />
+            <Divider />
+            <RepoSessionsSection sessions={sessions} />
+          </>
+        ) : (
+          <>
+            <Header head={head} />
+            <Divider />
+            <SessionsSection sessions={sessions} />
+          </>
+        )}
       </div>
     </div>
   );
@@ -100,6 +117,11 @@ function Divider(): JSX.Element {
 }
 
 function Header({ head }: { head: ChatHead | null }): JSX.Element {
+  if (head?.kind === "repo") return <RepoHeader head={head} />;
+  return <UserHeader head={head} />;
+}
+
+function UserHeader({ head }: { head: ChatHead | null }): JSX.Element {
   const name = head?.label ?? "—";
   const time = new Date().toLocaleTimeString([], {
     hour: "numeric",
@@ -124,6 +146,33 @@ function Header({ head }: { head: ChatHead | null }): JSX.Element {
           <span className="shrink-0">{time}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RepoHeader({ head }: { head: ChatHead }): JSX.Element {
+  const full = head.repoFullName ?? head.label;
+  const slash = full.lastIndexOf("/");
+  const owner = slash >= 0 ? full.slice(0, slash) : "";
+  const name = slash >= 0 ? full.slice(slash + 1) : full;
+  return (
+    <div className="flex items-start gap-md px-lg pt-lg pb-md">
+      <Avatar head={head} />
+      <div className="flex-1 min-w-0">
+        <div className="text-[19px] font-bold leading-tight truncate">
+          {name}
+        </div>
+        {owner && (
+          <div className="mt-1 text-[12px] text-muted truncate">{owner}</div>
+        )}
+      </div>
+      <button
+        onClick={() => window.chatheads.hideInfo()}
+        className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
+        aria-label="Close"
+      >
+        ✕
+      </button>
     </div>
   );
 }
@@ -190,18 +239,13 @@ function SessionsSection({
   const hasMore = sessions.length > DEFAULT_SESSION_LIMIT;
   return (
     <div>
-      {visible.map((s, i) => (
-        <Fragment key={s.id}>
-          {i > 0 && <div className="mx-lg h-px bg-divider" />}
-          <SessionRow
-            session={s}
-            expanded={expandedId === s.id}
-            onToggle={() =>
-              setExpandedId((cur) => (cur === s.id ? null : s.id))
-            }
-          />
-        </Fragment>
-      ))}
+      <SessionList
+        sessions={visible}
+        expandedId={expandedId}
+        onToggle={(id) =>
+          setExpandedId((cur) => (cur === id ? null : id))
+        }
+      />
       {hasMore && (
         <>
           <div className="mx-lg h-px bg-divider" />
@@ -218,13 +262,123 @@ function SessionsSection({
   );
 }
 
+// "Current" = live or paused sessions (heartbeat still alive).
+// "Completed" = server-classified RECENT/ENDED.
+const ACTIVE_STATES = new Set<SessionState>([
+  SessionState.BUSY,
+  SessionState.ACTIVE,
+  SessionState.IDLE,
+]);
+
+function tsOf(s: InfoSession): number {
+  return s.lastTs ? new Date(s.lastTs).getTime() : 0;
+}
+
+function RepoSessionsSection({
+  sessions,
+}: {
+  sessions: InfoSession[] | null;
+}): JSX.Element {
+  // Expansion state is shared across the two groups so expanding one session
+  // collapses a previously-expanded one regardless of which group it's in.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (sessions == null) {
+    return (
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        Loading…
+      </div>
+    );
+  }
+  if (sessions.length === 0) {
+    return (
+      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
+        No sessions yet.
+      </div>
+    );
+  }
+
+  // Sort by lastTs desc within each group — most recent activity on top.
+  const active = sessions
+    .filter((s) => ACTIVE_STATES.has(s.state))
+    .sort((a, b) => tsOf(b) - tsOf(a));
+  const completed = sessions
+    .filter((s) => !ACTIVE_STATES.has(s.state))
+    .sort((a, b) => tsOf(b) - tsOf(a));
+
+  const onToggle = (id: string): void =>
+    setExpandedId((cur) => (cur === id ? null : id));
+
+  return (
+    <div>
+      {active.length > 0 && (
+        <>
+          <div className="px-lg pt-md pb-1">
+            <SubHeader>Active</SubHeader>
+          </div>
+          <SessionList
+            sessions={active}
+            expandedId={expandedId}
+            onToggle={onToggle}
+            showPerson
+          />
+        </>
+      )}
+      {active.length > 0 && completed.length > 0 && (
+        <div className="mx-lg my-md h-px bg-divider" />
+      )}
+      {completed.length > 0 && (
+        <>
+          <div className="px-lg pt-md pb-1">
+            <SubHeader>Completed</SubHeader>
+          </div>
+          <SessionList
+            sessions={completed}
+            expandedId={expandedId}
+            onToggle={onToggle}
+            showPerson
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function SessionList({
+  sessions,
+  expandedId,
+  onToggle,
+  showPerson = false,
+}: {
+  sessions: InfoSession[];
+  expandedId: string | null;
+  onToggle: (id: string) => void;
+  showPerson?: boolean;
+}): JSX.Element {
+  return (
+    <>
+      {sessions.map((s, i) => (
+        <Fragment key={s.id}>
+          {i > 0 && <div className="mx-lg h-px bg-divider" />}
+          <SessionRow
+            session={s}
+            expanded={expandedId === s.id}
+            onToggle={() => onToggle(s.id)}
+            showPerson={showPerson}
+          />
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
 function repoLabel(s: InfoSession): string | null {
   if ("repo_full_name" in s && s.repo_full_name) {
     const slash = s.repo_full_name.lastIndexOf("/");
     return slash >= 0 ? s.repo_full_name.slice(slash + 1) : s.repo_full_name;
   }
-  // Fallback for own sessions: Claude writes projects as a slugified cwd path
-  // (e.g. "-Users-erik-dev-towns-app"); the trailing segment is the repo dir.
+  // Fallback for own sessions: both uploaders store `project` as a slugified
+  // cwd path, so the trailing segment is usually the repo dir.
   const parts = s.project.split(/[-/]/).filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1]! : null;
 }
@@ -233,10 +387,12 @@ function SessionRow({
   session,
   expanded,
   onToggle,
+  showPerson = false,
 }: {
   session: InfoSession;
   expanded: boolean;
   onToggle: () => void;
+  showPerson?: boolean;
 }): JSX.Element {
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
@@ -249,6 +405,12 @@ function SessionRow({
   );
   const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
   const hasMeta = shrinkableParts.length > 0 || tokensLabel !== null;
+  // FeedSessionSnapshot carries the owner's github_login + avatar_url. Own
+  // sessions (SessionSnapshot) don't, so the byline silently no-ops for them.
+  const personLogin =
+    showPerson && "github_login" in session ? session.github_login : null;
+  const personAvatar =
+    showPerson && "avatar_url" in session ? session.avatar_url : null;
 
   return (
     <div className={expanded ? "bg-surface" : undefined}>
@@ -264,6 +426,25 @@ function SessionRow({
             </div>
             {showDot && <Dot color={DOT_COLOR[session.state]} />}
           </div>
+          {personLogin && (
+            <div
+              className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0"
+              style={showDot ? { marginLeft: 14 } : undefined}
+            >
+              {personAvatar ? (
+                <img
+                  src={personAvatar}
+                  alt=""
+                  className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <span className="w-3.5 h-3.5 rounded-full bg-surface shrink-0" />
+              )}
+              <span className="truncate font-medium text-fg/80">
+                {personLogin}
+              </span>
+            </div>
+          )}
           {session.description && (
             <div className="mt-1 text-[12px] text-muted line-clamp-2">
               {session.description}
@@ -302,8 +483,11 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
     (session.lastUserPrompt && session.lastUserPrompt !== session.title
       ? session.lastUserPrompt
       : null);
-  const highlights = session.highlights ?? [];
-  const recent = session.recent ?? [];
+  // Defensive: the server sometimes returns non-array shapes here (stale rows
+  // where the rolling-summary analyzer output didn't match its JSON schema).
+  // Without this, .map crashes the whole tree and the card goes blank.
+  const highlights = Array.isArray(session.highlights) ? session.highlights : [];
+  const recent = Array.isArray(session.recent) ? session.recent : [];
   const hasAnything =
     Boolean(summary) || highlights.length > 0 || recent.length > 0;
   return (
@@ -361,8 +545,10 @@ function ActivityRow({ event }: { event: RecentEvent }): JSX.Element {
 
 function fmtTokens(tokens: TokenUsage | undefined): string | null {
   if (!tokens) return null;
-  const total =
-    tokens.in + tokens.out + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
+  // Exclude cacheRead: with prompt caching, the same cached prefix is re-read
+  // every turn, so summing it across turns multiplies unique tokens by the
+  // turn count. cacheWrite already accounts for what's in the cache.
+  const total = tokens.in + tokens.out + tokens.cacheWrite + tokens.reasoning;
   if (total <= 0) return null;
   if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}M`;
   if (total >= 1_000) return `${(total / 1_000).toFixed(1)}k`;
@@ -377,8 +563,10 @@ function fmtAgo(ts: string): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
+  const rem = m % 60;
+  const roundedH = rem >= 30 ? h + 1 : h;
+  if (roundedH < 24) return `${roundedH}h ago`;
+  const d = Math.floor(roundedH / 24);
   return `${d}d ago`;
 }
 

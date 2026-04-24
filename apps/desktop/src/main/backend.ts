@@ -14,6 +14,9 @@ import http from "node:http";
 import os from "node:os";
 import type { AddressInfo } from "node:net";
 import type {
+  ChatAskRequest,
+  ChatAskResponse,
+  ChatMessage,
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
@@ -68,6 +71,12 @@ export function getAuthState(): BackendAuthState {
  *  on refresh, so callers should re-read on reconnect rather than caching. */
 export function getJwt(): string | null {
   return creds?.jwt ?? null;
+}
+
+/** Device-scoped API key minted by /v1/auth/exchange during signIn. This is
+ *  what the MCP backend expects as Bearer. */
+export function getApiKey(): string | null {
+  return creds?.apiKey ?? null;
 }
 
 export function getBaseUrl(): string {
@@ -430,6 +439,13 @@ export function listFeedSessionsForUser(
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
 
+export function listFeedSessionsForRepo(
+  fullName: string,
+): Promise<FeedSessionSnapshot[]> {
+  const qs = new URLSearchParams({ repo: fullName });
+  return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
+}
+
 export function listDeviceRepos(): Promise<
   Array<{ repoId: number; fullName: string; localPath: string }>
 > {
@@ -459,6 +475,7 @@ export async function ingestChunk(args: {
   project: string;
   fromLineSeq: number;
   prefixHash: string;
+  source?: "claude" | "codex";
   body: string;
 }): Promise<IngestResponse> {
   if (!creds) throw new Error("Not signed in");
@@ -467,6 +484,7 @@ export async function ingestChunk(args: {
     session: args.session,
     fromLineSeq: String(args.fromLineSeq),
     prefixHash: args.prefixHash,
+    source: args.source ?? "claude",
   });
   const res = await fetch(`${baseUrl()}/v1/ingest?${qs.toString()}`, {
     method: "POST",
@@ -488,6 +506,16 @@ export function fetchSyncState(): Promise<Record<string, SyncStateEntry>> {
   return jsonFetch<Record<string, SyncStateEntry>>("/v1/sync-state", {
     method: "GET",
     auth: "apiKey",
+  });
+}
+
+// ---------- Chat ----------
+
+export async function askChat(messages: ChatMessage[]): Promise<ChatAskResponse> {
+  const body: ChatAskRequest = { messages };
+  return jsonFetch<ChatAskResponse>("/api/chat/ask", {
+    method: "POST",
+    body,
   });
 }
 

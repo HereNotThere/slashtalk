@@ -29,6 +29,7 @@ import type {
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
+import * as orgRepos from "./orgRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
@@ -43,6 +44,8 @@ import * as agentIngest from "./agentIngest";
 import * as summarize from "./summarize";
 import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
+import * as spotify from "./spotify";
+import * as peerPresence from "./peerPresence";
 import { setMacCornerRadius } from "./macCorners";
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -519,6 +522,7 @@ function positionInfo(
 async function showInfo(
   headId: string,
   bubbleScreen?: { x: number; y: number },
+  expandSessionId?: string,
 ): Promise<void> {
   if (isDraggingStack) return;
   const head = findHead(headId);
@@ -550,10 +554,17 @@ async function showInfo(
   const cachedHeight = infoHeightByHead.get(head.id);
   if (cachedHeight) infoCurrentHeight = cachedHeight;
 
-  // Send cached sessions immediately if we have them; renderer handles the
-  // `null` case by loading on its own effect.
+  // Send cached sessions + current Spotify presence immediately; renderer
+  // handles the `null` cases by loading on its own effect.
   const cached = sessionCache.get(head.id) ?? null;
-  win.webContents.send("info:show", { head, sessions: cached });
+  const login = rail.parseUserHeadId(head.id);
+  const spotifyPresence = login ? peerPresence.get(login) : null;
+  win.webContents.send("info:show", {
+    head,
+    sessions: cached,
+    expandSessionId: expandSessionId ?? null,
+    spotify: spotifyPresence,
+  });
 
   // Animate position/size when switching heads on an already-visible window;
   // land-in-place on first appearance.
@@ -570,7 +581,13 @@ async function showInfo(
     void fetchSessionsForHead(head.id).then((loaded) => {
       if (selectedHeadId !== head.id) return;
       if (!infoWindow || infoWindow.isDestroyed()) return;
-      infoWindow.webContents.send("info:show", { head, sessions: loaded });
+      const refreshedLogin = rail.parseUserHeadId(head.id);
+      infoWindow.webContents.send("info:show", {
+        head,
+        sessions: loaded,
+        expandSessionId: expandSessionId ?? null,
+        spotify: refreshedLogin ? peerPresence.get(refreshedLogin) : null,
+      });
     });
   }
 }
@@ -1019,9 +1036,22 @@ ipcMain.handle("response:open", (_e, message: string): void => {
 });
 
 ipcMain.handle(
+  "chat:openSessionCard",
+  (_e, payload: { sessionId: string; login: string }): void => {
+    const headId = rail.userHeadId(payload.login);
+    if (!findHead(headId)) return;
+    void showInfo(headId, undefined, payload.sessionId);
+  },
+);
+
+ipcMain.handle(
   "chat:ask",
   (_e, messages: Parameters<typeof backend.askChat>[0]) =>
     backend.askChat(messages),
+);
+
+ipcMain.handle("chat:gerund", (_e, prompt: string) =>
+  backend.fetchChatGerunds(prompt),
 );
 
 // -------- Dock to edge (drag → release → snap) --------
@@ -1725,19 +1755,23 @@ function emitSessionsChange(agentId: string): void {
 }
 
 ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
-ipcMain.handle("chatheads:signIn", async () => {
-  await chatheadsAuth.signIn();
-  try {
-    await installMcp.install("claude-code", chatheadsAuth.getToken());
-  } catch (err) {
-    console.warn("auto-install after sign-in failed:", err);
-  }
-});
+ipcMain.handle("chatheads:signIn", () => chatheadsAuth.signIn());
 ipcMain.handle("chatheads:cancelSignIn", () => chatheadsAuth.cancelSignIn());
-ipcMain.handle("chatheads:signOut", async () => {
-  await chatheadsAuth.signOut();
-  await installMcp.uninstall("claude-code");
+ipcMain.handle("chatheads:signOut", () => chatheadsAuth.signOut());
+
+// Push a presence update into the info window only while it's showing the
+// head whose login just changed. Fallback poll lives in the renderer.
+peerPresence.onChange(({ login, presence }) => {
+  if (!infoWindow || infoWindow.isDestroyed() || !selectedHeadId) return;
+  const shownLogin = rail.parseUserHeadId(selectedHeadId);
+  if (shownLogin !== login) return;
+  infoWindow.webContents.send("info:presence", { login, spotify: presence });
 });
+
+ipcMain.handle(
+  "spotify:forLogin",
+  (_e, login: string) => peerPresence.get(login),
+);
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
@@ -1752,11 +1786,24 @@ function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
     void uploader.start();
     void heartbeat.start();
+    void spotify.start();
+    void peerPresence.start();
     ws.start();
+    const apiKey = backend.getApiKey();
+    if (apiKey) {
+      void installMcp
+        .install("claude-code", apiKey)
+        .catch((err) => console.warn("installMcp.install failed:", err));
+    }
   } else {
     heartbeat.stop();
     uploader.reset();
+    spotify.stop();
+    peerPresence.stop();
     ws.stop();
+    void installMcp
+      .uninstall("claude-code")
+      .catch((err) => console.warn("installMcp.uninstall failed:", err));
   }
 }
 
@@ -1838,7 +1885,12 @@ async function refreshInfoNow(): Promise<void> {
     const sessions = await fetchSessionsForHead(head.id);
     if (selectedHeadId !== head.id) return;
     if (!infoWindow || infoWindow.isDestroyed()) return;
-    infoWindow.webContents.send("info:show", { head, sessions });
+    const refreshLogin = rail.parseUserHeadId(head.id);
+    infoWindow.webContents.send("info:show", {
+      head,
+      sessions,
+      spotify: refreshLogin ? peerPresence.get(refreshLogin) : null,
+    });
   } catch (e) {
     console.warn("[ws] refreshInfoNow failed:", e);
   }
@@ -1851,9 +1903,31 @@ ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>
   localRepos.removeLocalRepo(repoId),
 );
 
+// -------- Org-scoped repo picker (tray popup) --------
+
+ipcMain.handle("orgs:list", () => orgRepos.getOrgs());
+ipcMain.handle("orgs:activeOrg", () => orgRepos.getActiveOrg());
+ipcMain.handle("orgs:setActive", (_e, login: string) =>
+  orgRepos.setActiveOrg(login),
+);
+ipcMain.handle("repos:listForActiveOrg", () => orgRepos.getReposForActiveOrg());
+ipcMain.handle("repos:selection", () => orgRepos.getSelectedFullNames());
+ipcMain.handle("repos:toggle", (_e, fullName: string) =>
+  orgRepos.toggleRepo(fullName),
+);
+
 function broadcastToMain(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
+  }
+}
+
+// Tray popup (statusbar renderer) is the primary consumer of orgs:* /
+// repos:* push channels. We still broadcast to main so any future settings
+// UI on the main window stays in sync without extra plumbing.
+function broadcastToTrayAndMain(channel: string, payload: unknown): void {
+  for (const w of [mainWindow, trayPopup]) {
+    if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
   }
 }
 
@@ -1870,7 +1944,23 @@ function broadcastAgentEvent(event: AgentStreamEvent): void {
 }
 
 backend.onChange((state) => broadcastToMain("backend:authState", state));
+// Tray popup shows sign-in state too — mirror to it so the CTA flips live.
+backend.onChange((state) =>
+  trayPopup && !trayPopup.isDestroyed()
+    ? trayPopup.webContents.send("backend:authState", state)
+    : undefined,
+);
 localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
+orgRepos.onOrgsChange((orgs) =>
+  broadcastToTrayAndMain("orgs:listChange", orgs),
+);
+orgRepos.onActiveOrgChange((login) =>
+  broadcastToTrayAndMain("orgs:activeChange", login),
+);
+orgRepos.onReposChange((repos) => broadcastToTrayAndMain("repos:update", repos));
+orgRepos.onSelectionChange((selected) =>
+  broadcastToTrayAndMain("repos:selectionChange", selected),
+);
 chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
 githubAuth.onChange((state) => broadcastToMain("github:state", state));
 anthropic.onConfiguredChange((configured) =>
@@ -1893,6 +1983,7 @@ app.whenReady().then(() => {
   anthropic.restore();
   githubAuth.restore();
   localRepos.restore();
+  orgRepos.start();
   createTray();
   rail.start();
   selfSession.start();

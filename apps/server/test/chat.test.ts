@@ -16,6 +16,7 @@ import {
   getTeamActivityImpl,
   getSessionImpl,
 } from "../src/chat/tools";
+import { loadSessionCards } from "../src/chat/cards";
 import { SUMMARY_ANALYZER } from "../src/analyzers/names";
 
 let redis: RedisBridge;
@@ -352,6 +353,52 @@ describe("chat tool: get_session", () => {
     expect(result.kind).toBe("error");
     if (result.kind !== "error") return;
     expect(result.message).toContain("not found");
+  });
+});
+
+describe("chat cards: loadSessionCards", () => {
+  it("hydrates compact cards for visible sessions in input order", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      ALICE_SESSION,
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION, ALICE_SESSION]);
+    const bob = cards[0];
+    expect(bob.user.login).toBe("bob");
+    expect(bob.repo).toBe("team/slashtalk");
+    expect(bob.title).toBe("Wiring WS reconnect");
+    expect(bob.source).toBe("claude");
+  });
+
+  it("drops sessions outside the caller's repo graph", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      OUTSIDER_SESSION,
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION]);
+  });
+
+  it("de-dupes repeated session IDs while preserving first-seen order", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      BOB_SESSION,
+      ALICE_SESSION,
+      BOB_SESSION,
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION, ALICE_SESSION]);
+  });
+
+  it("silently skips unknown session IDs", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      "00000000-0000-0000-0000-000000000000",
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION]);
+  });
+
+  it("returns empty for an empty or all-invisible input", async () => {
+    expect(await loadSessionCards(db, aliceId, [])).toEqual([]);
+    expect(await loadSessionCards(db, aliceId, [OUTSIDER_SESSION])).toEqual([]);
   });
 });
 

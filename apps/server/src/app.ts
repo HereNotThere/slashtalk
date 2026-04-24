@@ -8,6 +8,7 @@ import { socialRoutes } from "./social/routes";
 import { sessionRoutes } from "./sessions/routes";
 import { userRoutes, deviceReposRoutes } from "./user/routes";
 import { chatRoutes } from "./chat/routes";
+import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
 import { wsHandler } from "./ws/handler";
 import type { RedisBridge } from "./ws/redis-bridge";
 
@@ -32,5 +33,7 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(userRoutes(db))
     .use(deviceReposRoutes(db))
     .use(chatRoutes(db))
+    .use(spotifyPresenceRoutes(db, redis))
+    .use(presenceReadRoutes(db, redis))
     .use(wsHandler(db, redis));
 }

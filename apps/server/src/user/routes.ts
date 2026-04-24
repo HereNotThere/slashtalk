@@ -13,10 +13,96 @@ import {
   sessions,
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
+import { decryptGithubToken } from "../auth/tokens";
+import { config } from "../config";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
+import type { OrgSummary, OrgRepo } from "@slashtalk/shared";
 
 // "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
 const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
+// GitHub org login: 1-39 chars of letters, digits, or hyphens.
+const ORG_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
+
+// Per-user caches for the GitHub-proxied lookups. The tray popup opens/closes
+// repeatedly — hitting GitHub every time would burn rate limit and feel slow.
+// Keyed by userId / `${userId}:${org}`; entries expire after 60s.
+const ORGS_TTL_MS = 60_000;
+const orgsCache = new Map<number, { at: number; value: OrgSummary[] }>();
+const orgReposCache = new Map<string, { at: number; value: OrgRepo[] }>();
+
+/** Test-only: reset the GitHub-proxy caches so assertions don't bleed
+ *  across cases. No production path calls this. */
+export function __clearOrgCaches(): void {
+  orgsCache.clear();
+  orgReposCache.clear();
+}
+
+async function fetchUserGithubToken(
+  db: Database,
+  userId: number,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ githubToken: users.githubToken })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row?.githubToken) return null;
+  try {
+    return await decryptGithubToken(row.githubToken, config.encryptionKey);
+  } catch {
+    return null;
+  }
+}
+
+function githubHeaders(token: string): Record<string, string> {
+  return {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    Authorization: `token ${token}`,
+    "User-Agent": "slashtalk",
+  };
+}
+
+interface RawGithubOrg {
+  login?: string;
+  name?: string | null;
+  avatar_url?: string | null;
+}
+
+interface RawGithubRepo {
+  id?: number;
+  name?: string;
+  full_name?: string;
+  owner?: { login?: string };
+  private?: boolean;
+  archived?: boolean;
+  permissions?: {
+    admin?: boolean;
+    maintain?: boolean;
+    push?: boolean;
+    triage?: boolean;
+    pull?: boolean;
+  };
+  role_name?: string;
+}
+
+function parseNextUrl(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+  // Link: <https://…?page=2>; rel="next", <https://…?page=N>; rel="last"
+  for (const part of linkHeader.split(",")) {
+    const m = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/);
+    if (m && m[2] === "next") return m[1];
+  }
+  return null;
+}
+
+function permissionFromRepo(r: RawGithubRepo): OrgRepo["permission"] {
+  if (r.permissions?.admin) return "admin";
+  if (r.permissions?.maintain) return "maintain";
+  if (r.permissions?.push) return "push";
+  if (r.permissions?.triage) return "triage";
+  return "pull";
+}
 
 export const userRoutes = (db: Database) =>
   new Elysia({ prefix: "/api/me", name: "user" })
@@ -163,7 +249,110 @@ export const userRoutes = (db: Database) =>
       });
 
       return { token, expiresAt: expiresAt.toISOString() };
-    });
+    })
+
+    // GET /api/me/orgs — orgs the signed-in user belongs to, proxied from
+    // GitHub using the stored OAuth token. Returns [] when the token is
+    // missing, dead, or rate-limited — the desktop treats "no orgs" as the
+    // tray-popup empty state rather than an error.
+    .get("/orgs", async ({ user }): Promise<OrgSummary[]> => {
+      const cached = orgsCache.get(user.id);
+      if (cached && Date.now() - cached.at < ORGS_TTL_MS) return cached.value;
+
+      const token = await fetchUserGithubToken(db, user.id);
+      if (!token) return [];
+
+      let res: Response;
+      try {
+        res = await fetch(
+          "https://api.github.com/user/orgs?per_page=100",
+          { headers: githubHeaders(token) },
+        );
+      } catch {
+        return [];
+      }
+      if (res.status === 401 || res.status === 403) return [];
+      if (!res.ok) return [];
+
+      const raw = (await res.json().catch(() => null)) as RawGithubOrg[] | null;
+      if (!Array.isArray(raw)) return [];
+
+      const value: OrgSummary[] = raw
+        .filter((o): o is RawGithubOrg & { login: string } => !!o.login)
+        .map((o) => ({
+          login: o.login,
+          name: o.name ?? null,
+          avatarUrl: o.avatar_url ?? "",
+        }));
+      orgsCache.set(user.id, { at: Date.now(), value });
+      return value;
+    })
+
+    // GET /api/me/orgs/:org/repos — repos in `:org` readable by the signed-in
+    // user. Uses /orgs/{org}/repos which (with a user token) already filters
+    // to repos the user can access. Archived repos are skipped. Caps at 5
+    // pages = 500 repos so a pathological org can't pin this request.
+    .get(
+      "/orgs/:org/repos",
+      async ({ params, user, set }): Promise<OrgRepo[]> => {
+        const org = params.org.trim();
+        if (!ORG_LOGIN.test(org)) {
+          set.status = 400;
+          return [];
+        }
+
+        const cacheKey = `${user.id}:${org}`;
+        const cached = orgReposCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < ORGS_TTL_MS) return cached.value;
+
+        const token = await fetchUserGithubToken(db, user.id);
+        if (!token) return [];
+
+        const collected: OrgRepo[] = [];
+        let url: string | null =
+          `https://api.github.com/orgs/${encodeURIComponent(org)}/repos?per_page=100&type=all&sort=updated`;
+        let pages = 0;
+        const MAX_PAGES = 5;
+
+        while (url && pages < MAX_PAGES) {
+          pages += 1;
+          let res: Response;
+          try {
+            res = await fetch(url, { headers: githubHeaders(token) });
+          } catch {
+            return [];
+          }
+          if (res.status === 401 || res.status === 403) return [];
+          if (res.status === 404) return [];
+          if (!res.ok) return [];
+
+          const raw = (await res
+            .json()
+            .catch(() => null)) as RawGithubRepo[] | null;
+          if (!Array.isArray(raw)) break;
+
+          for (const r of raw) {
+            if (r.archived) continue;
+            if (typeof r.id !== "number") continue;
+            if (!r.full_name || !r.name || !r.owner?.login) continue;
+            collected.push({
+              repoId: r.id,
+              fullName: r.full_name,
+              name: r.name,
+              owner: r.owner.login,
+              private: r.private ?? false,
+              permission: permissionFromRepo(r),
+            });
+          }
+
+          url = parseNextUrl(res.headers.get("link"));
+        }
+
+        orgReposCache.set(cacheKey, { at: Date.now(), value: collected });
+        return collected;
+      },
+      { params: t.Object({ org: t.String() }) },
+    );
 
 /**
  * Device repos management — reported by install script.

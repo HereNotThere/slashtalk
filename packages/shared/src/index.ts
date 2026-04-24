@@ -67,6 +67,7 @@ export interface RecentEvent {
 export interface SessionSnapshot {
   id: string;
   project: string;
+  source: EventSource;
   title: string | null;
   description: string | null;
   rollingSummary: string | null;
@@ -114,6 +115,24 @@ export interface FeedUser {
   total_sessions: number;
   active_sessions: number;
   repos: string[];
+}
+
+/** GitHub org the user is a member of. */
+export interface OrgSummary {
+  login: string;
+  name: string | null;
+  avatarUrl: string;
+}
+
+/** Repo within an org as returned by GitHub's /orgs/:org/repos endpoint,
+ *  scoped to those readable by the authenticated user. */
+export interface OrgRepo {
+  repoId: number;
+  fullName: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  permission: "pull" | "triage" | "push" | "maintain" | "admin";
 }
 
 /** One managed-agent session stored in the MCP backend's agent_sessions table.
@@ -204,10 +223,33 @@ export interface ChatUserMessage {
   content: string;
 }
 
+/**
+ * Compact session card rendered underneath an assistant message. Server
+ * hydrates these from sessions the model cited in the answer; visibility
+ * is scoped to the caller's user_repos like everywhere else.
+ */
+export interface SessionCard {
+  id: string;
+  user: {
+    login: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+  title: string | null;
+  state: SessionState;
+  repo: string | null;
+  branch: string | null;
+  lastTs: string | null;
+  currentTool: string | null;
+  lastUserPrompt: string | null;
+  source: EventSource;
+}
+
 export interface ChatAssistantMessage {
   role: "assistant";
   content: string;
   citations?: ChatCitation[];
+  cards?: SessionCard[];
 }
 
 export type ChatMessage = ChatUserMessage | ChatAssistantMessage;
@@ -229,4 +271,16 @@ export interface ApiResponse<T> {
 export interface ApiError {
   error: string;
   message: string;
+}
+
+/** Spotify "now playing" broadcast from a desktop client. Null clears. */
+export interface SpotifyPresence {
+  trackId: string;
+  name: string;
+  artist: string;
+  /** https://open.spotify.com/track/<id> — safe to open in a browser. */
+  url: string;
+  isPlaying: boolean;
+  /** ISO-8601. Server stamps this on write. */
+  updatedAt: string;
 }

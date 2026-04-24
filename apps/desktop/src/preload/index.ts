@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ChatAskResponse, ChatMessage } from "@slashtalk/shared";
+import type { ChatAskResponse, ChatMessage, SpotifyPresence } from "@slashtalk/shared";
 import type {
   AgentHistoryPage,
   AgentSessionRow,
@@ -26,6 +26,7 @@ import type {
   TrackedRepo,
   Unsubscribe,
 } from "../shared/types";
+import type { OrgRepo, OrgSummary } from "@slashtalk/shared";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
   const handler = (_e: Electron.IpcRendererEvent, payload: T): void =>
@@ -139,19 +140,32 @@ const bridge: ChatHeadsBridge = {
   askChat: (messages: ChatMessage[]) =>
     ipcRenderer.invoke("chat:ask", messages) as Promise<ChatAskResponse>,
 
+  openSessionCard: (payload) =>
+    ipcRenderer.invoke("chat:openSessionCard", payload) as Promise<void>,
+
+  fetchChatGerunds: (prompt: string) =>
+    ipcRenderer.invoke("chat:gerund", prompt) as Promise<string[]>,
+
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 
   onInfoShow: (cb) =>
-    subscribe<{ head: ChatHead; sessions: InfoSession[] | null }>(
-      "info:show",
-      cb,
-    ),
+    subscribe<{
+      head: ChatHead;
+      sessions: InfoSession[] | null;
+      expandSessionId?: string | null;
+      spotify: SpotifyPresence | null;
+    }>("info:show", cb),
   onInfoHide: (cb) => {
     const handler = (): void => cb();
     ipcRenderer.on("info:hide", handler);
     return () => ipcRenderer.off("info:hide", handler);
   },
+  onInfoPresence: (cb) =>
+    subscribe<{ login: string; spotify: SpotifyPresence | null }>(
+      "info:presence",
+      cb,
+    ),
   hideInfo: () => ipcRenderer.invoke("info:hide") as Promise<void>,
 
   listSessionsForHead: (headId) =>
@@ -164,6 +178,12 @@ const bridge: ChatHeadsBridge = {
     ipcRenderer.invoke("agentSessions:forAgent", agentId) as Promise<
       AgentSessionRow[]
     >,
+
+  getSpotifyForLogin: (login) =>
+    ipcRenderer.invoke(
+      "spotify:forLogin",
+      login,
+    ) as Promise<SpotifyPresence | null>,
 
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,
@@ -203,6 +223,28 @@ const bridge: ChatHeadsBridge = {
       ) as Promise<TrackedRepo[]>,
     onTrackedReposChange: (cb) =>
       subscribe<TrackedRepo[]>("backend:trackedRepos", cb),
+  },
+
+  orgs: {
+    list: () => ipcRenderer.invoke("orgs:list") as Promise<OrgSummary[]>,
+    activeOrg: () =>
+      ipcRenderer.invoke("orgs:activeOrg") as Promise<string | null>,
+    setActive: (login) =>
+      ipcRenderer.invoke("orgs:setActive", login) as Promise<void>,
+    onListChange: (cb) => subscribe<OrgSummary[]>("orgs:listChange", cb),
+    onActiveChange: (cb) => subscribe<string | null>("orgs:activeChange", cb),
+  },
+
+  repos: {
+    listForActiveOrg: () =>
+      ipcRenderer.invoke("repos:listForActiveOrg") as Promise<OrgRepo[]>,
+    selection: () =>
+      ipcRenderer.invoke("repos:selection") as Promise<string[]>,
+    toggle: (fullName) =>
+      ipcRenderer.invoke("repos:toggle", fullName) as Promise<string[]>,
+    onUpdate: (cb) => subscribe<OrgRepo[]>("repos:update", cb),
+    onSelectionChange: (cb) =>
+      subscribe<string[]>("repos:selectionChange", cb),
   },
 
   debug: {

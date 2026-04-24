@@ -15,6 +15,7 @@ import type { Database } from "../db";
 import { repos, userRepos } from "../db/schema";
 import { config } from "../config";
 import { buildChatTools, type ChatToolDefinition } from "./tools";
+import { loadSessionCards, MAX_CARDS_PER_MESSAGE } from "./cards";
 
 const SYSTEM_PROMPT = `You are the slashtalk team-presence assistant. You answer questions about what the user's teammates are working on in Claude Code right now, using only the tools provided.
 
@@ -134,10 +135,19 @@ export async function runChatAgent(
     messages.push({ role: "user", content: toolResults });
   }
 
+  const citations = extractCitations(finalText);
+  const cards = await loadSessionCards(
+    db,
+    user.id,
+    citations.slice(0, MAX_CARDS_PER_MESSAGE).map((c) => c.sessionId),
+    visibleRepos.map((r) => r.id),
+  );
+
   return {
     role: "assistant",
     content: finalText,
-    citations: extractCitations(finalText),
+    citations,
+    cards,
   };
 }
 

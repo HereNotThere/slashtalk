@@ -20,7 +20,10 @@ import type {
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
+  OrgRepo,
+  OrgSummary,
   SessionSnapshot,
+  SpotifyPresence,
   SyncStateEntry,
 } from "@slashtalk/shared";
 import type {
@@ -404,6 +407,17 @@ export function listRepos(): Promise<RepoSummary[]> {
   return jsonFetch<RepoSummary[]>("/api/me/repos", { method: "GET" });
 }
 
+export function listOrgs(): Promise<OrgSummary[]> {
+  return jsonFetch<OrgSummary[]>("/api/me/orgs", { method: "GET" });
+}
+
+export function listOrgRepos(org: string): Promise<OrgRepo[]> {
+  return jsonFetch<OrgRepo[]>(
+    `/api/me/orgs/${encodeURIComponent(org)}/repos`,
+    { method: "GET" },
+  );
+}
+
 export function claimRepo(fullName: string): Promise<RepoSummary> {
   return jsonFetch<RepoSummary>("/api/me/repos", {
     method: "POST",
@@ -519,6 +533,23 @@ export async function askChat(messages: ChatMessage[]): Promise<ChatAskResponse>
   });
 }
 
+export async function fetchChatGerunds(prompt: string): Promise<string[]> {
+  const fallback = ["Thinking"];
+  try {
+    const res = await jsonFetch<{ words?: unknown }>("/api/chat/gerund", {
+      method: "POST",
+      body: { prompt },
+    });
+    if (!Array.isArray(res.words)) return fallback;
+    const words = res.words.filter(
+      (w): w is string => typeof w === "string" && w.length > 0,
+    );
+    return words.length > 0 ? words : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function sendHeartbeat(body: {
   sessionId: string;
   pid?: number;
@@ -531,5 +562,23 @@ export function sendHeartbeat(body: {
     method: "POST",
     body,
     auth: "apiKey",
+  });
+}
+
+// ---------- Spotify presence ----------
+
+export function postSpotifyPresence(
+  track: Omit<SpotifyPresence, "updatedAt"> | null,
+): Promise<{ ok: true }> {
+  return jsonFetch("/v1/presence/spotify", {
+    method: "POST",
+    body: { track },
+    auth: "apiKey",
+  });
+}
+
+export function listPeerPresence(): Promise<Record<string, SpotifyPresence>> {
+  return jsonFetch<Record<string, SpotifyPresence>>("/api/presence/peers", {
+    method: "GET",
   });
 }

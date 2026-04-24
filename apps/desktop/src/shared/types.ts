@@ -4,12 +4,15 @@
 import type {
   AgentSessionRow,
   FeedSessionSnapshot,
+  OrgRepo,
+  OrgSummary,
   SessionSnapshot,
+  SpotifyPresence,
 } from "@slashtalk/shared";
 
 // Re-export for convenience: renderers import from this module, not from
 // @slashtalk/shared directly.
-export type { AgentSessionRow };
+export type { AgentSessionRow, SpotifyPresence };
 
 // Sessions surfaced to the info window: own sessions (SessionSnapshot) and
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
@@ -369,16 +372,39 @@ export interface ChatHeadsBridge {
     messages: import("@slashtalk/shared").ChatMessage[],
   ) => Promise<import("@slashtalk/shared").ChatAskResponse>;
 
+  /** Open the info popover for the session owner represented by a chat card. */
+  openSessionCard: (payload: {
+    sessionId: string;
+    login: string;
+  }) => Promise<void>;
+
+  // LLM-picked "thinking state" phrases for the loading indicator, describing
+  // what the assistant is actually doing for this specific prompt. The UI
+  // cycles through them. Server guarantees a non-empty array.
+  fetchChatGerunds: (prompt: string) => Promise<string[]>;
+
   // Drag (overlay → main)
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;
 
   // Info window (main → info renderer). Sessions are prefetched in main so
-  // the renderer can paint in one pass at the correct height.
+  // the renderer can paint in one pass at the correct height. `spotify` is
+  // whatever the main-process peerPresence poller last saw for this head.
   onInfoShow: (
-    cb: (payload: { head: ChatHead; sessions: InfoSession[] | null }) => void,
+    cb: (payload: {
+      head: ChatHead;
+      sessions: InfoSession[] | null;
+      /** Session the caller wants auto-expanded on open (e.g. from a chat card click). */
+      expandSessionId?: string | null;
+      spotify: SpotifyPresence | null;
+    }) => void,
   ) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
+  /** Pushed from main when the currently-shown head's Spotify presence
+   *  changes between polls. Scoped to the visible head already. */
+  onInfoPresence: (
+    cb: (payload: { login: string; spotify: SpotifyPresence | null }) => void,
+  ) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
   // Fetch sessions for a given chat head (user: own or a peer's; repo: all
@@ -386,6 +412,9 @@ export interface ChatHeadsBridge {
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
   listAgentSessionsForAgent: (agentId: string) => Promise<AgentSessionRow[]>;
+
+  /** Latest cached Spotify presence for `login` from the main-process poller. */
+  getSpotifyForLogin: (login: string) => Promise<SpotifyPresence | null>;
 
   // Tray popup actions
   openMain: () => Promise<void>;
@@ -415,6 +444,24 @@ export interface ChatHeadsBridge {
     addLocalRepo: () => Promise<TrackedRepo | null>;
     removeLocalRepo: (repoId: number) => Promise<TrackedRepo[]>;
     onTrackedReposChange: (cb: (repos: TrackedRepo[]) => void) => Unsubscribe;
+  };
+
+  // Org-scoped repo picker (tray popup). Backend stays unfiltered — these
+  // endpoints only drive the client-side filter of the chathead rail so the
+  // user controls which teammates they see locally.
+  orgs: {
+    list: () => Promise<OrgSummary[]>;
+    activeOrg: () => Promise<string | null>;
+    setActive: (login: string) => Promise<void>;
+    onListChange: (cb: (orgs: OrgSummary[]) => void) => Unsubscribe;
+    onActiveChange: (cb: (login: string | null) => void) => Unsubscribe;
+  };
+  repos: {
+    listForActiveOrg: () => Promise<OrgRepo[]>;
+    selection: () => Promise<string[]>;
+    toggle: (fullName: string) => Promise<string[]>;
+    onUpdate: (cb: (repos: OrgRepo[]) => void) => Unsubscribe;
+    onSelectionChange: (cb: (selected: string[]) => void) => Unsubscribe;
   };
 
   debug: {

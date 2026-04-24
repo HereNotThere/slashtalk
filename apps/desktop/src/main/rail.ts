@@ -9,6 +9,7 @@ import type { ChatHead, RailDebugSnapshot } from "../shared/types";
 import * as backend from "./backend";
 import * as agentStore from "./agentStore";
 import * as localRepos from "./localRepos";
+import * as orgRepos from "./orgRepos";
 import { createEmitter } from "./emitter";
 import type { LocalAgent } from "./agentStore";
 
@@ -217,7 +218,18 @@ async function refresh(): Promise<void> {
       `[rail] self=${initialSelf.label} selfLastTs=${selfLastTs} feedCount=${feedSessions.length} latestByLogin=${JSON.stringify([...latestByLogin.entries()])}`,
     );
     const self = selfHead(selfLastTs) ?? initialSelf;
-    const peerHeads = peers.map((t) =>
+
+    // Client-side filter: drop peers with no session in a repo the user has
+    // selected in the tray popup. Backend returns the full org roster; this
+    // narrows it to the user's local "repos I care about today" set. When no
+    // org is active (pre-pick), we pass through unfiltered.
+    const activeOrg = orgRepos.getActiveOrg();
+    const selectedRepos = orgRepos.getSelectedFullNamesSet();
+    const filteredPeers = activeOrg
+      ? peers.filter((p) => p.repos.some((r) => selectedRepos.has(r)))
+      : peers;
+
+    const peerHeads = filteredPeers.map((t) =>
       headForUser(
         t.githubLogin,
         t.avatarUrl,
@@ -368,6 +380,8 @@ export function start(): void {
   backend.onChange(scheduleRefresh);
   agentStore.onChange(scheduleRefresh);
   localRepos.onChange(scheduleRefresh);
+  orgRepos.onActiveOrgChange(scheduleRefresh);
+  orgRepos.onSelectionChange(scheduleRefresh);
   setInterval(() => void refresh(), POLL_INTERVAL_MS);
   void refresh();
 }

@@ -10,10 +10,16 @@ import type { LocalAgent } from "./agentStore";
 
 let loggedUnauthorized = false;
 
+const BAKED_MCP_BASE_URL = import.meta.env
+  .MAIN_VITE_SLASHTALK_MCP_BASE_URL as string | undefined;
 const DEFAULT_MCP_BASE_URL = "https://chatheads.onrender.com";
 
 function baseUrl(): string {
-  return process.env["SLASHTALK_MCP_BASE_URL"] ?? DEFAULT_MCP_BASE_URL;
+  return (
+    process.env["SLASHTALK_MCP_BASE_URL"] ??
+    BAKED_MCP_BASE_URL ??
+    DEFAULT_MCP_BASE_URL
+  );
 }
 
 function logUnauthorizedOnce(): void {

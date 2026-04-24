@@ -22,8 +22,13 @@ export interface InstallStatus {
   claudeCode: TargetState;
 }
 
+const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
+  | string
+  | undefined;
 const MCP_URL =
-  process.env["SLASHTALK_MCP_URL"] ?? "https://chatheads.onrender.com/mcp";
+  process.env["SLASHTALK_MCP_URL"] ??
+  BAKED_MCP_URL ??
+  "https://chatheads.onrender.com/mcp";
 const MCP_KEY = "slashtalk-mcp";
 
 interface ConfigShape {

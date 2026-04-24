@@ -25,10 +25,15 @@ let unsubAuth: (() => void) | null = null;
 let authRejected = false;
 let loggedUnauthorized = false;
 
+const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
+  | string
+  | undefined;
 const DEFAULT_MCP_URL = "https://chatheads.onrender.com/mcp";
 
 function mcpUrl(): string {
-  return process.env["SLASHTALK_MCP_URL"] ?? DEFAULT_MCP_URL;
+  return (
+    process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? DEFAULT_MCP_URL
+  );
 }
 
 function isUnauthorized(err: unknown): boolean {

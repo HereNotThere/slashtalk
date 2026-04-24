@@ -520,6 +520,7 @@ function positionInfo(
 async function showInfo(
   headId: string,
   bubbleScreen?: { x: number; y: number },
+  expandSessionId?: string,
 ): Promise<void> {
   if (isDraggingStack) return;
   const head = findHead(headId);
@@ -554,7 +555,11 @@ async function showInfo(
   // Send cached sessions immediately if we have them; renderer handles the
   // `null` case by loading on its own effect.
   const cached = sessionCache.get(head.id) ?? null;
-  win.webContents.send("info:show", { head, sessions: cached });
+  win.webContents.send("info:show", {
+    head,
+    sessions: cached,
+    expandSessionId: expandSessionId ?? null,
+  });
 
   // Animate position/size when switching heads on an already-visible window;
   // land-in-place on first appearance.
@@ -571,7 +576,11 @@ async function showInfo(
     void fetchSessionsForHead(head.id).then((loaded) => {
       if (selectedHeadId !== head.id) return;
       if (!infoWindow || infoWindow.isDestroyed()) return;
-      infoWindow.webContents.send("info:show", { head, sessions: loaded });
+      infoWindow.webContents.send("info:show", {
+        head,
+        sessions: loaded,
+        expandSessionId: expandSessionId ?? null,
+      });
     });
   }
 }
@@ -1018,6 +1027,15 @@ ipcMain.handle("chat:hide", (): void => hideChat());
 ipcMain.handle("response:open", (_e, message: string): void => {
   showResponse({ kind: "message", message });
 });
+
+ipcMain.handle(
+  "chat:openSessionCard",
+  (_e, payload: { sessionId: string; login: string }): void => {
+    const headId = rail.userHeadId(payload.login);
+    if (!findHead(headId)) return;
+    void showInfo(headId, undefined, payload.sessionId);
+  },
+);
 
 ipcMain.handle(
   "chat:ask",
@@ -1933,7 +1951,6 @@ app.whenReady().then(() => {
   githubAuth.restore();
   localRepos.restore();
   orgRepos.start();
-  createMainWindow();
   createTray();
   rail.start();
   selfSession.start();

@@ -371,6 +371,12 @@ export interface ChatHeadsBridge {
     messages: import("@slashtalk/shared").ChatMessage[],
   ) => Promise<import("@slashtalk/shared").ChatAskResponse>;
 
+  /** Open the info popover for the session owner represented by a chat card. */
+  openSessionCard: (payload: {
+    sessionId: string;
+    login: string;
+  }) => Promise<void>;
+
   // Drag (overlay → main)
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;
@@ -378,7 +384,12 @@ export interface ChatHeadsBridge {
   // Info window (main → info renderer). Sessions are prefetched in main so
   // the renderer can paint in one pass at the correct height.
   onInfoShow: (
-    cb: (payload: { head: ChatHead; sessions: InfoSession[] | null }) => void,
+    cb: (payload: {
+      head: ChatHead;
+      sessions: InfoSession[] | null;
+      /** Session the caller wants auto-expanded on open (e.g. from a chat card click). */
+      expandSessionId?: string | null;
+    }) => void,
   ) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
   hideInfo: () => Promise<void>;

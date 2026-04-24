@@ -16,6 +16,7 @@ import {
   getTeamActivityImpl,
   getSessionImpl,
 } from "../src/chat/tools";
+import { loadSessionCards } from "../src/chat/cards";
 import { SUMMARY_ANALYZER } from "../src/analyzers/names";
 
 let redis: RedisBridge;
@@ -275,6 +276,53 @@ describe("chat tool: get_team_activity", () => {
     const alice = result.teammates.find((t) => t.login === "alice");
     expect(alice).toBeUndefined();
   });
+
+  it("scopes to a single teammate via login filter", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "bob",
+    });
+    expect(result.teammates.map((t) => t.login)).toEqual(["bob"]);
+    expect(result.teammates[0].sessions[0].id).toBe(BOB_SESSION);
+  });
+
+  it("returns empty when login filter names someone the caller can't see", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "ghost-user-does-not-exist",
+    });
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("scopes to a single repo via repoFullName filter", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      repoFullName: "team/slashtalk",
+    });
+    const sessionIds = result.teammates.flatMap((t) =>
+      t.sessions.map((s) => s.id),
+    );
+    expect(sessionIds).toContain(BOB_SESSION);
+    expect(sessionIds).not.toContain(OUTSIDER_SESSION);
+  });
+
+  it("returns empty when repoFullName filter names a repo the caller can't see", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      repoFullName: "other/secret",
+    });
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("includes enriched payload fields (source, topFilesEdited, toolErrors, truncated lastUserPrompt)", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
+    const bob = result.teammates.find((t) => t.login === "bob")!;
+    const s = bob.sessions[0];
+    expect(s.source).toBe("claude");
+    expect(Array.isArray(s.topFilesEdited)).toBe(true);
+    expect(typeof s.toolErrors).toBe("number");
+    expect(s.lastUserPrompt === null || typeof s.lastUserPrompt === "string").toBe(true);
+  });
 });
 
 describe("chat tool: get_session", () => {
@@ -305,6 +353,52 @@ describe("chat tool: get_session", () => {
     expect(result.kind).toBe("error");
     if (result.kind !== "error") return;
     expect(result.message).toContain("not found");
+  });
+});
+
+describe("chat cards: loadSessionCards", () => {
+  it("hydrates compact cards for visible sessions in input order", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      ALICE_SESSION,
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION, ALICE_SESSION]);
+    const bob = cards[0];
+    expect(bob.user.login).toBe("bob");
+    expect(bob.repo).toBe("team/slashtalk");
+    expect(bob.title).toBe("Wiring WS reconnect");
+    expect(bob.source).toBe("claude");
+  });
+
+  it("drops sessions outside the caller's repo graph", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      OUTSIDER_SESSION,
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION]);
+  });
+
+  it("de-dupes repeated session IDs while preserving first-seen order", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      BOB_SESSION,
+      ALICE_SESSION,
+      BOB_SESSION,
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION, ALICE_SESSION]);
+  });
+
+  it("silently skips unknown session IDs", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      "00000000-0000-0000-0000-000000000000",
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION]);
+  });
+
+  it("returns empty for an empty or all-invisible input", async () => {
+    expect(await loadSessionCards(db, aliceId, [])).toEqual([]);
+    expect(await loadSessionCards(db, aliceId, [OUTSIDER_SESSION])).toEqual([]);
   });
 });
 

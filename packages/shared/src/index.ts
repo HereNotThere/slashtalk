@@ -67,6 +67,7 @@ export interface RecentEvent {
 export interface SessionSnapshot {
   id: string;
   project: string;
+  source: EventSource;
   title: string | null;
   description: string | null;
   rollingSummary: string | null;
@@ -222,10 +223,33 @@ export interface ChatUserMessage {
   content: string;
 }
 
+/**
+ * Compact session card rendered underneath an assistant message. Server
+ * hydrates these from sessions the model cited in the answer; visibility
+ * is scoped to the caller's user_repos like everywhere else.
+ */
+export interface SessionCard {
+  id: string;
+  user: {
+    login: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+  title: string | null;
+  state: SessionState;
+  repo: string | null;
+  branch: string | null;
+  lastTs: string | null;
+  currentTool: string | null;
+  lastUserPrompt: string | null;
+  source: EventSource;
+}
+
 export interface ChatAssistantMessage {
   role: "assistant";
   content: string;
   citations?: ChatCitation[];
+  cards?: SessionCard[];
 }
 
 export type ChatMessage = ChatUserMessage | ChatAssistantMessage;

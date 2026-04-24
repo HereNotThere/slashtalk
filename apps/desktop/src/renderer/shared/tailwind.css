@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@keyframes shimmer-char {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * Design tokens. Defined as CSS variables so themes swap without re-rendering.
  * Default values = dark theme. Light theme overrides live below.

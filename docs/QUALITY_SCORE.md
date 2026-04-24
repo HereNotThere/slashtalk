@@ -22,7 +22,7 @@ Columns: **Tests** (coverage depth), **Docs** (does CLAUDE.md/AGENTS.md/specs de
 | `sessions` / state machine | B | A | 2 | `/api/feed/users` N+1 | **B** |
 | `social` / PR poller | C | B | 1 | process-restart re-baselines from head (no replay) | **C** |
 | `analyzers` | D | B | 3 | no unit tests; `llm.ts` has no retries/timeouts; in-proc tick lock only; no token budgeting | **D** |
-| `ws` / Redis bridge | C | A | 2 | `user:<userId>` channel wired but unused; no dedup on reconnect | **C** |
+| `ws` / Redis bridge | C | A | 2 | no dedup on reconnect (clients rely on `/api/feed` as source of truth) | **C** |
 | `auth` | B | A | 3 | none known | **B** |
 | `user` / devices / repo-claim | B | A | 2 | repo-claim doesn't cache; every ingest retries all 3 matching strategies | **B** |
 | `chat` | C | B | 1 | integration test mocks insight; no eval harness | **C** |

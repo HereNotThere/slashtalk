@@ -15,7 +15,7 @@ Threat model, secret handling, and credential storage for slashtalk.
 
 | Artifact | At rest | Returned to caller |
 | --- | --- | --- |
-| GitHub OAuth access token | AES-256-GCM ciphertext in `users.github_token`, keyed by `ENCRYPTION_KEY` (format: `hex(iv):hex(ciphertext):hex(authTag)`, see `apps/server/src/auth/tokens.ts`) | Never. Used server-side for PR polling only. |
+| GitHub OAuth access token | AES-256-GCM ciphertext in `users.github_token`, keyed by `ENCRYPTION_KEY` (format: `hex(iv):hex(ciphertext)` — WebCrypto appends the auth tag to the ciphertext; see `apps/server/src/auth/tokens.ts`) | Never. Used server-side for PR polling only. |
 | Refresh token | SHA-256 hash in `refresh_tokens.token_hash` | Plaintext exactly once, at issuance, as an httpOnly cookie. |
 | API key | SHA-256 hash in `api_keys.key_hash` | Plaintext exactly once, at `/v1/auth/exchange` response. |
 | Setup token | SHA-256 hash in `setup_tokens.token`… (stored hashed) | Plaintext exactly once, to the desktop app during the loopback-port callback. |

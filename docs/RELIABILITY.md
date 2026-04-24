@@ -8,7 +8,7 @@ How the load-bearing flows (ingest, heartbeat, pub/sub, analyzers) degrade and r
 
 1. Parses each `\n`-delimited JSON line, counting every line (including blanks/malformed) against `lineSeq` so client and server stay aligned on partial retries.
 2. Upserts the `sessions` row.
-3. Classifies each event (`apps/server/src/ingest/classify.ts`).
+3. Classifies each event (`apps/server/src/ingest/classifier.ts`).
 4. Bulk-inserts into `events` with `ON CONFLICT (session_id, line_seq) DO NOTHING` — dedup is the primary-key constraint.
 5. Aggregates (Claude only) via `processEvents()` (`apps/server/src/ingest/aggregator.ts`).
 6. Attempts repo match if `sessions.repo_id` is still null.
@@ -55,7 +55,7 @@ How the load-bearing flows (ingest, heartbeat, pub/sub, analyzers) degrade and r
 | `repo:<id>` | `session_updated` | ingest + heartbeat |
 | `repo:<id>` | `session_insights_updated` | analyzer scheduler |
 | `repo:<id>` | `pr_activity` | PR poller |
-| `user:<userId>` | (reserved, unused) | — |
+| `user:<userId>` | `presence` (Spotify now-playing) | `presence/routes.ts` |
 
 **Liveness.** Server sends `{ type: "ping" }` every 30 s on every WS connection (Render's load balancer requires <60 s idle).
 

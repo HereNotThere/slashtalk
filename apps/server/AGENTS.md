@@ -1,6 +1,6 @@
 # apps/server (`@slashtalk/server`)
 
-Elysia + Bun backend. Composes `auth`, `ingest`, `sessions`, `social`, `user`, `chat`, `analyzers`, and `ws` plugins. See [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) for the domain map; this file focuses on layout + commands + recipes.
+Elysia + Bun backend. Composes `auth`, `ingest`, `sessions`, `social`, `user`, `chat`, `analyzers`, `presence`, and `ws` plugins. See [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) for the domain map; this file focuses on layout + commands + recipes.
 
 > **Keep this file current.** When you change build commands, scripts, conventions, layout, a plugin name, or the auth split, update this file in the same change.
 
@@ -17,36 +17,40 @@ src/
 ├── auth/
 │   ├── github.ts    # githubAuth + cliAuth (OAuth + exchange)
 │   ├── middleware.ts  # jwtAuth + apiKeyAuth
+│   ├── sessions.ts  # issue/rotate/revoke session+refresh tokens; cookie helpers
 │   └── tokens.ts    # JWT/refresh/setup/encryption helpers
 ├── ingest/
 │   ├── routes.ts    # POST /v1/ingest, GET /v1/sync-state, POST /v1/heartbeat
-│   ├── classify.ts  # raw event → {kind, turnId, callId, eventId, parentId}
-│   ├── aggregator.ts # processEvents(): event stream → SessionUpdates
-│   └── repo-match.ts # matchSessionRepo(): cwd/project → repos.id
+│   ├── classifier.ts # raw event → {kind, turnId, callId, eventId, parentId}
+│   └── aggregator.ts # processEvents(): event stream → SessionUpdates
 ├── sessions/
 │   ├── routes.ts    # /api/session(s)/...
 │   ├── snapshot.ts  # DB row → SessionSnapshot (+ insights)
 │   └── state.ts     # classifySessionState()
 ├── social/
 │   ├── routes.ts    # /api/feed, /api/feed/users
-│   ├── github-sync.ts
+│   ├── github-sync.ts # matchSessionRepo() — called from ingest + user routes
 │   └── pr-poller.ts # 60s poll, publishes pr_activity
 ├── user/
 │   └── routes.ts    # /api/me/*, incl. POST /api/me/repos (claim)
 ├── chat/
 │   └── routes.ts    # /api/chat/ask (stateless Q&A)
+├── presence/
+│   └── routes.ts    # POST /v1/presence/spotify, GET /api/presence/peers; publishes to user:<id> + repo:<id>
 ├── ws/
 │   ├── handler.ts   # WS upgrade, channel subscriptions, ping
 │   └── redis-bridge.ts # ioredis pub/sub, soft-fail
 ├── analyzers/
+│   ├── index.ts           # barrel re-export consumed by src/index.ts
 │   ├── scheduler.ts       # tick loop, candidate selection, worker pool
 │   ├── registry.ts        # array of Analyzers — add yours here
 │   ├── types.ts           # Analyzer<T> interface
 │   ├── llm.ts             # callStructured() — Anthropic client + pricing
 │   ├── publish.ts         # session_insights_updated → repo:<id>
 │   ├── names.ts           # analyzer name string constants
+│   ├── event-compact.ts   # shared event → compact-text helpers
 │   ├── summary.ts         # title + description analyzer (Haiku 4.5)
-│   └── rolling-summary.ts # presence narrative analyzer (Haiku 4.5)
+│   └── rolling-summary.ts # rolling narrative analyzer (Haiku 4.5)
 └── install/         # vestigial install.sh — do not extend
 ```
 
@@ -128,7 +132,7 @@ Rules: [core-beliefs #4](../../docs/design-docs/core-beliefs.md#4-drizzle-migrat
 ## Adding a new event source (beyond Claude / Codex)
 
 1. Add the source string to `SOURCES` in [`packages/shared/src/index.ts`](../../packages/shared/src/index.ts).
-2. Extend [`src/ingest/classify.ts`](src/ingest/classify.ts) to map the source's raw events to `EVENT_KINDS`.
+2. Extend [`src/ingest/classifier.ts`](src/ingest/classifier.ts) to map the source's raw events to `EVENT_KINDS`.
 3. Aggregation in [`src/ingest/aggregator.ts`](src/ingest/aggregator.ts) is currently Claude-only. Decide: parallel aggregator, or generalize.
 4. Add a test file `test/classifier-<source>.test.ts` mirroring `classifier.test.ts`.
 

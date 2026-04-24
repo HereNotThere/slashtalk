@@ -1,29 +1,17 @@
 #!/usr/bin/env bun
-// Generate docs/generated/db-schema.md from apps/server/src/db/schema.ts.
-//
-//   bun run gen:db-schema           # regenerate
-//   bun run gen:db-schema -- --check  # fail if drift
-//
-// Invoked from apps/server/ via package.json scripts.
+// Keeps docs/generated/db-schema.md in lockstep with the Drizzle schema.
 
 import * as schema from "../src/db/schema";
-import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
+import { is, SQL } from "drizzle-orm";
+import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
 const OUT = path.resolve(import.meta.dir, "../../../docs/generated/db-schema.md");
 
-function isTable(x: unknown): x is PgTable {
-  if (!x || typeof x !== "object") return false;
-  try {
-    getTableConfig(x as PgTable);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function render(tables: Array<{ export: string; table: PgTable }>): string {
+function render(
+  tables: Array<{ export: string; table: PgTable; cfg: ReturnType<typeof getTableConfig> }>,
+): string {
   const lines: string[] = [];
   lines.push("# Database schema");
   lines.push("");
@@ -31,11 +19,10 @@ function render(tables: Array<{ export: string; table: PgTable }>): string {
     "> Auto-generated from [`apps/server/src/db/schema.ts`](../../apps/server/src/db/schema.ts). Do not edit by hand. Regenerate with `bun run gen:db-schema` from `apps/server/`.",
   );
   lines.push("");
-  lines.push(`Tables: ${tables.map((t) => `\`${getTableConfig(t.table).name}\``).join(", ")}`);
+  lines.push(`Tables: ${tables.map((t) => `\`${t.cfg.name}\``).join(", ")}`);
   lines.push("");
 
-  for (const { export: exportName, table } of tables) {
-    const cfg = getTableConfig(table);
+  for (const { export: exportName, cfg } of tables) {
     lines.push(`## \`${cfg.name}\``);
     lines.push("");
     lines.push(`Drizzle export: \`${exportName}\`.`);
@@ -43,29 +30,18 @@ function render(tables: Array<{ export: string; table: PgTable }>): string {
     lines.push("| Column | Type | Notes |");
     lines.push("| --- | --- | --- |");
     for (const col of cfg.columns) {
-      const c = col as unknown as {
-        name: string;
-        columnType?: string;
-        dataType?: string;
-        notNull?: boolean;
-        primary?: boolean;
-        hasDefault?: boolean;
-        default?: unknown;
-      };
-      const type = c.columnType ?? c.dataType ?? "unknown";
+      const type = col.columnType ?? col.dataType ?? "unknown";
       const flags: string[] = [];
-      if (c.primary) flags.push("pk");
-      if (c.notNull) flags.push("not null");
-      if (c.hasDefault) flags.push("has default");
-      lines.push(`| \`${c.name}\` | \`${type}\` | ${flags.join(", ") || "—"} |`);
+      if (col.primary) flags.push("pk");
+      if (col.notNull) flags.push("not null");
+      if (col.hasDefault) flags.push("has default");
+      lines.push(`| \`${col.name}\` | \`${type}\` | ${flags.join(", ") || "—"} |`);
     }
 
     if (cfg.primaryKeys.length) {
       lines.push("");
       for (const pk of cfg.primaryKeys) {
-        const cols = (pk as unknown as { columns: Array<{ name: string }> }).columns
-          .map((c) => c.name)
-          .join(", ");
+        const cols = pk.columns.map((c) => c.name).join(", ");
         lines.push(`**Primary key:** \`(${cols})\``);
       }
     }
@@ -74,18 +50,11 @@ function render(tables: Array<{ export: string; table: PgTable }>): string {
       lines.push("");
       lines.push("**Indexes:**");
       for (const ix of cfg.indexes) {
-        const conf = (ix as unknown as {
-          config: {
-            name: string;
-            columns: Array<{ name?: string } | unknown>;
-            unique?: boolean;
-          };
-        }).config;
-        const cols = conf.columns
-          .map((col) => (typeof col === "object" && col && "name" in col ? (col as { name?: string }).name ?? "expr" : "expr"))
+        const cols = ix.config.columns
+          .map((col) => (is(col, SQL) ? "expr" : col.name ?? "expr"))
           .join(", ");
-        const kind = conf.unique ? "unique index" : "index";
-        lines.push(`- \`${conf.name}\` (${kind}) on \`(${cols})\``);
+        const kind = ix.config.unique ? "unique index" : "index";
+        lines.push(`- \`${ix.config.name}\` (${kind}) on \`(${cols})\``);
       }
     }
 
@@ -96,16 +65,30 @@ function render(tables: Array<{ export: string; table: PgTable }>): string {
 }
 
 const tables = Object.entries(schema)
-  .filter(([, v]) => isTable(v))
-  .map(([exportName, table]) => ({ export: exportName, table: table as PgTable }));
+  .filter(([, v]) => is(v, PgTable))
+  .map(([exportName, table]) => {
+    const t = table as PgTable;
+    return { export: exportName, table: t, cfg: getTableConfig(t) };
+  });
 
 const generated = render(tables) + "\n";
 
 const checkMode = process.argv.slice(2).includes("--check");
 
+function readIfExists(p: string): string {
+  try {
+    return fs.readFileSync(p, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function normalize(s: string): string {
+  return s.replace(/\r\n/g, "\n");
+}
+
 if (checkMode) {
-  const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, "utf8") : "";
-  if (current !== generated) {
+  if (normalize(readIfExists(OUT)) !== normalize(generated)) {
     console.error(
       `docs/generated/db-schema.md is out of date. Run: bun run gen:db-schema (from apps/server/)`,
     );
@@ -113,7 +96,12 @@ if (checkMode) {
   }
   console.log("docs/generated/db-schema.md is up to date.");
 } else {
-  fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, generated);
-  console.log(`Wrote ${OUT} (${tables.length} tables).`);
+  const current = readIfExists(OUT);
+  if (normalize(current) === normalize(generated)) {
+    console.log(`${OUT} already up to date (${tables.length} tables).`);
+  } else {
+    fs.mkdirSync(path.dirname(OUT), { recursive: true });
+    fs.writeFileSync(OUT, generated);
+    console.log(`Wrote ${OUT} (${tables.length} tables).`);
+  }
 }

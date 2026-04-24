@@ -15,6 +15,7 @@ Domain map for slashtalk. For rules that shape these domains, see [`docs/design-
  │                               │        │ user  (me/devices/repo-claim) │
  │ backend client (single-flight │        │ chat  (/api/chat, Q&A)        │
  │  refresh, safeStorage creds)  │        │ analyzers  (LLM scheduler)    │
+ │                               │        │ presence  (now-playing)       │
  └───────────────────────────────┘        └───────────────┬───────────────┘
                                                           │
                                                   Postgres + Redis
@@ -33,7 +34,7 @@ GitHub OAuth (identity-only, `read:user read:org`) + JWT session cookie + refres
 ### `ingest`
 NDJSON uploader endpoint; classifies events; aggregates per-session deltas; matches sessions to repos.
 
-- **Files:** `ingest/routes.ts`, `ingest/classify.ts`, `ingest/aggregator.ts`, `ingest/repo-match.ts`.
+- **Files:** `ingest/routes.ts`, `ingest/classifier.ts`, `ingest/aggregator.ts` (repo matching lives in `social/github-sync.ts::matchSessionRepo`).
 - **Tables:** writes `sessions`, `events`, `heartbeats`; reads `device_repo_paths`, `device_excluded_repos`, `repos`.
 - **Routes:** `POST /v1/ingest`, `GET /v1/sync-state`, `POST /v1/heartbeat`.
 - **Publishes:** `session_updated` on `repo:<id>` when events land or state flips.
@@ -50,10 +51,17 @@ Read-side: snapshot assembly + state classification.
 ### `social`
 Feed (social graph = repo co-membership) + PR-activity poller.
 
-- **Files:** `social/routes.ts`, `social/pr-poller.ts`, `social/github-sync.ts`.
+- **Files:** `social/routes.ts`, `social/pr-poller.ts`, `social/github-sync.ts` (owns `matchSessionRepo`, called from `ingest/routes.ts` and `user/routes.ts`).
 - **Tables:** reads `user_repos`, `sessions`, `users`, `repos`.
 - **Routes:** `GET /api/feed`, `GET /api/feed/users`.
 - **Publishes:** `pr_activity` on `repo:<id>` from the 60-second PR poller (stores encrypted OAuth token per user).
+
+### `presence`
+Per-user presence events (e.g. Spotify now-playing) — written from the desktop, read by peers.
+
+- **Files:** `presence/routes.ts` (exports `spotifyPresenceRoutes` at `/v1`, `presenceReadRoutes` at `/api`).
+- **Routes:** `POST /v1/presence/spotify`, `GET /api/presence/peers`.
+- **Publishes:** presence events on `user:<userId>` and (fan-out) `repo:<id>` for every repo the user shares.
 
 ### `user`
 Profile + device + repo-claim management.
@@ -80,7 +88,7 @@ WebSocket upgrade + Redis pub/sub bridge.
 ### `analyzers`
 Background LLM scheduler that produces session insights (title/description, rolling summary) via Anthropic.
 
-- **Files:** `analyzers/scheduler.ts`, `analyzers/registry.ts`, `analyzers/types.ts`, `analyzers/llm.ts`, `analyzers/publish.ts`, `analyzers/names.ts`, `analyzers/summary.ts`, `analyzers/rolling-summary.ts`.
+- **Files:** `analyzers/index.ts` (barrel), `analyzers/scheduler.ts`, `analyzers/registry.ts`, `analyzers/types.ts`, `analyzers/llm.ts`, `analyzers/publish.ts`, `analyzers/names.ts`, `analyzers/summary.ts`, `analyzers/rolling-summary.ts`, `analyzers/event-compact.ts`.
 - **Tables:** reads `sessions`; writes `session_insights`.
 - **Publishes:** `session_insights_updated` on `repo:<id>` per analyzer run.
 - **Disabled** if `ANTHROPIC_API_KEY` is unset.

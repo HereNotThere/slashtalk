@@ -28,8 +28,13 @@ const ENV_KEY = "anthropic.environmentId";
 const VAULT_KEY = "anthropic.vaultId";
 const API_KEY_STORE_KEY = "anthropic.apiKeyEnc";
 
+const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
+  | string
+  | undefined;
 const SLASHTALK_MCP_URL =
-  process.env["SLASHTALK_MCP_URL"] ?? "http://localhost:3000/mcp";
+  process.env["SLASHTALK_MCP_URL"] ??
+  BAKED_MCP_URL ??
+  "https://chatheads.onrender.com/mcp";
 const SLASHTALK_MCP_NAME = "slashtalk-mcp";
 
 const GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/";

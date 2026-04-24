@@ -589,6 +589,14 @@ function ensureChatWindow(): BrowserWindow {
 
   loadRenderer(chatWindow, "chat");
 
+  // On every (re)load, the renderer's anchor state resets to its default.
+  // Clear the dedup so the current anchor is re-sent even if it matches the
+  // last value main observed.
+  chatWindow.webContents.on("did-finish-load", () => {
+    lastSentChatAnchor = null;
+    sendChatConfig();
+  });
+
   chatWindow.on("blur", () => hideChat());
   chatWindow.on("closed", () => {
     chatWindow = null;

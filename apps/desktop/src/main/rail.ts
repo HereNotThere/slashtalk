@@ -138,10 +138,10 @@ function headForRepo(
   };
 }
 
-function selfHead(): ChatHead | null {
+function selfHead(lastActivityAt?: number | null): ChatHead | null {
   const state = backend.getAuthState();
   if (!state.signedIn) return null;
-  return headForUser(state.user.githubLogin, state.user.avatarUrl);
+  return headForUser(state.user.githubLogin, state.user.avatarUrl, lastActivityAt);
 }
 
 function sameHeads(a: ChatHead[], b: ChatHead[]): boolean {
@@ -172,15 +172,15 @@ function applyProjects(next: ChatHead[]): void {
 }
 
 async function refresh(): Promise<void> {
-  const self = selfHead();
-  if (!self) {
+  const initialSelf = selfHead();
+  if (!initialSelf) {
     console.log("[rail] refresh skipped — not signed in");
     lastSnapshot = { at: Date.now(), peers: null, error: "not signed in" };
     apply([]);
     applyProjects([]);
     return;
   }
-  console.log(`[rail] refresh as ${self.label}`);
+  console.log(`[rail] refresh as ${initialSelf.label}`);
   const agentHeads = agentStore
     .list()
     .map(headForAgent)
@@ -212,6 +212,11 @@ async function refresh(): Promise<void> {
     }
 
     lastSnapshot = { at: Date.now(), peers, error: null };
+    const selfLastTs = latestByLogin.get(initialSelf.label) ?? null;
+    console.log(
+      `[rail] self=${initialSelf.label} selfLastTs=${selfLastTs} feedCount=${feedSessions.length} latestByLogin=${JSON.stringify([...latestByLogin.entries()])}`,
+    );
+    const self = selfHead(selfLastTs) ?? initialSelf;
     const peerHeads = peers.map((t) =>
       headForUser(
         t.githubLogin,
@@ -240,7 +245,7 @@ async function refresh(): Promise<void> {
     lastSnapshot = { at: Date.now(), peers: null, error: message };
     console.error("[rail] listTeammates failed:", err);
     // Keep showing self + agents so the rail doesn't flash.
-    apply([self, ...agentHeads]);
+    apply([initialSelf, ...agentHeads]);
     applyProjects([]);
   }
 }

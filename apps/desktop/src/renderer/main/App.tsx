@@ -1,10 +1,61 @@
+import { useEffect, useState } from "react";
 import { useHeads } from "../shared/useHeads";
 import { SlashtalkSection } from "./SlashtalkSection";
 import { AgentsSection } from "./AgentsSection";
-import type { ChatHead } from "../../shared/types";
+import type { BackendAuthState, ChatHead } from "../../shared/types";
+
+const PRIMARY_GRADIENT = "linear-gradient(180deg, #2ECF81 0%, #0BB764 100%)";
 
 export function App(): JSX.Element {
   const heads = useHeads();
+  const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
+  const [signingIn, setSigningIn] = useState(false);
+
+  useEffect(() => {
+    void window.chatheads.backend.getAuthState().then(setAuth);
+    return window.chatheads.backend.onAuthState(setAuth);
+  }, []);
+
+  if (!auth.signedIn) {
+    const signIn = async (): Promise<void> => {
+      setSigningIn(true);
+      try {
+        await window.chatheads.backend.signIn();
+      } finally {
+        setSigningIn(false);
+      }
+    };
+    return (
+      <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-8">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <SlashtalkLogo size={64} />
+          <div>
+            <h1 className="m-0 text-[26px] font-bold leading-tight tracking-tight">
+              Slashtalk
+            </h1>
+            <div className="text-subtle text-[13px] mt-1.5">
+              Floating bubbles that stay on top of everything.
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={signIn}
+          disabled={signingIn}
+          style={{ background: PRIMARY_GRADIENT }}
+          className="
+            w-full max-w-[320px] border-0 text-white font-medium
+            rounded-xl px-4 py-2.5 text-[13px] cursor-pointer
+            shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_1px_2px_rgba(0,0,0,0.1)]
+            hover:brightness-105 active:brightness-95
+            disabled:opacity-60 disabled:cursor-wait
+            transition-[filter]
+          "
+        >
+          {signingIn ? "Waiting for browser…" : "→  Sign in to Slashtalk"}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <>

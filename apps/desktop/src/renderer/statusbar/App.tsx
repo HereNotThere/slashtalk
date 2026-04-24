@@ -21,7 +21,7 @@ export function App(): JSX.Element {
 
       <div className="flex gap-2">
         <FooterButton onClick={() => window.chatheads.openMain()}>
-          Open
+          Settings
         </FooterButton>
         <FooterButton onClick={() => window.chatheads.quit()}>
           Quit

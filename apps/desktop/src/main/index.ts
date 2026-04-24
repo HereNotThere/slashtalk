@@ -132,21 +132,26 @@ function getRailPinned(): boolean {
 function applyRailPinned(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const pinned = getRailPinned();
-  console.log(`[pin] applyRailPinned: target=${pinned}`);
+  console.log(`[pin] applyRailPinned: target=${pinned} focused=${appIsFocused()}`);
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  overlayWindow.setAlwaysOnTop(pinned, "floating");
-  if (!pinned) overlayWindow.moveTop();
-  // Dropping the rail from floating to normal level can cause macOS to
-  // reclassify the app as accessory when no regular NSWindow is visible
-  // (main window may be hidden). Re-assert regular policy + dock.show() to
-  // keep Slashtalk in Cmd+Tab and the Dock.
+  // Rail floats when pinned always, or when unpinned-and-focused. Otherwise
+  // drops to normal so it sits behind frontmost app windows.
+  const shouldFloat = pinned || appIsFocused();
+  overlayWindow.setAlwaysOnTop(shouldFloat, "floating");
+  if (shouldFloat) overlayWindow.moveTop();
   if (process.platform === "darwin") {
     app.setActivationPolicy("regular");
     void app.dock?.show();
   }
   const native = debugMacWindowState(overlayWindow);
   console.log(
-    `[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level} nativeCB=${native?.collectionBehavior}`,
+    `[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`,
+  );
+}
+
+function appIsFocused(): boolean {
+  return BrowserWindow.getAllWindows().some(
+    (w) => !w.isDestroyed() && w.isFocused(),
   );
 }
 
@@ -2105,20 +2110,24 @@ app.on("activate", () => {
   else mainWindow.focus();
 });
 
-// When unpinned and the user cmd-tabs or clicks the dock back to Slashtalk,
-// raise the rail alongside whichever window macOS is focusing.
+// Unpinned mode: rail follows app focus. Float when active so hover works,
+// drop to normal when blurred so it sits behind other apps.
 app.on("did-become-active", () => {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   if (getRailPinned()) return;
+  overlayWindow.setAlwaysOnTop(true, "floating");
   overlayWindow.moveTop();
 });
 
-// macOS demotes the app to accessory when its only remaining visible window
-// is a normal-level NSPanel (which is exactly our unpinned rail — focusable
-// false becomes NSPanel). Re-assert regular policy on every blur so we
-// survive the demotion attempt and stay in Cmd+Tab and the Dock.
 app.on("did-resign-active", () => {
-  if (process.platform !== "darwin") return;
-  app.setActivationPolicy("regular");
-  void app.dock?.show();
+  // Re-assert regular activation policy so the app survives the transition
+  // (macOS demotes us to accessory when the only visible window is a
+  // normal-level NSPanel).
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (getRailPinned()) return;
+  overlayWindow.setAlwaysOnTop(false);
 });

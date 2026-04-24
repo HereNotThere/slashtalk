@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage } from "@slashtalk/shared";
+import type { ChatMessage, SessionCard, SessionState } from "@slashtalk/shared";
 import type {
   AgentSummary,
   ChatHead,
@@ -11,6 +11,7 @@ import { AgentChat } from "../info/AgentPanel";
 import { SendIcon } from "../shared/icons";
 
 const CITATION_TOKEN = /\[session:[0-9a-fA-F-]+\]/g;
+const CARDS_VISIBLE = 5;
 
 const MARKDOWN_CLASSES =
   "prose prose-invert text-fg/90 break-words text-sm leading-relaxed " +
@@ -154,10 +155,15 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
               </div>
             </div>
           ) : (
-            <div key={i} className={MARKDOWN_CLASSES}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {m.content.replace(CITATION_TOKEN, "")}
-              </ReactMarkdown>
+            <div key={i} className="space-y-md">
+              <div className={MARKDOWN_CLASSES}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {m.content.replace(CITATION_TOKEN, "")}
+                </ReactMarkdown>
+              </div>
+              {m.cards && m.cards.length > 0 && (
+                <SessionCardStack cards={m.cards} />
+              )}
             </div>
           ),
         )}
@@ -203,4 +209,120 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
       </div>
     </div>
   );
+}
+
+function SessionCardStack({ cards }: { cards: SessionCard[] }): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const overflow = Math.max(0, cards.length - CARDS_VISIBLE);
+  const visible = expanded ? cards : cards.slice(0, CARDS_VISIBLE);
+
+  return (
+    <div className="space-y-sm">
+      {visible.map((c) => (
+        <SessionCardView key={c.id} card={c} />
+      ))}
+      {overflow > 0 && !expanded && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="text-xs text-subtle hover:text-muted underline decoration-dotted underline-offset-2"
+        >
+          + {overflow} more
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SessionCardView({ card }: { card: SessionCard }): JSX.Element {
+  const name = card.user.displayName ?? card.user.login;
+  const primary = card.title ?? card.lastUserPrompt ?? "(no title)";
+  const meta = [
+    `@${card.user.login}`,
+    card.repo,
+    card.branch,
+    card.lastTs ? relativeTime(card.lastTs) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const tool = card.currentTool ? `running ${card.currentTool}` : null;
+
+  return (
+    <button
+      onClick={() =>
+        void window.chatheads.openSessionCard({
+          sessionId: card.id,
+          login: card.user.login,
+        })
+      }
+      aria-label={`Open session details for @${card.user.login}`}
+      className="w-full flex items-start gap-3 px-3 py-2.5 rounded-xl bg-surface hover:bg-surface-hover text-left transition-colors"
+    >
+      <Avatar src={card.user.avatarUrl} fallback={name} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-medium text-fg truncate">
+            {primary}
+          </span>
+          <StateDot state={card.state} />
+        </div>
+        <div className="text-xs text-subtle truncate">{meta}</div>
+        {tool && (
+          <div className="text-xs text-muted/70 truncate">{tool}</div>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function Avatar({
+  src,
+  fallback,
+}: {
+  src: string | null;
+  fallback: string;
+}): JSX.Element {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="w-8 h-8 rounded-full shrink-0 bg-surface object-cover"
+      />
+    );
+  }
+  return (
+    <div className="w-8 h-8 rounded-full shrink-0 bg-surface flex items-center justify-center text-xs text-muted">
+      {fallback.slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
+
+const STATE_DOT: Record<SessionState, { color: string; pulse: boolean }> = {
+  busy: { color: "bg-warning", pulse: true },
+  active: { color: "bg-success", pulse: true },
+  idle: { color: "bg-info", pulse: false },
+  recent: { color: "bg-subtle", pulse: false },
+  ended: { color: "bg-border", pulse: false },
+};
+
+function StateDot({ state }: { state: SessionState }): JSX.Element {
+  const { color, pulse } = STATE_DOT[state];
+  return (
+    <span
+      className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${color} ${pulse ? "animate-pulse" : ""}`}
+      title={state}
+    />
+  );
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.max(0, Math.floor(diff / 1000));
+  if (s < 30) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }

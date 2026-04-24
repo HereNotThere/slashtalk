@@ -29,7 +29,6 @@ import type {
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
-import * as orgRepos from "./orgRepos";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
@@ -1903,18 +1902,14 @@ ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>
   localRepos.removeLocalRepo(repoId),
 );
 
-// -------- Org-scoped repo picker (tray popup) --------
+// -------- Tray repo-picker (tracked local repos) --------
 
-ipcMain.handle("orgs:list", () => orgRepos.getOrgs());
-ipcMain.handle("orgs:activeOrg", () => orgRepos.getActiveOrg());
-ipcMain.handle("orgs:setActive", (_e, login: string) =>
-  orgRepos.setActiveOrg(login),
-);
-ipcMain.handle("repos:listForActiveOrg", () => orgRepos.getReposForActiveOrg());
-ipcMain.handle("repos:selection", () => orgRepos.getSelectedFullNames());
-ipcMain.handle("repos:toggle", (_e, fullName: string) =>
-  orgRepos.toggleRepo(fullName),
-);
+ipcMain.handle("trackedRepos:selection", () => [
+  ...localRepos.selectedRepoIds(),
+]);
+ipcMain.handle("trackedRepos:toggle", (_e, repoId: number) => [
+  ...localRepos.toggleSelected(repoId),
+]);
 
 function broadcastToMain(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1950,16 +1945,11 @@ backend.onChange((state) =>
     ? trayPopup.webContents.send("backend:authState", state)
     : undefined,
 );
-localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
-orgRepos.onOrgsChange((orgs) =>
-  broadcastToTrayAndMain("orgs:listChange", orgs),
+localRepos.onChange((repos) =>
+  broadcastToTrayAndMain("backend:trackedRepos", repos),
 );
-orgRepos.onActiveOrgChange((login) =>
-  broadcastToTrayAndMain("orgs:activeChange", login),
-);
-orgRepos.onReposChange((repos) => broadcastToTrayAndMain("repos:update", repos));
-orgRepos.onSelectionChange((selected) =>
-  broadcastToTrayAndMain("repos:selectionChange", selected),
+localRepos.onSelectionChange((ids) =>
+  broadcastToTrayAndMain("trackedRepos:selectionChange", [...ids]),
 );
 chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
 githubAuth.onChange((state) => broadcastToMain("github:state", state));
@@ -1983,7 +1973,6 @@ app.whenReady().then(() => {
   anthropic.restore();
   githubAuth.restore();
   localRepos.restore();
-  orgRepos.start();
   createTray();
   rail.start();
   selfSession.start();

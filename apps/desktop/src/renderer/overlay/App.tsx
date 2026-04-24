@@ -7,7 +7,6 @@ import {
 } from "react";
 import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
-import { useProjects } from "../shared/useProjects";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
 import { CloseIcon, SearchIcon } from "../shared/icons";
 
@@ -45,7 +44,6 @@ function formatAge(ms: number): string {
 //   main, with a short enter delay and a longer leave grace (main-side).
 export function App(): JSX.Element {
   const heads = useHeads();
-  const projects = useProjects();
   const stackRef = useRef<HTMLDivElement>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [dock, setDock] = useState<DockConfig>({
@@ -110,7 +108,7 @@ export function App(): JSX.Element {
 
     prevPos.current = newPos;
     prevIds.current = new Set(bubbleRefs.current.keys());
-  }, [heads, projects, replayToken, isHorizontal]);
+  }, [heads, replayToken, isHorizontal]);
 
   useEffect(() => {
     return window.chatheads.onOverlayConfig((cfg) => {
@@ -261,27 +259,9 @@ export function App(): JSX.Element {
           />
         </div>
       )}
-      {(peers.length > 0 || projects.length > 0) && (
+      {peers.length > 0 && (
         <div className={peersClass}>
           {peers.map((h) => (
-            <div
-              key={h.id}
-              ref={registerBubble(h.id)}
-              className="shrink-0"
-              onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
-              onMouseLeave={hoverLeaveBubble}
-            >
-              <Bubble
-                head={h}
-                onHoverEnter={() => {}}
-                onHoverLeave={() => {}}
-              />
-            </div>
-          ))}
-          {peers.length > 0 && projects.length > 0 && (
-            <RailSeparator horizontal={isHorizontal} />
-          )}
-          {projects.map((h) => (
             <div
               key={h.id}
               ref={registerBubble(h.id)}
@@ -299,37 +279,6 @@ export function App(): JSX.Element {
         </div>
       )}
       <ChatBubble open={chatOpen} />
-    </div>
-  );
-}
-
-// Divider between the teammate row and the project row. Takes one extra
-// SPACING-row worth of space along the rail's main axis (the flex `gap` adds
-// 14px on each side of the 1px line); matches the SEPARATOR_EXTRA reserved in
-// the main-process overlay-size formula.
-function RailSeparator({
-  horizontal,
-}: {
-  horizontal: boolean;
-}): JSX.Element {
-  if (horizontal) {
-    return (
-      <div
-        className="h-full shrink-0 flex items-center justify-center"
-        style={{ width: 1 }}
-        aria-hidden
-      >
-        <div className="h-[60%] w-px bg-white/20 rounded-full" />
-      </div>
-    );
-  }
-  return (
-    <div
-      className="w-full shrink-0 flex items-center justify-center"
-      style={{ height: 1 }}
-      aria-hidden
-    >
-      <div className="w-[60%] h-px bg-white/20 rounded-full" />
     </div>
   );
 }

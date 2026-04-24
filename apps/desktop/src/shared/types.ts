@@ -23,7 +23,7 @@ export type Avatar =
 export interface ChatHead {
   id: string;
   /** Picks the info-popover layout and routes session fetches. */
-  kind: "user" | "repo" | "agent";
+  kind: "user" | "agent";
   label: string;
   tint: string;
   avatar: Avatar;
@@ -41,9 +41,6 @@ export interface ChatHead {
   /** Set when the agent streamed new content while its info panel was not
    *  open. Cleared when the user opens the panel. Agent heads only. */
   unread?: boolean;
-  /** Only set when kind === "repo". */
-  repoId?: number;
-  repoFullName?: string;
 }
 
 export type Unsubscribe = () => void;
@@ -356,11 +353,6 @@ export interface ChatHeadsBridge {
     onEnabledChange: (cb: (enabled: boolean) => void) => Unsubscribe;
   };
 
-  // Project heads — GitHub repos the user has claimed. Rendered below the
-  // teammate rail in the overlay; ignored by other windows.
-  listProjects: () => Promise<ChatHead[]>;
-  onProjectsUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
-
   // Info box (overlay → main). Show/hide are driven by hover; the rail keeps
   // the leave timer and asks main to hide after the user leaves the bubble
   // and doesn't re-enter the info panel. `infoHoverEnter/Leave` let the info
@@ -431,8 +423,7 @@ export interface ChatHeadsBridge {
   ) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
-  // Fetch sessions for a given chat head (user: own or a peer's; repo: all
-  // sessions on that repo across peers + self).
+  // Fetch sessions for a given chat head (self or a peer).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
   listAgentSessionsForAgent: (agentId: string) => Promise<AgentSessionRow[]>;
@@ -459,8 +450,6 @@ export interface ChatHeadsBridge {
     cancelSignIn: () => Promise<void>;
     signOut: () => Promise<void>;
     onAuthState: (cb: (state: BackendAuthState) => void) => Unsubscribe;
-
-    listRepos: () => Promise<RepoSummary[]>;
 
     listTrackedRepos: () => Promise<TrackedRepo[]>;
     /** Opens a folder picker, claims + tracks. Resolves `null` if cancelled;

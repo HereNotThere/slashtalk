@@ -143,6 +143,11 @@ function applyRailPinned(): void {
     app.setActivationPolicy("regular");
     void app.dock?.show();
   }
+  // Cursor polling runs in unpinned mode so the rail pops to floating when
+  // the cursor approaches it while Slashtalk is blurred — otherwise hover
+  // never fires cross-app.
+  if (pinned) stopHoverPolling();
+  else startHoverPolling();
   const native = debugMacWindowState(overlayWindow);
   console.log(
     `[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`,
@@ -153,6 +158,72 @@ function appIsFocused(): boolean {
   return BrowserWindow.getAllWindows().some(
     (w) => !w.isDestroyed() && w.isFocused(),
   );
+}
+
+// ---------- Cross-app hover polling ----------
+//
+// When the rail is unpinned and Slashtalk is blurred, the rail sits at normal
+// window level and macOS routes mouse events to the frontmost app's windows
+// above it. Hover never fires. To preserve hover-to-peek across apps, we poll
+// the cursor at 12.5Hz (cheap: one getCursorScreenPoint + rect test) and pop
+// the rail to floating level as soon as the cursor enters its bounds. When
+// the cursor leaves, we drop back after a short grace so the info popover
+// can take over tracking.
+
+const HOVER_POLL_INTERVAL_MS = 80;
+const HOVER_LEAVE_GRACE_MS = 200;
+// Pre-expand the hit rect slightly so we float just before the cursor crosses
+// the edge — otherwise the first pixel of entry gets eaten by the transition.
+const HOVER_EDGE_MARGIN = 6;
+
+let hoverPollTimer: NodeJS.Timeout | null = null;
+let hoverLeaveTimer: NodeJS.Timeout | null = null;
+
+function startHoverPolling(): void {
+  if (hoverPollTimer) return;
+  hoverPollTimer = setInterval(hoverPollTick, HOVER_POLL_INTERVAL_MS);
+}
+
+function stopHoverPolling(): void {
+  if (hoverPollTimer) {
+    clearInterval(hoverPollTimer);
+    hoverPollTimer = null;
+  }
+  if (hoverLeaveTimer) {
+    clearTimeout(hoverLeaveTimer);
+    hoverLeaveTimer = null;
+  }
+}
+
+function hoverPollTick(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  // Short-circuit when pinned or focused — the rail is already floating via
+  // normal pin/focus paths, so hover "just works" without our help.
+  if (getRailPinned() || appIsFocused()) return;
+  const cursor = screen.getCursorScreenPoint();
+  const b = overlayWindow.getBounds();
+  const inside =
+    cursor.x >= b.x - HOVER_EDGE_MARGIN &&
+    cursor.x <= b.x + b.width + HOVER_EDGE_MARGIN &&
+    cursor.y >= b.y - HOVER_EDGE_MARGIN &&
+    cursor.y <= b.y + b.height + HOVER_EDGE_MARGIN;
+  const isFloating = overlayWindow.isAlwaysOnTop();
+  if (inside && !isFloating) {
+    overlayWindow.setAlwaysOnTop(true, "floating");
+    overlayWindow.moveTop();
+    if (hoverLeaveTimer) {
+      clearTimeout(hoverLeaveTimer);
+      hoverLeaveTimer = null;
+    }
+  } else if (!inside && isFloating && !hoverLeaveTimer) {
+    hoverLeaveTimer = setTimeout(() => {
+      hoverLeaveTimer = null;
+      // Re-check state: don't drop if the user pinned or focused in the grace.
+      if (!overlayWindow || overlayWindow.isDestroyed()) return;
+      if (getRailPinned() || appIsFocused()) return;
+      overlayWindow.setAlwaysOnTop(false);
+    }, HOVER_LEAVE_GRACE_MS);
+  }
 }
 
 function broadcastRailPinned(): void {

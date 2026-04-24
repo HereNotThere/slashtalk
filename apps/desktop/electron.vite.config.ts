@@ -5,7 +5,11 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // `@slashtalk/shared` is source-only (CLAUDE.md rule #5): its package.json
+    // `main` points at `src/index.ts`, so Node can't load it as an external.
+    // Bundle it into the main output instead — everything else (electron, node
+    // built-ins, npm deps) stays external.
+    plugins: [externalizeDepsPlugin({ exclude: ['@slashtalk/shared'] })],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') },

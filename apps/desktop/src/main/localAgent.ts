@@ -74,6 +74,7 @@ export function loadSessionMessages(
   // transcripts are stored in full, so there's only ever one page.
   _cursor?: string | null,
 ): AgentHistoryPage {
+  void _cursor;
   return { msgs: localTranscripts.load(sessionId), nextCursor: null };
 }
 

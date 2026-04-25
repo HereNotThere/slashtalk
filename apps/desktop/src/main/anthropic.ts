@@ -241,6 +241,70 @@ export interface CreatedAgent {
 }
 
 export async function createAgent(input: CreateAgentInput): Promise<CreatedAgent> {
+  const config = await buildAgentConfig(input);
+
+  const agent = await client().beta.agents.create({
+    name: input.name,
+    description: input.description,
+    model: config.model,
+    system: input.systemPrompt,
+    // Pre-built toolset: bash, read, write, edit, glob, grep, web_fetch, web_search.
+    tools: config.tools,
+    // Anthropic-managed skills: xlsx lets the agent read/write spreadsheets
+    // and handles PDFs/PowerPoint. Loaded lazily when the agent deems it
+    // relevant; doesn't cost tokens when unused.
+    skills: config.skills,
+    ...(config.mcpServers.length > 0 ? { mcp_servers: config.mcpServers } : {}),
+  });
+
+  return {
+    id: agent.id,
+    name: agent.name,
+    description: agent.description ?? undefined,
+    systemPrompt: input.systemPrompt,
+    model: config.model,
+  };
+}
+
+export async function updateAgent(
+  agentId: string,
+  input: CreateAgentInput,
+): Promise<CreatedAgent> {
+  const current = await client().beta.agents.retrieve(agentId);
+  const config = await buildAgentConfig(input);
+  const agent = await client().beta.agents.update(agentId, {
+    version: current.version,
+    name: input.name,
+    description: input.description ?? null,
+    model: config.model,
+    system: input.systemPrompt,
+    tools: config.tools,
+    skills: config.skills,
+    mcp_servers: config.mcpServers,
+  });
+
+  return {
+    id: agent.id,
+    name: agent.name,
+    description: agent.description ?? undefined,
+    systemPrompt: agent.system ?? input.systemPrompt,
+    model: typeof agent.model === "string" ? agent.model : agent.model.id,
+  };
+}
+
+async function buildAgentConfig(input: CreateAgentInput): Promise<{
+  model: string;
+  mcpServers: Array<{ type: "url"; name: string; url: string }>;
+  tools: Array<
+    | { type: "agent_toolset_20260401" }
+    | {
+        type: "mcp_toolset";
+        mcp_server_name: string;
+        default_config: { permission_policy: { type: "always_allow" } };
+      }
+  >;
+  skills: Array<{ type: "anthropic"; skill_id: "xlsx" }>;
+}> {
   const vaultId = await ensureVault();
   const model = input.model ?? "claude-haiku-4-5";
 
@@ -265,37 +329,19 @@ export async function createAgent(input: CreateAgentInput): Promise<CreatedAgent
     url: s.url,
   }));
 
-  const mcpToolsets = servers.map(
-    (s) =>
-      ({
-        type: "mcp_toolset",
-        mcp_server_name: s.name,
-        default_config: {
-          permission_policy: { type: "always_allow" },
-        },
-      }) as const,
-  );
-
-  const agent = await client().beta.agents.create({
-    name: input.name,
-    description: input.description,
-    model,
-    system: input.systemPrompt,
-    // Pre-built toolset: bash, read, write, edit, glob, grep, web_fetch, web_search.
-    tools: [{ type: "agent_toolset_20260401" }, ...mcpToolsets],
-    // Anthropic-managed skills: xlsx lets the agent read/write spreadsheets
-    // and handles PDFs/PowerPoint. Loaded lazily when the agent deems it
-    // relevant; doesn't cost tokens when unused.
-    skills: [{ type: "anthropic", skill_id: "xlsx" }],
-    ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-  });
+  const mcpToolsets = servers.map((s) => ({
+    type: "mcp_toolset" as const,
+    mcp_server_name: s.name,
+    default_config: {
+      permission_policy: { type: "always_allow" as const },
+    },
+  }));
 
   return {
-    id: agent.id,
-    name: agent.name,
-    description: agent.description ?? undefined,
-    systemPrompt: input.systemPrompt,
     model,
+    mcpServers,
+    tools: [{ type: "agent_toolset_20260401" }, ...mcpToolsets],
+    skills: [{ type: "anthropic", skill_id: "xlsx" }],
   };
 }
 

@@ -141,6 +141,51 @@ REDIS_URL=redis://localhost:6380 \
 bun test --cwd apps/server
 ```
 
+## Desktop app (local dev)
+
+By default the packaged desktop talks to the hosted services
+(`https://slashtalk.onrender.com` for the API and
+`https://chatheads.onrender.com` for the MCP). To point the desktop at a
+locally-running backend instead, create `apps/desktop/.env` with all three
+URLs:
+
+```
+MAIN_VITE_SLASHTALK_API_URL=http://localhost:10000
+MAIN_VITE_SLASHTALK_MCP_URL=http://localhost:3000/mcp
+MAIN_VITE_SLASHTALK_MCP_BASE_URL=http://localhost:3000
+```
+
+Then run both backends and the desktop:
+
+```sh
+# Terminal 1: slashtalk API server (port 10000)
+cd apps/server && bun run dev
+
+# Terminal 2: MCP server (port 3000)
+cd apps/mcp && bun run dev
+
+# Terminal 3: desktop
+cd apps/desktop && bun run dev
+```
+
+Notes:
+
+- The `MAIN_VITE_` prefix is required — electron-vite only exposes prefixed
+  env vars to the main process. Plain `SLASHTALK_*` in `.env` is ignored.
+  (Plain `SLASHTALK_*` exported in your shell still works as a runtime
+  override.)
+- Keep the API and MCP URLs pointed at the same environment. The desktop
+  device apiKey is minted by the API server and verified by the MCP server
+  via the shared `api_keys` table — mixing local API + hosted MCP (or vice
+  versa) sends a token to a service whose database doesn't know it,
+  producing `unauthorized` errors.
+- `apps/mcp/.env` only needs `DATABASE_URL` (point it at the same Postgres
+  the slashtalk API uses, e.g.
+  `postgres://slashtalk:slashtalk@localhost:5432/slashtalk`). The MCP
+  validates Bearer tokens against `api_keys` directly.
+- For a hosted-API + local-everything-else dev session, comment the local
+  URLs out and the desktop falls back to the hosted defaults.
+
 ## Project structure
 
 See [`AGENTS.md`](AGENTS.md) for the full map and per-workspace pointers.

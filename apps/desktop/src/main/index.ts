@@ -25,6 +25,7 @@ import type {
   InfoSession,
   McpTarget,
   ResponseOpenPayload,
+  UpdateAgentInput,
 } from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
@@ -56,7 +57,7 @@ declare global {
 }
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
-// BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/ChatBubble (45px),
+// BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/SearchBubble/CreateBubble (45px),
 // SPACING ↔ `gap-[14px]` on the stack (14px),
 // PADDING_X ↔ `px-md` on the stack (12px),
 // PADDING_Y ↔ `py-lg` on the stack (16px). Drift here = popovers misalign.
@@ -335,11 +336,13 @@ function toAgentSummary(a: LocalAgent): AgentSummary {
     id: a.id,
     name: a.name,
     description: a.description,
+    systemPrompt: a.systemPrompt,
     model: a.model,
     createdAt: a.createdAt,
     mode: a.mode ?? "cloud",
     cwd: a.cwd,
     visibility: a.visibility ?? "private",
+    mcpServers: a.mcpServers,
   };
 }
 
@@ -418,11 +421,12 @@ function createMainWindow(): void {
 
 // -------- Overlay (bubbles) --------
 
-// Overlay always renders heads plus the chat bubble at the end of the rail, so
-// add 1. This is the main-axis length (height for vertical rail, width for
-// horizontal). Cross-axis is always OVERLAY_WIDTH.
+// Overlay always renders heads plus two control bubbles: search at the leading
+// edge and agent creation at the trailing edge. This is the main-axis length
+// (height for vertical rail, width for horizontal). Cross-axis is always
+// OVERLAY_WIDTH.
 function overlayLength(count: number): number {
-  const n = count + 1;
+  const n = count + 2;
   return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING_Y * 2;
 }
 
@@ -837,7 +841,7 @@ function repositionInfoIfVisible(): void {
 
 // -------- Chat input popover --------
 //
-// Transparent window anchored on the chat bubble (the last cell in the rail).
+// Transparent window anchored on the search bubble (the leading cell in the rail).
 // The chat renderer paints its own pill + shadow; we just size + position the
 // frame.
 
@@ -887,16 +891,12 @@ function ensureChatWindow(): BrowserWindow {
   return chatWindow;
 }
 
-// Which end of the pill the leading search-icon circle sits at. Always chosen
-// so the icon overlaps the chat bubble on the rail, whichever edge the rail is
-// docked against. For vertical+start (left rail) the pill extends rightward
-// from the bubble (icon on left). For vertical+end, horizontal+start, and
-// horizontal+end the chat bubble is at the rail's "end" (bottom / right), so
-// the pill extends inward with the icon on its right.
+// Which end of the pill the search-icon circle sits at. Vertical rails still
+// extend inward from the screen edge. Horizontal rails now have search on the
+// leading/left cell, so the pill extends rightward from that bubble.
 function chatAnchorFromDock(dock: DockConfig): ChatAnchor {
-  return dock.orientation === "vertical" && dock.side === "start"
-    ? "left"
-    : "right";
+  if (dock.orientation === "horizontal") return "left";
+  return dock.side === "start" ? "left" : "right";
 }
 
 function positionChat(): void {
@@ -908,12 +908,12 @@ function positionChat(): void {
   const anchor = chatAnchorFromDock(dock);
 
   if (dock.orientation === "vertical") {
-    // Chat bubble pinned to the bottom of the overlay (flex-none in the
-    // renderer). Anchor from window bounds so this works whether content
-    // fits or the peer list is scrolling under a height cap.
+    // Search bubble pinned to the top of the overlay (flex-none in the
+    // renderer). Anchor from window bounds so this works whether content fits
+    // or the peer list is scrolling under a height cap.
     const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
     const bubbleCenterY =
-      stackBounds.y + stackBounds.height - PADDING_Y - BUBBLE_SIZE / 2;
+      stackBounds.y + PADDING_Y + BUBBLE_SIZE / 2;
     const chatX =
       anchor === "left"
         ? bubbleCenterX - CHAT_ICON_OFFSET
@@ -928,12 +928,12 @@ function positionChat(): void {
     return;
   }
 
-  // Horizontal rail: chat bubble pinned to the right end of the row. Pill
+  // Horizontal rail: search bubble pinned to the left end of the row. Pill
   // lives on the inner side of the rail (below for top, above for bottom),
-  // extending leftward from the bubble.
+  // extending rightward from the bubble.
   const bubbleCenterX =
-    stackBounds.x + stackBounds.width - PADDING_Y - BUBBLE_SIZE / 2;
-  const chatX = bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
+    stackBounds.x + PADDING_Y + BUBBLE_SIZE / 2;
+  const chatX = bubbleCenterX - CHAT_ICON_OFFSET;
   const chatY =
     dock.side === "start"
       ? stackBounds.y + stackBounds.height + INFO_GAP
@@ -1550,6 +1550,26 @@ ipcMain.handle("app:openMain", (): void => {
   hideTrayPopup();
 });
 
+ipcMain.handle("app:openAgentCreator", (): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
+  else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  hideTrayPopup();
+
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  const send = (): void => {
+    if (!win.isDestroyed()) win.webContents.send("agents:openCreator");
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once("did-finish-load", send);
+  } else {
+    send();
+  }
+});
+
 ipcMain.handle("app:quit", (): void => app.quit());
 
 ipcMain.handle("clipboard:writeText", (_e, text: string): void =>
@@ -1656,9 +1676,11 @@ ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) =>
 );
 ipcMain.handle("mcp:status", () => installMcp.status());
 ipcMain.handle("mcp:url", () => installMcp.mcpUrl());
-ipcMain.handle("mcp:detailForHead", (_e, _headId: string) =>
-  Promise.resolve(null),
-);
+ipcMain.handle("mcp:detailForHead", (_e, _headId: string) => {
+  void _e;
+  void _headId;
+  return Promise.resolve(null);
+});
 
 ipcMain.handle("github:isConfigured", () => githubAuth.isConfigured());
 ipcMain.handle("github:getState", () => githubAuth.getState());
@@ -1689,6 +1711,7 @@ ipcMain.handle(
         mode: "local",
         cwd: created.cwd,
         visibility,
+        mcpServers: [],
       };
       agentStore.add(row);
       return toAgentSummary(row);
@@ -1711,8 +1734,60 @@ ipcMain.handle(
       sessions: [],
       mode: "cloud",
       visibility,
+      mcpServers: input.mcpServers ?? [],
     };
     agentStore.add(row);
+    return toAgentSummary(row);
+  },
+);
+ipcMain.handle(
+  "agents:update",
+  async (
+    _e,
+    id: string,
+    input: UpdateAgentInput,
+  ): Promise<AgentSummary> => {
+    const existing = agentStore.get(id);
+    if (!existing) throw new Error("Unknown agent");
+
+    const name = input.name.trim();
+    const systemPrompt = input.systemPrompt.trim();
+    if (!name) throw new Error("Agent name is required.");
+    if (!systemPrompt) throw new Error("Agent prompt is required.");
+
+    const patch = {
+      name,
+      description: input.description?.trim() || undefined,
+      systemPrompt,
+      model: input.model?.trim() || existing.model,
+      cwd: isLocalAgent(existing) ? input.cwd?.trim() || undefined : existing.cwd,
+      visibility: input.visibility ?? existing.visibility ?? "private",
+      mcpServers: isLocalAgent(existing)
+        ? existing.mcpServers
+        : input.mcpServers ?? existing.mcpServers ?? [],
+    };
+
+    if (!isLocalAgent(existing)) {
+      const updated = await anthropic.updateAgent(id, {
+        name: patch.name,
+        description: patch.description,
+        systemPrompt: patch.systemPrompt,
+        model: patch.model,
+        mcpServers: patch.mcpServers,
+      });
+      const row = agentStore.update(id, {
+        ...patch,
+        name: updated.name,
+        description: updated.description,
+        systemPrompt: updated.systemPrompt,
+        model: updated.model,
+      });
+      if (!row) throw new Error("Unknown agent");
+      return toAgentSummary(row);
+    }
+
+    const row = agentStore.update(id, patch);
+    if (!row) throw new Error("Unknown agent");
     return toAgentSummary(row);
   },
 );

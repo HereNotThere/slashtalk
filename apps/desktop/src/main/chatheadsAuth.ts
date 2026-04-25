@@ -45,6 +45,7 @@ export async function signIn(): Promise<void> {
 }
 
 export function cancelSignIn(_reason?: string): void {
+  void _reason;
   backend.cancelSignIn();
 }
 

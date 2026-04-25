@@ -308,7 +308,8 @@ export function markPrActivity(login: string): void {
       const next = heads.map((h) =>
         parseUserHeadId(h.id) === login && h.prActivityAt === now
           ? (() => {
-              const { prActivityAt, ...rest } = h;
+              const rest = { ...h };
+              delete rest.prActivityAt;
               return rest as ChatHead;
             })()
           : h,

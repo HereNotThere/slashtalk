@@ -24,6 +24,7 @@ import type {
   ResponseOpenPayload,
   TrackedRepo,
   Unsubscribe,
+  UpdateAgentInput,
 } from "../shared/types";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
@@ -80,6 +81,8 @@ const bridge: ChatHeadsBridge = {
     list: () => ipcRenderer.invoke("agents:list") as Promise<AgentSummary[]>,
     create: (input: CreateAgentInput) =>
       ipcRenderer.invoke("agents:create", input) as Promise<AgentSummary>,
+    update: (id, input: UpdateAgentInput) =>
+      ipcRenderer.invoke("agents:update", id, input) as Promise<AgentSummary>,
     remove: (id) => ipcRenderer.invoke("agents:remove", id) as Promise<void>,
     send: (agentId, text, sessionId) =>
       ipcRenderer.invoke("agents:send", agentId, text, sessionId) as Promise<void>,
@@ -149,6 +152,13 @@ const bridge: ChatHeadsBridge = {
   onChatConfig: (cb) =>
     subscribe<{ anchor: ChatAnchor }>("chat:config", cb),
   onOverlayConfig: (cb) => subscribe<DockConfig>("overlay:config", cb),
+  openAgentCreator: () =>
+    ipcRenderer.invoke("app:openAgentCreator") as Promise<void>,
+  onOpenAgentCreator: (cb) => {
+    const handler = (): void => cb();
+    ipcRenderer.on("agents:openCreator", handler);
+    return () => ipcRenderer.off("agents:openCreator", handler);
+  },
 
   openResponse: (message) =>
     ipcRenderer.invoke("response:open", message) as Promise<void>,

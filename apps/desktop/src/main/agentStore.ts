@@ -4,7 +4,7 @@
 
 import * as store from "./store";
 import { createEmitter } from "./emitter";
-import type { AgentMode, AgentVisibility } from "../shared/types";
+import type { AgentMode, AgentVisibility, McpServerInput } from "../shared/types";
 
 export interface SessionTokens {
   input: number;
@@ -42,6 +42,9 @@ export interface LocalAgent {
   /** Whether this agent's sessions flow to the chatheads backend as pointers
    *  + client-generated summaries. Undefined treated as 'private'. */
   visibility?: AgentVisibility;
+  /** User-added MCP servers for cloud agents. The built-in Slashtalk MCP is
+   *  derived at create/update time and intentionally not stored here. */
+  mcpServers?: McpServerInput[];
 }
 
 const AGENTS_KEY = "anthropic.agents";
@@ -77,6 +80,31 @@ export function list(): LocalAgent[] {
 
 export function add(a: Omit<LocalAgent, "sessions"> & { sessions?: LocalSession[] }): void {
   save([...load(), { ...a, sessions: a.sessions ?? [] }]);
+}
+
+export function update(
+  id: string,
+  patch: Partial<
+    Pick<
+      LocalAgent,
+      | "name"
+      | "description"
+      | "systemPrompt"
+      | "model"
+      | "cwd"
+      | "visibility"
+      | "mcpServers"
+    >
+  >,
+): LocalAgent | undefined {
+  let updated: LocalAgent | undefined;
+  const next = load().map((a) => {
+    if (a.id !== id) return a;
+    updated = { ...a, ...patch };
+    return updated;
+  });
+  if (updated) save(next);
+  return updated;
 }
 
 export function remove(id: string): void {

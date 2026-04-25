@@ -93,6 +93,34 @@ export function restore(): void {
   creds = loadEncrypted<StoredCreds>(CREDS_KEY);
 }
 
+export async function validateStoredSession(): Promise<void> {
+  if (!creds) return;
+
+  try {
+    await jsonFetch("/api/me/", { method: "GET" });
+  } catch (err) {
+    if (!creds) return;
+    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      clearLocalSession();
+      return;
+    }
+    console.warn("[auth] stored session validation skipped:", err);
+    return;
+  }
+
+  if (!creds) return;
+  try {
+    await listDeviceRepos();
+  } catch (err) {
+    if (!creds) return;
+    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      clearLocalSession();
+      return;
+    }
+    console.warn("[auth] stored device validation skipped:", err);
+  }
+}
+
 // ---------- Sign in ----------
 
 interface CallbackParams {
@@ -344,6 +372,11 @@ async function doJsonFetch<T>(
     logHttp("warn", opts.method, path, "401", ms, "— refreshing");
     const refreshed = await tryRefresh();
     if (refreshed) return doJsonFetch<T>(path, opts, true);
+  }
+
+  if (res.status === 401 && auth === "apiKey" && creds) {
+    logHttp("warn", opts.method, path, "401", ms, "— signing out");
+    clearLocalSession();
   }
 
   if (!res.ok) {

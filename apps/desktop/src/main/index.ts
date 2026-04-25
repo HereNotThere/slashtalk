@@ -2263,7 +2263,7 @@ function debugBackfillTimestamps(): void {
   // No-op; kept for reference.
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
   // "regular" but we set it explicitly, and force-show the dock icon in case
   // something demoted us to accessory mode.
@@ -2273,6 +2273,7 @@ app.whenReady().then(() => {
     void app.dock?.show();
   }
   backend.restore();
+  await backend.validateStoredSession();
   chatheadsAuth.restore();
   anthropic.restore();
   githubAuth.restore();

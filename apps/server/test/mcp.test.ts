@@ -694,6 +694,93 @@ describe("MCP OAuth discovery", () => {
       error: "invalid_target",
     });
   });
+
+  it("emits structured OAuth audit logs without raw token material", async () => {
+    const logs = await captureAuthAuditLogs(async () => {
+      const { clientId, redirectUri } = await registerDynamicOAuthClient();
+      const { verifier, challenge } = await pkcePair();
+      const code = await authorizeCode({
+        clientId,
+        redirectUri,
+        codeChallenge: challenge,
+        scope: "mcp:read mcp:write offline_access",
+        resource: `${baseUrl}/mcp`,
+      });
+      const token = await tokenExchange({
+        clientId,
+        redirectUri,
+        code,
+        codeVerifier: verifier,
+        resource: `${baseUrl}/mcp`,
+      });
+      expect(token.status).toBe(200);
+      const issued = (await token.json()) as {
+        access_token: string;
+        refresh_token: string;
+      };
+      const refresh = await refreshTokenExchange({
+        clientId,
+        refreshToken: issued.refresh_token,
+      });
+      expect(refresh.status).toBe(200);
+      const replay = await refreshTokenExchange({
+        clientId,
+        refreshToken: issued.refresh_token,
+      });
+      expect(replay.status).toBe(400);
+    });
+
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: "mcp_oauth_client_registered",
+        clientKind: "dynamic",
+      }),
+    );
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: "mcp_oauth_authorization_code_issued",
+        scope: "mcp:read mcp:write offline_access",
+        resource: `${baseUrl}/mcp`,
+      }),
+    );
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: "mcp_oauth_token_issued",
+        grantType: "authorization_code",
+      }),
+    );
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: "mcp_oauth_token_refreshed",
+        grantType: "refresh_token",
+      }),
+    );
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: "mcp_oauth_token_rejected",
+        error: "invalid_grant",
+      }),
+    );
+    for (const log of logs) {
+      expect(JSON.stringify(log)).not.toContain("mcp_at_");
+      expect(JSON.stringify(log)).not.toContain("mcp_rt_");
+      expect(JSON.stringify(log)).not.toContain("mcp_code_");
+    }
+  });
+
+  it("emits structured audit logs for MCP bearer rejection reasons", async () => {
+    const logs = await captureAuthAuditLogs(async () => {
+      await expectMcpInvalidToken("bad-oauth-token", "unknown token");
+    });
+
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: "mcp_token_rejected",
+        reason: "unknown token",
+        route: "/mcp",
+      }),
+    );
+  });
 });
 
 function initializeRequest() {
@@ -904,6 +991,27 @@ async function expectMcpInvalidToken(token: string, reason: string) {
   );
   expect(header).toContain('error="invalid_token"');
   expect(header).toContain(`error_description="${reason}"`);
+}
+
+async function captureAuthAuditLogs(fn: () => Promise<void>) {
+  const originalWrite = process.stderr.write;
+  const chunks: string[] = [];
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    chunks.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    await fn();
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+
+  return chunks
+    .join("")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((line) => line.msg === "auth_audit");
 }
 
 async function pkcePair(verifier = `verifier-${crypto.randomUUID()}`) {

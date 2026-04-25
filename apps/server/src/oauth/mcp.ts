@@ -10,6 +10,7 @@ import {
   users,
 } from "../db/schema";
 import { hashToken } from "../auth/tokens";
+import { authAudit } from "../auth/audit";
 
 const SCOPES = ["mcp:read", "mcp:write"] as const;
 const STATIC_CLIENT_IDS = new Set(["slashtalk-static-claude-code"]);
@@ -155,6 +156,10 @@ export function mcpOAuthRoutes(db: Database) {
       const origin = originOf(request);
       const parsed = await parseTokenRequest(request, origin);
       if (!parsed.ok) {
+        authAudit("mcp_oauth_token_rejected", {
+          error: parsed.error,
+          reason: parsed.errorDescription,
+        });
         set.status = 400;
         return {
           error: parsed.error,
@@ -167,6 +172,12 @@ export function mcpOAuthRoutes(db: Database) {
           ? await exchangeAuthorizationCode(db, parsed.value)
           : await rotateOAuthRefreshToken(db, parsed.value);
       if (!issued.ok) {
+        authAudit("mcp_oauth_token_rejected", {
+          grantType: parsed.value.grantType,
+          clientId: parsed.value.clientId,
+          error: issued.error,
+          reason: issued.errorDescription,
+        });
         set.status = 400;
         return {
           error: issued.error,
@@ -297,6 +308,11 @@ async function registerDynamicClient(
     tokenEndpointAuthMethod: metadata.token_endpoint_auth_method,
     scope: metadata.scope,
   });
+  authAudit("mcp_oauth_client_registered", {
+    clientId,
+    clientKind: "dynamic",
+    clientName: metadata.client_name,
+  });
   return {
     client_id: clientId,
     client_id_issued_at: Math.floor(Date.now() / 1000),
@@ -402,6 +418,12 @@ async function issueAuthorizationCode(
     scope: input.scope,
     resource: input.resource,
     expiresAt: new Date(Date.now() + AUTH_CODE_TTL_MS),
+  });
+  authAudit("mcp_oauth_authorization_code_issued", {
+    userId: input.userId,
+    clientId: input.clientId,
+    scope: input.scope,
+    resource: input.resource,
   });
   return code;
 }
@@ -535,6 +557,8 @@ async function exchangeAuthorizationCode(
     clientId: code.clientId,
     scope: code.scope,
     resource: code.resource,
+    auditEvent: "mcp_oauth_token_issued",
+    grantType: "authorization_code",
   });
 }
 
@@ -573,6 +597,8 @@ async function rotateOAuthRefreshToken(
     clientId: token.clientId,
     scope: token.scope,
     resource: token.resource,
+    auditEvent: "mcp_oauth_token_refreshed",
+    grantType: "refresh_token",
   });
 }
 
@@ -592,7 +618,14 @@ type IssueTokenResult =
 
 async function issueOAuthTokens(
   db: Database,
-  input: { userId: number; clientId: string; scope: string; resource: string },
+  input: {
+    userId: number;
+    clientId: string;
+    scope: string;
+    resource: string;
+    auditEvent: "mcp_oauth_token_issued" | "mcp_oauth_token_refreshed";
+    grantType: "authorization_code" | "refresh_token";
+  },
 ): Promise<IssueTokenResult> {
   const accessToken = `mcp_at_${crypto.randomUUID()}`;
   const refreshToken = `mcp_rt_${crypto.randomUUID()}`;
@@ -605,6 +638,13 @@ async function issueOAuthTokens(
     resource: input.resource,
     accessExpiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SECONDS * 1000),
     refreshExpiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+  });
+  authAudit(input.auditEvent, {
+    userId: input.userId,
+    clientId: input.clientId,
+    grantType: input.grantType,
+    scope: input.scope,
+    resource: input.resource,
   });
 
   return {

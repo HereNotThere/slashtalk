@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
 import { users, apiKeys, devices, oauthTokens } from "../db/schema";
+import { authAudit } from "../auth/audit";
 import { hashToken } from "../auth/tokens";
 import { mcpResourceUrl, mcpWwwAuthenticate } from "../oauth/mcp";
 import { McpPresenceStore } from "./presence";
@@ -19,6 +20,10 @@ export const mcpRoutes = () => {
     .all("/mcp", async ({ request, set }) => {
       const auth = await authenticateMcpRequest(request);
       if (!auth.ok) {
+        authAudit("mcp_token_rejected", {
+          route: "/mcp",
+          reason: auth.reason ?? "missing bearer token",
+        });
         set.status = 401;
         set.headers["www-authenticate"] = mcpWwwAuthenticate(
           new URL(request.url).origin,

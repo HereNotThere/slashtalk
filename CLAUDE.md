@@ -25,6 +25,8 @@ Violating one of these causes a visible regression or data loss. Tier 3 of the h
 ## Where to go next
 
 - [`AGENTS.md`](AGENTS.md) — project map + workspaces.
+- [`docs/README.md`](docs/README.md) — navigation map for `docs/`.
+- [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — authoring bible (read before adding any doc).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — domain map (ingest, sessions, analyzers, ws, …).
 - [`docs/design-docs/core-beliefs.md`](docs/design-docs/core-beliefs.md) — the full rule list with "why" and "how to apply" per rule.
 - [`docs/RELIABILITY.md`](docs/RELIABILITY.md) — resume protocol, state machine, soft-fail contract.

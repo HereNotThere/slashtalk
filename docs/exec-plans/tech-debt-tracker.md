@@ -73,3 +73,68 @@ Parse the handler body and fail if a `user_repos` insert is reached without a `v
 
 **20. CI check: no GitHub App code paths.**
 Grep the repo for `installation_id`, `"GitHub App"`, `/app/installations`, `X-GitHub-Installation-Id`, and fail on any match under `apps/server/src/`. See [`core-beliefs #11`](../design-docs/core-beliefs.md#11-identity-is-user-oauth-no-github-app).
+
+---
+
+## Harness readiness — pitch-sprint priorities (from 2026-04-25 audit)
+
+Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026-04-25.md). Audit verdict: ~60% harness-ready. Excellent doc scaffolding, gaps concentrated in enforcement, observability, and memory. Items 18–20 above are the Tier-3 enforcement complement to this section and remain deferred.
+
+### Rung 1 — Legibility (batch fix) — ✅ shipped 2026-04-25
+
+**21. ~~Resolve docs/ structural drift.~~** ✅ Shipped in single session 2026-04-25 across 10 new files + 5 updated files. The session went beyond the audit's minimum and also landed [`docs/CONVENTIONS.md`](../CONVENTIONS.md) + [`docs/templates/`](../templates/), closing the convention-template-protocol triangle.
+
+- ✅ Reconciled desktop window count across [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`AGENTS.md`](../../AGENTS.md), [`README.md`](../../README.md). Six renderer windows + `trayPopup`/`dockPlaceholder` as auxiliary main-process chrome, explicitly distinguished in `ARCHITECTURE.md § UI / windows`.
+- ✅ Added [`docs/README.md`](../README.md) — navigation map for `docs/` with two-tier structure made explicit.
+- ✅ Added [`docs/CONVENTIONS.md`](../CONVENTIONS.md) — authoring bible: doc types, naming, two-tier hierarchy, per-workspace AGENTS.md rules, convention-template-protocol triangle, Tier 1–5 harness plan vocabulary.
+- ✅ Added [`docs/templates/`](../templates/) — page shapes for design-doc, ADR, runbook, spec, plan, plus a templates README.
+- ✅ Added [`docs/exec-plans/README.md`](./README.md) — `active/` vs `completed/` vs root convention; `.gitkeep` placeholders kept and now documented.
+- ✅ Added [`docs/references/README.md`](../references/README.md) — `<library>-llms.txt` convention with file shape and add-a-reference workflow.
+- ✅ Two-tier hierarchy kept (UPPERCASE root tier vs subdirectory tier) and documented in `CONVENTIONS.md § The two-tier docs hierarchy` and reflected in `design-docs/index.md § Cross-cutting models`. No file moves required.
+- ✅ Filename convention: kebab-case for new docs; UPPERCASE reserved for the three legacy cross-cutting top-level docs (`RELIABILITY.md`, `SECURITY.md`, `QUALITY_SCORE.md`); rule documented in `CONVENTIONS.md § Naming`.
+- ✅ Per-workspace AGENTS.md: minimum skeleton (`Layout` + `Commands` + `Before committing`) defined in `CONVENTIONS.md`; intentional shape variance per workspace role documented; root [`AGENTS.md`](../../AGENTS.md) updated with the shape-variance note below the workspaces table.
+- ✅ Root [`AGENTS.md`](../../AGENTS.md) and [`CLAUDE.md`](../../CLAUDE.md) wired to `docs/README.md` and `docs/CONVENTIONS.md` as primary docs entry points.
+
+### Rung 2 — Enforcement (~1 day)
+
+**22. `apps/server/eslint.config.js`.** Mirror [`apps/desktop/eslint.config.js`](../../apps/desktop/eslint.config.js). Minimum rules: Elysia plugin-name uniqueness, layering (no cross-app imports), ban `console.*` once pino lands. Closes the desktop-vs-server lint asymmetry. **See item 39 first.**
+
+**23. `lefthook.yml` for pre-commit hooks.** Run `bun run typecheck && bun run test && bun run gen:db-schema:check` on pre-commit. 1:1 with the existing manual checklists in [`AGENTS.md`](../../AGENTS.md) and [`CLAUDE.md`](../../CLAUDE.md); no new behavior.
+
+### Rung 3 — Observability (~1 day, highest leverage)
+
+**24. Adopt pino structured logger.** Shared logger config (in `packages/shared` or new `packages/log`). Replace `console.log` / `console.error` in `apps/server/src/analyzers/scheduler.ts`, ingest paths, and ws bridge first; rest of codebase second. Why this rung is highest priority: slashtalk's product is "make Claude Code sessions legible" — pitching that while the slashtalk repo is operationally illegible is a contradiction.
+
+**25. Wire Sentry (or equivalent) for unhandled errors.** Single hook on the server. Captures crashes the way the analyzer ingest pipeline cannot today.
+
+### Rung 4 — Memory (~half day)
+
+**26. Lift `AGENTS.md` recipes into `.claude/skills/*`.** Convert the five "Adding X" sections in [`apps/server/AGENTS.md`](../../apps/server/AGENTS.md) into discrete skill files (`add-route.md`, `add-llm-analyzer.md`, `add-db-column.md`, etc.). Reference from root `AGENTS.md`. Free leverage — prose is already written.
+
+### Deferred (post-pitch)
+
+**27. Architectural-invariant tests in `apps/server/test/`.** Tests that enforce `core-beliefs.md` rules at runtime (e.g., "every cross-user route joins `user_repos`", "every Elysia plugin has a unique `name`"). Complements items 18–20 (CI grep checks).
+
+**28. Desktop integration tests.** Window lifecycle, IPC, preload bridge. Current coverage is 3 unit tests for a 7-window Electron app.
+
+**29. ADR backfill.** Convert durable decisions in [`core-beliefs.md`](../design-docs/core-beliefs.md) into per-decision ADR files with date + alternatives considered. Optional — `core-beliefs.md` already captures Why; ADRs add the "what we chose against."
+
+**30. Runbooks for known failure modes.** Analyzer crash recovery, ingest backlog drain, schema migration rollback, etc. None exist today.
+
+### Open question — decide before item 22
+
+**39. Server-vs-desktop ESLint asymmetry — intentional or sequencing artifact?** [`apps/desktop`](../../apps/desktop/eslint.config.js) has ESLint; [`apps/server`](../../apps/server/) does not, despite server being the security-critical path. If intentional culture choice (human review preference), record it in `core-beliefs.md` and close item 22 as won't-do. If sequencing artifact, ship item 22.
+
+---
+
+## Pitch-window sequencing
+
+Three days moves the repo from ~60% to ~90% harness-ready by the audit's checklist:
+
+| Day | Items | Status |
+| --- | --- | --- |
+| 1 | 24 (pino) + 25 (Sentry) | pending |
+| 2 am | 23 (lefthook) | pending |
+| 2 pm | 22 (server lint, after item 39 decision) | pending |
+| 3 am | 26 (skills) | pending |
+| 3 pm | 21 (Legibility batch) | ✅ shipped 2026-04-25 (went beyond audit scope: also landed CONVENTIONS.md + templates/) |

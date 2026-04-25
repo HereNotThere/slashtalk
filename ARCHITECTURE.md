@@ -5,7 +5,7 @@ Domain map for slashtalk. For rules that shape these domains, see [`docs/design-
 ## System outline
 
 ```
- Desktop (Electron, 7 windows)            Server (Elysia, one process)
+ Desktop (Electron, multi-window)          Server (Elysia, one process)
  ┌───────────────────────────────┐        ┌───────────────────────────────┐
  │ watcher pipeline              │        │ auth  (OAuth, JWT, API keys)  │
  │  uploader   → /v1/ingest      │──HTTPS→│ ingest  (NDJSON, aggregator)  │
@@ -99,7 +99,7 @@ Background LLM scheduler that produces session insights (title/description, roll
 
 ## Desktop architecture (`apps/desktop/src/`)
 
-7 BrowserWindows orchestrated from a single main process. Detailed layout in [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md).
+Six renderer windows plus auxiliary system chrome (`trayPopup`, `dockPlaceholder`) orchestrated from a single main process. Detailed renderer layout in [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md).
 
 ### Watcher pipeline
 - `main/uploader.ts` — `fs.watch(~/.claude/projects, {recursive:true})` + `~/.codex/sessions`, debounce 150 ms, concurrency cap 16, ships deltas to `/v1/ingest`. Strict-tracking gate runs before every upload ([core-beliefs #6](docs/design-docs/core-beliefs.md#6-strict-tracking-gate-in-the-desktop-uploader)).
@@ -115,7 +115,11 @@ Background LLM scheduler that produces session insights (title/description, roll
 - `main/localRepos.ts` — tracked-repo list, `.git/config` parsing, worktree resolution. Rehydrates from server on sign-in.
 
 ### UI / windows
-Seven windows: `main` (config), `overlay` (rail), `info` (peek popover), `chat` (input pill), `response` (full viewer), `statusbar` + `trayPopup`, `dockPlaceholder` (drag ghost). Tailwind v4 via single shared `tailwind.css`.
+**Six renderer windows** (each with its own `index.html`, listed in [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md#layout)): `main` (config), `overlay` (rail), `info` (peek popover), `chat` (input pill), `response` (full viewer), `statusbar` (menu-bar entry).
+
+**Auxiliary windows** owned by the main process: `trayPopup` (popup attached to the macOS tray) and `dockPlaceholder` (drag ghost). These do not have their own renderer entry under `src/renderer/` — they are orchestrated from `src/main/`.
+
+Tailwind v4 via single shared `tailwind.css`.
 
 ## MCP service (`apps/mcp/`)
 

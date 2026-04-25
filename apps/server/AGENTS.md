@@ -85,7 +85,7 @@ From repo root: `bun --filter @slashtalk/server <script>`.
 
 **Required:** `DATABASE_URL`, `REDIS_URL`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `JWT_SECRET`, `ENCRYPTION_KEY`, `BASE_URL`.
 
-**Optional:** `PORT` (10000), `ANTHROPIC_API_KEY` (analyzer scheduler disabled if unset), `ANALYZER_TICK_MS` (300_000), `ANALYZER_MAX_SESSIONS_PER_TICK` (200), `ANALYZER_CONCURRENCY` (5).
+**Optional:** `PORT` (10000), `ANTHROPIC_API_KEY` (analyzer scheduler disabled if unset), `ANALYZER_TICK_MS` (300_000), `ANALYZER_MAX_SESSIONS_PER_TICK` (200), `ANALYZER_CONCURRENCY` (5), `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` / `GITHUB_APP_ID` / `GITHUB_APP_SLUG` (selected-private-repo claim verification).
 
 ## Auth split
 

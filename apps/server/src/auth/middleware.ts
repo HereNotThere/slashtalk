@@ -12,6 +12,18 @@ type SessionJwtPayload = {
   sessionIssuedAt?: number;
 };
 
+const authUserColumns = {
+  id: users.id,
+  githubId: users.githubId,
+  githubLogin: users.githubLogin,
+  avatarUrl: users.avatarUrl,
+  displayName: users.displayName,
+  githubToken: users.githubToken,
+  credentialsRevokedAt: users.credentialsRevokedAt,
+  createdAt: users.createdAt,
+  updatedAt: users.updatedAt,
+};
+
 /** JWT auth plugin — validates cookie-based JWT, derives `user` into context */
 export const jwtAuth = new Elysia({ name: "auth/jwt" })
   .use(
@@ -36,7 +48,7 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
     }
 
     const [user] = await db
-      .select()
+      .select(authUserColumns)
       .from(users)
       .where(eq(users.id, Number(payload.sub)))
       .limit(1);
@@ -87,7 +99,7 @@ export const apiKeyAuth = new Elysia({ name: "auth/apiKey" }).derive(
     }
 
     const [user] = await db
-      .select()
+      .select(authUserColumns)
       .from(users)
       .where(eq(users.id, apiKey.userId))
       .limit(1);

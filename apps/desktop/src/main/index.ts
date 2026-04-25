@@ -2092,6 +2092,10 @@ ipcMain.handle("backend:signOutEverywhere", async () => {
   await backend.signOutEverywhere();
   localRepos.clearOnSignOut();
 });
+ipcMain.handle("backend:getGithubAppStatus", () =>
+  backend.getGithubAppStatus(),
+);
+ipcMain.handle("backend:connectGithubApp", () => backend.connectGithubApp());
 
 function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {

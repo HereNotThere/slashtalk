@@ -64,6 +64,13 @@
       "when": 1777142158601,
       "tag": "0008_workable_virginia_dare",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777149303522,
+      "tag": "0009_chubby_freak",
+      "breakpoints": true
     }
   ]
 }

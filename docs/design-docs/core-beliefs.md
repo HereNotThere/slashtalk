@@ -98,14 +98,15 @@ A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, n
 
 ---
 
-## 11. Identity is user OAuth. No GitHub App.
+## 11. Identity is user OAuth; private repo checks use a narrow GitHub App.
 
-**Why.** Requiring an org-admin install gates adoption on someone other than the end user. slashtalk's promise is that any signed-in user can use it on any repo they personally can see — whether that repo is public, in an org that allows third-party OAuth apps, or in their own account.
+**Why.** Requiring an org-admin install for basic identity gates adoption on someone other than the end user. slashtalk's promise is that any signed-in user can start with normal GitHub OAuth and no broad repo scope. Private repos still need GitHub-confirmed visibility, so the narrow exception is a GitHub App user authorization with repository Metadata read-only, installed only on selected repos.
 
 **How to apply.**
 - OAuth scope stays `read:user read:org` ([docs/SECURITY.md § OAuth scope](../SECURITY.md)).
-- Every GitHub API call uses the calling user's own decrypted token. The single code path that decrypts a user token is [`fetchUserGithubToken`](../../apps/server/src/user/routes.ts); use it everywhere.
-- Never add a GitHub App client ID, `installation_id`, `/app/installations` call, or org-level consent flow.
+- Identity, org picker, and public repo checks use the calling user's OAuth App token via [`fetchUserGithubToken`](../../apps/server/src/user/routes.ts).
+- Private repo claim fallback may use the calling user's GitHub App user token via [`fetchUserGithubAppToken`](../../apps/server/src/auth/github-app.ts). Do not request OAuth `repo` scope.
+- Do not use an installation token alone to grant access. A repo claim must represent user visibility, not merely app installation visibility.
 
 ---
 
@@ -114,7 +115,7 @@ A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, n
 **Why.** `user_repos` is the single authorization source for the feed, session, event, and WebSocket channels. A row must represent a user GitHub has confirmed can read the repo — otherwise every downstream check becomes a sieve. A pre-gate bug in [PR #85](https://github.com/HereNotThere/slashtalk/pull/85) let any JWT holder claim any `owner/name` and inherit the real collaborators' visibility.
 
 **How to apply.**
-- [`POST /api/me/repos`](../../apps/server/src/user/routes.ts) calls `GET /repos/:owner/:name` with the user's OAuth token and requires `200` before inserting a `user_repos` row. `404` = fail closed with 403 `no_access`. `401/403` = fail closed with 401 `token_expired`. Never fall back to "accept."
+- [`POST /api/me/repos`](../../apps/server/src/user/routes.ts) calls `GET /repos/:owner/:name` with the user's OAuth token and requires `200` before inserting a `user_repos` row. OAuth `404` with no linked GitHub App = fail closed with 403 `no_access` plus a GitHub App `connectUrl`; OAuth `404` with a linked GitHub App retries with the GitHub App user token. GitHub App `404` = fail closed with 403 `no_access` plus an install/configure `connectUrl`. `401/403` = fail closed with 401 `token_expired`. Never fall back to "accept."
 - Never hand-insert `user_repos` rows from migrations, seed scripts, or other routes; go through the same gate (or run [`scripts/reverify-claims.ts`](../../apps/server/scripts/reverify-claims.ts) afterward to catch drift).
 - A per-user rate limit on the claim endpoint stops brute-force repo enumeration with a stolen JWT.
 

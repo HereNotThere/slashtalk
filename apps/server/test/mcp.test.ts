@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { db } from "../src/db";
-import { oauthAuthorizationCodes } from "../src/db/schema";
+import { oauthAuthorizationCodes, oauthTokens } from "../src/db/schema";
 import { hashToken } from "../src/auth/tokens";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
@@ -88,8 +88,14 @@ describe("root /mcp", () => {
       body: JSON.stringify(initializeRequest()),
     });
     expect(invalid.status).toBe(401);
-    expect(invalid.headers.get("www-authenticate")).toBe(
-      `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+    expect(invalid.headers.get("www-authenticate")).toContain(
+      `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+    );
+    expect(invalid.headers.get("www-authenticate")).toContain(
+      'error="invalid_token"',
+    );
+    expect(invalid.headers.get("www-authenticate")).toContain(
+      'error_description="unknown token"',
     );
   });
 
@@ -108,6 +114,52 @@ describe("root /mcp", () => {
     expect(res.headers.get("mcp-session-id")).toBeTruthy();
     const body = await res.text();
     expect(body).toContain("slashtalk");
+  });
+
+  it("accepts initialize with a valid MCP OAuth access token", async () => {
+    const { accessToken } = await issueMcpOAuthToken();
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify(initializeRequest()),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("mcp-session-id")).toBeTruthy();
+    const body = await res.text();
+    expect(body).toContain("slashtalk");
+  });
+
+  it("rejects expired, revoked, wrong-resource, and insufficient-scope OAuth tokens", async () => {
+    const expired = await issueMcpOAuthToken();
+    await db
+      .update(oauthTokens)
+      .set({ accessExpiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(oauthTokens.accessTokenHash, await hashToken(expired.accessToken)));
+    await expectMcpInvalidToken(expired.accessToken, "expired");
+
+    const revoked = await issueMcpOAuthToken();
+    await db
+      .update(oauthTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(oauthTokens.accessTokenHash, await hashToken(revoked.accessToken)));
+    await expectMcpInvalidToken(revoked.accessToken, "revoked");
+
+    const wrongResource = await issueMcpOAuthToken();
+    await db
+      .update(oauthTokens)
+      .set({ resource: `${baseUrl}/not-mcp` })
+      .where(
+        eq(oauthTokens.accessTokenHash, await hashToken(wrongResource.accessToken)),
+      );
+    await expectMcpInvalidToken(wrongResource.accessToken, "resource mismatch");
+
+    const noReadScope = await issueMcpOAuthToken({ scope: "mcp:write" });
+    await expectMcpInvalidToken(noReadScope.accessToken, "insufficient scope");
   });
 
   it("reuses known sessions and rejects unknown session ids", async () => {
@@ -612,6 +664,55 @@ async function tokenExchange({
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
+}
+
+async function issueMcpOAuthToken({
+  scope = "mcp:read mcp:write offline_access",
+}: {
+  scope?: string;
+} = {}) {
+  const { clientId, redirectUri } = await registerDynamicOAuthClient();
+  const { verifier, challenge } = await pkcePair();
+  const code = await authorizeCode({
+    clientId,
+    redirectUri,
+    codeChallenge: challenge,
+    scope,
+    resource: `${baseUrl}/mcp`,
+  });
+  const token = await tokenExchange({
+    clientId,
+    redirectUri,
+    code,
+    codeVerifier: verifier,
+    resource: `${baseUrl}/mcp`,
+  });
+  expect(token.status).toBe(200);
+  const body = (await token.json()) as {
+    access_token: string;
+    refresh_token: string;
+  };
+  return { accessToken: body.access_token, refreshToken: body.refresh_token };
+}
+
+async function expectMcpInvalidToken(token: string, reason: string) {
+  const res = await fetch(`${baseUrl}/mcp`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify(initializeRequest()),
+  });
+
+  expect(res.status).toBe(401);
+  const header = res.headers.get("www-authenticate");
+  expect(header).toContain(
+    `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+  );
+  expect(header).toContain('error="invalid_token"');
+  expect(header).toContain(`error_description="${reason}"`);
 }
 
 async function pkcePair(verifier = `verifier-${crypto.randomUUID()}`) {

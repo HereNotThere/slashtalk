@@ -50,11 +50,20 @@ Current consolidation behavior:
 
 - Desktop signs in through GitHub OAuth against `apps/server`.
 - `apps/server` issues a JWT/refresh pair, then the desktop exchanges a setup token for a device API key through `/v1/auth/exchange`.
-- `/mcp` accepts `Authorization: Bearer <device-api-key>` using the same `apiKeyAuth` middleware as `/v1/*`.
+- `/mcp` accepts `Authorization: Bearer <device-api-key>` for desktop-local proxy and legacy compatibility.
 - Local Claude Code and Codex installs should point at the desktop-local proxy (`http://127.0.0.1:37613/mcp` by default). The proxy injects the safeStorage-backed device API key per request, so client config does not store a static Slashtalk bearer.
 - `/v1/managed-agent-sessions` is also served by `apps/server` with `apiKeyAuth`; private managed-agent sessions are not returned by the list endpoint.
 
-Direct MCP OAuth remains a planned follow-up phase. Until OAuth lands, static bearer config remains an explicit compatibility bridge and should be treated as a long-lived device credential: revoke the device API key if it is exposed.
+Direct MCP OAuth behavior:
+
+- `/mcp` returns `401` with `WWW-Authenticate: Bearer resource_metadata="..."` so OAuth-capable MCP clients can discover protected-resource metadata.
+- `/.well-known/oauth-protected-resource` describes root `/mcp`; authorization-server metadata is served at the standard root paths plus Claude/Codex-compatible `/mcp` variants.
+- `/oauth/register` supports Dynamic Client Registration for public loopback clients. `slashtalk-static-claude-code` is also accepted as a static public client.
+- `/oauth/authorize` requires a signed-in Slashtalk browser session, routing through GitHub sign-in when needed, then issues a short-lived one-time authorization code bound to client, redirect URI, scope, PKCE challenge, user, and `/mcp` resource.
+- `/oauth/token` exchanges authorization codes with PKCE and returns opaque MCP access/refresh tokens. Token hashes are stored in `oauth_tokens`; access tokens are short lived and bound to `/mcp`.
+- `/mcp` accepts valid MCP OAuth access tokens with `mcp:read` scope, and rejects expired, revoked, wrong-resource, unknown, or insufficient-scope tokens with `WWW-Authenticate` `invalid_token` details.
+
+Static bearer config remains an explicit compatibility bridge and should be treated as a long-lived device credential: revoke the device API key if it is exposed.
 
 ## JWT session cookie
 

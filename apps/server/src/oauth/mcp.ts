@@ -45,8 +45,16 @@ export function protectedResourceMetadataUrl(origin: string): string {
   return `${origin}/.well-known/oauth-protected-resource`;
 }
 
-export function mcpWwwAuthenticate(origin: string): string {
-  return `Bearer resource_metadata="${protectedResourceMetadataUrl(origin)}"`;
+export function mcpWwwAuthenticate(
+  origin: string,
+  error?: { code: "invalid_token"; description: string },
+): string {
+  const params = [`resource_metadata="${protectedResourceMetadataUrl(origin)}"`];
+  if (error) {
+    params.push(`error="${error.code}"`);
+    params.push(`error_description="${error.description}"`);
+  }
+  return `Bearer ${params.join(", ")}`;
 }
 
 export function protectedResourceMetadata(origin: string) {

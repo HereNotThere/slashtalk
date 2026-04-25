@@ -1,0 +1,84 @@
+# MCP OAuth Final Interop Manual Test
+
+This verifies direct MCP OAuth against `apps/server` without the desktop local proxy. The expected result is that Claude Code completes OAuth login, receives a Slashtalk MCP access token, and can initialize `/mcp` directly.
+
+## Start Slashtalk
+
+From the repo root:
+
+```sh
+bun run dev:server
+```
+
+Use `http://localhost:10000` unless the server logs a different port.
+
+## Clean Previous Claude Entry
+
+```sh
+claude mcp remove slashtalk-oauth-local || true
+```
+
+## Add Direct OAuth MCP Server
+
+```sh
+claude mcp add \
+  --transport http \
+  slashtalk-oauth-local \
+  http://localhost:10000/mcp
+```
+
+For the static-client path, use:
+
+```sh
+claude mcp add \
+  --transport http \
+  --client-id slashtalk-static-claude-code \
+  slashtalk-oauth-local \
+  http://localhost:10000/mcp
+```
+
+## Authenticate
+
+Open Claude Code and run:
+
+```text
+/mcp
+```
+
+Select `slashtalk-oauth-local`, then authenticate. The browser should go through Slashtalk GitHub sign-in if needed and return to Claude's local callback URL.
+
+## Expected Server Logs
+
+During login:
+
+- `POST /mcp` returns `401` with `WWW-Authenticate`.
+- `GET /.well-known/oauth-protected-resource`.
+- `GET /.well-known/oauth-authorization-server`.
+- Optional `POST /oauth/register` for Dynamic Client Registration.
+- `GET /oauth/authorize`.
+- `POST /oauth/token`.
+
+After login:
+
+- `mcp_session_opened` with `clientInfo.name="claude-code"`.
+- A follow-up `tools/list` succeeds.
+
+The current migration intentionally advertises no MCP tools, so an empty tool list is a success.
+
+## Negative Check
+
+This should return `401` with `error="invalid_token"`:
+
+```sh
+curl -i http://localhost:10000/mcp \
+  -H 'authorization: Bearer bad-token' \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual","version":"0.0.0"}}}'
+```
+
+## Cleanup
+
+```sh
+claude mcp remove slashtalk-oauth-local
+```

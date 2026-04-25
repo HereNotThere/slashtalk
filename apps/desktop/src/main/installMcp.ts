@@ -10,6 +10,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import * as backend from "./backend";
 
 export type McpTarget = "claude-code";
 
@@ -25,10 +26,6 @@ export interface InstallStatus {
 const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
   | string
   | undefined;
-const MCP_URL =
-  process.env["SLASHTALK_MCP_URL"] ??
-  BAKED_MCP_URL ??
-  "https://chatheads.onrender.com/mcp";
 const MCP_KEY = "slashtalk-mcp";
 
 interface ConfigShape {
@@ -47,7 +44,7 @@ function configPath(target: McpTarget): string {
 function entry(token?: string | null): unknown {
   const e: { type: string; url: string; headers?: Record<string, string> } = {
     type: "http",
-    url: MCP_URL,
+    url: mcpUrl(),
   };
   if (token) e.headers = { Authorization: `Bearer ${token}` };
   return e;
@@ -109,5 +106,9 @@ export async function status(): Promise<InstallStatus> {
 }
 
 export function mcpUrl(): string {
-  return MCP_URL;
+  return (
+    process.env["SLASHTALK_MCP_URL"] ??
+    BAKED_MCP_URL ??
+    `${backend.getBaseUrl()}/mcp`
+  );
 }

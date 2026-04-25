@@ -37,6 +37,11 @@ src/
 │   └── routes.ts    # /api/chat/ask (stateless Q&A)
 ├── presence/
 │   └── routes.ts    # POST /v1/presence/spotify, GET /api/presence/peers; publishes to user:<id> + repo:<id>
+├── managed-agent-sessions/
+│   └── routes.ts    # PUT/GET /v1/managed-agent-sessions (apiKeyAuth)
+├── mcp/
+│   ├── routes.ts        # root /mcp Streamable HTTP resource (apiKeyAuth today)
+│   └── session-pool.ts  # MCP HTTP session lifecycle
 ├── ws/
 │   ├── handler.ts   # WS upgrade, channel subscriptions, ping
 │   └── redis-bridge.ts # ioredis pub/sub, soft-fail
@@ -85,6 +90,7 @@ From repo root: `bun --filter @slashtalk/server <script>`.
 ## Auth split
 
 - `/v1/*` → `apiKeyAuth`
+- `/mcp` → explicit MCP resource-server exception, `apiKeyAuth` during consolidation
 - `/auth/*` + `/api/*` → `jwtAuth`
 - `/ws?token=…` → JWT, else API key
 

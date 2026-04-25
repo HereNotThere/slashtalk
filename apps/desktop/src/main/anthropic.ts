@@ -14,6 +14,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as store from "./store";
 import * as chatheadsAuth from "./chatheadsAuth";
+import * as backend from "./backend";
 import * as githubAuth from "./githubDeviceAuth";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 import { createEmitter } from "./emitter";
@@ -31,10 +32,6 @@ const API_KEY_STORE_KEY = "anthropic.apiKeyEnc";
 const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
   | string
   | undefined;
-const SLASHTALK_MCP_URL =
-  process.env["SLASHTALK_MCP_URL"] ??
-  BAKED_MCP_URL ??
-  "https://chatheads.onrender.com/mcp";
 const SLASHTALK_MCP_NAME = "slashtalk-mcp";
 
 const GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/";
@@ -46,6 +43,14 @@ let storedApiKey: string | null = null;
 
 const configuredChanges = createEmitter<boolean>();
 export const onConfiguredChange = configuredChanges.on;
+
+function slashtalkMcpUrl(): string {
+  return (
+    process.env["SLASHTALK_MCP_URL"] ??
+    BAKED_MCP_URL ??
+    `${backend.getBaseUrl()}/mcp`
+  );
+}
 
 /** Load the persisted API key on startup. Must run before any UI asks
  *  isConfigured(). */
@@ -180,7 +185,7 @@ async function ensureSlashtalkCredential(vaultId: string): Promise<void> {
     display_name: "Slashtalk MCP",
     auth: {
       type: "static_bearer",
-      mcp_server_url: SLASHTALK_MCP_URL,
+      mcp_server_url: slashtalkMcpUrl(),
       token,
     },
   });
@@ -316,7 +321,7 @@ async function buildAgentConfig(input: CreateAgentInput): Promise<{
       ? [
           {
             name: SLASHTALK_MCP_NAME,
-            url: SLASHTALK_MCP_URL,
+            url: slashtalkMcpUrl(),
           },
         ]
       : []),

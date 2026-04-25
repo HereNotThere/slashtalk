@@ -42,6 +42,19 @@ See also core-beliefs [#11](design-docs/core-beliefs.md#11-identity-is-user-oaut
 
 **Rule.** Raw tokens, hashes, and encryption keys are never logged, returned in error responses, or serialized into Redis messages.
 
+## MCP auth model
+
+`apps/server` owns the MCP HTTP resource at root `/mcp`. This is the deliberate exception to the route-prefix auth rule: MCP versioning is negotiated in the protocol initialize handshake, so the resource URL remains `/mcp` instead of `/v1/mcp`.
+
+Current consolidation behavior:
+
+- Desktop signs in through GitHub OAuth against `apps/server`.
+- `apps/server` issues a JWT/refresh pair, then the desktop exchanges a setup token for a device API key through `/v1/auth/exchange`.
+- `/mcp` accepts `Authorization: Bearer <device-api-key>` using the same `apiKeyAuth` middleware as `/v1/*`.
+- `/v1/managed-agent-sessions` is also served by `apps/server` with `apiKeyAuth`; private managed-agent sessions are not returned by the list endpoint.
+
+The local-proxy and direct MCP OAuth flows are planned follow-up phases. Until OAuth lands, static bearer config remains a compatibility bridge and should be treated as a long-lived device credential: revoke the device API key if it is exposed.
+
 ## JWT session cookie
 
 - Algorithm: HS256, signed with `JWT_SECRET`.

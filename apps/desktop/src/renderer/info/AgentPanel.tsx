@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   AgentMsg,
-  AgentSessionRow,
+  ManagedAgentSessionRow,
   AgentSessionSummary,
   AgentStreamEvent,
   AgentSummary,
@@ -182,7 +182,7 @@ function AgentSessions({
   onStartSession: (text: string) => void;
 }): JSX.Element {
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
-  const [pastSessions, setPastSessions] = useState<AgentSessionRow[]>([]);
+  const [pastSessions, setPastSessions] = useState<ManagedAgentSessionRow[]>([]);
   const [input, setInput] = useState("");
 
   useEffect(() => {
@@ -196,7 +196,7 @@ function AgentSessions({
     const refetch = (): void => {
       void window.chatheads
         .listAgentSessionsForAgent(agentId)
-        .then((rows) => setPastSessions(rows.filter((row) => row.ended_at)));
+        .then((rows) => setPastSessions(rows.filter((row) => row.endedAt)));
     };
     refetch();
     const timer = setInterval(refetch, 15_000);
@@ -247,7 +247,7 @@ function AgentSessions({
                 </div>
                 <div className="space-y-1">
                   {pastSessions.map((row) => (
-                    <PastSummary key={row.session_id} row={row} />
+                    <PastSummary key={row.sessionId} row={row} />
                   ))}
                 </div>
               </div>
@@ -329,7 +329,7 @@ function SessionButton({
   );
 }
 
-function PastSummary({ row }: { row: AgentSessionRow }): JSX.Element {
+function PastSummary({ row }: { row: ManagedAgentSessionRow }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <button
@@ -341,7 +341,7 @@ function PastSummary({ row }: { row: AgentSessionRow }): JSX.Element {
         {row.name ?? "Archived session"}
       </div>
       <div className="text-[11px] text-subtle">
-        {new Date(row.last_activity).toLocaleString()}
+        {new Date(row.lastActivity).toLocaleString()}
       </div>
       {open && (
         <div className="mt-2 text-[12px] text-muted whitespace-pre-wrap leading-snug">

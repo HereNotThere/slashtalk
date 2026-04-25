@@ -2,7 +2,32 @@
 
 > Auto-generated from [`apps/server/src/db/schema.ts`](../../apps/server/src/db/schema.ts). Do not edit by hand. Regenerate with `bun run gen:db-schema` from `apps/server/`.
 
-Tables: `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
+Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
+
+## `agent_sessions`
+
+Drizzle export: `agentSessions`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `PgSerial` | pk, not null, has default |
+| `user_login` | `PgText` | not null |
+| `agent_id` | `PgText` | not null |
+| `session_id` | `PgText` | not null |
+| `mode` | `PgText` | not null |
+| `visibility` | `PgText` | not null, has default |
+| `name` | `PgText` | — |
+| `started_at` | `PgTimestamp` | not null |
+| `ended_at` | `PgTimestamp` | — |
+| `last_activity` | `PgTimestamp` | not null, has default |
+| `summary` | `PgText` | — |
+| `summary_model` | `PgText` | — |
+| `summary_ts` | `PgTimestamp` | — |
+
+**Indexes:**
+- `agent_sessions_session_id_key` (unique index) on `(session_id)`
+- `agent_sessions_user_started_idx` (index) on `(user_login, started_at)`
+- `agent_sessions_agent_started_idx` (index) on `(agent_id, started_at)`
 
 ## `api_keys`
 

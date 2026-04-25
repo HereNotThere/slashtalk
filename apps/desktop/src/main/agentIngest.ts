@@ -1,24 +1,24 @@
-// Posts managed-agent session pointers + summaries to the Slashtalk MCP backend.
-// One function, one endpoint (PUT /v1/agent_sessions). Callers gate on agent
+// Posts managed-agent session pointers + summaries to the Slashtalk backend.
+// One function, one endpoint (PUT /v1/managed-agent-sessions). Callers gate on agent
 // visibility before invoking — private agents never reach this module. Soft-
 // fails on network/auth errors so a missing backend never blocks local agent
 // usage.
 
-import type { AgentSessionRow } from "@slashtalk/shared";
+import type { ManagedAgentSessionRow } from "@slashtalk/shared";
 import * as chatheadsAuth from "./chatheadsAuth";
+import * as backend from "./backend";
 import type { LocalAgent } from "./agentStore";
 
 let loggedUnauthorized = false;
 
 const BAKED_MCP_BASE_URL = import.meta.env
   .MAIN_VITE_SLASHTALK_MCP_BASE_URL as string | undefined;
-const DEFAULT_MCP_BASE_URL = "https://chatheads.onrender.com";
 
 function baseUrl(): string {
   return (
     process.env["SLASHTALK_MCP_BASE_URL"] ??
     BAKED_MCP_BASE_URL ??
-    DEFAULT_MCP_BASE_URL
+    backend.getBaseUrl()
   );
 }
 
@@ -26,22 +26,22 @@ function logUnauthorizedOnce(): void {
   if (loggedUnauthorized) return;
   loggedUnauthorized = true;
   console.warn(
-    "[agentIngest] MCP rejected the current apiKey; check that SLASHTALK_MCP_BASE_URL points at the same environment as SLASHTALK_API_URL",
+    "[agentIngest] server rejected the current apiKey; check that SLASHTALK_MCP_BASE_URL points at the same environment as SLASHTALK_API_URL",
   );
 }
 
 export interface UpsertSessionPayload {
-  agent_id: string;
-  session_id: string;
+  agentId: string;
+  sessionId: string;
   mode: "cloud" | "local";
   visibility: "private" | "team";
   name?: string;
-  started_at: string;
-  ended_at?: string;
-  last_activity?: string;
+  startedAt: string;
+  endedAt?: string;
+  lastActivity?: string;
   summary?: string;
-  summary_model?: string;
-  summary_ts?: string;
+  summaryModel?: string;
+  summaryTs?: string;
 }
 
 export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
@@ -53,7 +53,7 @@ export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
     return;
   }
   try {
-    const res = await fetch(`${base}/v1/agent_sessions`, {
+    const res = await fetch(`${base}/v1/managed-agent-sessions`, {
       method: "PUT",
       headers: {
         "content-type": "application/json",
@@ -76,20 +76,20 @@ export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
   }
 }
 
-/** GET /v1/agent_sessions. Empty array on any failure — the info panel
+/** GET /v1/managed-agent-sessions. Empty array on any failure — the info panel
  *  treats this as "no agent activity" which is the right fallback for
  *  network hiccups / unsigned-in state. */
 async function listSessions(params: {
   userLogin?: string;
   agentId?: string;
-}): Promise<AgentSessionRow[]> {
+}): Promise<ManagedAgentSessionRow[]> {
   const token = chatheadsAuth.getToken();
   if (!token) return [];
   const base = baseUrl();
   try {
-    const url = new URL(`${base}/v1/agent_sessions`);
-    if (params.userLogin) url.searchParams.set("user_login", params.userLogin);
-    if (params.agentId) url.searchParams.set("agent_id", params.agentId);
+    const url = new URL(`${base}/v1/managed-agent-sessions`);
+    if (params.userLogin) url.searchParams.set("userLogin", params.userLogin);
+    if (params.agentId) url.searchParams.set("agentId", params.agentId);
     const res = await fetch(url, {
       method: "GET",
       headers: { authorization: `Bearer ${token}` },
@@ -105,7 +105,7 @@ async function listSessions(params: {
       );
       return [];
     }
-    const body = (await res.json()) as { sessions?: AgentSessionRow[] };
+    const body = (await res.json()) as { sessions?: ManagedAgentSessionRow[] };
     return body.sessions ?? [];
   } catch (err) {
     console.warn("[agentIngest] list failed:", err);
@@ -113,11 +113,11 @@ async function listSessions(params: {
   }
 }
 
-export function listForUser(userLogin: string): Promise<AgentSessionRow[]> {
+export function listForUser(userLogin: string): Promise<ManagedAgentSessionRow[]> {
   return listSessions({ userLogin });
 }
 
-export function listForAgent(agentId: string): Promise<AgentSessionRow[]> {
+export function listForAgent(agentId: string): Promise<ManagedAgentSessionRow[]> {
   return listSessions({ agentId });
 }
 
@@ -132,12 +132,12 @@ export function upsertSessionStart(
   if ((agent.visibility ?? "private") !== "team") return;
   if (agent.mode === "local") return; // local-ingest is a later commit
   void upsertSession({
-    agent_id: agent.id,
-    session_id: sessionId,
+    agentId: agent.id,
+    sessionId,
     mode: "cloud",
     visibility: "team",
     name: agent.name,
-    started_at: new Date(startedAtMs).toISOString(),
-    last_activity: new Date().toISOString(),
+    startedAt: new Date(startedAtMs).toISOString(),
+    lastActivity: new Date().toISOString(),
   });
 }

@@ -66,6 +66,7 @@ export interface RecentEvent {
 /** Full session snapshot — shared between server API and desktop client */
 export interface SessionSnapshot {
   id: string;
+  source: EventSource;
   project: string;
   title: string | null;
   description: string | null;
@@ -134,23 +135,23 @@ export interface OrgRepo {
   permission: "pull" | "triage" | "push" | "maintain" | "admin";
 }
 
-/** One managed-agent session stored in the MCP backend's agent_sessions table.
+/** One managed-agent session stored in the server's agent_sessions table.
  *  Private agent sessions never reach the backend, so every row returned here
  *  is visibility='team'. Both server and desktop speak this shape so there is
  *  no skew between the PUT payload and GET response. */
-export interface AgentSessionRow {
-  user_login: string;
-  agent_id: string;
-  session_id: string;
+export interface ManagedAgentSessionRow {
+  userLogin: string;
+  agentId: string;
+  sessionId: string;
   mode: "cloud" | "local";
   visibility: "private" | "team";
   name: string | null;
-  started_at: string;
-  ended_at: string | null;
-  last_activity: string;
+  startedAt: string;
+  endedAt: string | null;
+  lastActivity: string;
   summary: string | null;
-  summary_model: string | null;
-  summary_ts: string | null;
+  summaryModel: string | null;
+  summaryTs: string | null;
 }
 
 /** Ingest response */

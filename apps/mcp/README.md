@@ -1,19 +1,22 @@
 # @slashtalk/mcp
 
-MCP server + managed-agent ingest. Runs as a standalone Bun service that
-sits alongside `@slashtalk/server`. Two audiences talk to it:
+Deprecated standalone MCP server + managed-agent ingest. The default local
+and hosted path has moved to `apps/server`, which now serves root `/mcp` and
+`/v1/agent_sessions` with the Slashtalk device API key. Keep this workspace
+only for legacy migration testing during the transition window.
+
+Historically, two audiences talked to it:
 
 - **Claude Code / Claude Desktop / claude.ai** connect to `/mcp` over
-  MCP's streamable HTTP transport. Registered tools currently: `share_workspace`.
+  MCP's streamable HTTP transport.
 - **The slashtalk desktop app** upserts managed-agent session pointers +
   client-generated summaries to `/v1/agent_sessions` (`PUT` / `GET`).
 
-Also hosts presence (`/presence`, `/presence/stream`) and the chatheads-
-era GitHub OAuth surface used by the desktop loopback flow. Auth will be
-unified with `@slashtalk/server` in a later pass (see
-`chatheads-team-two/merge-into-slashtalk-plan.md`, Phase 6).
+Also hosts presence (`/presence`, `/presence/stream`) and the chatheads-era
+GitHub OAuth surface used by the old desktop loopback flow. New capability
+should land in `apps/server`.
 
-## Local dev
+## Legacy local dev
 
 ```bash
 cd apps/mcp

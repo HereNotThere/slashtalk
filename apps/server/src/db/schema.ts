@@ -239,6 +239,32 @@ export const heartbeats = pgTable("heartbeats", {
   updatedAt: timestamp("updated_at", { withTimezone: true }),
 });
 
+export const agentSessions = pgTable(
+  "agent_sessions",
+  {
+    id: serial("id").primaryKey(),
+    userLogin: text("user_login").notNull(),
+    agentId: text("agent_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    mode: text("mode").notNull(),
+    visibility: text("visibility").notNull().default("private"),
+    name: text("name"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    lastActivity: timestamp("last_activity", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    summary: text("summary"),
+    summaryModel: text("summary_model"),
+    summaryTs: timestamp("summary_ts", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agent_sessions_session_id_key").on(t.sessionId),
+    index("agent_sessions_user_started_idx").on(t.userLogin, t.startedAt),
+    index("agent_sessions_agent_started_idx").on(t.agentId, t.startedAt),
+  ],
+);
+
 // ── Session Insights (LLM-derived) ──────────────────────────
 
 export const sessionInsights = pgTable(

@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { ChatAskResponse, ChatMessage, SpotifyPresence } from "@slashtalk/shared";
 import type {
   AgentHistoryPage,
-  AgentSessionRow,
+  ManagedAgentSessionRow,
   AgentSessionSummary,
   AgentStreamEvent,
   AgentSummary,
@@ -203,7 +203,7 @@ const bridge: ChatHeadsBridge = {
 
   listAgentSessionsForAgent: (agentId) =>
     ipcRenderer.invoke("agentSessions:forAgent", agentId) as Promise<
-      AgentSessionRow[]
+      ManagedAgentSessionRow[]
     >,
 
   getSpotifyForLogin: (login) =>

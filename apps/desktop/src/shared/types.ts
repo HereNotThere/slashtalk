@@ -2,7 +2,7 @@
 // Any IPC contract lives here, so changes are caught by the compiler on both sides.
 
 import type {
-  AgentSessionRow,
+  ManagedAgentSessionRow,
   FeedSessionSnapshot,
   SessionSnapshot,
   SpotifyPresence,
@@ -10,7 +10,7 @@ import type {
 
 // Re-export for convenience: renderers import from this module, not from
 // @slashtalk/shared directly.
-export type { AgentSessionRow, SpotifyPresence };
+export type { ManagedAgentSessionRow, SpotifyPresence };
 
 // Sessions surfaced to the info window: own sessions (SessionSnapshot) and
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
@@ -443,7 +443,7 @@ export interface ChatHeadsBridge {
   // Fetch sessions for a given chat head (self or a peer).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
-  listAgentSessionsForAgent: (agentId: string) => Promise<AgentSessionRow[]>;
+  listAgentSessionsForAgent: (agentId: string) => Promise<ManagedAgentSessionRow[]>;
 
   /** Latest cached Spotify presence for `login` from the main-process poller. */
   getSpotifyForLogin: (login: string) => Promise<SpotifyPresence | null>;

@@ -5,11 +5,25 @@
 // arriving partial PUT can't wipe state a newer one already wrote.
 
 import { z } from "zod";
-import type { AgentSessionRow } from "@slashtalk/shared";
 import * as db from "./db.ts";
 import { log } from "./server.ts";
 
 const LIST_LIMIT = 50;
+
+interface LegacyAgentSessionRow {
+  user_login: string;
+  agent_id: string;
+  session_id: string;
+  mode: "cloud" | "local";
+  visibility: "private" | "team";
+  name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  last_activity: string;
+  summary: string | null;
+  summary_model: string | null;
+  summary_ts: string | null;
+}
 
 const IsoDate = z.string().datetime();
 
@@ -103,7 +117,7 @@ export async function handleList(
 
   const sql = db.sql();
   const rows = agentId
-    ? await sql<AgentSessionRow[]>`
+    ? await sql<LegacyAgentSessionRow[]>`
         select
           user_login, agent_id, session_id, mode, visibility, name,
           started_at, ended_at, last_activity,
@@ -113,7 +127,7 @@ export async function handleList(
         order by started_at desc
         limit ${LIST_LIMIT}
       `
-    : await sql<AgentSessionRow[]>`
+    : await sql<LegacyAgentSessionRow[]>`
         select
           user_login, agent_id, session_id, mode, visibility, name,
           started_at, ended_at, last_activity,

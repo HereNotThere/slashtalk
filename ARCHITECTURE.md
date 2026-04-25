@@ -117,9 +117,9 @@ Background LLM scheduler that produces session insights (title/description, roll
 ### UI / windows
 Seven windows: `main` (config), `overlay` (rail), `info` (peek popover), `chat` (input pill), `response` (full viewer), `statusbar` + `trayPopup`, `dockPlaceholder` (drag ghost). Tailwind v4 via single shared `tailwind.css`.
 
-## MCP service (`apps/mcp/`)
+## MCP surface
 
-Standalone Bun service for MCP tools + managed-agent session ingest. **Being consolidated into `apps/server`** — see [`apps/mcp/AGENTS.md`](apps/mcp/AGENTS.md) and [`apps/mcp/README.md`](apps/mcp/README.md). New capability should land in `apps/server` when possible.
+`apps/server` serves the consolidated MCP HTTP resource at root `/mcp` and owns managed-agent session ingest at `/v1/managed-agent-sessions`. Both paths currently authenticate with the Slashtalk device API key. `apps/mcp/` remains in the repo as the deprecated standalone service for one migration window; new MCP capability should land in `apps/server`.
 
 ## Shared types (`packages/shared/src/`)
 

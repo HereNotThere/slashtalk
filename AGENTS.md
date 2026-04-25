@@ -32,15 +32,16 @@ Bun workspace monorepo. **`bun` is the only supported package manager** ([core-b
 | Prefix | Auth | Used by |
 | --- | --- | --- |
 | `/v1/*` | `apiKeyAuth` (Bearer token, SHA-256 compared) | Desktop + CLI |
+| `/mcp` | `apiKeyAuth` today; MCP OAuth later | MCP HTTP clients |
 | `/auth/*` + `/api/*` | `jwtAuth` (httpOnly `session` cookie or `Cookie:` header) | Browser + desktop cookie |
 | `/ws?token=…` | JWT, else API key | All clients |
 
-Mixing is a rule violation — see [core-beliefs #2](docs/design-docs/core-beliefs.md#2-route-prefix-encodes-auth).
+Mixing is a rule violation. Root `/mcp` is the explicit MCP resource-server exception because MCP protocol versioning happens in the initialize handshake — see [core-beliefs #2](docs/design-docs/core-beliefs.md#2-route-prefix-encodes-auth).
 
 ## Commands from repo root
 
 ```sh
-bun run dev                                    # start server + MCP + desktop for local development
+bun run dev                                    # start server + desktop for local development
 bun install                                    # install all workspaces
 bun --filter @slashtalk/server <script>
 bun --filter @slashtalk/electron <script>

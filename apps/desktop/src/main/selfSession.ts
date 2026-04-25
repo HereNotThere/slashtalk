@@ -13,6 +13,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import * as chatheadsAuth from "./chatheadsAuth";
+import * as backend from "./backend";
 
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -24,15 +25,17 @@ let running = false;
 let unsubAuth: (() => void) | null = null;
 let authRejected = false;
 let loggedUnauthorized = false;
+let loggedConnectFailureUrl: string | null = null;
 
 const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
   | string
   | undefined;
-const DEFAULT_MCP_URL = "https://chatheads.onrender.com/mcp";
 
 function mcpUrl(): string {
   return (
-    process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? DEFAULT_MCP_URL
+    process.env["SLASHTALK_MCP_URL"] ??
+    BAKED_MCP_URL ??
+    `${backend.getBaseUrl()}/mcp`
   );
 }
 
@@ -90,7 +93,14 @@ async function connect(): Promise<void> {
       }
       return;
     }
-    console.error("[selfSession] connect failed:", err);
+    if (loggedConnectFailureUrl !== url) {
+      loggedConnectFailureUrl = url;
+      console.warn("[selfSession] MCP connect failed", {
+        url,
+        message: err instanceof Error ? err.message : String(err),
+        cause: (err as { cause?: { code?: string } } | null)?.cause?.code,
+      });
+    }
     scheduleReconnect();
   }
 }
@@ -126,6 +136,7 @@ export function start(): void {
   unsubAuth = chatheadsAuth.onChange((state) => {
     authRejected = false;
     loggedUnauthorized = false;
+    loggedConnectFailureUrl = null;
     if (state.signedIn) void connect();
     else void disconnect();
   });

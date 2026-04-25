@@ -1973,22 +1973,22 @@ async function finalizeTeamSession(
 ): Promise<void> {
   const endedAt = new Date().toISOString();
   const base = {
-    agent_id: agent.id,
-    session_id: sessionId,
+    agentId: agent.id,
+    sessionId,
     mode: "cloud" as const,
     visibility: "team" as const,
     name: agent.name,
-    started_at: new Date(startedAtMs).toISOString(),
-    ended_at: endedAt,
-    last_activity: endedAt,
+    startedAt: new Date(startedAtMs).toISOString(),
+    endedAt,
+    lastActivity: endedAt,
   };
   try {
     const { summary, model } = await summarize.summarizeCloudSession(sessionId);
     await agentIngest.upsertSession({
       ...base,
       summary,
-      summary_model: model,
-      summary_ts: new Date().toISOString(),
+      summaryModel: model,
+      summaryTs: new Date().toISOString(),
     });
   } catch (err) {
     console.warn("[summarize] failed:", err);

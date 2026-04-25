@@ -36,6 +36,13 @@
       "when": 1777219200002,
       "tag": "0004_confused_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777122627135,
+      "tag": "0005_tricky_rhino",
+      "breakpoints": true
     }
   ]
 }

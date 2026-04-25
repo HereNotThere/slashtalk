@@ -27,6 +27,7 @@ import type {
 import type {
   BackendAuthState,
   BackendUser,
+  GithubAppStatus,
   RepoSummary,
   TeammateSummary,
 } from "../shared/types";
@@ -157,12 +158,7 @@ function awaitLoopbackCallback(): Promise<CallbackParams> {
         "Content-Type": "text/html; charset=utf-8",
         Connection: "close",
       });
-      res.end(
-        `<!doctype html><meta charset="utf-8"><title>Signed in</title>` +
-          `<style>body{font:-apple-system,BlinkMacSystemFont,sans-serif;padding:40px;text-align:center;color:#333}</style>` +
-          `<h2>Signed in to slashtalk</h2><p>You can close this tab and return to the app.</p>` +
-          `<script>setTimeout(()=>window.close(),500)</script>`,
-      );
+      res.end(signedInHtml(login));
       finish();
       resolve({ jwt, refreshToken, login });
     });
@@ -202,6 +198,127 @@ function awaitLoopbackCallback(): Promise<CallbackParams> {
         `${baseUrl()}/auth/github?desktop_port=${addr.port}`,
       );
     });
+  });
+}
+
+function signedInHtml(login: string): string {
+  const escapedLogin = escapeHtml(login);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signed in · Slashtalk</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #101312;
+      --panel: #181d1a;
+      --panel-border: rgba(255, 255, 255, 0.10);
+      --text: #f2f5f3;
+      --muted: #9ba5a0;
+      --accent: #2ecf81;
+      --accent-ink: #07150d;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f8f5;
+        --panel: #ffffff;
+        --panel-border: rgba(17, 24, 39, 0.10);
+        --text: #171a18;
+        --muted: #68716b;
+        --accent-ink: #ffffff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 50% 0%, rgba(46, 207, 129, 0.14), transparent 34%),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(420px, 100%);
+      padding: 28px;
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+      text-align: center;
+    }
+    .mark {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 18px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-size: 27px;
+      font-weight: 800;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .account {
+      margin-top: 18px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(148, 163, 184, 0.10);
+      color: var(--text);
+      font-size: 14px;
+    }
+    .brand {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">✓</div>
+    <h1>Signed in to Slashtalk</h1>
+    <p>You can return to the desktop app.</p>
+    <div class="account">@${escapedLogin}</div>
+    <div class="brand">This tab will close automatically.</div>
+  </main>
+  <script>setTimeout(() => window.close(), 900);</script>
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
   });
 }
 
@@ -282,6 +399,20 @@ export async function signOutEverywhere(): Promise<void> {
   } finally {
     clearLocalSession();
   }
+}
+
+export async function getGithubAppStatus(): Promise<GithubAppStatus> {
+  return jsonFetch<GithubAppStatus>("/api/me/github-app/status", {
+    method: "GET",
+  });
+}
+
+export async function connectGithubApp(): Promise<void> {
+  const status = await getGithubAppStatus();
+  if (!status.configured) {
+    throw new Error("Private repo access is not configured for this Slashtalk server.");
+  }
+  await shell.openExternal(status.connectUrl);
 }
 
 // ---------- HTTP ----------
@@ -466,6 +597,7 @@ export class ClaimRepoError extends Error {
   constructor(
     public readonly kind:
       | "no_access"
+      | "github_app_required"
       | "token_expired"
       | "rate_limited"
       | "invalid_full_name"
@@ -473,10 +605,25 @@ export class ClaimRepoError extends Error {
       | "unknown",
     message: string,
     public readonly status: number,
+    public readonly connectUrl?: string,
   ) {
     super(message);
     this.name = "ClaimRepoError";
   }
+}
+
+type ClaimRepoErrorKind = ClaimRepoError["kind"];
+
+function isClaimRepoErrorKind(value: unknown): value is ClaimRepoErrorKind {
+  return (
+    value === "no_access" ||
+    value === "github_app_required" ||
+    value === "token_expired" ||
+    value === "rate_limited" ||
+    value === "invalid_full_name" ||
+    value === "upstream_unavailable" ||
+    value === "unknown"
+  );
 }
 
 export async function claimRepo(fullName: string): Promise<RepoSummary> {
@@ -492,11 +639,14 @@ export async function claimRepo(fullName: string): Promise<RepoSummary> {
   } catch (err) {
     if (err instanceof HttpError) {
       const parsed = parseClaimError(err.body);
-      const kind = (parsed?.error ?? "unknown") as ClaimRepoError["kind"];
+      const kind = isClaimRepoErrorKind(parsed?.error)
+        ? parsed.error
+        : "unknown";
       throw new ClaimRepoError(
         kind,
         parsed?.message ?? `Claim failed (${err.status})`,
         err.status,
+        parsed?.connectUrl,
       );
     }
     throw err;
@@ -506,6 +656,7 @@ export async function claimRepo(fullName: string): Promise<RepoSummary> {
 interface ClaimErrorBody {
   error?: string;
   message?: string;
+  connectUrl?: string;
 }
 
 function parseClaimError(body: string): ClaimErrorBody | null {

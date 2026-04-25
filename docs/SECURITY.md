@@ -4,10 +4,10 @@ Threat model, secret handling, and credential storage for slashtalk.
 
 ## OAuth scope
 
-`GET /auth/github` requests **`read:user read:org` only** — no `repo` scope. Consequences:
+`GET /auth/github` requests **`read:user read:org` only** — no `repo` scope. Private repo verification is handled by a narrow GitHub App user authorization, not by broad OAuth scopes. Consequences:
 
-- We **cannot** read repo contents server-side. We **can** call `GET /repos/:owner/:name` and `GET /user/orgs` to confirm visibility; both are how the claim-gate and org picker verify access.
-- Repos are **claimed** on demand: the desktop app reads a local clone's `.git/config`, extracts `owner/name`, and POSTs `/api/me/repos { fullName }`. The server verifies possession at claim time by calling `GET /repos/:owner/:name` with the user's stored OAuth token — see § Repo-claim verification.
+- We **cannot** read repo contents server-side. The OAuth App token covers identity/org listing and public repo checks. The GitHub App requests repository **Metadata: read-only** and is used when a private repo claim needs installation-scoped verification.
+- Repos are **claimed** on demand: the desktop app reads a local clone's `.git/config`, extracts `owner/name`, and POSTs `/api/me/repos { fullName }`. The server first verifies with the user's stored OAuth token, then falls back to the GitHub App user token when GitHub returns 404 — see § Repo-claim verification.
 - `repos.github_id` is populated from that verification response. Legacy rows predating the claim-gate may be null; a backfill via [`scripts/reverify-claims.ts`](../apps/server/scripts/reverify-claims.ts) closes that gap.
 - Historical `syncUserRepos` / `POST /api/me/sync-repos` have been removed.
 
@@ -16,8 +16,10 @@ Threat model, secret handling, and credential storage for slashtalk.
 `POST /api/me/repos` is the single gate between a desktop-initiated repo claim and any cross-user data access. Downstream routes (`/api/feed*`, `/api/session/:id`, `/api/session/:id/events`, WS `repo:<id>` subscriptions) all authorize reads via a `user_repos` row, so an unverified claim would let any JWT holder read another user's sessions. The server therefore confirms the caller can see the repo on GitHub before creating the `user_repos` row.
 
 - The handler decrypts `users.github_token` via `fetchUserGithubToken` and calls `GET https://api.github.com/repos/:owner/:name`.
+- If the OAuth App token returns `404` and the user has linked the GitHub App, the handler uses `users.github_app_user_token` to list the user's accessible app installations and installation repositories, then matches the requested `owner/name`. This token is scoped by the GitHub App installation and only requests repository metadata.
 - `200` → accept. Persist `repos.github_id`, canonical `repos.owner`/`repos.name`, and `repos.private` from the response body.
-- `404` → reject with **403 `no_access`**. The caller does not have visibility on GitHub; we must not grant visibility here.
+- OAuth `404` without a linked GitHub App → reject with **403 `no_access`** plus `requiresGithubApp: true` and a user-bound `connectUrl` so the desktop can open `/auth/github-app`. That route starts the GitHub App web authorization flow, verifies the authorizing GitHub account matches the Slashtalk user, and stores the GitHub App user token from the callback. The explicit install/configure fallback is `/auth/github-app?install=1`; this keeps already-installed apps from dead-ending on GitHub's installation settings page without returning an OAuth `code`.
+- No matching repository after GitHub App verification → reject with **403 `no_access`**. The caller does not have visibility on GitHub or the app installation does not include that repo; when the GitHub App path was used, the response includes a user-bound `/auth/github-app?install=1` connect URL as a configure fallback.
 - `401` / `403` from GitHub → reject with **401 `token_expired`**. The desktop surfaces a re-sign-in prompt and calls `backend.signOut()`.
 - Fetch errors or 5xx from GitHub → reject with **502 `upstream_unavailable`**. The desktop shows a retry hint.
 - A per-user **30-claims-per-hour rate limit** guards against brute-force repo-name enumeration with a stolen JWT.
@@ -36,6 +38,7 @@ See also core-beliefs [#11](design-docs/core-beliefs.md#11-identity-is-user-oaut
 | Artifact | At rest | Returned to caller |
 | --- | --- | --- |
 | GitHub OAuth access token | AES-256-GCM ciphertext in `users.github_token`, keyed by `ENCRYPTION_KEY` (format: `hex(iv):hex(ciphertext)` — WebCrypto appends the auth tag to the ciphertext; see `apps/server/src/auth/tokens.ts`) | Never. Used server-side for PR polling only. |
+| GitHub App user access/refresh tokens | AES-256-GCM ciphertext in `users.github_app_user_token` and `users.github_app_refresh_token`, keyed by `ENCRYPTION_KEY` | Never. Used server-side for private repo metadata verification only. |
 | Refresh token | SHA-256 hash in `refresh_tokens.token_hash` | Plaintext exactly once, at issuance, as an httpOnly cookie. |
 | API key | SHA-256 hash in `api_keys.key_hash` | Plaintext exactly once, at `/v1/auth/exchange` response. |
 | Setup token | SHA-256 hash in `setup_tokens.token`… (stored hashed) | Plaintext exactly once, to the desktop app during the loopback-port callback. |
@@ -120,6 +123,7 @@ Required at boot (or `apps/server/src/config.ts` throws):
 
 - `DATABASE_URL`, `REDIS_URL`
 - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+- Optional for private repo claims: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`
 - `JWT_SECRET` (≥32 chars)
 - `ENCRYPTION_KEY` (64-char hex; `openssl rand -hex 32`)
 - `BASE_URL`

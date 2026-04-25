@@ -279,6 +279,13 @@ export interface McpInstallStatus {
   codex: McpTargetState;
 }
 
+export interface GithubAppStatus {
+  configured: boolean;
+  connected: boolean;
+  installUrl: string | null;
+  connectUrl: string;
+}
+
 export type ResponseOpenPayload =
   | { kind: "message"; message: string }
   | { kind: "agent"; agentId: string; sessionId: string };
@@ -477,6 +484,8 @@ export interface ChatHeadsBridge {
     signOut: () => Promise<void>;
     signOutEverywhere: () => Promise<void>;
     onAuthState: (cb: (state: BackendAuthState) => void) => Unsubscribe;
+    getGithubAppStatus: () => Promise<GithubAppStatus>;
+    connectGithubApp: () => Promise<void>;
 
     listTrackedRepos: () => Promise<TrackedRepo[]>;
     /** Opens a folder picker, claims + tracks. Resolves `null` if cancelled;

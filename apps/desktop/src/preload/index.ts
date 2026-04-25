@@ -14,6 +14,7 @@ import type {
   CreateAgentInput,
   DockConfig,
   GithubConnectState,
+  GithubAppStatus,
   GithubPendingConnect,
   InfoSession,
   McpInstallStatus,
@@ -240,6 +241,10 @@ const bridge: ChatHeadsBridge = {
     signOutEverywhere: () =>
       ipcRenderer.invoke("backend:signOutEverywhere") as Promise<void>,
     onAuthState: (cb) => subscribe<BackendAuthState>("backend:authState", cb),
+    getGithubAppStatus: () =>
+      ipcRenderer.invoke("backend:getGithubAppStatus") as Promise<GithubAppStatus>,
+    connectGithubApp: () =>
+      ipcRenderer.invoke("backend:connectGithubApp") as Promise<void>,
 
     listTrackedRepos: () =>
       ipcRenderer.invoke("backend:listTrackedRepos") as Promise<TrackedRepo[]>,

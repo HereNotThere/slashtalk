@@ -24,7 +24,7 @@ Bun workspace monorepo. **`bun` is the only supported package manager** ([core-b
 | --- | --- | --- |
 | [`apps/server`](apps/server) | [AGENTS.md](apps/server/AGENTS.md) | Elysia backend (auth, ingest, sessions, social, analyzers, ws) |
 | [`apps/desktop`](apps/desktop) | [AGENTS.md](apps/desktop/AGENTS.md) | Electron overlay, 7 BrowserWindows |
-| [`apps/mcp`](apps/mcp) | [AGENTS.md](apps/mcp/AGENTS.md) | MCP server (being consolidated into `apps/server`) |
+| [`apps/mcp`](apps/mcp) | [AGENTS.md](apps/mcp/AGENTS.md) | Deprecated standalone MCP service kept for migration-window legacy testing |
 | [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types |
 
 ## Route prefix encodes auth
@@ -32,7 +32,7 @@ Bun workspace monorepo. **`bun` is the only supported package manager** ([core-b
 | Prefix | Auth | Used by |
 | --- | --- | --- |
 | `/v1/*` | `apiKeyAuth` (Bearer token, SHA-256 compared) | Desktop + CLI |
-| `/mcp` | `apiKeyAuth` today; MCP OAuth later | MCP HTTP clients |
+| `/mcp` | MCP OAuth access token; device API key for local proxy / legacy | MCP HTTP clients |
 | `/auth/*` + `/api/*` | `jwtAuth` (httpOnly `session` cookie or `Cookie:` header) | Browser + desktop cookie |
 | `/ws?token=…` | JWT, else API key | All clients |
 

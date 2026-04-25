@@ -40,7 +40,7 @@ src/
 ├── managed-agent-sessions/
 │   └── routes.ts    # PUT/GET /v1/managed-agent-sessions (apiKeyAuth)
 ├── mcp/
-│   ├── routes.ts        # root /mcp Streamable HTTP resource (apiKeyAuth today)
+│   ├── routes.ts        # root /mcp Streamable HTTP resource (MCP OAuth + device API key compatibility)
 │   └── session-pool.ts  # MCP HTTP session lifecycle
 ├── ws/
 │   ├── handler.ts   # WS upgrade, channel subscriptions, ping
@@ -90,7 +90,7 @@ From repo root: `bun --filter @slashtalk/server <script>`.
 ## Auth split
 
 - `/v1/*` → `apiKeyAuth`
-- `/mcp` → explicit MCP resource-server exception, `apiKeyAuth` during consolidation
+- `/mcp` → explicit MCP resource-server exception; accepts MCP OAuth access tokens, plus device API keys for desktop-local proxy and legacy clients
 - `/auth/*` + `/api/*` → `jwtAuth`
 - `/ws?token=…` → JWT, else API key
 

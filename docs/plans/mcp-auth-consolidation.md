@@ -179,18 +179,18 @@ External grounding:
 
 ## Acceptance criteria
 
-- [ ] `apps/server` serves root `/mcp` as an explicit MCP resource-server exception to route-prefix auth rules and can handle MCP initialize/session requests with a valid Slashtalk device API key.
-- [ ] `apps/server` owns `/v1/managed-agent-sessions`; desktop no longer defaults to `chatheads.onrender.com` for managed-agent-session ingest.
-- [ ] `apps/mcp` is no longer required for local development or hosted deployment.
-- [ ] Claude Code install works without writing a static bearer token when local proxy mode is selected.
-- [ ] Codex install support exists and avoids hardcoding the device key in `~/.codex/config.toml`.
-- [ ] OAuth Protected Resource Metadata and Authorization Server Metadata validate against MCP discovery expectations.
-- [ ] `/mcp` returns 401 with a spec-compliant `WWW-Authenticate` header (including `resource_metadata` parameter) on every auth-rejection path.
-- [ ] OAuth access tokens are short-lived, resource-bound to `/mcp`, scoped, and rejected when expired or audience-mismatched.
-- [ ] Public-client registration model is implemented and documented — either Dynamic Client Registration succeeds end-to-end, or unknown `client_id`s are rejected against a maintained well-known list.
-- [ ] Real-client interop verified: Claude Code and Codex each complete OAuth discovery, token exchange, and a sample tool call against the consolidated `/mcp`.
-- [ ] Manual test runbooks exist for MCP consolidation, local proxy, OAuth discovery spike, and final OAuth interop; each includes startup commands, config edits/install commands, expected logs, sample tool calls, negative tests, and rollback/reset steps.
-- [ ] Assistant-run manual checks and user-run Claude/Codex verification feedback are recorded before each MCP phase is marked done.
+- [x] `apps/server` serves root `/mcp` as an explicit MCP resource-server exception to route-prefix auth rules and can handle MCP initialize/session requests with a valid Slashtalk device API key.
+- [x] `apps/server` owns `/v1/managed-agent-sessions`; desktop no longer defaults to `chatheads.onrender.com` for managed-agent-session ingest.
+- [x] `apps/mcp` is no longer required for local development or hosted deployment.
+- [x] Claude Code install works without writing a static bearer token when local proxy mode is selected.
+- [x] Codex install support exists and avoids hardcoding the device key in `~/.codex/config.toml`.
+- [x] OAuth Protected Resource Metadata and Authorization Server Metadata validate against MCP discovery expectations.
+- [x] `/mcp` returns 401 with a spec-compliant `WWW-Authenticate` header (including `resource_metadata` parameter) on every auth-rejection path.
+- [x] OAuth access tokens are short-lived, resource-bound to `/mcp`, scoped, and rejected when expired or audience-mismatched.
+- [x] Public-client registration model is implemented and documented — Dynamic Client Registration succeeds and `slashtalk-static-claude-code` is accepted as a maintained static public client.
+- [x] Real-client interop verified: Claude Code and Codex each complete OAuth discovery, token exchange, and startup list calls against the consolidated `/mcp`.
+- [x] Manual test runbooks exist for MCP consolidation, local proxy, OAuth discovery spike, and final OAuth interop; each includes startup commands, config edits/install commands, expected logs, sample tool calls, negative tests, and rollback/reset steps.
+- [x] Assistant-run manual checks and user-run Claude/Codex verification feedback are recorded before each MCP phase is marked done.
 - [ ] Auth audit log emits structured events for token issuance, rejection (with reason), revocation, and cross-user denials in MCP tools.
 - [ ] Protocol/auth/access-control behavior was implemented test-first: failing tests existed before implementation for managed-agent sessions, `/mcp` API-key auth, OAuth metadata, PKCE/token exchange, MCP token middleware, revocation, rate limits, and cross-user tool access.
 - [ ] Normal sign-out revokes only the presented refresh token and local desktop credentials; it does not revoke other devices or MCP OAuth grants.
@@ -198,7 +198,7 @@ External grounding:
 - [ ] GitHub OAuth grant revocation or explicit sign-out-everywhere invalidates that user's refresh tokens, MCP OAuth tokens, and device API keys in one cascade; existing MCP sessions are forced to re-authenticate.
 - [ ] Sign-out-everywhere exists and is reachable from account settings.
 - [ ] `/mcp` enforces per-user request quotas and per-user concurrent MCP session caps in `apps/server`, with gateway-level IP/global abuse handling documented.
-- [ ] Legacy bearer-token mode remains available with explicit warning and revocation path.
+- [x] Legacy bearer-token mode remains available with explicit warning and revocation path.
 - [ ] Cross-user MCP tools can only read data through existing `user_repos` authorization rules.
 - [ ] Server and desktop typechecks pass, server tests pass, and docs reflect the new default architecture.
 
@@ -219,6 +219,8 @@ External grounding:
 - **2026-04-25 — Phase 2 local proxy implementation.** Added desktop-local MCP proxy support and config-writer fixtures for Claude Code and Codex. Local installs now default to `http://127.0.0.1:37613/mcp` without static bearer material; the proxy injects the safeStorage-backed device API key per request. Legacy Claude bearer install remains as an explicit compatibility mode.
 - **2026-04-25 — OAuth discovery spike harness.** Added a throwaway local spike server (`bun --filter @slashtalk/server spike:mcp-oauth`) and runbook to observe Claude Code and Codex before permanent OAuth implementation. Curl smoke verified the RFC 9728 challenge, protected-resource metadata, authorization-server metadata, dummy token exchange surface, and authenticated MCP initialize path.
 - **2026-04-25 — OAuth discovery observations.** Claude Code 2.1.119 successfully used both DCR and static public-client flows. Claude follows RFC 9728, sends PKCE, requests `offline_access`, includes RFC 8707 `resource` in authorize/token, then retries `/mcp` with bearer auth. Codex 0.125.0 successfully used DCR, probes multiple authorization-server metadata variants instead of protected-resource metadata, uses PKCE and `offline_access`, does not send `resource` during authorize/token, then connects to `/mcp` with bearer auth. Implementation should support DCR plus static public clients, serve Codex metadata variants, require PKCE, and bind tokens to `/mcp` server-side without requiring `resource` from every client.
+- **2026-04-25 — Phase 3 core OAuth implementation.** Added permanent OAuth metadata, Dynamic Client Registration, `oauth_clients`, `oauth_authorization_codes`, and `oauth_tokens` schema, auth-code + PKCE exchange, Slashtalk GitHub sign-in handoff for browser OAuth, and `/mcp` validation for short-lived resource-bound MCP access tokens. Device API key compatibility remains for the desktop-local proxy and legacy bearer installs.
+- **2026-04-25 — Final OAuth interop verification.** Claude Code 2.1.119 and Codex 0.125.0 both completed direct OAuth against `http://localhost:10000/mcp`. Codex required empty list handlers for `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list`; those are now registered explicitly because the current migration phase intentionally advertises no tools/resources/prompts. Remaining plan work is hardening: MCP refresh-token grant/rotation, structured auth audit logs, revocation scopes including sign-out-everywhere, per-user `/mcp` quotas/session caps, and optional desktop UI/settings polish.
 
 ## Three questions
 

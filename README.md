@@ -183,8 +183,10 @@ Notes:
   (Plain `SLASHTALK_*` exported in your shell still works as a runtime
   override.)
 - Keep API and explicit MCP override URLs pointed at the same environment.
-  The desktop device apiKey is minted by the API server and verified by the
-  server-owned `/mcp` route via the shared `api_keys` table.
+  The desktop device apiKey is minted by the API server and accepted by the
+  server-owned `/mcp` route for local-proxy and legacy compatibility. Direct
+  Claude Code and Codex clients can also authenticate to the same `/mcp` route
+  through MCP OAuth.
 - `apps/mcp` is deprecated for the migration window. Only start it when
   testing legacy standalone-MCP behavior.
 - For a hosted-API + local-everything-else dev session, comment the local

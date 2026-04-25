@@ -19,7 +19,7 @@ The load-bearing rules for this codebase. Each is stated with **Why** (why we ca
 **How to apply.**
 - `/v1/*` → `apiKeyAuth` only (desktop/CLI clients).
 - `/auth/*` + `/api/*` → `jwtAuth` only (browser / desktop cookie).
-- `/mcp` → explicit MCP resource-server exception. It uses `apiKeyAuth` during consolidation and gets its own MCP OAuth middleware later; do not bury MCP under `/v1` because MCP protocol versioning is negotiated in the initialize handshake.
+- `/mcp` → explicit MCP resource-server exception. It accepts MCP OAuth access tokens for direct MCP clients and Slashtalk device API keys for the desktop-local proxy / legacy bridge; do not bury MCP under `/v1` because MCP protocol versioning is negotiated in the initialize handshake.
 - WS `/ws` accepts either via `?token=...` (tries JWT first, then API key).
 
 A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, not an overload.

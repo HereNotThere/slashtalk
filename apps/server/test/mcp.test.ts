@@ -610,6 +610,90 @@ describe("MCP OAuth discovery", () => {
     expect(token.status).toBe(400);
     expect(await token.json()).toMatchObject({ error: "invalid_target" });
   });
+
+  it("rotates MCP OAuth refresh tokens and returns a fresh access token", async () => {
+    const issued = await issueMcpOAuthToken();
+    const refreshed = await refreshTokenExchange({
+      clientId: issued.clientId,
+      refreshToken: issued.refreshToken,
+      resource: `${baseUrl}/mcp`,
+    });
+
+    expect(refreshed.status).toBe(200);
+    const body = (await refreshed.json()) as {
+      access_token: string;
+      refresh_token: string;
+      token_type: string;
+      expires_in: number;
+      scope: string;
+      resource: string;
+    };
+    expect(body.access_token).toStartWith("mcp_at_");
+    expect(body.access_token).not.toBe(issued.accessToken);
+    expect(body.refresh_token).toStartWith("mcp_rt_");
+    expect(body.refresh_token).not.toBe(issued.refreshToken);
+    expect(body.token_type).toBe("Bearer");
+    expect(body.expires_in).toBeGreaterThan(0);
+    expect(body.scope).toBe("mcp:read mcp:write offline_access");
+    expect(body.resource).toBe(`${baseUrl}/mcp`);
+
+    const mcp = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${body.access_token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify(initializeRequest()),
+    });
+    expect(mcp.status).toBe(200);
+  });
+
+  it("rejects refresh token replay, expiry, client mismatch, and resource mismatch", async () => {
+    const replay = await issueMcpOAuthToken();
+    const first = await refreshTokenExchange({
+      clientId: replay.clientId,
+      refreshToken: replay.refreshToken,
+    });
+    expect(first.status).toBe(200);
+    const second = await refreshTokenExchange({
+      clientId: replay.clientId,
+      refreshToken: replay.refreshToken,
+    });
+    expect(second.status).toBe(400);
+    expect(await second.json()).toMatchObject({ error: "invalid_grant" });
+
+    const expired = await issueMcpOAuthToken();
+    await db
+      .update(oauthTokens)
+      .set({ refreshExpiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(oauthTokens.refreshTokenHash, await hashToken(expired.refreshToken)));
+    const expiredRefresh = await refreshTokenExchange({
+      clientId: expired.clientId,
+      refreshToken: expired.refreshToken,
+    });
+    expect(expiredRefresh.status).toBe(400);
+    expect(await expiredRefresh.json()).toMatchObject({ error: "invalid_grant" });
+
+    const wrongClient = await issueMcpOAuthToken();
+    const clientMismatch = await refreshTokenExchange({
+      clientId: "unknown-client",
+      refreshToken: wrongClient.refreshToken,
+    });
+    expect(clientMismatch.status).toBe(400);
+    expect(await clientMismatch.json()).toMatchObject({ error: "invalid_grant" });
+
+    const wrongResource = await issueMcpOAuthToken();
+    const resourceMismatch = await refreshTokenExchange({
+      clientId: wrongResource.clientId,
+      refreshToken: wrongResource.refreshToken,
+      resource: `${baseUrl}/not-mcp`,
+    });
+    expect(resourceMismatch.status).toBe(400);
+    expect(await resourceMismatch.json()).toMatchObject({
+      error: "invalid_target",
+    });
+  });
 });
 
 function initializeRequest() {
@@ -747,6 +831,28 @@ async function tokenExchange({
   });
 }
 
+async function refreshTokenExchange({
+  clientId,
+  refreshToken,
+  resource,
+}: {
+  clientId: string;
+  refreshToken: string;
+  resource?: string;
+}) {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: clientId,
+    refresh_token: refreshToken,
+  });
+  if (resource) body.set("resource", resource);
+  return fetch(`${baseUrl}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+}
+
 async function issueMcpOAuthToken({
   scope = "mcp:read mcp:write offline_access",
 }: {
@@ -773,7 +879,11 @@ async function issueMcpOAuthToken({
     access_token: string;
     refresh_token: string;
   };
-  return { accessToken: body.access_token, refreshToken: body.refresh_token };
+  return {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token,
+    clientId,
+  };
 }
 
 async function expectMcpInvalidToken(token: string, reason: string) {

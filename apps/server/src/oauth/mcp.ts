@@ -162,7 +162,10 @@ export function mcpOAuthRoutes(db: Database) {
         };
       }
 
-      const issued = await exchangeAuthorizationCode(db, parsed.value);
+      const issued =
+        parsed.value.grantType === "authorization_code"
+          ? await exchangeAuthorizationCode(db, parsed.value)
+          : await rotateOAuthRefreshToken(db, parsed.value);
       if (!issued.ok) {
         set.status = 400;
         return {
@@ -403,14 +406,23 @@ async function issueAuthorizationCode(
   return code;
 }
 
-interface ParsedTokenRequest {
-  grantType: string;
+interface AuthorizationCodeTokenRequest {
+  grantType: "authorization_code";
   clientId: string;
   redirectUri: string;
   code: string;
   codeVerifier: string;
   resource: string | null;
 }
+
+interface RefreshTokenRequest {
+  grantType: "refresh_token";
+  clientId: string;
+  refreshToken: string;
+  resource: string | null;
+}
+
+type ParsedTokenRequest = AuthorizationCodeTokenRequest | RefreshTokenRequest;
 
 async function parseTokenRequest(
   request: Request,
@@ -434,23 +446,9 @@ async function parseTokenRequest(
   const redirectUri = params.get("redirect_uri") ?? "";
   const code = params.get("code") ?? "";
   const codeVerifier = params.get("code_verifier") ?? "";
+  const refreshToken = params.get("refresh_token") ?? "";
   const resource = params.get("resource");
 
-  if (grantType !== "authorization_code") {
-    return {
-      ok: false,
-      error: "unsupported_grant_type",
-      errorDescription: "grant_type must be authorization_code",
-    };
-  }
-  if (!clientId || !redirectUri || !code || !codeVerifier) {
-    return {
-      ok: false,
-      error: "invalid_request",
-      errorDescription:
-        "client_id, redirect_uri, code, and code_verifier are required",
-    };
-  }
   if (resource && resource !== mcpResourceUrl(origin)) {
     return {
       ok: false,
@@ -459,29 +457,48 @@ async function parseTokenRequest(
     };
   }
 
+  if (grantType === "authorization_code") {
+    if (!clientId || !redirectUri || !code || !codeVerifier) {
+      return {
+        ok: false,
+        error: "invalid_request",
+        errorDescription:
+          "client_id, redirect_uri, code, and code_verifier are required",
+      };
+    }
+
+    return {
+      ok: true,
+      value: { grantType, clientId, redirectUri, code, codeVerifier, resource },
+    };
+  }
+
+  if (grantType === "refresh_token") {
+    if (!clientId || !refreshToken) {
+      return {
+        ok: false,
+        error: "invalid_request",
+        errorDescription: "client_id and refresh_token are required",
+      };
+    }
+
+    return {
+      ok: true,
+      value: { grantType, clientId, refreshToken, resource },
+    };
+  }
+
   return {
-    ok: true,
-    value: { grantType, clientId, redirectUri, code, codeVerifier, resource },
+    ok: false,
+    error: "unsupported_grant_type",
+    errorDescription: "grant_type must be authorization_code or refresh_token",
   };
 }
 
 async function exchangeAuthorizationCode(
   db: Database,
-  request: ParsedTokenRequest,
-): Promise<
-  | {
-      ok: true;
-      value: {
-        access_token: string;
-        token_type: "Bearer";
-        expires_in: number;
-        refresh_token: string;
-        scope: string;
-        resource: string;
-      };
-    }
-  | { ok: false; error: string; errorDescription: string }
-> {
+  request: AuthorizationCodeTokenRequest,
+): Promise<IssueTokenResult> {
   const codeHash = await hashToken(request.code);
   const [code] = await db
     .select()
@@ -513,15 +530,79 @@ async function exchangeAuthorizationCode(
     .set({ usedAt: new Date() })
     .where(eq(oauthAuthorizationCodes.id, code.id));
 
+  return issueOAuthTokens(db, {
+    userId: code.userId,
+    clientId: code.clientId,
+    scope: code.scope,
+    resource: code.resource,
+  });
+}
+
+async function rotateOAuthRefreshToken(
+  db: Database,
+  request: RefreshTokenRequest,
+): Promise<IssueTokenResult> {
+  const refreshTokenHash = await hashToken(request.refreshToken);
+  const [token] = await db
+    .select()
+    .from(oauthTokens)
+    .where(eq(oauthTokens.refreshTokenHash, refreshTokenHash))
+    .limit(1);
+
+  if (!token || token.revokedAt || token.refreshExpiresAt < new Date()) {
+    return invalidGrant("refresh token is invalid or expired");
+  }
+  if (token.clientId !== request.clientId) {
+    return invalidGrant("client_id does not match refresh token");
+  }
+  if (request.resource && token.resource !== request.resource) {
+    return {
+      ok: false,
+      error: "invalid_target",
+      errorDescription: "resource does not match refresh token",
+    };
+  }
+
+  await db
+    .update(oauthTokens)
+    .set({ revokedAt: new Date() })
+    .where(eq(oauthTokens.id, token.id));
+
+  return issueOAuthTokens(db, {
+    userId: token.userId,
+    clientId: token.clientId,
+    scope: token.scope,
+    resource: token.resource,
+  });
+}
+
+type IssueTokenResult =
+  | {
+      ok: true;
+      value: {
+        access_token: string;
+        token_type: "Bearer";
+        expires_in: number;
+        refresh_token: string;
+        scope: string;
+        resource: string;
+      };
+    }
+  | { ok: false; error: string; errorDescription: string };
+
+async function issueOAuthTokens(
+  db: Database,
+  input: { userId: number; clientId: string; scope: string; resource: string },
+): Promise<IssueTokenResult> {
   const accessToken = `mcp_at_${crypto.randomUUID()}`;
   const refreshToken = `mcp_rt_${crypto.randomUUID()}`;
   await db.insert(oauthTokens).values({
-    userId: code.userId,
-    clientId: code.clientId,
+    userId: input.userId,
+    clientId: input.clientId,
     accessTokenHash: await hashToken(accessToken),
     refreshTokenHash: await hashToken(refreshToken),
-    scope: code.scope,
-    resource: code.resource,
+    scope: input.scope,
+    resource: input.resource,
     accessExpiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SECONDS * 1000),
     refreshExpiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
   });
@@ -533,8 +614,8 @@ async function exchangeAuthorizationCode(
       token_type: "Bearer",
       expires_in: ACCESS_TOKEN_TTL_SECONDS,
       refresh_token: refreshToken,
-      scope: code.scope,
-      resource: code.resource,
+      scope: input.scope,
+      resource: input.resource,
     },
   };
 }

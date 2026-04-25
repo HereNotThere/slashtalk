@@ -70,6 +70,7 @@ Revocation scopes:
 - Normal sign-out (`POST /auth/logout`) revokes only the presented refresh token and clears local cookies/desktop credentials.
 - Device revoke (`DELETE /api/me/devices/:id`) deletes that device and its API key; other devices, refresh tokens, and MCP OAuth grants remain valid.
 - Sign out everywhere (`POST /auth/logout-everywhere`) deletes all refresh tokens and device API keys for the signed-in user, revokes all of that user's MCP OAuth access/refresh tokens, and forces existing MCP clients to re-authenticate on their next request.
+- GitHub OAuth grant revocation detected through a GitHub `401` on user-backed repo/org API calls runs the same global cascade.
 
 ## JWT session cookie
 

@@ -3,6 +3,7 @@ import { cors } from "@elysiajs/cors";
 import { openapi } from "@elysiajs/openapi";
 import type { Database } from "./db";
 import { githubAuth, cliAuth } from "./auth/github";
+import { githubAppAuth } from "./auth/github-app";
 import { ingestRoutes } from "./ingest/routes";
 import { socialRoutes } from "./social/routes";
 import { sessionRoutes } from "./sessions/routes";
@@ -41,6 +42,7 @@ export function createApp(db: Database, redis: RedisBridge) {
       return INSTALL_SCRIPT;
     })
     .use(githubAuth(db))
+    .use(githubAppAuth(db))
     .use(cliAuth(db))
     .use(ingestRoutes(db, redis))
     .use(socialRoutes(db))

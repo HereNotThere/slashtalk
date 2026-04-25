@@ -11,6 +11,7 @@ import { db } from "../src/db";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { __clearOrgCaches } from "../src/user/routes";
+import { config } from "../src/config";
 import {
   apiKeys,
   devices,
@@ -20,7 +21,7 @@ import {
   userRepos,
   users,
 } from "../src/db/schema";
-import { hashToken } from "../src/auth/tokens";
+import { encryptGithubToken, hashToken } from "../src/auth/tokens";
 import { resetDatabase, getCookie } from "./helpers";
 
 let redis: RedisBridge;
@@ -32,7 +33,22 @@ let aliceUserId: number;
 
 // Mock state (reset per-test)
 let repoFetchCount = 0;
-let repoResponse: { status: number; body: unknown } = { status: 200, body: {} };
+let appInstallationsFetchCount = 0;
+let appInstallationReposFetchCount = 0;
+type RepoResponse =
+  | { status: number; body: unknown }
+  | ((authorization: string | null) => { status: number; body: unknown });
+let repoResponse: RepoResponse = { status: 200, body: {} };
+let appInstallationsResponses: Array<{
+  status: number;
+  body: unknown;
+  link?: string;
+}> = [{ status: 200, body: { installations: [] } }];
+let appInstallationReposResponses: Array<{
+  status: number;
+  body: unknown;
+  link?: string;
+}> = [{ status: 200, body: { repositories: [] } }];
 
 const ALICE = {
   id: 9101,
@@ -67,10 +83,39 @@ beforeAll(async () => {
     }
     if (url.startsWith("https://api.github.com/repos/")) {
       repoFetchCount += 1;
-      return new Response(JSON.stringify(repoResponse.body ?? {}), {
-        status: repoResponse.status,
+      const response =
+        typeof repoResponse === "function"
+          ? repoResponse(authorizationHeader(init?.headers))
+          : repoResponse;
+      return new Response(JSON.stringify(response.body ?? {}), {
+        status: response.status,
         headers: { "Content-Type": "application/json" },
       });
+    }
+    if (url.startsWith("https://api.github.com/user/installations?")) {
+      appInstallationsFetchCount += 1;
+      const response =
+        appInstallationsResponses[appInstallationsFetchCount - 1] ??
+        appInstallationsResponses[appInstallationsResponses.length - 1]!;
+      return new Response(JSON.stringify(response.body ?? {}), {
+        status: response.status,
+        headers: jsonHeaders(response.link),
+      });
+    }
+    if (
+      url.startsWith("https://api.github.com/user/installations/100/repositories?")
+    ) {
+      appInstallationReposFetchCount += 1;
+      const response =
+        appInstallationReposResponses[appInstallationReposFetchCount - 1] ??
+        appInstallationReposResponses[appInstallationReposResponses.length - 1]!;
+      return new Response(
+        JSON.stringify(response.body ?? {}),
+        {
+          status: response.status,
+          headers: jsonHeaders(response.link),
+        },
+      );
     }
 
     // Pass through (local Elysia server, etc.)
@@ -108,10 +153,24 @@ afterAll(async () => {
 beforeEach(async () => {
   __clearOrgCaches();
   repoFetchCount = 0;
+  appInstallationsFetchCount = 0;
+  appInstallationReposFetchCount = 0;
   repoResponse = { status: 200, body: {} };
+  appInstallationsResponses = [{ status: 200, body: { installations: [] } }];
+  appInstallationReposResponses = [{ status: 200, body: { repositories: [] } }];
   // Drop any user_repos / repos rows from prior cases so counts are exact.
   await db.delete(userRepos).where(eq(userRepos.userId, aliceUserId));
   await db.delete(repos);
+  await db
+    .update(users)
+    .set({
+      githubAppUserToken: null,
+      githubAppRefreshToken: null,
+      githubAppTokenExpiresAt: null,
+      githubAppRefreshTokenExpiresAt: null,
+      githubAppConnectedAt: null,
+    })
+    .where(eq(users.id, aliceUserId));
 });
 
 async function claim(fullName: string): Promise<Response> {
@@ -146,6 +205,36 @@ async function expectError(
   expect(body.error).toBe(kind);
 }
 
+function authorizationHeader(headers: HeadersInit | undefined): string | null {
+  if (!headers) return null;
+  if (headers instanceof Headers) return headers.get("authorization");
+  if (Array.isArray(headers)) {
+    const found = headers.find(([key]) => key.toLowerCase() === "authorization");
+    return found?.[1] ?? null;
+  }
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === "authorization") return value;
+  }
+  return null;
+}
+
+function jsonHeaders(link?: string): Record<string, string> {
+  return link
+    ? { "Content-Type": "application/json", Link: link }
+    : { "Content-Type": "application/json" };
+}
+
+async function storeGitHubAppToken(token: string): Promise<void> {
+  await db
+    .update(users)
+    .set({
+      githubAppUserToken: await encryptGithubToken(token, config.encryptionKey),
+      githubAppTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      githubAppConnectedAt: new Date(),
+    })
+    .where(eq(users.id, aliceUserId));
+}
+
 describe("POST /api/me/repos — claim gate", () => {
   it("accepts a claim when GitHub returns 200 and persists canonical metadata", async () => {
     repoResponse = { status: 200, body: repoOkBody("Acme/Alpha", 12345, true) };
@@ -178,10 +267,10 @@ describe("POST /api/me/repos — claim gate", () => {
     expect(repoFetchCount).toBe(1);
   });
 
-  it("rejects with 403 no_access when GitHub returns 404 — no user_repos row created", async () => {
+  it("asks the user to connect the GitHub App when OAuth cannot see the repo", async () => {
     repoResponse = { status: 404, body: { message: "Not Found" } };
 
-    await expectError(await claim("acme/secret"), 403, "no_access");
+    await expectError(await claim("acme/secret"), 403, "github_app_required");
 
     const rows = await db
       .select()
@@ -189,6 +278,113 @@ describe("POST /api/me/repos — claim gate", () => {
       .where(eq(userRepos.userId, aliceUserId));
     expect(rows.length).toBe(0);
     expect(repoFetchCount).toBe(1);
+  });
+
+  it("accepts a private repo claim with the GitHub App user token when OAuth cannot see it", async () => {
+    await storeGitHubAppToken("ghu_app_alice");
+    repoResponse = { status: 404, body: { message: "Not Found" } };
+    appInstallationsResponses = [
+      {
+        status: 200,
+        body: {
+          installations: [
+            { id: 100, app_slug: config.githubAppSlug, suspended_at: null },
+          ],
+        },
+      },
+    ];
+    appInstallationReposResponses = [
+      {
+        status: 200,
+        body: { repositories: [repoOkBody("Acme/Secret", 333, true)] },
+      },
+    ];
+
+    const res = await claim("acme/secret");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { fullName: string; private: boolean };
+    expect(body.fullName).toBe("acme/secret");
+    expect(body.private).toBe(true);
+    expect(repoFetchCount).toBe(1);
+    expect(appInstallationsFetchCount).toBe(1);
+    expect(appInstallationReposFetchCount).toBe(1);
+  });
+
+  it("rejects no_access when the connected GitHub App token also cannot see the repo", async () => {
+    await storeGitHubAppToken("ghu_app_alice");
+    repoResponse = { status: 404, body: { message: "Not Found" } };
+    appInstallationsResponses = [
+      {
+        status: 200,
+        body: {
+          installations: [
+            { id: 100, app_slug: config.githubAppSlug, suspended_at: null },
+          ],
+        },
+      },
+    ];
+    appInstallationReposResponses = [
+      {
+        status: 200,
+        body: { repositories: [repoOkBody("Acme/Other", 444, true)] },
+      },
+    ];
+
+    const res = await claim("acme/secret");
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as {
+      error: string;
+      message: string;
+      connectUrl: string;
+    };
+    expect(body.error).toBe("no_access");
+    expect(body.message).toContain("GitHub App");
+    expect(body.connectUrl).toBe(
+      "http://localhost:10000/auth/github-app?install=1",
+    );
+    expect(repoFetchCount).toBe(1);
+    expect(appInstallationsFetchCount).toBe(1);
+    expect(appInstallationReposFetchCount).toBe(1);
+  });
+
+  it("follows GitHub App pagination when verifying installed repositories", async () => {
+    await storeGitHubAppToken("ghu_app_alice");
+    repoResponse = { status: 404, body: { message: "Not Found" } };
+    appInstallationsResponses = [
+      {
+        status: 200,
+        body: { installations: [] },
+        link: '<https://api.github.com/user/installations?per_page=100&page=2>; rel="next"',
+      },
+      {
+        status: 200,
+        body: {
+          installations: [
+            { id: 100, app_slug: config.githubAppSlug, suspended_at: null },
+          ],
+        },
+      },
+    ];
+    appInstallationReposResponses = [
+      {
+        status: 200,
+        body: { repositories: [] },
+        link: '<https://api.github.com/user/installations/100/repositories?per_page=100&page=2>; rel="next"',
+      },
+      {
+        status: 200,
+        body: { repositories: [repoOkBody("Acme/Paged", 555, true)] },
+      },
+    ];
+
+    const res = await claim("acme/paged");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { fullName: string; private: boolean };
+    expect(body.fullName).toBe("acme/paged");
+    expect(body.private).toBe(true);
+    expect(repoFetchCount).toBe(1);
+    expect(appInstallationsFetchCount).toBe(2);
+    expect(appInstallationReposFetchCount).toBe(2);
   });
 
   it("rejects with 401 token_expired when GitHub returns 401", async () => {

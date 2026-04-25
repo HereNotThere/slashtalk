@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import type { BackendAuthState, TrackedRepo } from "../../shared/types";
+import type {
+  BackendAuthState,
+  GithubAppStatus,
+  TrackedRepo,
+} from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 
 export function App(): JSX.Element {
@@ -54,8 +58,15 @@ export function App(): JSX.Element {
 
   const auth = useBackendAuth();
   const repos = useTrackedRepos();
+  const [githubAppRefreshKey, setGithubAppRefreshKey] = useState(0);
+  const [githubAppWatch, setGithubAppWatch] = useState(false);
+  const githubApp = useGithubAppStatus(
+    auth.signedIn,
+    githubAppRefreshKey,
+    githubAppWatch,
+  );
   const selected = useSelection();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<null | "add" | "repoAccess">(null);
   const [addError, setAddError] = useState<string | null>(null);
 
   const onSpotifyShareChange = (v: boolean): void => {
@@ -67,6 +78,16 @@ export function App(): JSX.Element {
     setSessionOnly(v);
     void window.chatheads.rail.setSessionOnlyMode(v);
   };
+
+  useEffect(() => {
+    if (!auth.signedIn || githubApp?.connected) setGithubAppWatch(false);
+  }, [auth.signedIn, githubApp?.connected]);
+
+  useEffect(() => {
+    if (!githubAppWatch) return;
+    const timer = setTimeout(() => setGithubAppWatch(false), 121_000);
+    return () => clearTimeout(timer);
+  }, [githubAppWatch]);
 
   if (!auth.signedIn) {
     return (
@@ -99,21 +120,45 @@ export function App(): JSX.Element {
 
   async function onAdd(): Promise<void> {
     if (busy) return;
-    setBusy(true);
+    setBusy("add");
     setAddError(null);
     try {
       await window.chatheads.backend.addLocalRepo();
     } catch (err) {
       setAddError((err as Error).message);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
+
+  async function onConnectRepoAccess(): Promise<void> {
+    if (busy) return;
+    setBusy("repoAccess");
+    setAddError(null);
+    try {
+      await window.chatheads.backend.connectGithubApp();
+      setGithubAppWatch(true);
+    } catch (err) {
+      setAddError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const needsRepoAccess = githubApp?.configured && !githubApp.connected;
 
   return (
     <Shell>
       <Header />
       <Divider />
+      {needsRepoAccess ? (
+        <RepoAccessPrompt
+          busy={busy === "repoAccess"}
+          watching={githubAppWatch}
+          onConnect={onConnectRepoAccess}
+          onRefresh={() => setGithubAppRefreshKey((value) => value + 1)}
+        />
+      ) : null}
       <Body
         repos={repos}
         selected={selected}
@@ -122,7 +167,12 @@ export function App(): JSX.Element {
         }
       />
       {addError ? <ErrorNote message={addError} /> : null}
-      <AddButton busy={busy} onClick={onAdd} />
+      <AddButton
+        busy={busy === "add" || busy === "repoAccess"}
+        watchingRepoAccess={githubAppWatch}
+        needsRepoAccess={needsRepoAccess === true}
+        onClick={needsRepoAccess ? onConnectRepoAccess : onAdd}
+      />
       <Divider />
       <PinRow
         pinned={pinned}
@@ -294,16 +344,20 @@ function Checkbox({ checked }: { checked: boolean }): JSX.Element {
 
 function AddButton({
   busy,
+  watchingRepoAccess,
+  needsRepoAccess,
   onClick,
 }: {
   busy: boolean;
+  watchingRepoAccess: boolean;
+  needsRepoAccess: boolean;
   onClick: () => void;
 }): JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={busy}
+      disabled={busy || watchingRepoAccess}
       className="
         w-full px-2.5 py-1.5 rounded-md
         bg-surface-strong border-none text-fg cursor-pointer [font:inherit]
@@ -312,12 +366,90 @@ function AddButton({
         disabled:opacity-[0.5] disabled:cursor-default
       "
     >
-      {busy ? "Choosing folder…" : "+ Add local repo"}
+      {needsRepoAccess
+        ? busy
+          ? "Opening GitHub..."
+          : watchingRepoAccess
+            ? "Waiting for GitHub..."
+          : "Connect repo access"
+        : busy
+          ? "Choosing folder..."
+          : "+ Add local repo"}
     </button>
   );
 }
 
+function RepoAccessPrompt({
+  busy,
+  watching,
+  onConnect,
+  onRefresh,
+}: {
+  busy: boolean;
+  watching: boolean;
+  onConnect: () => void;
+  onRefresh: () => void;
+}): JSX.Element {
+  return (
+    <div
+      className="
+        px-2.5 py-2 rounded-md border border-fg/10
+        bg-surface-strong text-[12px] text-fg
+      "
+    >
+      <div className="font-medium mb-0.5">Finish GitHub setup</div>
+      <div className="text-fg/65 leading-snug">
+        Connect repo access once, then choose your local repo folder.
+      </div>
+      <div className="flex gap-1.5 mt-2">
+        <button
+          type="button"
+          onClick={onConnect}
+          disabled={busy}
+          className="
+            px-2 py-1 rounded bg-surface-strong-hover border-none
+            text-fg cursor-pointer [font:inherit]
+            disabled:opacity-50 disabled:cursor-wait
+          "
+        >
+          {busy ? "Opening..." : watching ? "Open again" : "Open GitHub"}
+        </button>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={busy}
+          className="
+            px-2 py-1 rounded bg-transparent border border-fg/10
+            text-fg/70 cursor-pointer [font:inherit] hover:text-fg
+            disabled:opacity-50 disabled:cursor-wait
+          "
+        >
+          Refresh
+        </button>
+      </div>
+      {watching ? (
+        <div className="text-fg/55 mt-2">Waiting for GitHub approval...</div>
+      ) : null}
+    </div>
+  );
+}
+
 function ErrorNote({ message }: { message: string }): JSX.Element {
+  const isGithubApp = message.includes("Slashtalk GitHub App");
+  if (isGithubApp) {
+    return (
+      <div
+        className="
+          px-2.5 py-2 rounded-md border border-fg/10
+          bg-surface-strong text-[12px] text-fg
+        "
+      >
+        <div className="font-medium mb-0.5">Private repo access needed</div>
+        <div className="text-fg/65">{message}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="px-1.5 py-1 text-[12px] text-red-500/90">{message}</div>
   );
@@ -473,6 +605,63 @@ function useTrackedRepos(): TrackedRepo[] {
     return window.chatheads.backend.onTrackedReposChange(setRepos);
   }, []);
   return repos;
+}
+
+function useGithubAppStatus(
+  signedIn: boolean,
+  refreshKey: number,
+  watching: boolean,
+): GithubAppStatus | null {
+  const [status, setStatus] = useState<GithubAppStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!signedIn) {
+      setStatus(null);
+      return () => {
+        alive = false;
+      };
+    }
+    void window.chatheads.backend
+      .getGithubAppStatus()
+      .then((next) => {
+        if (alive) setStatus(next);
+      })
+      .catch(() => {
+        if (alive) setStatus(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [signedIn, refreshKey]);
+
+  useEffect(() => {
+    if (!signedIn || !watching) return;
+
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+
+    const poll = async (): Promise<void> => {
+      attempts += 1;
+      try {
+        const next = await window.chatheads.backend.getGithubAppStatus();
+        if (!alive) return;
+        setStatus(next);
+        if (next.connected) return;
+      } catch {
+        if (!alive) return;
+      }
+
+      if (attempts < 60) timer = setTimeout(() => void poll(), 2_000);
+    };
+
+    timer = setTimeout(() => void poll(), 1_000);
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [signedIn, watching]);
+  return status;
 }
 
 function useSelection(): Set<number> {

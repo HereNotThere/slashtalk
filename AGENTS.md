@@ -40,6 +40,7 @@ Mixing is a rule violation — see [core-beliefs #2](docs/design-docs/core-belie
 ## Commands from repo root
 
 ```sh
+bun run dev                                    # start server + MCP + desktop for local development
 bun install                                    # install all workspaces
 bun --filter @slashtalk/server <script>
 bun --filter @slashtalk/electron <script>

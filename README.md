@@ -155,7 +155,13 @@ MAIN_VITE_SLASHTALK_MCP_URL=http://localhost:3000/mcp
 MAIN_VITE_SLASHTALK_MCP_BASE_URL=http://localhost:3000
 ```
 
-Then run both backends and the desktop:
+Then start both backends and the desktop from the repo root:
+
+```sh
+bun run dev
+```
+
+Or run each process separately:
 
 ```sh
 # Terminal 1: slashtalk API server (port 10000)

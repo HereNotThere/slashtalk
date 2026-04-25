@@ -186,8 +186,52 @@ describe("root /mcp", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
     });
     expect(listTools.status).toBe(200);
-    const listToolsBody = await listTools.text();
-    expect(listToolsBody).not.toContain("share_workspace");
+    const listToolsBody = await mcpJson(listTools);
+    expect(listToolsBody).toMatchObject({
+      jsonrpc: "2.0",
+      id: 2,
+      result: { tools: [] },
+    });
+    expect(listToolsBody.error).toBeUndefined();
+
+    const listResources = await mcpSessionRequest({
+      apiKey: aliceApiKey,
+      sessionId: sessionId!,
+      id: 20,
+      method: "resources/list",
+    });
+    expect(listResources).toMatchObject({
+      jsonrpc: "2.0",
+      id: 20,
+      result: { resources: [] },
+    });
+    expect(listResources.error).toBeUndefined();
+
+    const listResourceTemplates = await mcpSessionRequest({
+      apiKey: aliceApiKey,
+      sessionId: sessionId!,
+      id: 21,
+      method: "resources/templates/list",
+    });
+    expect(listResourceTemplates).toMatchObject({
+      jsonrpc: "2.0",
+      id: 21,
+      result: { resourceTemplates: [] },
+    });
+    expect(listResourceTemplates.error).toBeUndefined();
+
+    const listPrompts = await mcpSessionRequest({
+      apiKey: aliceApiKey,
+      sessionId: sessionId!,
+      id: 22,
+      method: "prompts/list",
+    });
+    expect(listPrompts).toMatchObject({
+      jsonrpc: "2.0",
+      id: 22,
+      result: { prompts: [] },
+    });
+    expect(listPrompts.error).toBeUndefined();
 
     const stale = await fetch(`${baseUrl}/mcp`, {
       method: "POST",
@@ -579,6 +623,43 @@ function initializeRequest() {
       clientInfo: { name: "server-test", version: "0.0.0" },
     },
   };
+}
+
+async function mcpSessionRequest({
+  apiKey,
+  sessionId,
+  id,
+  method,
+}: {
+  apiKey: string;
+  sessionId: string;
+  id: number;
+  method: string;
+}) {
+  const res = await fetch(`${baseUrl}/mcp`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      "mcp-session-id": sessionId,
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id, method }),
+  });
+  expect(res.status).toBe(200);
+  return mcpJson(res);
+}
+
+async function mcpJson(res: Response) {
+  const text = await res.text();
+  if (text.startsWith("event:")) {
+    const dataLine = text
+      .split("\n")
+      .find((line) => line.startsWith("data: "));
+    expect(dataLine).toBeTruthy();
+    return JSON.parse(dataLine!.slice("data: ".length));
+  }
+  return JSON.parse(text);
 }
 
 async function registerDynamicOAuthClient() {

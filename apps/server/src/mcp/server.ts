@@ -6,7 +6,24 @@ export type ServerOptions = {
 };
 
 export function createMcpServer(options: ServerOptions): McpServer {
-  return new McpServer({ name: options.name, version: options.version });
+  const server = new McpServer({ name: options.name, version: options.version });
+  installEmptyListHandlers(server);
+  return server;
+}
+
+function installEmptyListHandlers(server: McpServer): void {
+  // The SDK only installs list handlers after something registers that
+  // capability. During this migration phase the server intentionally exposes no
+  // tools/resources/prompts, but clients such as Codex still probe the list
+  // methods during startup. Keep those probes successful with empty lists.
+  const internal = server as unknown as {
+    setToolRequestHandlers: () => void;
+    setResourceRequestHandlers: () => void;
+    setPromptRequestHandlers: () => void;
+  };
+  internal.setToolRequestHandlers();
+  internal.setResourceRequestHandlers();
+  internal.setPromptRequestHandlers();
 }
 
 type LogLevel = "debug" | "info" | "warn" | "error";

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { Elysia } from "elysia";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
+import { config } from "../src/config";
 import { db } from "../src/db";
 import { oauthAuthorizationCodes, oauthTokens } from "../src/db/schema";
 import { hashToken } from "../src/auth/tokens";
@@ -350,6 +351,37 @@ describe("MCP OAuth discovery", () => {
     };
     expect(body.resource).toBe(`${baseUrl}/mcp`);
     expect(body.authorization_servers).toEqual([baseUrl]);
+  });
+
+  it("uses configured base URL for non-loopback OAuth metadata origins", async () => {
+    const configuredOrigin = new URL(config.baseUrl).origin;
+    const res = await app.handle(
+      new Request(
+        "http://internal-render/.well-known/oauth-protected-resource/mcp",
+      ),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      resource: string;
+      authorization_servers: string[];
+    };
+    expect(body.resource).toBe(`${configuredOrigin}/mcp`);
+    expect(body.authorization_servers).toEqual([configuredOrigin]);
+  });
+
+  it("uses configured base URL for non-loopback MCP auth challenges", async () => {
+    const configuredOrigin = new URL(config.baseUrl).origin;
+    const res = await app.handle(
+      new Request("http://internal-render/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(
+      `Bearer resource_metadata="${configuredOrigin}/.well-known/oauth-protected-resource"`,
+    );
   });
 
   for (const path of [

@@ -5,7 +5,7 @@ import { db } from "../db";
 import { users, apiKeys, devices, oauthTokens } from "../db/schema";
 import { authAudit } from "../auth/audit";
 import { hashToken } from "../auth/tokens";
-import { mcpResourceUrl, mcpWwwAuthenticate } from "../oauth/mcp";
+import { mcpOrigin, mcpResourceUrl, mcpWwwAuthenticate } from "../oauth/mcp";
 import { McpPresenceStore } from "./presence";
 import { McpSessionPool } from "./session-pool";
 
@@ -40,7 +40,7 @@ export const mcpRoutes = (options: McpRouteOptions = {}) => {
         });
         set.status = 401;
         set.headers["www-authenticate"] = mcpWwwAuthenticate(
-          new URL(request.url).origin,
+          mcpOrigin(request),
           auth.reason
             ? { code: "invalid_token", description: auth.reason }
             : undefined,
@@ -153,7 +153,7 @@ async function authenticateMcpRequest(request: Request): Promise<McpAuthResult> 
     return { ok: false, reason: "expired" };
   }
 
-  const expectedResource = mcpResourceUrl(new URL(request.url).origin);
+  const expectedResource = mcpResourceUrl(mcpOrigin(request));
   if (oauthToken.resource !== expectedResource) {
     return { ok: false, reason: "resource mismatch" };
   }

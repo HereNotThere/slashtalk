@@ -147,7 +147,8 @@ Rules: [core-beliefs #4](../../docs/design-docs/core-beliefs.md#4-drizzle-migrat
 ```sh
 bun run typecheck
 bun run test
+bun run lint
 bun run gen:db-schema:check   # if you touched schema.ts
 ```
 
-All must pass.
+All must pass. `bun run lint` warns on `console.*` (sets up for pino, item 24 in `tech-debt-tracker.md`); `any` and unused vars are warnings rather than errors so existing framework escape hatches don't break the gate.

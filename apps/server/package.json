@@ -10,6 +10,7 @@
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "lint": "eslint .",
     "spike:mcp-oauth": "bun run scripts/mcp-oauth-discovery-spike.ts",
     "gen:db-schema": "bun run scripts/gen-db-schema.ts",
     "gen:db-schema:check": "bun run scripts/gen-db-schema.ts -- --check"
@@ -30,8 +31,12 @@
     "zod": "^4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.13.0",
     "@types/bun": "^1.2.0",
     "drizzle-kit": "^0.31.0",
-    "typescript": "^5.8.0"
+    "eslint": "^9.13.0",
+    "globals": "^15.11.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.10.0"
   }
 }

@@ -97,7 +97,7 @@ Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026
 
 ### Rung 2 — Enforcement (~1 day)
 
-**22. `apps/server/eslint.config.js`.** Mirror [`apps/desktop/eslint.config.js`](../../apps/desktop/eslint.config.js). Minimum rules: Elysia plugin-name uniqueness, layering (no cross-app imports), ban `console.*` once pino lands. Closes the desktop-vs-server lint asymmetry. **See item 39 first.**
+**22. ~~`apps/server/eslint.config.js`.~~** ✅ Shipped 2026-04-25. Mirrors `apps/desktop/eslint.config.js` (`@eslint/js` recommended + `tseslint` recommended) with server-specific rules: `no-console` (warn — sets up for pino in item 24), `no-empty` with `allowEmptyCatch` (codifies the soft-fail listener-isolation pattern, [core-beliefs #7](../design-docs/core-beliefs.md#7-redis-publishing-is-soft-fail)-adjacent), `@typescript-eslint/no-explicit-any` (warn — surfaces new uses without breaking existing Elysia/WS framework escapes), `@typescript-eslint/no-unused-vars` (warn with `^_` opt-out). Tests + scripts allow `console.*`. Initial run: 0 errors, 39 warnings — all expected baseline that subsequent items (24 pino, 27 invariant tests) will reduce. Deeper invariant rules (Elysia plugin-name uniqueness, layering, `await redis.publish(...)` outside `redis-bridge.ts`) deferred to Tier 3 / `scripts/check-invariants.ts` (items 18–20) where AST-level checks fit better than ESLint pattern matching.
 
 **23. `lefthook.yml` for pre-commit hooks.** Run `bun run typecheck && bun run test && bun run gen:db-schema:check` on pre-commit. 1:1 with the existing manual checklists in [`AGENTS.md`](../../AGENTS.md) and [`CLAUDE.md`](../../CLAUDE.md); no new behavior.
 
@@ -121,9 +121,9 @@ Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026
 
 **30. Runbooks for known failure modes.** Analyzer crash recovery, ingest backlog drain, schema migration rollback, etc. None exist today.
 
-### Open question — decide before item 22
+### Resolved questions
 
-**39. Server-vs-desktop ESLint asymmetry — intentional or sequencing artifact?** [`apps/desktop`](../../apps/desktop/eslint.config.js) has ESLint; [`apps/server`](../../apps/server/) does not, despite server being the security-critical path. If intentional culture choice (human review preference), record it in `core-beliefs.md` and close item 22 as won't-do. If sequencing artifact, ship item 22.
+**39. ~~Server-vs-desktop ESLint asymmetry — intentional or sequencing artifact?~~** ✅ Resolved 2026-04-25 as **sequencing artifact**. Evidence: `apps/desktop/eslint.config.js` was added in commit `1bc4ae9` (the initial desktop-app commit) as Vite/React boilerplate scaffolding, not a deliberate quality investment; no `apps/server/.eslintrc*` or `eslint.config*` ever existed in git history; no prior consideration-and-rejection. Closed by shipping item 22.
 
 ---
 
@@ -135,6 +135,6 @@ Three days moves the repo from ~60% to ~90% harness-ready by the audit's checkli
 | --- | --- | --- |
 | 1 | 24 (pino) + 25 (Sentry) | pending |
 | 2 am | 23 (lefthook) | pending |
-| 2 pm | 22 (server lint, after item 39 decision) | pending |
+| 2 pm | 22 (server lint, after item 39 decision) | ✅ shipped 2026-04-25 (item 39 resolved as sequencing artifact) |
 | 3 am | 26 (skills) | pending |
 | 3 pm | 21 (Legibility batch) | ✅ shipped 2026-04-25 (went beyond audit scope: also landed CONVENTIONS.md + templates/) |

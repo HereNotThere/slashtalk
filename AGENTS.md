@@ -61,7 +61,7 @@ In each touched workspace:
 ```sh
 bun run typecheck
 bun run test     # apps/server + where applicable
-bun run lint     # apps/desktop today; apps/server forthcoming (Tier 2)
+bun run lint     # apps/server + apps/desktop
 ```
 
 If you touched `apps/server/src/db/schema.ts`, also run `bun run gen:db-schema` to refresh [`docs/generated/db-schema.md`](docs/generated/db-schema.md).

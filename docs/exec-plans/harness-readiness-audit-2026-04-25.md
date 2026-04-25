@@ -205,3 +205,5 @@ The team already operates with the harness-engineering frame. `core-beliefs.md`,
 Before acting on this audit:
 
 - **Is the asymmetry intentional?** Desktop has ESLint, server doesn't. If this is a culture/preference choice ("we trust server review more than desktop"), the audit should reflect that. If it's a sequencing artifact (server lint was Tier 2 backlog), then it's a normal next step.
+
+> **Resolved 2026-04-25:** sequencing artifact. `apps/desktop/eslint.config.js` was added as Vite/React boilerplate in the initial desktop-app commit (`1bc4ae9`); `apps/server` never had an ESLint config in git history. Closed by shipping item 22 — `apps/server/eslint.config.js` mirrors desktop's tseslint baseline with server-specific rules (`no-console` warn for the pino setup, `allowEmptyCatch` for the soft-fail pattern, `no-explicit-any` warn rather than error so existing Elysia/WS framework escapes don't break the gate). See [`tech-debt-tracker.md` item 22](./tech-debt-tracker.md).

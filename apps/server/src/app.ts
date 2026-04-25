@@ -11,6 +11,7 @@ import { chatRoutes } from "./chat/routes";
 import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
 import { managedAgentSessionRoutes } from "./managed-agent-sessions/routes";
 import { mcpRoutes } from "./mcp/routes";
+import { mcpOAuthRoutes } from "./oauth/mcp";
 import { wsHandler } from "./ws/handler";
 import type { RedisBridge } from "./ws/redis-bridge";
 
@@ -48,6 +49,7 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(deviceReposRoutes(db))
     .use(chatRoutes(db))
     .use(managedAgentSessionRoutes(db))
+    .use(mcpOAuthRoutes(db))
     .use(mcpRoutes())
     .use(spotifyPresenceRoutes(db, redis))
     .use(presenceReadRoutes(db, redis))

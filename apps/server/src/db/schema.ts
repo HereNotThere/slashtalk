@@ -78,6 +78,27 @@ export const setupTokens = pgTable("setup_tokens", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+export const oauthClients = pgTable(
+  "oauth_clients",
+  {
+    id: serial("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    clientKind: text("client_kind").notNull(),
+    clientName: text("client_name").notNull(),
+    redirectUris: jsonb("redirect_uris").$type<string[]>().notNull(),
+    grantTypes: jsonb("grant_types").$type<string[]>().notNull(),
+    responseTypes: jsonb("response_types").$type<string[]>().notNull(),
+    tokenEndpointAuthMethod: text("token_endpoint_auth_method").notNull(),
+    scope: text("scope").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("oauth_clients_client_id_key").on(t.clientId),
+    index("oauth_clients_kind_idx").on(t.clientKind),
+  ],
+);
+
 // ── Repos & Social Graph ────────────────────────────────────
 
 export const repos = pgTable("repos", {

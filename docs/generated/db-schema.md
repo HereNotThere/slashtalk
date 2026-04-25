@@ -2,7 +2,7 @@
 
 > Auto-generated from [`apps/server/src/db/schema.ts`](../../apps/server/src/db/schema.ts). Do not edit by hand. Regenerate with `bun run gen:db-schema` from `apps/server/`.
 
-Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
+Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `oauth_clients`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
 
 ## `agent_sessions`
 
@@ -123,6 +123,28 @@ Drizzle export: `heartbeats`.
 | `pid` | `PgInteger` | — |
 | `kind` | `PgText` | — |
 | `updated_at` | `PgTimestamp` | — |
+
+## `oauth_clients`
+
+Drizzle export: `oauthClients`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `PgSerial` | pk, not null, has default |
+| `client_id` | `PgText` | not null |
+| `client_kind` | `PgText` | not null |
+| `client_name` | `PgText` | not null |
+| `redirect_uris` | `PgJsonb` | not null |
+| `grant_types` | `PgJsonb` | not null |
+| `response_types` | `PgJsonb` | not null |
+| `token_endpoint_auth_method` | `PgText` | not null |
+| `scope` | `PgText` | not null |
+| `created_at` | `PgTimestamp` | has default |
+| `updated_at` | `PgTimestamp` | has default |
+
+**Indexes:**
+- `oauth_clients_client_id_key` (unique index) on `(client_id)`
+- `oauth_clients_kind_idx` (index) on `(client_kind)`
 
 ## `refresh_tokens`
 

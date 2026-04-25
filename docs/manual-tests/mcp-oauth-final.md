@@ -86,3 +86,4 @@ claude mcp remove slashtalk-oauth-local
 ## Verification Log
 
 - 2026-04-25: Claude Code 2.1.119 completed direct OAuth authentication against `http://localhost:10000/mcp`. Server logged `mcp_session_opened` for `giuseppecrj` with `clientInfo.name="claude-code"` and later `mcp_session_closed` with `reason="stream_abort"`. Empty tool list remains expected for this migration phase.
+- 2026-04-25: Codex 0.125.0 completed direct OAuth authentication against `http://localhost:10000/mcp` and started without MCP startup failures after the server advertised empty `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list` responses. Server logged `mcp_session_opened` for `giuseppecrj` with `clientInfo.name="codex-mcp-client"`.

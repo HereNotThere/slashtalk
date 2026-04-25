@@ -6,6 +6,8 @@ This file is the **map** — start here, then follow links. Deep content lives i
 
 ## Start here
 
+- [`docs/README.md`](docs/README.md) — **navigation map for `docs/`** (read first to find anything else)
+- [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — authoring bible: doc types, naming, the convention-template-protocol triangle, when to write what
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — domain map (ingest, sessions, analyzers, ws, …)
 - [`docs/design-docs/core-beliefs.md`](docs/design-docs/core-beliefs.md) — rules that can't be broken
 - [`docs/RELIABILITY.md`](docs/RELIABILITY.md) — ingest resume, heartbeat state machine, Redis soft-fail
@@ -13,8 +15,9 @@ This file is the **map** — start here, then follow links. Deep content lives i
 - [`docs/QUALITY_SCORE.md`](docs/QUALITY_SCORE.md) — per-domain health grades
 - [`docs/generated/db-schema.md`](docs/generated/db-schema.md) — auto-generated DB schema (run `bun run gen:db-schema` in `apps/server/` to refresh)
 - [`docs/product-specs/`](docs/product-specs/) — backend + upload specs
-- [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md) — known gaps
+- [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md) — known gaps + harness rollout plan
 - [`docs/references/`](docs/references/) — 3rd-party library notes (Elysia, Drizzle, ioredis, Electron, Anthropic SDK)
+- [`docs/templates/`](docs/templates/) — page shapes for every doc type
 
 ## Workspaces
 
@@ -23,9 +26,11 @@ Bun workspace monorepo. **`bun` is the only supported package manager** ([core-b
 | Workspace | Map | Purpose |
 | --- | --- | --- |
 | [`apps/server`](apps/server) | [AGENTS.md](apps/server/AGENTS.md) | Elysia backend (auth, ingest, sessions, social, analyzers, ws) |
-| [`apps/desktop`](apps/desktop) | [AGENTS.md](apps/desktop/AGENTS.md) | Electron overlay, 7 BrowserWindows |
+| [`apps/desktop`](apps/desktop) | [AGENTS.md](apps/desktop/AGENTS.md) | Electron overlay, 6 renderer windows + tray/dock chrome |
 | [`apps/mcp`](apps/mcp) | [AGENTS.md](apps/mcp/AGENTS.md) | MCP server (being consolidated into `apps/server`) |
 | [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types |
+
+Per-workspace `AGENTS.md` shape varies intentionally by workspace role — server is recipe-heavy, desktop is design-system-heavy, mcp is transitional, shared is constraint-heavy. The minimum every workspace AGENTS.md must include is `Layout` + `Commands` + `Before committing`. See [`docs/CONVENTIONS.md#per-workspace-agentsmd`](docs/CONVENTIONS.md#per-workspace-agentsmd).
 
 ## Route prefix encodes auth
 

@@ -75,6 +75,12 @@ export function protectedResourceMetadata(origin: string) {
   };
 }
 
+export function mcpOrigin(request: Request): string {
+  const url = new URL(request.url);
+  if (isLoopbackHost(url.hostname)) return url.origin;
+  return new URL(config.baseUrl).origin;
+}
+
 export function authorizationServerMetadata(origin: string) {
   return {
     issuer: origin,
@@ -92,7 +98,7 @@ export function authorizationServerMetadata(origin: string) {
 
 export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
   const metadata = ({ request }: { request: Request }) =>
-    authorizationServerMetadata(originOf(request));
+    authorizationServerMetadata(mcpOrigin(request));
   const registerLimiter = new KeyedRequestLimiter({
     max: options.registerQuotaMax ?? OAUTH_WRITE_QUOTA_MAX,
     windowMs: options.quotaWindowMs ?? OAUTH_WRITE_QUOTA_WINDOW_MS,
@@ -105,10 +111,10 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
   return new Elysia({ name: "oauth/mcp" })
     .use(jwt({ name: "jwt", secret: config.jwtSecret }))
     .get("/.well-known/oauth-protected-resource", ({ request }) =>
-      protectedResourceMetadata(originOf(request)),
+      protectedResourceMetadata(mcpOrigin(request)),
     )
     .get("/.well-known/oauth-protected-resource/mcp", ({ request }) =>
-      protectedResourceMetadata(originOf(request)),
+      protectedResourceMetadata(mcpOrigin(request)),
     )
     .get("/.well-known/oauth-authorization-server", metadata)
     .get("/.well-known/oauth-authorization-server/mcp", metadata)
@@ -162,7 +168,7 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
       const parsed = await parseAuthorizeRequest(
         db,
         url.searchParams,
-        originOf(request),
+        mcpOrigin(request),
       );
       if (!parsed.ok) {
         set.status = 400;
@@ -186,7 +192,7 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
       return null;
     })
     .post("/oauth/token", async ({ request, set }) => {
-      const origin = originOf(request);
+      const origin = mcpOrigin(request);
       const parsed = await parseTokenRequest(request, origin);
       const quota = tokenLimiter.record(
         `${clientIp(request)}:${parsed.ok ? parsed.value.clientId : "invalid"}`,
@@ -238,14 +244,18 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
     });
 }
 
-function originOf(request: Request): string {
-  return new URL(request.url).origin;
-}
-
 function clientIp(request: Request): string {
   const forwardedFor = request.headers.get("x-forwarded-for");
   if (forwardedFor) return forwardedFor.split(",")[0]?.trim() || "unknown";
   return request.headers.get("x-real-ip") ?? new URL(request.url).hostname;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1"
+  );
 }
 
 class KeyedRequestLimiter {

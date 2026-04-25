@@ -1,7 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import { refreshTokens } from "../db/schema";
+import { apiKeys, oauthTokens, refreshTokens } from "../db/schema";
+import { authAudit } from "./audit";
 import { hashToken } from "./tokens";
 
 export const JWT_TTL_SECONDS = 60 * 60; // 1 hour
@@ -55,7 +56,53 @@ export async function revokeRefreshToken(
   presented: string,
 ): Promise<void> {
   const hash = await hashToken(presented);
-  await db.delete(refreshTokens).where(eq(refreshTokens.tokenHash, hash));
+  const [revoked] = await db
+    .delete(refreshTokens)
+    .where(eq(refreshTokens.tokenHash, hash))
+    .returning();
+  if (revoked) {
+    authAudit("refresh_token_revoked", {
+      userId: revoked.userId,
+      scope: "single",
+    });
+  }
+}
+
+export async function revokeAllUserCredentials(
+  db: Database,
+  userId: number,
+  reason: "sign_out_everywhere" | "github_grant_revoked",
+): Promise<void> {
+  const counts = await db.transaction(async (tx) => {
+    const refreshRows = await tx
+      .delete(refreshTokens)
+      .where(eq(refreshTokens.userId, userId))
+      .returning({ id: refreshTokens.id });
+    const apiKeyRows = await tx
+      .delete(apiKeys)
+      .where(eq(apiKeys.userId, userId))
+      .returning({ id: apiKeys.id });
+    const oauthRows = await tx
+      .update(oauthTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(oauthTokens.userId, userId), isNull(oauthTokens.revokedAt)))
+      .returning({ id: oauthTokens.id });
+
+    return {
+      refreshTokens: refreshRows.length,
+      deviceApiKeys: apiKeyRows.length,
+      mcpOauthTokens: oauthRows.length,
+    };
+  });
+
+  authAudit("credentials_revoked", {
+    userId,
+    scope: "global",
+    reason,
+    refreshTokens: counts.refreshTokens,
+    deviceApiKeys: counts.deviceApiKeys,
+    mcpOauthTokens: counts.mcpOauthTokens,
+  });
 }
 
 /**

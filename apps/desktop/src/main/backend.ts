@@ -247,6 +247,15 @@ export async function signOut(): Promise<void> {
   }
 }
 
+export async function signOutEverywhere(): Promise<void> {
+  if (!creds) return;
+  try {
+    await jsonFetch("/auth/logout-everywhere", { method: "POST" });
+  } finally {
+    clearLocalSession();
+  }
+}
+
 // ---------- HTTP ----------
 
 type Auth =

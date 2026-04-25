@@ -237,6 +237,8 @@ const bridge: ChatHeadsBridge = {
     cancelSignIn: () =>
       ipcRenderer.invoke("backend:cancelSignIn") as Promise<void>,
     signOut: () => ipcRenderer.invoke("backend:signOut") as Promise<void>,
+    signOutEverywhere: () =>
+      ipcRenderer.invoke("backend:signOutEverywhere") as Promise<void>,
     onAuthState: (cb) => subscribe<BackendAuthState>("backend:authState", cb),
 
     listTrackedRepos: () =>

@@ -18,6 +18,7 @@ import {
   issueSessionTokens,
   rotateSessionTokens,
   revokeRefreshToken,
+  revokeAllUserCredentials,
   setSessionCookies,
   clearSessionCookies,
   presentedRefreshToken,
@@ -233,6 +234,34 @@ export const githubAuth = (db: Database) =>
           t.Object({ refreshToken: t.Optional(t.String()) }),
         ),
       }
+    )
+
+    // POST /auth/logout-everywhere — explicit global revoke. This invalidates
+    // all refresh tokens, device API keys, and MCP OAuth grants for the signed-in
+    // user; normal /logout intentionally remains scoped to one refresh token.
+    .post(
+      "/logout-everywhere",
+      async ({ jwt, cookie: { session, refresh: refreshCookie }, set }) => {
+        const token = session?.value;
+        if (typeof token !== "string" || token.length === 0) {
+          set.status = 401;
+          return { error: "Unauthorized" };
+        }
+
+        const payload = await jwt.verify(token);
+        if (!payload || !("sub" in payload) || !payload.sub) {
+          set.status = 401;
+          return { error: "Invalid token" };
+        }
+
+        await revokeAllUserCredentials(
+          db,
+          Number(payload.sub),
+          "sign_out_everywhere",
+        );
+        clearSessionCookies({ session, refresh: refreshCookie });
+        return { ok: true };
+      },
     );
 
 function isSafeReturnTo(value: string): boolean {

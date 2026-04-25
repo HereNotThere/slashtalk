@@ -77,6 +77,17 @@ curl -i http://localhost:10000/mcp \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual","version":"0.0.0"}}}'
 ```
 
+## Sign-Out-Everywhere Check
+
+After a successful Claude or Codex OAuth login, open Slashtalk settings and use
+`Sign out everywhere`. Then restart or reconnect the MCP client.
+
+Expected result:
+
+- The server logs `auth_audit` with `event="credentials_revoked"` and `scope="global"`.
+- The next MCP request from the previously authenticated client is rejected with `error_description="revoked"` or the client asks you to authenticate again.
+- Other users' MCP OAuth sessions are unaffected.
+
 ## Cleanup
 
 ```sh

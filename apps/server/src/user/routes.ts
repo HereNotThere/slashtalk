@@ -14,6 +14,7 @@ import {
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { decryptGithubToken } from "../auth/tokens";
+import { authAudit } from "../auth/audit";
 import { config } from "../config";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import type { OrgSummary, OrgRepo } from "@slashtalk/shared";
@@ -278,6 +279,11 @@ export const userRoutes = (db: Database) =>
 
         await db.delete(apiKeys).where(eq(apiKeys.deviceId, device.id));
         await db.delete(devices).where(eq(devices.id, device.id));
+        authAudit("device_credentials_revoked", {
+          userId: user.id,
+          deviceId: device.id,
+          scope: "device",
+        });
 
         return { ok: true };
       },

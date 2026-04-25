@@ -475,6 +475,7 @@ export interface ChatHeadsBridge {
     signIn: () => Promise<void>;
     cancelSignIn: () => Promise<void>;
     signOut: () => Promise<void>;
+    signOutEverywhere: () => Promise<void>;
     onAuthState: (cb: (state: BackendAuthState) => void) => Unsubscribe;
 
     listTrackedRepos: () => Promise<TrackedRepo[]>;

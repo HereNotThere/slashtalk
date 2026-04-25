@@ -60,10 +60,16 @@ Direct MCP OAuth behavior:
 - `/.well-known/oauth-protected-resource` describes root `/mcp`; authorization-server metadata is served at the standard root paths plus Claude/Codex-compatible `/mcp` variants.
 - `/oauth/register` supports Dynamic Client Registration for public loopback clients. `slashtalk-static-claude-code` is also accepted as a static public client.
 - `/oauth/authorize` requires a signed-in Slashtalk browser session, routing through GitHub sign-in when needed, then issues a short-lived one-time authorization code bound to client, redirect URI, scope, PKCE challenge, user, and `/mcp` resource.
-- `/oauth/token` exchanges authorization codes with PKCE and returns opaque MCP access/refresh tokens. Token hashes are stored in `oauth_tokens`; access tokens are short lived and bound to `/mcp`.
+- `/oauth/token` exchanges authorization codes with PKCE and returns opaque MCP access/refresh tokens. Token hashes are stored in `oauth_tokens`; access tokens are short lived and bound to `/mcp`. Refresh tokens rotate on use and replay is rejected.
 - `/mcp` accepts valid MCP OAuth access tokens with `mcp:read` scope, and rejects expired, revoked, wrong-resource, unknown, or insufficient-scope tokens with `WWW-Authenticate` `invalid_token` details.
 
 Static bearer config remains an explicit compatibility bridge and should be treated as a long-lived device credential: revoke the device API key if it is exposed.
+
+Revocation scopes:
+
+- Normal sign-out (`POST /auth/logout`) revokes only the presented refresh token and clears local cookies/desktop credentials.
+- Device revoke (`DELETE /api/me/devices/:id`) deletes that device and its API key; other devices, refresh tokens, and MCP OAuth grants remain valid.
+- Sign out everywhere (`POST /auth/logout-everywhere`) deletes all refresh tokens and device API keys for the signed-in user, revokes all of that user's MCP OAuth access/refresh tokens, and forces existing MCP clients to re-authenticate on their next request.
 
 ## JWT session cookie
 

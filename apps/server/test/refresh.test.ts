@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "../src/db";
-import { refreshTokens, users } from "../src/db/schema";
+import {
+  apiKeys,
+  devices,
+  oauthTokens,
+  refreshTokens,
+  users,
+} from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { hashToken } from "../src/auth/tokens";
@@ -254,6 +260,148 @@ describe("/auth/logout", () => {
     const after = await db.select().from(refreshTokens);
     expect(after.length).toBe(before.length);
   });
+
+  it("does not revoke other refresh tokens, devices, or MCP OAuth grants", async () => {
+    const alice = await signIn("alice_code");
+    const otherSession = await signIn("alice_code");
+    const bundle = await insertCredentialBundle(alice.userId, "logout-scope");
+
+    const logout = await fetch(`${baseUrl}/auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: alice.refreshToken }),
+    });
+    expect(logout.status).toBe(200);
+
+    const remainingRefreshes = await db
+      .select()
+      .from(refreshTokens)
+      .where(eq(refreshTokens.userId, alice.userId));
+    const otherSessionHash = await hashToken(otherSession.refreshToken);
+    expect(
+      remainingRefreshes.some((row) => row.tokenHash === otherSessionHash),
+    ).toBe(true);
+
+    const [apiKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.keyHash, await hashToken(bundle.apiKey)));
+    expect(apiKey).toBeTruthy();
+
+    const [oauthToken] = await db
+      .select()
+      .from(oauthTokens)
+      .where(
+        eq(oauthTokens.accessTokenHash, await hashToken(bundle.accessToken)),
+      );
+    expect(oauthToken?.revokedAt).toBeNull();
+  });
+});
+
+describe("device revoke", () => {
+  it("revokes only the selected device API key and leaves other grants intact", async () => {
+    const alice = await signIn("alice_code");
+    const first = await insertCredentialBundle(alice.userId, "device-revoke-1");
+    const second = await insertCredentialBundle(alice.userId, "device-revoke-2");
+
+    const res = await fetch(`${baseUrl}/api/me/devices/${first.deviceId}`, {
+      method: "DELETE",
+      headers: { Cookie: alice.sessionCookie },
+    });
+    expect(res.status).toBe(200);
+
+    const [deletedKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.keyHash, await hashToken(first.apiKey)));
+    expect(deletedKey).toBeUndefined();
+
+    const [keptKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.keyHash, await hashToken(second.apiKey)));
+    expect(keptKey).toBeTruthy();
+
+    const [refresh] = await db
+      .select()
+      .from(refreshTokens)
+      .where(eq(refreshTokens.tokenHash, await hashToken(alice.refreshToken)));
+    expect(refresh).toBeTruthy();
+
+    const [oauthToken] = await db
+      .select()
+      .from(oauthTokens)
+      .where(eq(oauthTokens.accessTokenHash, await hashToken(first.accessToken)));
+    expect(oauthToken?.revokedAt).toBeNull();
+  });
+});
+
+describe("/auth/logout-everywhere", () => {
+  it("revokes all refresh tokens, device API keys, and MCP OAuth tokens for the signed-in user only", async () => {
+    const alice = await signIn("alice_code");
+    await signIn("alice_code");
+    const bob = await signIn("bob_code");
+    const aliceBundle = await insertCredentialBundle(alice.userId, "global-alice");
+    const bobBundle = await insertCredentialBundle(bob.userId, "global-bob");
+
+    const before = await mcpInitialize(aliceBundle.accessToken);
+    expect(before.status).toBe(200);
+
+    const res = await fetch(`${baseUrl}/auth/logout-everywhere`, {
+      method: "POST",
+      headers: { Cookie: alice.sessionCookie },
+    });
+    expect(res.status).toBe(200);
+
+    const aliceRefreshes = await db
+      .select()
+      .from(refreshTokens)
+      .where(eq(refreshTokens.userId, alice.userId));
+    expect(aliceRefreshes).toHaveLength(0);
+
+    const bobRefreshes = await db
+      .select()
+      .from(refreshTokens)
+      .where(eq(refreshTokens.userId, bob.userId));
+    expect(bobRefreshes.length).toBeGreaterThan(0);
+
+    const [aliceKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.keyHash, await hashToken(aliceBundle.apiKey)));
+    expect(aliceKey).toBeUndefined();
+
+    const [bobKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.keyHash, await hashToken(bobBundle.apiKey)));
+    expect(bobKey).toBeTruthy();
+
+    const [aliceOauth] = await db
+      .select()
+      .from(oauthTokens)
+      .where(
+        eq(
+          oauthTokens.accessTokenHash,
+          await hashToken(aliceBundle.accessToken),
+        ),
+      );
+    expect(aliceOauth?.revokedAt).toBeTruthy();
+
+    const [bobOauth] = await db
+      .select()
+      .from(oauthTokens)
+      .where(
+        eq(oauthTokens.accessTokenHash, await hashToken(bobBundle.accessToken)),
+      );
+    expect(bobOauth?.revokedAt).toBeNull();
+
+    const after = await mcpInitialize(aliceBundle.accessToken);
+    expect(after.status).toBe(401);
+    expect(after.headers.get("www-authenticate")).toContain(
+      'error_description="revoked"',
+    );
+  });
 });
 
 describe("sign-in issues session + refresh cookies", () => {
@@ -275,3 +423,50 @@ describe("sign-in issues session + refresh cookies", () => {
     expect(rows.length).toBeGreaterThan(0);
   });
 });
+
+async function insertCredentialBundle(userId: number, label: string) {
+  const [device] = await db
+    .insert(devices)
+    .values({ userId, deviceName: `test-${label}`, os: "test" })
+    .returning();
+  const apiKey = `api-${crypto.randomUUID()}`;
+  await db.insert(apiKeys).values({
+    userId,
+    deviceId: device.id,
+    keyHash: await hashToken(apiKey),
+  });
+  const accessToken = `mcp_at_${crypto.randomUUID()}`;
+  const refreshToken = `mcp_rt_${crypto.randomUUID()}`;
+  await db.insert(oauthTokens).values({
+    userId,
+    clientId: `client-${label}`,
+    accessTokenHash: await hashToken(accessToken),
+    refreshTokenHash: await hashToken(refreshToken),
+    scope: "mcp:read mcp:write offline_access",
+    resource: `${baseUrl}/mcp`,
+    accessExpiresAt: new Date(Date.now() + 60_000),
+    refreshExpiresAt: new Date(Date.now() + 60_000),
+  });
+  return { deviceId: device.id, apiKey, accessToken, refreshToken };
+}
+
+function mcpInitialize(token: string) {
+  return fetch(`${baseUrl}/mcp`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "refresh-test", version: "0.0.0" },
+      },
+    }),
+  });
+}

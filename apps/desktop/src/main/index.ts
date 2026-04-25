@@ -2082,6 +2082,10 @@ ipcMain.handle("backend:signOut", async () => {
   await backend.signOut();
   localRepos.clearOnSignOut();
 });
+ipcMain.handle("backend:signOutEverywhere", async () => {
+  await backend.signOutEverywhere();
+  localRepos.clearOnSignOut();
+});
 
 function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {

@@ -18,9 +18,11 @@ import { authAudit } from "../auth/audit";
 import { revokeAllUserCredentials } from "../auth/sessions";
 import {
   fetchUserGithubAppToken,
+  githubAppConnectionStatus,
   githubAppConnectUrl,
-  githubAppInstallConnectUrl,
+  githubAppConnectUrlForUser,
   githubAppInstallUrl,
+  isGithubAppConfigured,
 } from "../auth/github-app";
 import { config } from "../config";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
@@ -539,7 +541,7 @@ export const userRoutes = (db: Database) =>
                 rawOwner,
                 rawName,
               );
-            } else if (config.githubAppClientId && config.githubAppClientSecret) {
+            } else if (isGithubAppConfigured()) {
               outcome = { ok: false, kind: "github_app_required" };
             }
           }
@@ -547,10 +549,11 @@ export const userRoutes = (db: Database) =>
             if (outcome.kind === "github_app_required") {
               set.status = 403;
               return {
-                error: "github_app_required",
+                error: "no_access",
                 message:
                   "Private repo access needs the Slashtalk GitHub App. Complete the browser setup, then click Add local repo again.",
-                connectUrl: githubAppConnectUrl(),
+                requiresGithubApp: true,
+                connectUrl: githubAppConnectUrlForUser(user.id),
               };
             }
             if (outcome.kind === "no_access") {
@@ -562,7 +565,7 @@ export const userRoutes = (db: Database) =>
                 error: "no_access",
                 message,
                 connectUrl: checkedGitHubApp
-                  ? githubAppInstallConnectUrl()
+                  ? githubAppConnectUrlForUser(user.id, { install: true })
                   : undefined,
               };
             }
@@ -651,12 +654,16 @@ export const userRoutes = (db: Database) =>
 
     // GET /api/me/github-app/status — whether this user has linked the
     // narrow GitHub App repo-access grant used for private repo claims.
-    .get("/github-app/status", ({ user }) => ({
-      configured: Boolean(config.githubAppClientId && config.githubAppSlug),
-      connected: Boolean(user.githubAppUserToken),
-      installUrl: githubAppInstallUrl(),
-      connectUrl: githubAppConnectUrl(),
-    }))
+    .get("/github-app/status", async ({ user }) => {
+      const status = await githubAppConnectionStatus(db, user.id);
+      return {
+        ...status,
+        installUrl: status.configured ? githubAppInstallUrl() : null,
+        connectUrl: status.configured
+          ? githubAppConnectUrlForUser(user.id)
+          : githubAppConnectUrl(),
+      };
+    })
 
     // DELETE /api/me/repos/:repoId — stop tracking a repo
     .delete(

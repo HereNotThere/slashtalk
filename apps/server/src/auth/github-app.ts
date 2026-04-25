@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
@@ -11,7 +12,10 @@ import {
 
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
+const GITHUB_USER_URL = "https://api.github.com/user";
 const STATE_COOKIE = "github_app_state";
+const INTENT_COOKIE = "github_app_intent";
+const INTENT_TTL_MS = 10 * 60 * 1000;
 
 type GitHubAppConfig = {
   clientId: string;
@@ -42,6 +46,11 @@ interface GitHubAppTokenResponse {
   error_description?: string;
 }
 
+interface GitHubIdentityResponse {
+  id?: number;
+  login?: string;
+}
+
 export const githubAppAuth = (db: Database) =>
   new Elysia({ prefix: "/auth", name: "auth/github-app" })
     .use(jwt({ name: "jwt", secret: config.jwtSecret }))
@@ -54,15 +63,14 @@ export const githubAppAuth = (db: Database) =>
           return { error: "GitHub App is not configured" };
         }
 
-        const user = await sessionUser(
-          db,
-          jwt,
-          stringCookieValue(cookie.session?.value),
-        );
+        const intent = verifyGithubAppConnectIntent(query.intent);
+        const user = intent
+          ? await findUserById(db, intent.userId)
+          : await sessionUser(db, jwt, stringCookieValue(cookie.session?.value));
         if (!user) {
           return redirect(
             `/auth/github?${new URLSearchParams({
-              return_to: "/auth/github-app",
+              return_to: githubAppReturnPath(query.install === "1"),
             })}`,
           );
         }
@@ -76,6 +84,16 @@ export const githubAppAuth = (db: Database) =>
           maxAge: 10 * 60,
           path: "/auth/github-app",
         });
+        if (query.intent) {
+          cookie[INTENT_COOKIE].set({
+            value: query.intent,
+            httpOnly: true,
+            secure: config.baseUrl.startsWith("https"),
+            sameSite: "lax",
+            maxAge: 10 * 60,
+            path: "/auth/github-app",
+          });
+        }
 
         if (query.install === "1") {
           const installUrl = githubAppInstallUrl(state);
@@ -87,6 +105,7 @@ export const githubAppAuth = (db: Database) =>
       {
         query: t.Object({
           install: t.Optional(t.String()),
+          intent: t.Optional(t.String()),
         }),
       },
     )
@@ -99,6 +118,10 @@ export const githubAppAuth = (db: Database) =>
 
       const expectedState = stringCookieValue(cookie[STATE_COOKIE]?.value);
       cookie[STATE_COOKIE]?.remove();
+      const intent = verifyGithubAppConnectIntent(
+        stringCookieValue(cookie[INTENT_COOKIE]?.value),
+      );
+      cookie[INTENT_COOKIE]?.remove();
       if (
         typeof query.state !== "string" ||
         !expectedState ||
@@ -108,11 +131,9 @@ export const githubAppAuth = (db: Database) =>
         return { error: "Invalid GitHub App state" };
       }
 
-      const user = await sessionUser(
-        db,
-        jwt,
-        stringCookieValue(cookie.session?.value),
-      );
+      const user = intent
+        ? await findUserById(db, intent.userId)
+        : await sessionUser(db, jwt, stringCookieValue(cookie.session?.value));
       if (!user) {
         set.status = 401;
         return { error: "Sign in to Slashtalk before connecting GitHub App" };
@@ -129,10 +150,27 @@ export const githubAppAuth = (db: Database) =>
 
       const tokenData = await exchangeGitHubAppCode(app, query.code);
       if (!tokenData.access_token) {
-        set.status = 400;
+        set.status = tokenData.error === "upstream_unavailable" ? 502 : 400;
         return {
           error: "GitHub App authorization failed",
           message: tokenData.error_description ?? tokenData.error,
+        };
+      }
+
+      const identity = await fetchGitHubUserIdentity(tokenData.access_token);
+      if (!identity) {
+        set.status = 502;
+        return {
+          error: "GitHub App identity check failed",
+          message: "Could not verify the GitHub account that authorized the app.",
+        };
+      }
+      if (identity.id !== user.githubId) {
+        set.status = 403;
+        return {
+          error: "GitHub App account mismatch",
+          message:
+            "Authorize the GitHub App with the same GitHub account you use for Slashtalk.",
         };
       }
 
@@ -158,6 +196,34 @@ export function githubAppInstallConnectUrl(): string {
   return `${config.baseUrl}/auth/github-app?install=1`;
 }
 
+export function isGithubAppConfigured(): boolean {
+  return Boolean(
+    config.githubAppClientId &&
+      config.githubAppClientSecret &&
+      config.githubAppSlug,
+  );
+}
+
+export function githubAppConnectUrlForUser(
+  userId: number,
+  options: { install?: boolean } = {},
+): string {
+  const url = new URL("/auth/github-app", config.baseUrl);
+  url.searchParams.set("intent", signGithubAppConnectIntent(userId));
+  if (options.install) url.searchParams.set("install", "1");
+  return url.toString();
+}
+
+export async function githubAppConnectionStatus(
+  db: Database,
+  userId: number,
+): Promise<{ configured: boolean; connected: boolean }> {
+  const configured = isGithubAppConfigured();
+  if (!configured) return { configured, connected: false };
+  const token = await fetchUserGithubAppToken(db, userId);
+  return { configured, connected: token.ok };
+}
+
 export async function fetchUserGithubAppToken(
   db: Database,
   userId: number,
@@ -177,10 +243,15 @@ export async function fetchUserGithubAppToken(
 
   const now = Date.now();
   if (!row.tokenExpiresAt || row.tokenExpiresAt.getTime() > now + 60_000) {
-    return {
-      ok: true,
-      token: await decryptGithubToken(row.token, config.encryptionKey),
-    };
+    try {
+      return {
+        ok: true,
+        token: await decryptGithubToken(row.token, config.encryptionKey),
+      };
+    } catch {
+      await clearGitHubAppTokens(db, userId);
+      return { ok: false, reason: "refresh_failed" };
+    }
   }
 
   if (
@@ -193,10 +264,13 @@ export async function fetchUserGithubAppToken(
   const app = githubAppConfig();
   if (!app) return { ok: false, reason: "refresh_failed" };
 
-  const refreshToken = await decryptGithubToken(
-    row.refreshToken,
-    config.encryptionKey,
-  );
+  let refreshToken: string;
+  try {
+    refreshToken = await decryptGithubToken(row.refreshToken, config.encryptionKey);
+  } catch {
+    await clearGitHubAppTokens(db, userId);
+    return { ok: false, reason: "refresh_failed" };
+  }
   const refreshed = await refreshGitHubAppToken(app, refreshToken);
   if (!refreshed.access_token) {
     return { ok: false, reason: "refresh_failed" };
@@ -212,6 +286,62 @@ function githubAppConfig(): GitHubAppConfig | null {
     clientId: config.githubAppClientId,
     clientSecret: config.githubAppClientSecret,
   };
+}
+
+function githubAppReturnPath(install: boolean): string {
+  return install ? "/auth/github-app?install=1" : "/auth/github-app";
+}
+
+function signGithubAppConnectIntent(userId: number): string {
+  const payload = Buffer.from(
+    JSON.stringify({
+      purpose: "github_app_connect",
+      userId,
+      exp: Date.now() + INTENT_TTL_MS,
+      nonce: crypto.randomUUID(),
+    }),
+  ).toString("base64url");
+  const sig = createHmac("sha256", config.jwtSecret)
+    .update(payload)
+    .digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+function verifyGithubAppConnectIntent(
+  token: string | undefined,
+): { userId: number } | null {
+  if (!token) return null;
+  const [payload, sig] = token.split(".");
+  if (!payload || !sig) return null;
+  const expected = createHmac("sha256", config.jwtSecret)
+    .update(payload)
+    .digest("base64url");
+  const actualBytes = Buffer.from(sig);
+  const expectedBytes = Buffer.from(expected);
+  if (
+    actualBytes.length !== expectedBytes.length ||
+    !timingSafeEqual(actualBytes, expectedBytes)
+  ) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    (parsed as { purpose?: unknown }).purpose !== "github_app_connect" ||
+    typeof (parsed as { userId?: unknown }).userId !== "number" ||
+    typeof (parsed as { exp?: unknown }).exp !== "number" ||
+    (parsed as { exp: number }).exp <= Date.now()
+  ) {
+    return null;
+  }
+  return { userId: (parsed as { userId: number }).userId };
 }
 
 function githubAppAuthorizeUrl(app: GitHubAppConfig, state: string): string {
@@ -231,13 +361,21 @@ async function sessionUser(db: Database, jwt: JwtVerifier, token?: string) {
   if (!token) return null;
   const payload = await jwt.verify(token);
   if (!payload || !payload.sub) return null;
+  return findUserById(db, Number(payload.sub), payload);
+}
+
+async function findUserById(
+  db: Database,
+  userId: number,
+  payload?: { sessionIssuedAt?: number; iat?: number | boolean },
+) {
   const [user] = await db
     .select()
     .from(users)
-    .where(eq(users.id, Number(payload.sub)))
+    .where(eq(users.id, userId))
     .limit(1);
   if (!user) return null;
-  if (user.credentialsRevokedAt) {
+  if (payload && user.credentialsRevokedAt) {
     const issuedAtMs =
       typeof payload.sessionIssuedAt === "number"
         ? payload.sessionIssuedAt
@@ -255,7 +393,7 @@ async function exchangeGitHubAppCode(
   app: GitHubAppConfig,
   code: string,
 ): Promise<GitHubAppTokenResponse> {
-  const res = await fetch(GITHUB_TOKEN_URL, {
+  return githubAppTokenRequest({
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -268,14 +406,13 @@ async function exchangeGitHubAppCode(
       redirect_uri: githubAppCallbackUrl(),
     }),
   });
-  return (await res.json()) as GitHubAppTokenResponse;
 }
 
 async function refreshGitHubAppToken(
   app: GitHubAppConfig,
   refreshToken: string,
 ): Promise<GitHubAppTokenResponse> {
-  const res = await fetch(GITHUB_TOKEN_URL, {
+  return githubAppTokenRequest({
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -288,7 +425,54 @@ async function refreshGitHubAppToken(
       refresh_token: refreshToken,
     }),
   });
-  return (await res.json()) as GitHubAppTokenResponse;
+}
+
+async function githubAppTokenRequest(init: RequestInit) {
+  let res: Response;
+  try {
+    res = await fetch(GITHUB_TOKEN_URL, init);
+  } catch {
+    return {
+      error: "upstream_unavailable",
+      error_description: "Could not reach GitHub.",
+    };
+  }
+  const body = (await res.json().catch(() => null)) as GitHubAppTokenResponse | null;
+  if (!body) {
+    return {
+      error: "upstream_unavailable",
+      error_description: "GitHub returned an invalid token response.",
+    };
+  }
+  if (!res.ok && !body.error) {
+    return {
+      error: "upstream_unavailable",
+      error_description: `GitHub returned HTTP ${res.status}.`,
+    };
+  }
+  return body;
+}
+
+async function fetchGitHubUserIdentity(
+  token: string,
+): Promise<GitHubIdentityResponse | null> {
+  let res: Response;
+  try {
+    res = await fetch(GITHUB_USER_URL, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "slashtalk",
+      },
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as GitHubIdentityResponse | null;
+  if (!body || typeof body.id !== "number") return null;
+  return body;
 }
 
 async function storeGitHubAppTokens(
@@ -316,6 +500,20 @@ async function storeGitHubAppTokens(
         : null,
       githubAppConnectedAt: now,
       updatedAt: now,
+    })
+    .where(eq(users.id, userId));
+}
+
+async function clearGitHubAppTokens(db: Database, userId: number): Promise<void> {
+  await db
+    .update(users)
+    .set({
+      githubAppUserToken: null,
+      githubAppRefreshToken: null,
+      githubAppTokenExpiresAt: null,
+      githubAppRefreshTokenExpiresAt: null,
+      githubAppConnectedAt: null,
+      updatedAt: new Date(),
     })
     .where(eq(users.id, userId));
 }

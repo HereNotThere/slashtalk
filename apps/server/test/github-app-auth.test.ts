@@ -19,6 +19,13 @@ const ALICE = {
   name: "Alice",
 };
 
+const BOB = {
+  id: 9102,
+  login: "bob",
+  avatar_url: "https://avatars.test/bob",
+  name: "Bob",
+};
+
 beforeAll(async () => {
   originalFetch = globalThis.fetch;
   globalThis.fetch = async (
@@ -50,15 +57,37 @@ beforeAll(async () => {
           { headers: { "Content-Type": "application/json" } },
         );
       }
+      if (body.code === "github_app_bob_code") {
+        return new Response(
+          JSON.stringify({
+            access_token: "ghu_app_bob",
+            expires_in: 28_800,
+            refresh_token: "ghr_app_bob",
+            refresh_token_expires_in: 15_768_000,
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
       return new Response(JSON.stringify({ error: "bad_verification_code" }), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
     if (url === "https://api.github.com/user") {
-      return new Response(JSON.stringify(ALICE), {
-        headers: { "Content-Type": "application/json" },
-      });
+      const authorization =
+        init?.headers instanceof Headers
+          ? init.headers.get("authorization")
+          : Array.isArray(init?.headers)
+            ? init.headers.find(
+                ([key]) => key.toLowerCase() === "authorization",
+              )?.[1]
+            : (init?.headers as Record<string, string> | undefined)?.Authorization;
+      return new Response(
+        JSON.stringify(authorization === "Bearer ghu_app_bob" ? BOB : ALICE),
+        {
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
 
     return originalFetch(input, init);
@@ -78,6 +107,26 @@ afterAll(async () => {
   await redis.disconnect();
 });
 
+async function signInAlice(): Promise<string> {
+  const signIn = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+  const sessionCookie = getCookie(signIn, "session")!;
+  expect(sessionCookie).toBeTruthy();
+  return sessionCookie;
+}
+
+async function clearAliceGitHubAppTokens(): Promise<void> {
+  await db
+    .update(users)
+    .set({
+      githubAppUserToken: null,
+      githubAppRefreshToken: null,
+      githubAppTokenExpiresAt: null,
+      githubAppRefreshTokenExpiresAt: null,
+      githubAppConnectedAt: null,
+    })
+    .where(eq(users.githubLogin, "alice"));
+}
+
 describe("GitHub App authorization", () => {
   it("routes unauthenticated users through Slashtalk sign-in first", async () => {
     const res = await fetch(`${baseUrl}/auth/github-app`, {
@@ -89,10 +138,18 @@ describe("GitHub App authorization", () => {
     );
   });
 
+  it("preserves explicit install intent through Slashtalk sign-in", async () => {
+    const res = await fetch(`${baseUrl}/auth/github-app?install=1`, {
+      redirect: "manual",
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(
+      "/auth/github?return_to=%2Fauth%2Fgithub-app%3Finstall%3D1",
+    );
+  });
+
   it("stores encrypted GitHub App user tokens for the signed-in user", async () => {
-    const signIn = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
-    const sessionCookie = getCookie(signIn, "session")!;
-    expect(sessionCookie).toBeTruthy();
+    const sessionCookie = await signInAlice();
 
     const start = await fetch(`${baseUrl}/auth/github-app`, {
       headers: { Cookie: sessionCookie },
@@ -134,7 +191,7 @@ describe("GitHub App authorization", () => {
     const body = (await status.json()) as {
       configured: boolean;
       connected: boolean;
-      installUrl: string;
+      installUrl: string | null;
       connectUrl: string;
     };
     expect(body.configured).toBe(true);
@@ -142,12 +199,72 @@ describe("GitHub App authorization", () => {
     expect(body.installUrl).toBe(
       `https://github.com/apps/${config.githubAppSlug}/installations/new`,
     );
-    expect(body.connectUrl).toBe("http://localhost:10000/auth/github-app");
+    expect(body.connectUrl).toStartWith(
+      "http://localhost:10000/auth/github-app?intent=",
+    );
+  });
+
+  it("binds desktop connect intents to the desktop-authenticated user", async () => {
+    await clearAliceGitHubAppTokens();
+    const sessionCookie = await signInAlice();
+
+    const status = await fetch(`${baseUrl}/api/me/github-app/status`, {
+      headers: { Cookie: sessionCookie },
+    });
+    const body = (await status.json()) as { connectUrl: string };
+    const connectUrl = new URL(body.connectUrl);
+    const connectPath = connectUrl.pathname + connectUrl.search;
+
+    const start = await fetch(`${baseUrl}${connectPath}`, {
+      redirect: "manual",
+    });
+    expect(start.status).toBe(302);
+    const location = new URL(start.headers.get("location")!);
+    const state = location.searchParams.get("state");
+    expect(state).toBeTruthy();
+    const stateCookie = getCookie(start, "github_app_state")!;
+    const intentCookie = getCookie(start, "github_app_intent")!;
+    expect(intentCookie).toBeTruthy();
+
+    const callback = await fetch(
+      `${baseUrl}/auth/github-app/callback?code=github_app_code&state=${state}`,
+      { headers: { Cookie: `${stateCookie}; ${intentCookie}` } },
+    );
+    expect(callback.status).toBe(200);
+
+    const [alice] = await db
+      .select()
+      .from(users)
+      .where(eq(users.githubLogin, "alice"));
+    expect(alice.githubAppUserToken).toBeTruthy();
+  });
+
+  it("rejects GitHub App authorization from a different GitHub account", async () => {
+    await clearAliceGitHubAppTokens();
+    const sessionCookie = await signInAlice();
+
+    const start = await fetch(`${baseUrl}/auth/github-app`, {
+      headers: { Cookie: sessionCookie },
+      redirect: "manual",
+    });
+    const state = new URL(start.headers.get("location")!).searchParams.get("state");
+    const stateCookie = getCookie(start, "github_app_state")!;
+
+    const callback = await fetch(
+      `${baseUrl}/auth/github-app/callback?code=github_app_bob_code&state=${state}`,
+      { headers: { Cookie: `${sessionCookie}; ${stateCookie}` } },
+    );
+    expect(callback.status).toBe(403);
+
+    const [alice] = await db
+      .select()
+      .from(users)
+      .where(eq(users.githubLogin, "alice"));
+    expect(alice.githubAppUserToken).toBeNull();
   });
 
   it("can still start the installation flow explicitly", async () => {
-    const signIn = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
-    const sessionCookie = getCookie(signIn, "session")!;
+    const sessionCookie = await signInAlice();
 
     const start = await fetch(`${baseUrl}/auth/github-app?install=1`, {
       headers: { Cookie: sessionCookie },

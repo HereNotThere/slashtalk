@@ -612,6 +612,20 @@ export class ClaimRepoError extends Error {
   }
 }
 
+type ClaimRepoErrorKind = ClaimRepoError["kind"];
+
+function isClaimRepoErrorKind(value: unknown): value is ClaimRepoErrorKind {
+  return (
+    value === "no_access" ||
+    value === "github_app_required" ||
+    value === "token_expired" ||
+    value === "rate_limited" ||
+    value === "invalid_full_name" ||
+    value === "upstream_unavailable" ||
+    value === "unknown"
+  );
+}
+
 export async function claimRepo(fullName: string): Promise<RepoSummary> {
   try {
     // Delegates to `jsonFetch` so the JWT single-flight refresh-on-401
@@ -625,7 +639,9 @@ export async function claimRepo(fullName: string): Promise<RepoSummary> {
   } catch (err) {
     if (err instanceof HttpError) {
       const parsed = parseClaimError(err.body);
-      const kind = (parsed?.error ?? "unknown") as ClaimRepoError["kind"];
+      const kind = isClaimRepoErrorKind(parsed?.error)
+        ? parsed.error
+        : "unknown";
       throw new ClaimRepoError(
         kind,
         parsed?.message ?? `Claim failed (${err.status})`,

@@ -35,6 +35,7 @@ let aliceUserId: number;
 let repoFetchCount = 0;
 let appInstallationsFetchCount = 0;
 let appInstallationReposFetchCount = 0;
+let lastAppInstallationsAuthorization: string | null = null;
 type RepoResponse =
   | { status: number; body: unknown }
   | ((authorization: string | null) => { status: number; body: unknown });
@@ -49,6 +50,18 @@ let appInstallationReposResponses: Array<{
   body: unknown;
   link?: string;
 }> = [{ status: 200, body: { repositories: [] } }];
+let refreshTokenResponse: {
+  status: number;
+  body: unknown;
+} = {
+  status: 200,
+  body: {
+    access_token: "ghu_app_refreshed",
+    expires_in: 28_800,
+    refresh_token: "ghr_app_refreshed",
+    refresh_token_expires_in: 15_768_000,
+  },
+};
 
 const ALICE = {
   id: 9101,
@@ -71,6 +84,13 @@ beforeAll(async () => {
           : input.url;
 
     if (url === "https://github.com/login/oauth/access_token") {
+      const body = JSON.parse(init?.body as string);
+      if (body.grant_type === "refresh_token") {
+        return new Response(JSON.stringify(refreshTokenResponse.body), {
+          status: refreshTokenResponse.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       return new Response(
         JSON.stringify({ access_token: "ghtoken_alice_code" }),
         { headers: { "Content-Type": "application/json" } },
@@ -94,6 +114,7 @@ beforeAll(async () => {
     }
     if (url.startsWith("https://api.github.com/user/installations?")) {
       appInstallationsFetchCount += 1;
+      lastAppInstallationsAuthorization = authorizationHeader(init?.headers);
       const response =
         appInstallationsResponses[appInstallationsFetchCount - 1] ??
         appInstallationsResponses[appInstallationsResponses.length - 1]!;
@@ -155,9 +176,19 @@ beforeEach(async () => {
   repoFetchCount = 0;
   appInstallationsFetchCount = 0;
   appInstallationReposFetchCount = 0;
+  lastAppInstallationsAuthorization = null;
   repoResponse = { status: 200, body: {} };
   appInstallationsResponses = [{ status: 200, body: { installations: [] } }];
   appInstallationReposResponses = [{ status: 200, body: { repositories: [] } }];
+  refreshTokenResponse = {
+    status: 200,
+    body: {
+      access_token: "ghu_app_refreshed",
+      expires_in: 28_800,
+      refresh_token: "ghr_app_refreshed",
+      refresh_token_expires_in: 15_768_000,
+    },
+  };
   // Drop any user_repos / repos rows from prior cases so counts are exact.
   await db.delete(userRepos).where(eq(userRepos.userId, aliceUserId));
   await db.delete(repos);
@@ -224,12 +255,26 @@ function jsonHeaders(link?: string): Record<string, string> {
     : { "Content-Type": "application/json" };
 }
 
-async function storeGitHubAppToken(token: string): Promise<void> {
+async function storeGitHubAppToken(
+  token: string,
+  options: {
+    tokenExpiresAt?: Date | null;
+    refreshToken?: string | null;
+    refreshTokenExpiresAt?: Date | null;
+  } = {},
+): Promise<void> {
+  const refreshToken = options.refreshToken ?? "ghr_app_alice";
   await db
     .update(users)
     .set({
       githubAppUserToken: await encryptGithubToken(token, config.encryptionKey),
-      githubAppTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      githubAppRefreshToken: refreshToken
+        ? await encryptGithubToken(refreshToken, config.encryptionKey)
+        : null,
+      githubAppTokenExpiresAt:
+        options.tokenExpiresAt ?? new Date(Date.now() + 60 * 60 * 1000),
+      githubAppRefreshTokenExpiresAt:
+        options.refreshTokenExpiresAt ?? new Date(Date.now() + 60 * 60 * 1000),
       githubAppConnectedAt: new Date(),
     })
     .where(eq(users.id, aliceUserId));
@@ -270,7 +315,18 @@ describe("POST /api/me/repos — claim gate", () => {
   it("asks the user to connect the GitHub App when OAuth cannot see the repo", async () => {
     repoResponse = { status: 404, body: { message: "Not Found" } };
 
-    await expectError(await claim("acme/secret"), 403, "github_app_required");
+    const res = await claim("acme/secret");
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as {
+      error: string;
+      requiresGithubApp?: boolean;
+      connectUrl?: string;
+    };
+    expect(body.error).toBe("no_access");
+    expect(body.requiresGithubApp).toBe(true);
+    expect(body.connectUrl).toStartWith(
+      "http://localhost:10000/auth/github-app?intent=",
+    );
 
     const rows = await db
       .select()
@@ -339,12 +395,77 @@ describe("POST /api/me/repos — claim gate", () => {
     };
     expect(body.error).toBe("no_access");
     expect(body.message).toContain("GitHub App");
-    expect(body.connectUrl).toBe(
-      "http://localhost:10000/auth/github-app?install=1",
+    expect(body.connectUrl).toContain(
+      "http://localhost:10000/auth/github-app?intent=",
     );
+    expect(body.connectUrl).toContain("install=1");
     expect(repoFetchCount).toBe(1);
     expect(appInstallationsFetchCount).toBe(1);
     expect(appInstallationReposFetchCount).toBe(1);
+  });
+
+  it("refreshes an expired GitHub App user token before verifying private repo access", async () => {
+    await storeGitHubAppToken("ghu_app_expired", {
+      tokenExpiresAt: new Date(Date.now() - 60_000),
+      refreshToken: "ghr_app_alice",
+      refreshTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    repoResponse = { status: 404, body: { message: "Not Found" } };
+    appInstallationsResponses = [
+      {
+        status: 200,
+        body: {
+          installations: [
+            { id: 100, app_slug: config.githubAppSlug, suspended_at: null },
+          ],
+        },
+      },
+    ];
+    appInstallationReposResponses = [
+      {
+        status: 200,
+        body: { repositories: [repoOkBody("Acme/Refreshed", 556, true)] },
+      },
+    ];
+
+    const res = await claim("acme/refreshed");
+    expect(res.status).toBe(200);
+
+    const [alice] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, aliceUserId));
+    expect(alice.githubAppTokenExpiresAt!.getTime()).toBeGreaterThan(Date.now());
+    expect(lastAppInstallationsAuthorization).toBe("Bearer ghu_app_refreshed");
+    expect(appInstallationsFetchCount).toBe(1);
+    expect(appInstallationReposFetchCount).toBe(1);
+  });
+
+  it("reports disconnected when the GitHub App token and refresh token are expired", async () => {
+    await storeGitHubAppToken("ghu_app_expired", {
+      tokenExpiresAt: new Date(Date.now() - 60_000),
+      refreshToken: "ghr_app_alice",
+      refreshTokenExpiresAt: new Date(Date.now() - 1_000),
+    });
+
+    const status = await fetch(`${baseUrl}/api/me/github-app/status`, {
+      headers: { Cookie: aliceCookie },
+    });
+    expect(status.status).toBe(200);
+    const body = (await status.json()) as {
+      configured: boolean;
+      connected: boolean;
+      installUrl: string | null;
+      connectUrl: string;
+    };
+    expect(body.configured).toBe(true);
+    expect(body.connected).toBe(false);
+    expect(body.installUrl).toBe(
+      `https://github.com/apps/${config.githubAppSlug}/installations/new`,
+    );
+    expect(body.connectUrl).toStartWith(
+      "http://localhost:10000/auth/github-app?intent=",
+    );
   });
 
   it("follows GitHub App pagination when verifying installed repositories", async () => {

@@ -282,7 +282,7 @@ export interface McpInstallStatus {
 export interface GithubAppStatus {
   configured: boolean;
   connected: boolean;
-  installUrl: string;
+  installUrl: string | null;
   connectUrl: string;
 }
 

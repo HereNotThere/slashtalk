@@ -38,6 +38,7 @@ import * as installMcp from "./installMcp";
 import * as chatheadsAuth from "./chatheadsAuth";
 import * as selfSession from "./selfSession";
 import { createLocalMcpProxy } from "./localMcpProxy";
+import { getLocalMcpProxySecret } from "./localMcpProxySecret";
 import * as anthropic from "./anthropic";
 import * as localAgent from "./localAgent";
 import * as agentStore from "./agentStore";
@@ -49,8 +50,13 @@ import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
 
+installMcp.configureInstaller({
+  localProxySecret: getLocalMcpProxySecret,
+});
+
 const mcpProxy = createLocalMcpProxy({
   getToken: backend.getApiKey,
+  getProxySecret: getLocalMcpProxySecret,
   remoteMcpUrl: installMcp.remoteMcpUrl,
 });
 
@@ -2094,18 +2100,26 @@ function applySyncForAuth(signedIn: boolean): void {
     updateSpotifyRunning();
     void peerPresence.start();
     ws.start();
-    void installMcp
-      .install("claude-code")
-      .catch((err) => console.warn("installMcp.install failed:", err));
+    for (const target of ["claude-code", "codex"] as const) {
+      void installMcp
+        .install(target)
+        .catch((err) =>
+          console.warn(`installMcp.install ${target} failed:`, err),
+        );
+    }
   } else {
     heartbeat.stop();
     uploader.reset();
     updateSpotifyRunning();
     peerPresence.stop();
     ws.stop();
-    void installMcp
-      .uninstall("claude-code")
-      .catch((err) => console.warn("installMcp.uninstall failed:", err));
+    for (const target of ["claude-code", "codex"] as const) {
+      void installMcp
+        .uninstall(target)
+        .catch((err) =>
+          console.warn(`installMcp.uninstall ${target} failed:`, err),
+        );
+    }
   }
 }
 

@@ -30,29 +30,27 @@ Then sign in through the desktop app.
 
 ## Verify Claude Code Config
 
-The desktop auto-installs the Claude Code entry after sign-in. Confirm `~/.claude.json` contains Slashtalk with no bearer header:
+The desktop auto-installs the Claude Code entry after sign-in. Confirm `~/.claude.json` contains Slashtalk with the local proxy admission header and no Slashtalk bearer:
 
 ```json
 {
   "mcpServers": {
     "slashtalk-mcp": {
       "type": "http",
-      "url": "http://127.0.0.1:37613/mcp"
+      "url": "http://127.0.0.1:37613/mcp",
+      "headers": {
+        "X-Slashtalk-Proxy-Token": "<local-proxy-secret>"
+      }
     }
   }
 }
 ```
 
-There should be no `headers.Authorization` on the `slashtalk-mcp` entry.
+There should be no `headers.Authorization` on the `slashtalk-mcp` entry. `X-Slashtalk-Proxy-Token` is a local-only proxy admission secret, not the server device API key.
 
 ## Verify Codex Config
 
-Install the Codex entry from the desktop config writer:
-
-```sh
-cd apps/desktop
-bun -e 'import("./src/main/installMcp.ts").then((m) => m.install("codex"))'
-```
+Install the Codex entry from the running desktop app so it uses the same safeStorage-backed local proxy secret as the proxy process. Do not install Codex by importing `installMcp.ts` directly from a separate Bun process; that process cannot read Electron safeStorage and will generate a different fallback secret.
 
 Confirm `~/.codex/config.toml` contains:
 
@@ -60,9 +58,10 @@ Confirm `~/.codex/config.toml` contains:
 [mcp_servers.slashtalk-mcp]
 url = "http://127.0.0.1:37613/mcp"
 enabled = true
+http_headers = { "X-Slashtalk-Proxy-Token" = "<local-proxy-secret>" }
 ```
 
-There should be no `Authorization`, `http_headers`, `env_http_headers`, `bearer_token_env_var`, or device API key in the Slashtalk Codex section.
+There should be no `Authorization`, `env_http_headers`, `bearer_token_env_var`, or device API key in the Slashtalk Codex section. The only expected secret is the local proxy admission value in `http_headers`.
 
 ## Proxy Smoke Test
 
@@ -71,6 +70,7 @@ With the desktop signed in and running, initialize MCP through the local proxy:
 ```sh
 curl -i http://127.0.0.1:37613/mcp \
   -X POST \
+  -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -H 'mcp-protocol-version: 2025-06-18' \
@@ -89,6 +89,7 @@ Use the returned session id to list tools:
 ```sh
 curl -i http://127.0.0.1:37613/mcp \
   -X POST \
+  -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -H 'mcp-protocol-version: 2025-06-18' \
@@ -124,7 +125,10 @@ Codex:
 Sign out of the desktop, keep it running, then call the local proxy:
 
 ```sh
-curl -i http://127.0.0.1:37613/mcp -X POST --data '{}'
+curl -i http://127.0.0.1:37613/mcp \
+  -X POST \
+  -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
+  --data '{}'
 ```
 
 Expected:
@@ -133,11 +137,23 @@ Expected:
 - Response text mentions the desktop is not signed in.
 - Server does not log a new MCP session.
 
-Then sign back in and call the proxy with a deliberately wrong incoming bearer:
+Then sign back in and call the proxy without the local proxy admission secret:
+
+```sh
+curl -i http://127.0.0.1:37613/mcp -X POST --data '{}'
+```
+
+Expected:
+
+- Local proxy returns `401`.
+- Server does not log a new MCP session.
+
+Then call the proxy with a deliberately wrong incoming bearer but the correct proxy admission secret:
 
 ```sh
 curl -i http://127.0.0.1:37613/mcp \
   -X POST \
+  -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
   -H 'authorization: Bearer wrong-token' \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \

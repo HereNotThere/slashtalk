@@ -295,6 +295,12 @@ describe("/auth/logout", () => {
         eq(oauthTokens.accessTokenHash, await hashToken(bundle.accessToken)),
       );
     expect(oauthToken?.revokedAt).toBeNull();
+
+    const setup = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: otherSession.sessionCookie },
+    });
+    expect(setup.status).toBe(200);
   });
 });
 
@@ -401,6 +407,25 @@ describe("/auth/logout-everywhere", () => {
     expect(after.headers.get("www-authenticate")).toContain(
       'error_description="revoked"',
     );
+
+    const [aliceUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, alice.userId));
+    expect(aliceUser.credentialsRevokedAt).toBeTruthy();
+
+    const oldJwtSetup = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: alice.sessionCookie },
+    });
+    expect(oldJwtSetup.status).toBe(401);
+
+    const freshAlice = await signIn("alice_code");
+    const freshJwtSetup = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: freshAlice.sessionCookie },
+    });
+    expect(freshJwtSetup.status).toBe(200);
   });
 });
 

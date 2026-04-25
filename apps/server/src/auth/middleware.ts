@@ -6,6 +6,12 @@ import { db } from "../db";
 import { users, apiKeys, devices } from "../db/schema";
 import { hashToken } from "./tokens";
 
+type SessionJwtPayload = {
+  sub?: string | number;
+  iat?: number | boolean;
+  sessionIssuedAt?: number;
+};
+
 /** JWT auth plugin — validates cookie-based JWT, derives `user` into context */
 export const jwtAuth = new Elysia({ name: "auth/jwt" })
   .use(
@@ -21,7 +27,9 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
       throw new Error("Unauthorized");
     }
 
-    const payload = await jwt.verify(token as string);
+    const payload = (await jwt.verify(token as string)) as
+      | false
+      | SessionJwtPayload;
     if (!payload || !payload.sub) {
       set.status = 401;
       throw new Error("Invalid token");
@@ -36,6 +44,19 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
     if (!user) {
       set.status = 401;
       throw new Error("User not found");
+    }
+
+    if (user.credentialsRevokedAt) {
+      const issuedAtMs =
+        typeof payload.sessionIssuedAt === "number"
+          ? payload.sessionIssuedAt
+          : typeof payload.iat === "number"
+            ? payload.iat * 1000
+            : null;
+      if (!issuedAtMs || issuedAtMs < user.credentialsRevokedAt.getTime()) {
+        set.status = 401;
+        throw new Error("Invalid token");
+      }
     }
 
     return { user };

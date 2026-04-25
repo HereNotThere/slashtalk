@@ -25,6 +25,9 @@ export const users = pgTable("users", {
   avatarUrl: text("avatar_url"),
   displayName: text("display_name"),
   githubToken: text("github_token").notNull(), // encrypted at rest
+  credentialsRevokedAt: timestamp("credentials_revoked_at", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -333,7 +336,7 @@ export const agentSessions = pgTable(
     summaryTs: timestamp("summary_ts", { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex("agent_sessions_session_id_key").on(t.sessionId),
+    uniqueIndex("agent_sessions_user_session_key").on(t.userLogin, t.sessionId),
     index("agent_sessions_user_started_idx").on(t.userLogin, t.startedAt),
     index("agent_sessions_agent_started_idx").on(t.agentId, t.startedAt),
   ],

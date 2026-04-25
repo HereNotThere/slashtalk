@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "../src/db";
-import { users } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
@@ -11,6 +10,7 @@ let app: ReturnType<typeof createApp>;
 let baseUrl: string;
 let restoreFetch: () => void;
 let aliceApiKey: string;
+let bobApiKey: string;
 
 beforeAll(async () => {
   restoreFetch = mockGitHubAuth();
@@ -39,6 +39,21 @@ beforeAll(async () => {
   });
   const { apiKey } = (await exchangeRes.json()) as { apiKey: string };
   aliceApiKey = apiKey;
+
+  const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+  const bobCookie = getCookie(bobRes, "session")!;
+  const bobSetupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
+    method: "POST",
+    headers: { Cookie: bobCookie },
+  });
+  const { token: bobToken } = (await bobSetupRes.json()) as { token: string };
+  const bobExchangeRes = await fetch(`${baseUrl}/v1/auth/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: bobToken, deviceName: "bob-laptop", os: "darwin" }),
+  });
+  const { apiKey: bobKey } = (await bobExchangeRes.json()) as { apiKey: string };
+  bobApiKey = bobKey;
 });
 
 afterAll(async () => {
@@ -114,7 +129,61 @@ describe("managed-agent session ingest", () => {
     });
   });
 
+  it("scopes session id conflicts by user", async () => {
+    const payload = {
+      agentId: "agent-collision",
+      sessionId: "shared-session-id",
+      mode: "cloud",
+      visibility: "team",
+      startedAt: "2026-04-25T12:00:00.000Z",
+      lastActivity: "2026-04-25T12:01:00.000Z",
+    };
+    const alice = await fetch(`${baseUrl}/v1/managed-agent-sessions`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ...payload, name: "alice session" }),
+    });
+    expect(alice.status).toBe(200);
+
+    const bob = await fetch(`${baseUrl}/v1/managed-agent-sessions`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${bobApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ...payload, name: "bob session" }),
+    });
+    expect(bob.status).toBe(200);
+
+    const rows = await db.execute(sql`
+      select user_login, session_id, name
+      from agent_sessions
+      where session_id = 'shared-session-id'
+      order by user_login
+    `);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.user_login)).toEqual(["alice", "bob"]);
+    expect(rows.map((row) => row.name)).toEqual(["alice session", "bob session"]);
+  });
+
   it("lists only the caller's team-visible rows by default and filters by agent", async () => {
+    await fetch(`${baseUrl}/v1/managed-agent-sessions`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agentId: "agent-list",
+        sessionId: "list-session",
+        mode: "cloud",
+        visibility: "team",
+        startedAt: "2026-04-25T10:00:00.000Z",
+      }),
+    });
     await fetch(`${baseUrl}/v1/managed-agent-sessions`, {
       method: "PUT",
       headers: {
@@ -135,7 +204,7 @@ describe("managed-agent session ingest", () => {
     });
     expect(list.status).toBe(200);
     const body = (await list.json()) as { sessions: Array<{ sessionId: string }> };
-    expect(body.sessions.map((s) => s.sessionId)).toContain("session-1");
+    expect(body.sessions.map((s) => s.sessionId)).toContain("list-session");
     expect(body.sessions.map((s) => s.sessionId)).not.toContain("private-session");
 
     const filtered = await fetch(`${baseUrl}/v1/managed-agent-sessions?agentId=agent-private`, {
@@ -145,17 +214,44 @@ describe("managed-agent session ingest", () => {
     expect(filteredBody.sessions).toEqual([]);
   });
 
-  it("does not expose another user's private rows", async () => {
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "alice"));
-    expect(alice).toBeTruthy();
+  it("rejects invalid mode values", async () => {
+    const res = await fetch(`${baseUrl}/v1/managed-agent-sessions`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agentId: "agent-bad-mode",
+        sessionId: "bad-mode-session",
+        mode: "remote",
+        visibility: "team",
+        startedAt: "2026-04-25T11:00:00.000Z",
+      }),
+    });
+    expect(res.status).not.toBe(200);
+  });
 
-    const list = await fetch(`${baseUrl}/v1/managed-agent-sessions?userLogin=alice`, {
+  it("does not allow cross-user list reads", async () => {
+    const bobPut = await fetch(`${baseUrl}/v1/managed-agent-sessions`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${bobApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agentId: "agent-bob",
+        sessionId: "bob-team-session",
+        mode: "cloud",
+        visibility: "team",
+        startedAt: "2026-04-25T11:30:00.000Z",
+      }),
+    });
+    expect(bobPut.status).toBe(200);
+
+    const list = await fetch(`${baseUrl}/v1/managed-agent-sessions?userLogin=bob`, {
       headers: { Authorization: `Bearer ${aliceApiKey}` },
     });
-    const body = (await list.json()) as { sessions: Array<{ visibility: string }> };
-    expect(body.sessions.every((row) => row.visibility === "team")).toBe(true);
+    expect(list.status).toBe(403);
   });
 });

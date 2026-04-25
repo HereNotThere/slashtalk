@@ -6,6 +6,7 @@ import { db } from "../src/db";
 import { oauthAuthorizationCodes, oauthTokens } from "../src/db/schema";
 import { hashToken } from "../src/auth/tokens";
 import { mcpRoutes } from "../src/mcp/routes";
+import { mcpOAuthRoutes } from "../src/oauth/mcp";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
 
@@ -99,6 +100,11 @@ describe("root /mcp", () => {
     expect(invalid.headers.get("www-authenticate")).toContain(
       'error_description="unknown token"',
     );
+  });
+
+  it("does not expose the MCP presence debug snapshot publicly", async () => {
+    const res = await fetch(`${baseUrl}/mcp/presence`);
+    expect(res.status).toBe(404);
   });
 
   it("accepts initialize with a valid device API key and returns an MCP session id", async () => {
@@ -335,6 +341,17 @@ describe("MCP OAuth discovery", () => {
     expect(body.bearer_methods_supported).toEqual(["header"]);
   });
 
+  it("serves protected-resource metadata at the path-derived /mcp location", async () => {
+    const res = await fetch(`${baseUrl}/.well-known/oauth-protected-resource/mcp`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      resource: string;
+      authorization_servers: string[];
+    };
+    expect(body.resource).toBe(`${baseUrl}/mcp`);
+    expect(body.authorization_servers).toEqual([baseUrl]);
+  });
+
   for (const path of [
     "/.well-known/oauth-authorization-server",
     "/.well-known/oauth-authorization-server/mcp",
@@ -404,6 +421,66 @@ describe("MCP OAuth discovery", () => {
     expect(body.response_types).toEqual(["code"]);
     expect(body.token_endpoint_auth_method).toBe("none");
     expect(body.scope).toBe("mcp:read mcp:write");
+  });
+
+  it("rate limits dynamic client registration", async () => {
+    const limited = new Elysia()
+      .use(
+        mcpOAuthRoutes(db, {
+          registerQuotaMax: 1,
+          tokenQuotaMax: 100,
+          quotaWindowMs: 60_000,
+        }),
+      )
+      .listen(0);
+    const limitedUrl = `http://localhost:${limited.server!.port}`;
+
+    try {
+      const first = await registerOAuthClientAt(limitedUrl);
+      expect(first.status).toBe(201);
+
+      const second = await registerOAuthClientAt(limitedUrl);
+      expect(second.status).toBe(429);
+      expect(await second.json()).toMatchObject({ error: "slow_down" });
+    } finally {
+      limited.stop();
+    }
+  });
+
+  it("rate limits token exchange attempts by client", async () => {
+    const limited = new Elysia()
+      .use(
+        mcpOAuthRoutes(db, {
+          registerQuotaMax: 100,
+          tokenQuotaMax: 1,
+          quotaWindowMs: 60_000,
+        }),
+      )
+      .listen(0);
+    const limitedUrl = `http://localhost:${limited.server!.port}`;
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: "limited-client",
+    });
+
+    try {
+      const first = await fetch(`${limitedUrl}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      expect(first.status).toBe(400);
+
+      const second = await fetch(`${limitedUrl}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      expect(second.status).toBe(429);
+      expect(await second.json()).toMatchObject({ error: "slow_down" });
+    } finally {
+      limited.stop();
+    }
   });
 
   it("rejects invalid dynamic client registration requests", async () => {
@@ -610,6 +687,24 @@ describe("MCP OAuth discovery", () => {
     expect(await second.json()).toMatchObject({ error: "invalid_grant" });
   });
 
+  it("lets only one concurrent authorization-code exchange succeed", async () => {
+    const { clientId, redirectUri } = await registerDynamicOAuthClient();
+    const { verifier, challenge } = await pkcePair();
+    const code = await authorizeCode({
+      clientId,
+      redirectUri,
+      codeChallenge: challenge,
+    });
+
+    const exchanges = await Promise.all([
+      tokenExchange({ clientId, redirectUri, code, codeVerifier: verifier }),
+      tokenExchange({ clientId, redirectUri, code, codeVerifier: verifier }),
+    ]);
+
+    expect(exchanges.map((res) => res.status).sort()).toEqual([200, 400]);
+    await Promise.all(exchanges.map((res) => res.text()));
+  });
+
   it("rejects expired authorization codes", async () => {
     const { clientId, redirectUri } = await registerDynamicOAuthClient();
     const { verifier, challenge } = await pkcePair();
@@ -739,6 +834,23 @@ describe("MCP OAuth discovery", () => {
     expect(await resourceMismatch.json()).toMatchObject({
       error: "invalid_target",
     });
+  });
+
+  it("lets only one concurrent MCP OAuth refresh succeed", async () => {
+    const issued = await issueMcpOAuthToken();
+    const refreshes = await Promise.all([
+      refreshTokenExchange({
+        clientId: issued.clientId,
+        refreshToken: issued.refreshToken,
+      }),
+      refreshTokenExchange({
+        clientId: issued.clientId,
+        refreshToken: issued.refreshToken,
+      }),
+    ]);
+
+    expect(refreshes.map((res) => res.status).sort()).toEqual([200, 400]);
+    await Promise.all(refreshes.map((res) => res.text()));
   });
 
   it("emits structured OAuth audit logs without raw token material", async () => {
@@ -881,7 +993,17 @@ async function mcpJson(res: Response) {
 
 async function registerDynamicOAuthClient() {
   const redirectUri = `http://127.0.0.1:${40_000 + Math.floor(Math.random() * 1_000)}/callback`;
-  const res = await fetch(`${baseUrl}/oauth/register`, {
+  const res = await registerOAuthClientAt(baseUrl, redirectUri);
+  expect(res.status).toBe(201);
+  const body = (await res.json()) as { client_id: string };
+  return { clientId: body.client_id, redirectUri };
+}
+
+async function registerOAuthClientAt(
+  url: string,
+  redirectUri = `http://127.0.0.1:${40_000 + Math.floor(Math.random() * 1_000)}/callback`,
+) {
+  return fetch(`${url}/oauth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -893,9 +1015,6 @@ async function registerDynamicOAuthClient() {
       scope: "mcp:read mcp:write offline_access",
     }),
   });
-  expect(res.status).toBe(201);
-  const body = (await res.json()) as { client_id: string };
-  return { clientId: body.client_id, redirectUri };
 }
 
 async function authorizeCode({

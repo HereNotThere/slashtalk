@@ -29,6 +29,7 @@ export interface InstallOptions {
 interface InstallerDeps {
   homeDir?: string;
   localProxyUrl?: () => string;
+  localProxySecret?: () => string;
   remoteMcpUrl?: () => string;
 }
 
@@ -56,7 +57,9 @@ const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as
   | undefined;
 const DEFAULT_BASE_URL = "https://slashtalk.onrender.com";
 const MCP_KEY = "slashtalk-mcp";
+export const LOCAL_PROXY_SECRET_HEADER = "X-Slashtalk-Proxy-Token";
 export const DEFAULT_LOCAL_MCP_PORT = 37613;
+let fallbackLocalProxySecret: string | null = null;
 
 function backendBaseUrl(): string {
   return (
@@ -84,6 +87,11 @@ export function localMcpPort(): number {
 
 export function localProxyMcpUrl(): string {
   return `http://127.0.0.1:${localMcpPort()}/mcp`;
+}
+
+function defaultLocalProxySecret(): string {
+  fallbackLocalProxySecret ??= crypto.randomUUID();
+  return fallbackLocalProxySecret;
 }
 
 function normalizeOptions(
@@ -115,6 +123,7 @@ function claudeEntry(
   options: ReturnType<typeof normalizeOptions>,
   localUrl: string,
   remoteUrl: string,
+  proxySecret: string,
 ): unknown {
   const e: { type: string; url: string; headers?: Record<string, string> } = {
     type: "http",
@@ -123,6 +132,8 @@ function claudeEntry(
   if (options.mode === "legacy-bearer") {
     if (!options.token) throw new Error("legacy-bearer MCP install requires token");
     e.headers = { Authorization: `Bearer ${options.token}` };
+  } else {
+    e.headers = { [LOCAL_PROXY_SECRET_HEADER]: proxySecret };
   }
   return e;
 }
@@ -185,11 +196,12 @@ function removeSlashtalkCodexSection(text: string): string {
   return out.join("\n").trimEnd();
 }
 
-function codexEntry(localUrl: string): string {
+function codexEntry(localUrl: string, proxySecret: string): string {
   return [
     "[mcp_servers.slashtalk-mcp]",
     `url = ${JSON.stringify(localUrl)}`,
     "enabled = true",
+    `http_headers = { ${JSON.stringify(LOCAL_PROXY_SECRET_HEADER)} = ${JSON.stringify(proxySecret)} }`,
   ].join("\n");
 }
 
@@ -198,17 +210,27 @@ async function installClaudeCode(
   options: ReturnType<typeof normalizeOptions>,
   localUrl: string,
   remoteUrl: string,
+  proxySecret: string,
 ): Promise<void> {
   const config = await readJsonConfig(file);
   config.mcpServers = config.mcpServers ?? {};
-  config.mcpServers[MCP_KEY] = claudeEntry(options, localUrl, remoteUrl);
+  config.mcpServers[MCP_KEY] = claudeEntry(
+    options,
+    localUrl,
+    remoteUrl,
+    proxySecret,
+  );
   await writeJsonConfig(file, config);
 }
 
-async function installCodex(file: string, localUrl: string): Promise<void> {
+async function installCodex(
+  file: string,
+  localUrl: string,
+  proxySecret: string,
+): Promise<void> {
   const existing = await readTomlConfig(file);
   const withoutOurs = removeSlashtalkCodexSection(existing);
-  const next = [withoutOurs, codexEntry(localUrl)]
+  const next = [withoutOurs, codexEntry(localUrl, proxySecret)]
     .filter((part) => part.trim() !== "")
     .join("\n\n");
   await writeTomlConfig(file, next + "\n");
@@ -217,6 +239,7 @@ async function installCodex(file: string, localUrl: string): Promise<void> {
 export function createInstaller(deps: InstallerDeps = {}): Installer {
   const homeDir = deps.homeDir ?? os.homedir();
   const getLocalProxyUrl = deps.localProxyUrl ?? localProxyMcpUrl;
+  const getLocalProxySecret = deps.localProxySecret ?? defaultLocalProxySecret;
   const getRemoteMcpUrl = deps.remoteMcpUrl ?? defaultRemoteMcpUrl;
 
   return {
@@ -229,6 +252,7 @@ export function createInstaller(deps: InstallerDeps = {}): Installer {
           options,
           getLocalProxyUrl(),
           getRemoteMcpUrl(),
+          getLocalProxySecret(),
         );
       } else {
         if (options.mode === "legacy-bearer") {
@@ -236,7 +260,7 @@ export function createInstaller(deps: InstallerDeps = {}): Installer {
             "Codex legacy-bearer install is intentionally unsupported",
           );
         }
-        await installCodex(file, getLocalProxyUrl());
+        await installCodex(file, getLocalProxyUrl(), getLocalProxySecret());
       }
       return { installed: true, path: file };
     },
@@ -296,10 +320,17 @@ export function createInstaller(deps: InstallerDeps = {}): Installer {
   };
 }
 
-const defaultInstaller = createInstaller();
+let defaultInstaller = createInstaller();
 
-export const install = defaultInstaller.install;
-export const uninstall = defaultInstaller.uninstall;
-export const status = defaultInstaller.status;
-export const mcpUrl = defaultInstaller.mcpUrl;
-export const remoteMcpUrl = defaultInstaller.remoteMcpUrl;
+export function configureInstaller(deps: InstallerDeps): void {
+  defaultInstaller = createInstaller(deps);
+}
+
+export const install: Installer["install"] = (...args) =>
+  defaultInstaller.install(...args);
+export const uninstall: Installer["uninstall"] = (...args) =>
+  defaultInstaller.uninstall(...args);
+export const status: Installer["status"] = () => defaultInstaller.status();
+export const mcpUrl: Installer["mcpUrl"] = () => defaultInstaller.mcpUrl();
+export const remoteMcpUrl: Installer["remoteMcpUrl"] = () =>
+  defaultInstaller.remoteMcpUrl();

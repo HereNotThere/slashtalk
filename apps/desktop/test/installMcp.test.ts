@@ -39,6 +39,7 @@ describe("installMcp", () => {
     const installer = createInstaller({
       homeDir: home,
       localProxyUrl: () => "http://127.0.0.1:37613/mcp",
+      localProxySecret: () => "local-proxy-secret",
       remoteMcpUrl: () => "https://api.example.com/mcp",
     });
 
@@ -50,7 +51,9 @@ describe("installMcp", () => {
     expect(config.mcpServers["slashtalk-mcp"]).toEqual({
       type: "http",
       url: "http://127.0.0.1:37613/mcp",
+      headers: { "X-Slashtalk-Proxy-Token": "local-proxy-secret" },
     });
+    expect(JSON.stringify(config)).not.toContain("device-api-key");
   });
 
   it("keeps Claude Code legacy bearer install available explicitly", async () => {
@@ -58,6 +61,7 @@ describe("installMcp", () => {
     const installer = createInstaller({
       homeDir: home,
       localProxyUrl: () => "http://127.0.0.1:37613/mcp",
+      localProxySecret: () => "local-proxy-secret",
       remoteMcpUrl: () => "https://api.example.com/mcp",
     });
 
@@ -87,6 +91,7 @@ describe("installMcp", () => {
     const installer = createInstaller({
       homeDir: home,
       localProxyUrl: () => "http://127.0.0.1:37613/mcp",
+      localProxySecret: () => "local-proxy-secret",
       remoteMcpUrl: () => "https://api.example.com/mcp",
     });
 
@@ -98,6 +103,9 @@ describe("installMcp", () => {
     expect(text).toContain("[mcp_servers.slashtalk-mcp]");
     expect(text).toContain('url = "http://127.0.0.1:37613/mcp"');
     expect(text).toContain("enabled = true");
+    expect(text).toContain(
+      'http_headers = { "X-Slashtalk-Proxy-Token" = "local-proxy-secret" }',
+    );
     expect(text).not.toContain("device-api-key");
     expect(text).not.toContain("Authorization");
     expect(text).not.toContain("bearer_token");
@@ -115,6 +123,7 @@ describe("installMcp", () => {
         "[mcp_servers.slashtalk-mcp]",
         'url = "http://127.0.0.1:37613/mcp"',
         "enabled = true",
+        'http_headers = { "X-Slashtalk-Proxy-Token" = "old-secret" }',
         "",
         "[mcp_servers.other]",
         'url = "https://example.com/mcp"',
@@ -124,6 +133,7 @@ describe("installMcp", () => {
     const installer = createInstaller({
       homeDir: home,
       localProxyUrl: () => "http://127.0.0.1:37613/mcp",
+      localProxySecret: () => "local-proxy-secret",
       remoteMcpUrl: () => "https://api.example.com/mcp",
     });
 

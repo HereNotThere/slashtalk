@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import { apiKeys, oauthTokens, refreshTokens } from "../db/schema";
+import { apiKeys, oauthTokens, refreshTokens, users } from "../db/schema";
 import { authAudit } from "./audit";
 import { hashToken } from "./tokens";
 
@@ -9,7 +9,12 @@ export const JWT_TTL_SECONDS = 60 * 60; // 1 hour
 export const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
 interface JwtSigner {
-  sign: (payload: { sub: string; exp: number }) => Promise<string>;
+  sign: (payload: {
+    sub: string;
+    exp: number;
+    iat: true;
+    sessionIssuedAt: number;
+  }) => Promise<string>;
 }
 
 export async function issueSessionTokens(
@@ -17,9 +22,12 @@ export async function issueSessionTokens(
   jwt: JwtSigner,
   userId: number,
 ): Promise<{ jwt: string; refreshToken: string }> {
+  const now = Date.now();
   const token = await jwt.sign({
     sub: String(userId),
-    exp: Math.floor(Date.now() / 1000) + JWT_TTL_SECONDS,
+    exp: Math.floor(now / 1000) + JWT_TTL_SECONDS,
+    iat: true,
+    sessionIssuedAt: now,
   });
   const refreshToken = crypto.randomUUID();
   await db.insert(refreshTokens).values({
@@ -74,6 +82,11 @@ export async function revokeAllUserCredentials(
   reason: "sign_out_everywhere" | "github_grant_revoked",
 ): Promise<void> {
   const counts = await db.transaction(async (tx) => {
+    const revokedAt = new Date();
+    await tx
+      .update(users)
+      .set({ credentialsRevokedAt: revokedAt, updatedAt: revokedAt })
+      .where(eq(users.id, userId));
     const refreshRows = await tx
       .delete(refreshTokens)
       .where(eq(refreshTokens.userId, userId))
@@ -84,7 +97,7 @@ export async function revokeAllUserCredentials(
       .returning({ id: apiKeys.id });
     const oauthRows = await tx
       .update(oauthTokens)
-      .set({ revokedAt: new Date() })
+      .set({ revokedAt })
       .where(and(eq(oauthTokens.userId, userId), isNull(oauthTokens.revokedAt)))
       .returning({ id: oauthTokens.id });
 

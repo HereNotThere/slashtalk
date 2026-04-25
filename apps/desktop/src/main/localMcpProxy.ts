@@ -1,6 +1,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  LOCAL_PROXY_SECRET_HEADER,
   localMcpPort,
   localProxyMcpUrl,
   remoteMcpUrl,
@@ -9,6 +10,7 @@ import {
 interface LocalMcpProxyDeps {
   port?: number;
   getToken?: () => string | null;
+  getProxySecret?: () => string | null;
   remoteMcpUrl?: () => string;
 }
 
@@ -57,6 +59,11 @@ function response(
   res.end(text);
 }
 
+function headerValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
 function upstreamUrl(base: string, incomingUrl: string | undefined): URL {
   const target = new URL(base);
   const incoming = new URL(incomingUrl ?? "/mcp", "http://127.0.0.1");
@@ -74,6 +81,7 @@ function forwardedHeaders(
   for (const [name, value] of Object.entries(req.headers)) {
     const lower = name.toLowerCase();
     if (lower === "authorization" || lower === "host") continue;
+    if (lower === LOCAL_PROXY_SECRET_HEADER.toLowerCase()) continue;
     if (HOP_BY_HOP_HEADERS.has(lower)) continue;
     if (Array.isArray(value)) {
       for (const v of value) headers.append(name, v);
@@ -98,6 +106,7 @@ export function createLocalMcpProxy(
   let server: http.Server | null = null;
   let boundPort = deps.port ?? localMcpPort();
   const getToken = deps.getToken ?? (() => null);
+  const getProxySecret = deps.getProxySecret ?? (() => null);
   const getRemoteMcpUrl = deps.remoteMcpUrl ?? remoteMcpUrl;
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -107,17 +116,37 @@ export function createLocalMcpProxy(
       return;
     }
 
+    const expectedProxySecret = getProxySecret();
+    const suppliedProxySecret = headerValue(
+      req.headers[LOCAL_PROXY_SECRET_HEADER.toLowerCase()],
+    );
+    if (!expectedProxySecret || suppliedProxySecret !== expectedProxySecret) {
+      response(res, 401, "Invalid Slashtalk local proxy token");
+      return;
+    }
+
     const token = getToken();
     if (!token) {
       response(res, 401, "Slashtalk desktop is not signed in");
       return;
     }
 
+    const abortController = new AbortController();
+    let finished = false;
+    const abortUpstream = () => {
+      if (!finished) abortController.abort();
+    };
+    req.on("aborted", abortUpstream);
+    req.socket.on("close", abortUpstream);
+    res.on("close", abortUpstream);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
     try {
       const body = await readBody(req);
       const requestInit: RequestInit = {
         method: req.method,
         headers: forwardedHeaders(req, token),
+        signal: abortController.signal,
       };
       if (body) {
         requestInit.body = body.buffer.slice(
@@ -132,22 +161,32 @@ export function createLocalMcpProxy(
       res.statusMessage = upstream.statusText;
       copyResponseHeaders(upstream, res);
       if (!upstream.body) {
+        finished = true;
         res.end();
         return;
       }
-      const reader = upstream.body.getReader();
+      reader = upstream.body.getReader();
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         if (value) res.write(Buffer.from(value));
       }
+      finished = true;
       res.end();
     } catch (err) {
-      console.warn("[localMcpProxy] forward failed", {
-        message: err instanceof Error ? err.message : String(err),
-      });
+      if (!abortController.signal.aborted) {
+        console.warn("[localMcpProxy] forward failed", {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
       if (!res.headersSent) response(res, 502, "MCP proxy upstream failed");
-      else res.end();
+      else if (!res.destroyed) res.end();
+    } finally {
+      finished = true;
+      req.off("aborted", abortUpstream);
+      req.socket.off("close", abortUpstream);
+      res.off("close", abortUpstream);
+      await reader?.cancel().catch(() => undefined);
     }
   }
 

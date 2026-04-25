@@ -39,6 +39,7 @@ See also core-beliefs [#11](design-docs/core-beliefs.md#11-identity-is-user-oaut
 | Refresh token | SHA-256 hash in `refresh_tokens.token_hash` | Plaintext exactly once, at issuance, as an httpOnly cookie. |
 | API key | SHA-256 hash in `api_keys.key_hash` | Plaintext exactly once, at `/v1/auth/exchange` response. |
 | Setup token | SHA-256 hash in `setup_tokens.token`… (stored hashed) | Plaintext exactly once, to the desktop app during the loopback-port callback. |
+| MCP OAuth token | SHA-256 hashes in `oauth_tokens.access_token_hash` and `oauth_tokens.refresh_token_hash` | Plaintext exactly once, at `/oauth/token` issuance or refresh rotation. |
 
 **Rule.** Raw tokens, hashes, and encryption keys are never logged, returned in error responses, or serialized into Redis messages.
 
@@ -51,17 +52,19 @@ Current consolidation behavior:
 - Desktop signs in through GitHub OAuth against `apps/server`.
 - `apps/server` issues a JWT/refresh pair, then the desktop exchanges a setup token for a device API key through `/v1/auth/exchange`.
 - `/mcp` accepts `Authorization: Bearer <device-api-key>` for desktop-local proxy and legacy compatibility.
-- Local Claude Code and Codex installs should point at the desktop-local proxy (`http://127.0.0.1:37613/mcp` by default). The proxy injects the safeStorage-backed device API key per request, so client config does not store a static Slashtalk bearer.
-- `/v1/managed-agent-sessions` is also served by `apps/server` with `apiKeyAuth`; private managed-agent sessions are not returned by the list endpoint.
+- Local Claude Code and Codex installs should point at the desktop-local proxy (`http://127.0.0.1:37613/mcp` by default). The desktop writes a random local-only `X-Slashtalk-Proxy-Token` header into client config and stores the matching secret with Electron `safeStorage`. The proxy requires that header, strips it before forwarding, then injects the safeStorage-backed device API key per request. Client config must never contain the Slashtalk device API key.
+- `/v1/managed-agent-sessions` is also served by `apps/server` with `apiKeyAuth`; reads are self-only until rows gain repo linkage, and private managed-agent sessions are not returned by the list endpoint.
+- The old public `/mcp/presence` debug route has been removed. MCP presence state is internal process state, not a public snapshot API.
 
 Direct MCP OAuth behavior:
 
 - `/mcp` returns `401` with `WWW-Authenticate: Bearer resource_metadata="..."` so OAuth-capable MCP clients can discover protected-resource metadata.
-- `/.well-known/oauth-protected-resource` describes root `/mcp`; authorization-server metadata is served at the standard root paths plus Claude/Codex-compatible `/mcp` variants.
+- `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp` describe root `/mcp`; authorization-server metadata is served at the standard root paths plus Claude/Codex-compatible `/mcp` variants.
 - `/oauth/register` supports Dynamic Client Registration for public loopback clients. `slashtalk-static-claude-code` is also accepted as a static public client.
 - `/oauth/authorize` requires a signed-in Slashtalk browser session, routing through GitHub sign-in when needed, then issues a short-lived one-time authorization code bound to client, redirect URI, scope, PKCE challenge, user, and `/mcp` resource.
-- `/oauth/token` exchanges authorization codes with PKCE and returns opaque MCP access/refresh tokens. Token hashes are stored in `oauth_tokens`; access tokens are short lived and bound to `/mcp`. Refresh tokens rotate on use and replay is rejected.
+- `/oauth/token` exchanges authorization codes with PKCE and returns opaque MCP access/refresh tokens. Token hashes are stored in `oauth_tokens`; access tokens are short lived and bound to `/mcp`. Authorization codes and refresh tokens are consumed with conditional transaction updates so concurrent replay yields exactly one success.
 - `/mcp` accepts valid MCP OAuth access tokens with `mcp:read` scope, and rejects expired, revoked, wrong-resource, unknown, or insufficient-scope tokens with `WWW-Authenticate` `invalid_token` details.
+- `/oauth/register` and `/oauth/token` have in-process write-rate limits and emit `auth_audit` `mcp_oauth_rate_limited` on rejection. Edge/global traffic shaping is still a deployment concern.
 
 Static bearer config remains an explicit compatibility bridge and should be treated as a long-lived device credential: revoke the device API key if it is exposed.
 
@@ -71,6 +74,7 @@ Revocation scopes:
 - Device revoke (`DELETE /api/me/devices/:id`) deletes that device and its API key; other devices, refresh tokens, and MCP OAuth grants remain valid.
 - Sign out everywhere (`POST /auth/logout-everywhere`) deletes all refresh tokens and device API keys for the signed-in user, revokes all of that user's MCP OAuth access/refresh tokens, and forces existing MCP clients to re-authenticate on their next request.
 - GitHub OAuth grant revocation detected through a GitHub `401` on user-backed repo/org API calls runs the same global cascade.
+- The global cascade also bumps `users.credentials_revoked_at`; `jwtAuth` rejects already-issued JWT session cookies whose issue time is older than that timestamp. A fresh sign-in after the cascade receives a new valid JWT.
 
 ## JWT session cookie
 
@@ -78,6 +82,7 @@ Revocation scopes:
 - Name: `session` (httpOnly, secure in production, sameSite=lax).
 - Lifetime: short (1 h). Refresh via `POST /auth/refresh` (rotates the refresh token).
 - The desktop app also sends the JWT as a raw `Cookie: session=<jwt>` header to `/api/me/*`; single-flight refresh in `apps/desktop/src/main/backend.ts` coordinates concurrent 401 retries.
+- `jwtAuth` compares each JWT issue time against `users.credentials_revoked_at`, so sign-out-everywhere and detected GitHub grant revocation invalidate existing browser/desktop session authority immediately.
 
 ## Desktop credential storage
 
@@ -88,6 +93,8 @@ Both the JWT and the API key are persisted in Electron `safeStorage`:
 - Linux → libsecret (via kwallet or gnome-keyring)
 
 See `apps/desktop/src/main/safeStore.ts`. If `safeStorage.isEncryptionAvailable()` is false, credentials are **not** persisted and the user is re-prompted on next launch.
+
+The desktop-local MCP proxy secret is also stored with `safeStorage`. It is not a Slashtalk server credential; it is an admission token proving the caller received desktop-installed local config before the proxy injects the real device API key.
 
 ## PII surface
 

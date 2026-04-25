@@ -68,7 +68,6 @@ export const mcpRoutes = (options: McpRouteOptions = {}) => {
         },
       });
     })
-    .get("/mcp/presence", () => ({ states: presence.snapshot() }))
     .onStop(() => {
       pool.shutdown();
     });

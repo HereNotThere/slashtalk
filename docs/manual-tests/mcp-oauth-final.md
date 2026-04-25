@@ -52,7 +52,7 @@ Select `slashtalk-oauth-local`, then authenticate. The browser should go through
 During login:
 
 - `POST /mcp` returns `401` with `WWW-Authenticate`.
-- `GET /.well-known/oauth-protected-resource`.
+- `GET /.well-known/oauth-protected-resource` or `GET /.well-known/oauth-protected-resource/mcp`.
 - `GET /.well-known/oauth-authorization-server`.
 - Optional `POST /oauth/register` for Dynamic Client Registration.
 - `GET /oauth/authorize`.
@@ -65,6 +65,21 @@ After login:
 
 The current migration intentionally advertises no MCP tools, so an empty tool list is a success.
 
+## Metadata Check
+
+Both protected-resource metadata paths should describe the root `/mcp` resource:
+
+```sh
+curl -s http://localhost:10000/.well-known/oauth-protected-resource | jq .resource
+curl -s http://localhost:10000/.well-known/oauth-protected-resource/mcp | jq .resource
+```
+
+Expected output for both:
+
+```text
+"http://localhost:10000/mcp"
+```
+
 ## Negative Check
 
 This should return `401` with `error="invalid_token"`:
@@ -76,6 +91,14 @@ curl -i http://localhost:10000/mcp \
   -H 'accept: application/json, text/event-stream' \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual","version":"0.0.0"}}}'
 ```
+
+The removed debug presence route should not expose process presence state:
+
+```sh
+curl -i http://localhost:10000/mcp/presence
+```
+
+Expected: `404`.
 
 ## Sign-Out-Everywhere Check
 

@@ -222,6 +222,22 @@ describe("POST /api/me/repos — claim gate", () => {
         eq(oauthTokens.accessTokenHash, await hashToken(derived.accessToken)),
       );
     expect(oauthToken?.revokedAt).toBeTruthy();
+
+    const [alice] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, aliceUserId));
+    expect(alice.credentialsRevokedAt).toBeTruthy();
+
+    const setup = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: aliceCookie },
+    });
+    expect(setup.status).toBe(401);
+
+    const fresh = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+    expect(fresh.status).toBe(200);
+    aliceCookie = getCookie(fresh, "session")!;
   });
 
   it("rejects with 502 upstream_unavailable on GitHub 5xx", async () => {

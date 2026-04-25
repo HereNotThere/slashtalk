@@ -72,6 +72,16 @@ How the load-bearing flows (ingest, heartbeat, pub/sub, analyzers) degrade and r
 
 **Scope.** These limits protect authenticated per-user abuse and accidental client loops. IP-wide and global traffic shaping belongs at the edge/load balancer because the app server should not be the only line of defense for unauthenticated floods or distributed abuse.
 
+## OAuth write endpoint limits
+
+**Contract.** Public MCP OAuth write endpoints apply lightweight in-process limits before doing unbounded work:
+
+- `/oauth/register` is limited by caller IP. Rejections return `429 { "error": "slow_down" }` and emit `auth_audit` `mcp_oauth_rate_limited`.
+- `/oauth/token` is limited by caller IP plus `client_id` when available. Rejections also return `429 { "error": "slow_down" }`.
+- Authorization-code and refresh-token consumption use conditional `UPDATE ... RETURNING` inside a transaction. Under concurrent replay, exactly one exchange can consume the one-time credential and issue replacement tokens.
+
+**Scope.** These limits give local/dev parity and basic single-process protection. They are intentionally not a distributed abuse-control system; production still needs edge or gateway controls for global/IP-wide floods.
+
 ## Analyzer scheduler
 
 **Contract.** `apps/server/src/analyzers/scheduler.ts` runs every `ANALYZER_TICK_MS` (default 300 s) when `ANTHROPIC_API_KEY` is set. Each tick:

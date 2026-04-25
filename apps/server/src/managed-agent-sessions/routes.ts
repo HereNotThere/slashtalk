@@ -40,7 +40,7 @@ export const managedAgentSessionRoutes = (db: Database) =>
             summaryTs: body.summaryTs ? new Date(body.summaryTs) : null,
           })
           .onConflictDoUpdate({
-            target: agentSessions.sessionId,
+            target: [agentSessions.userLogin, agentSessions.sessionId],
             set: {
               agentId: sql`excluded.agent_id`,
               mode: sql`excluded.mode`,
@@ -75,7 +75,7 @@ export const managedAgentSessionRoutes = (db: Database) =>
         body: t.Object({
           agentId: t.String({ minLength: 1 }),
           sessionId: t.String({ minLength: 1 }),
-          mode: t.String({ minLength: 1 }),
+          mode: t.Union([t.Literal("cloud"), t.Literal("local")]),
           visibility: t.Union([t.Literal("private"), t.Literal("team")]),
           name: t.Optional(t.String()),
           startedAt: t.String({ format: "date-time" }),
@@ -87,10 +87,14 @@ export const managedAgentSessionRoutes = (db: Database) =>
         }),
       },
     )
-    .get("/managed-agent-sessions", async ({ request, user }) => {
+    .get("/managed-agent-sessions", async ({ request, user, set }) => {
       const url = new URL(request.url);
       const target = url.searchParams.get("userLogin") ?? user.githubLogin;
       const agentId = url.searchParams.get("agentId");
+      if (target !== user.githubLogin) {
+        set.status = 403;
+        return { error: "forbidden" };
+      }
 
       const conditions = [
         eq(agentSessions.userLogin, target),

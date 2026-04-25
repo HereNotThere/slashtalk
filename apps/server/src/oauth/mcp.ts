@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import { jwt } from "@elysiajs/jwt";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
 import {
@@ -17,6 +17,14 @@ const STATIC_CLIENT_IDS = new Set(["slashtalk-static-claude-code"]);
 const AUTH_CODE_TTL_MS = 5 * 60 * 1000;
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const OAUTH_WRITE_QUOTA_MAX = 120;
+const OAUTH_WRITE_QUOTA_WINDOW_MS = 60_000;
+
+type OAuthRouteOptions = {
+  registerQuotaMax?: number;
+  tokenQuotaMax?: number;
+  quotaWindowMs?: number;
+};
 
 interface RegisterRequest {
   client_name?: unknown;
@@ -82,13 +90,24 @@ export function authorizationServerMetadata(origin: string) {
   };
 }
 
-export function mcpOAuthRoutes(db: Database) {
+export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
   const metadata = ({ request }: { request: Request }) =>
     authorizationServerMetadata(originOf(request));
+  const registerLimiter = new KeyedRequestLimiter({
+    max: options.registerQuotaMax ?? OAUTH_WRITE_QUOTA_MAX,
+    windowMs: options.quotaWindowMs ?? OAUTH_WRITE_QUOTA_WINDOW_MS,
+  });
+  const tokenLimiter = new KeyedRequestLimiter({
+    max: options.tokenQuotaMax ?? OAUTH_WRITE_QUOTA_MAX,
+    windowMs: options.quotaWindowMs ?? OAUTH_WRITE_QUOTA_WINDOW_MS,
+  });
 
   return new Elysia({ name: "oauth/mcp" })
     .use(jwt({ name: "jwt", secret: config.jwtSecret }))
     .get("/.well-known/oauth-protected-resource", ({ request }) =>
+      protectedResourceMetadata(originOf(request)),
+    )
+    .get("/.well-known/oauth-protected-resource/mcp", ({ request }) =>
       protectedResourceMetadata(originOf(request)),
     )
     .get("/.well-known/oauth-authorization-server", metadata)
@@ -97,7 +116,21 @@ export function mcpOAuthRoutes(db: Database) {
     .get("/.well-known/openid-configuration", metadata)
     .get("/.well-known/openid-configuration/mcp", metadata)
     .get("/mcp/.well-known/openid-configuration", metadata)
-    .post("/oauth/register", async ({ body, set }) => {
+    .post("/oauth/register", async ({ body, request, set }) => {
+      const quota = registerLimiter.record(clientIp(request));
+      if (!quota.ok) {
+        authAudit("mcp_oauth_rate_limited", {
+          route: "/oauth/register",
+          limit: quota.limit,
+          windowMs: quota.windowMs,
+        });
+        set.status = 429;
+        return {
+          error: "slow_down",
+          error_description: "too many registration requests",
+        };
+      }
+
       const parsed = parseRegistration(body as RegisterRequest);
       if (!parsed.ok) {
         set.status = 400;
@@ -155,6 +188,22 @@ export function mcpOAuthRoutes(db: Database) {
     .post("/oauth/token", async ({ request, set }) => {
       const origin = originOf(request);
       const parsed = await parseTokenRequest(request, origin);
+      const quota = tokenLimiter.record(
+        `${clientIp(request)}:${parsed.ok ? parsed.value.clientId : "invalid"}`,
+      );
+      if (!quota.ok) {
+        authAudit("mcp_oauth_rate_limited", {
+          route: "/oauth/token",
+          ...(parsed.ok ? { clientId: parsed.value.clientId } : {}),
+          limit: quota.limit,
+          windowMs: quota.windowMs,
+        });
+        set.status = 429;
+        return {
+          error: "slow_down",
+          error_description: "too many token requests",
+        };
+      }
       if (!parsed.ok) {
         authAudit("mcp_oauth_token_rejected", {
           error: parsed.error,
@@ -191,6 +240,38 @@ export function mcpOAuthRoutes(db: Database) {
 
 function originOf(request: Request): string {
   return new URL(request.url).origin;
+}
+
+function clientIp(request: Request): string {
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  if (forwardedFor) return forwardedFor.split(",")[0]?.trim() || "unknown";
+  return request.headers.get("x-real-ip") ?? new URL(request.url).hostname;
+}
+
+class KeyedRequestLimiter {
+  private buckets = new Map<string, number[]>();
+
+  constructor(private options: { max: number; windowMs: number }) {}
+
+  record(key: string):
+    | { ok: true }
+    | { ok: false; limit: number; windowMs: number } {
+    const now = Date.now();
+    const cutoff = now - this.options.windowMs;
+    const bucket = this.buckets.get(key)?.filter((ts) => ts > cutoff) ?? [];
+    if (bucket.length >= this.options.max) {
+      this.buckets.set(key, bucket);
+      return {
+        ok: false,
+        limit: this.options.max,
+        windowMs: this.options.windowMs,
+      };
+    }
+
+    bucket.push(now);
+    this.buckets.set(key, bucket);
+    return { ok: true };
+  }
 }
 
 type JwtVerifier = {
@@ -547,18 +628,30 @@ async function exchangeAuthorizationCode(
     return invalidGrant("code_verifier does not match code_challenge");
   }
 
-  await db
-    .update(oauthAuthorizationCodes)
-    .set({ usedAt: new Date() })
-    .where(eq(oauthAuthorizationCodes.id, code.id));
+  return db.transaction(async (tx) => {
+    const [consumed] = await tx
+      .update(oauthAuthorizationCodes)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(oauthAuthorizationCodes.id, code.id),
+          isNull(oauthAuthorizationCodes.usedAt),
+          gt(oauthAuthorizationCodes.expiresAt, new Date()),
+        ),
+      )
+      .returning();
+    if (!consumed) {
+      return invalidGrant("authorization code is invalid or expired");
+    }
 
-  return issueOAuthTokens(db, {
-    userId: code.userId,
-    clientId: code.clientId,
-    scope: code.scope,
-    resource: code.resource,
-    auditEvent: "mcp_oauth_token_issued",
-    grantType: "authorization_code",
+    return issueOAuthTokens(tx, {
+      userId: consumed.userId,
+      clientId: consumed.clientId,
+      scope: consumed.scope,
+      resource: consumed.resource,
+      auditEvent: "mcp_oauth_token_issued",
+      grantType: "authorization_code",
+    });
   });
 }
 
@@ -587,18 +680,30 @@ async function rotateOAuthRefreshToken(
     };
   }
 
-  await db
-    .update(oauthTokens)
-    .set({ revokedAt: new Date() })
-    .where(eq(oauthTokens.id, token.id));
+  return db.transaction(async (tx) => {
+    const [consumed] = await tx
+      .update(oauthTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(oauthTokens.id, token.id),
+          isNull(oauthTokens.revokedAt),
+          gt(oauthTokens.refreshExpiresAt, new Date()),
+        ),
+      )
+      .returning();
+    if (!consumed) {
+      return invalidGrant("refresh token is invalid or expired");
+    }
 
-  return issueOAuthTokens(db, {
-    userId: token.userId,
-    clientId: token.clientId,
-    scope: token.scope,
-    resource: token.resource,
-    auditEvent: "mcp_oauth_token_refreshed",
-    grantType: "refresh_token",
+    return issueOAuthTokens(tx, {
+      userId: consumed.userId,
+      clientId: consumed.clientId,
+      scope: consumed.scope,
+      resource: consumed.resource,
+      auditEvent: "mcp_oauth_token_refreshed",
+      grantType: "refresh_token",
+    });
   });
 }
 
@@ -617,7 +722,7 @@ type IssueTokenResult =
   | { ok: false; error: string; errorDescription: string };
 
 async function issueOAuthTokens(
-  db: Database,
+  db: Pick<Database, "insert">,
   input: {
     userId: number;
     clientId: string;

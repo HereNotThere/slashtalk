@@ -25,7 +25,7 @@ Drizzle export: `agentSessions`.
 | `summary_ts` | `PgTimestamp` | — |
 
 **Indexes:**
-- `agent_sessions_session_id_key` (unique index) on `(session_id)`
+- `agent_sessions_user_session_key` (unique index) on `(user_login, session_id)`
 - `agent_sessions_user_started_idx` (index) on `(user_login, started_at)`
 - `agent_sessions_agent_started_idx` (index) on `(agent_id, started_at)`
 
@@ -332,6 +332,7 @@ Drizzle export: `users`.
 | `avatar_url` | `PgText` | — |
 | `display_name` | `PgText` | — |
 | `github_token` | `PgText` | not null |
+| `credentials_revoked_at` | `PgTimestamp` | — |
 | `created_at` | `PgTimestamp` | has default |
 | `updated_at` | `PgTimestamp` | has default |
 

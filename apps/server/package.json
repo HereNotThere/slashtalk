@@ -10,6 +10,7 @@
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "spike:mcp-oauth": "bun run scripts/mcp-oauth-discovery-spike.ts",
     "gen:db-schema": "bun run scripts/gen-db-schema.ts",
     "gen:db-schema:check": "bun run scripts/gen-db-schema.ts -- --check"
   },

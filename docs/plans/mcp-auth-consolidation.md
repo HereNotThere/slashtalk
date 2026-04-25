@@ -217,6 +217,7 @@ External grounding:
 - **2026-04-25 — Manual QA refinement.** Added phase-specific MCP manual test runbooks and made assistant-run plus user-run Claude/Codex verification part of the done criteria after each significant MCP phase.
 - **2026-04-25 — Migration scope refinement.** Dropped the unused `share_workspace` test tool from Phase 1 consolidation; `/mcp` migration now verifies transport/auth/session behavior with an empty tool list until real MCP tools are added later.
 - **2026-04-25 — Phase 2 local proxy implementation.** Added desktop-local MCP proxy support and config-writer fixtures for Claude Code and Codex. Local installs now default to `http://127.0.0.1:37613/mcp` without static bearer material; the proxy injects the safeStorage-backed device API key per request. Legacy Claude bearer install remains as an explicit compatibility mode.
+- **2026-04-25 — OAuth discovery spike harness.** Added a throwaway local spike server (`bun --filter @slashtalk/server spike:mcp-oauth`) and runbook to observe Claude Code and Codex before permanent OAuth implementation. Curl smoke verified the RFC 9728 challenge, protected-resource metadata, authorization-server metadata, dummy token exchange surface, and authenticated MCP initialize path; real-client observations are still required before choosing DCR vs. static clients.
 
 ## Three questions
 

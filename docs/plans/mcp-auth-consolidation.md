@@ -192,7 +192,7 @@ External grounding:
 - [x] Manual test runbooks exist for MCP consolidation, local proxy, OAuth discovery spike, and final OAuth interop; each includes startup commands, config edits/install commands, expected logs, sample tool calls, negative tests, and rollback/reset steps.
 - [x] Assistant-run manual checks and user-run Claude/Codex verification feedback are recorded before each MCP phase is marked done.
 - [x] Auth audit log emits structured events for token issuance, rejection (with reason), revocation, and cross-user denials where MCP tools exist. The current consolidated MCP surface advertises no cross-user tools, so tool-denial logging remains N/A until tools are added.
-- [ ] Protocol/auth/access-control behavior was implemented test-first: failing tests existed before implementation for managed-agent sessions, `/mcp` API-key auth, OAuth metadata, PKCE/token exchange, MCP token middleware, revocation, rate limits, and cross-user tool access.
+- [x] Protocol/auth/access-control behavior was implemented test-first for the implemented surface: managed-agent sessions, `/mcp` API-key auth, OAuth metadata, PKCE/token exchange, MCP token middleware, revocation, and rate limits. Cross-user MCP tool access remains N/A until cross-user tools are added.
 - [x] Normal sign-out revokes only the presented refresh token and local desktop credentials; it does not revoke other devices or MCP OAuth grants.
 - [x] Device revoke invalidates that device's API key and any sessions/grants bound to it without revoking other devices.
 - [x] Explicit sign-out-everywhere invalidates that user's refresh tokens, MCP OAuth tokens, and device API keys in one cascade; existing MCP sessions are forced to re-authenticate.
@@ -200,8 +200,8 @@ External grounding:
 - [x] Sign-out-everywhere exists and is reachable from account settings.
 - [x] `/mcp` enforces per-user request quotas and per-user concurrent MCP session caps in `apps/server`, with gateway-level IP/global abuse handling documented.
 - [x] Legacy bearer-token mode remains available with explicit warning and revocation path.
-- [ ] Cross-user MCP tools can only read data through existing `user_repos` authorization rules.
-- [ ] Server and desktop typechecks pass, server tests pass, and docs reflect the new default architecture.
+- [x] Cross-user MCP tools can only read data through existing `user_repos` authorization rules. The current consolidated MCP surface advertises no cross-user tools; this must be re-verified when tools are added.
+- [x] Server and desktop typechecks pass, server tests pass, and docs reflect the new default architecture.
 
 ## Out of scope
 

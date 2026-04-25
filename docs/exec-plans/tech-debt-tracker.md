@@ -76,7 +76,7 @@ Grep the repo for `installation_id`, `"GitHub App"`, `/app/installations`, `X-Gi
 
 ---
 
-## Harness readiness — pitch-sprint priorities (from 2026-04-25 audit)
+## Harness readiness — sprint priorities (from 2026-04-25 audit)
 
 Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026-04-25.md). Audit verdict: ~60% harness-ready. Excellent doc scaffolding, gaps concentrated in enforcement, observability, and memory. Items 18–20 above are the Tier-3 enforcement complement to this section and remain deferred.
 
@@ -103,7 +103,7 @@ Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026
 
 ### Rung 3 — Observability (~1 day, highest leverage)
 
-**24. Adopt pino structured logger.** Shared logger config (in `packages/shared` or new `packages/log`). Replace `console.log` / `console.error` in `apps/server/src/analyzers/scheduler.ts`, ingest paths, and ws bridge first; rest of codebase second. Why this rung is highest priority: slashtalk's product is "make Claude Code sessions legible" — pitching that while the slashtalk repo is operationally illegible is a contradiction.
+**24. Adopt pino structured logger.** Shared logger config (in `packages/shared` or new `packages/log`). Replace `console.log` / `console.error` in `apps/server/src/analyzers/scheduler.ts`, ingest paths, and ws bridge first; rest of codebase second. Why this rung is highest priority: slashtalk's product is "make Claude Code sessions legible" — a repo whose own runtime is operationally illegible to its agents undermines the product story.
 
 **25. Wire Sentry (or equivalent) for unhandled errors.** Single hook on the server. Captures crashes the way the analyzer ingest pipeline cannot today.
 
@@ -111,11 +111,11 @@ Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026
 
 **26. Lift `AGENTS.md` recipes into `.claude/skills/*`.** Convert the five "Adding X" sections in [`apps/server/AGENTS.md`](../../apps/server/AGENTS.md) into discrete skill files (`add-route.md`, `add-llm-analyzer.md`, `add-db-column.md`, etc.). Reference from root `AGENTS.md`. Free leverage — prose is already written.
 
-### Deferred (post-pitch)
+### Deferred
 
 **27. Architectural-invariant tests in `apps/server/test/`.** Tests that enforce `core-beliefs.md` rules at runtime (e.g., "every cross-user route joins `user_repos`", "every Elysia plugin has a unique `name`"). Complements items 18–20 (CI grep checks).
 
-**28. Desktop integration tests.** Window lifecycle, IPC, preload bridge. Current coverage is 3 unit tests for a 7-window Electron app.
+**28. Desktop integration tests.** Window lifecycle, IPC, preload bridge. Current coverage is 3 unit tests for a multi-window Electron app.
 
 **29. ADR backfill.** Convert durable decisions in [`core-beliefs.md`](../design-docs/core-beliefs.md) into per-decision ADR files with date + alternatives considered. Optional — `core-beliefs.md` already captures Why; ADRs add the "what we chose against."
 
@@ -127,7 +127,7 @@ Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026
 
 ---
 
-## Pitch-window sequencing
+## Sprint sequencing
 
 Three days moves the repo from ~60% to ~90% harness-ready by the audit's checklist:
 

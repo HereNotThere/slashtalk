@@ -1,0 +1,42 @@
+Anthropic SDKs — our versions:
+  @anthropic-ai/sdk ^0.90.0
+  @anthropic-ai/claude-agent-sdk ^0.2.118
+
+Used in apps/server/src/analyzers/llm.ts (callStructured) and in future
+garbage-collection agents (harness plan Tier 5).
+
+Allowed model IDs (core-beliefs.md #8)
+--------------------------------------
+
+- claude-haiku-4-5-20251001  — high-volume cheap labels (default)
+- claude-sonnet-4-6          — working horse when Haiku is not enough
+- claude-opus-4-7            — latest + most capable; 1M context
+
+When adding or changing a model ID, update the pricing table in
+llm.ts in the same PR.
+
+Calling conventions
+-------------------
+
+- callStructured() forces a tool-use response by passing
+    tool_choice: { type: "tool", name: <tool_name> }.
+  The tool has a JSON schema; the return value is the parsed tool input.
+
+- System prompt is cached with
+    cache_control: { type: "ephemeral" }.
+  Keep the system prompt long and static; put variable context in the
+  user message. Cache hits are ~10× cheaper on input tokens.
+
+- Pricing table lives in llm.ts. Cache-write overhead = 1.25× base.
+
+Known gaps (QUALITY_SCORE.md: analyzers → D)
+---------------------------------------------
+
+- No retries, timeouts, or backoff on llm.ts. Harness plan Tier 4 adds
+  exponential backoff + jitter with transient/permanent classification.
+- No analyzer eval harness yet (snapshot + cost baseline). Tier 4 adds
+  recorded-fixture replay under apps/server/test/analyzers/.
+- Scheduler uses in-process `tickInFlight` only — multi-replica
+  deployments would double-work. Tier 4 adds a Redis SET NX EX lock.
+
+Upstream: https://docs.claude.com/en/api/overview

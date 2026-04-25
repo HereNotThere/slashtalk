@@ -1,5 +1,5 @@
-// Sends /v1/heartbeat for live Claude and Codex sessions that belong to a
-// tracked repo and have already been ingested.
+// Sends /v1/heartbeat for live Claude, Codex, and Cursor sessions that have
+// already been ingested.
 
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -12,6 +12,7 @@ import * as uploader from "./uploader";
 
 const CLAUDE_SESSIONS_DIR = path.join(os.homedir(), ".claude", "sessions");
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), ".codex", "sessions");
+const CURSOR_PROJECTS_DIR = path.join(os.homedir(), ".cursor", "projects");
 
 const FALLBACK_MS = 15_000;
 const CHANGE_DEBOUNCE_MS = 250;
@@ -125,12 +126,31 @@ function enumerateCodexLive(now: number): LiveSession[] {
     }));
 }
 
+function enumerateCursorLive(now: number): LiveSession[] {
+  return uploader
+    .listTrackedSessions()
+    .filter(
+      (session) =>
+        session.source === "cursor" &&
+        session.cwd &&
+        now - session.mtimeMs <= CODEX_LIVE_WINDOW_MS,
+    )
+    .map((session) => ({
+      sessionId: session.sessionId,
+      kind: "cursor",
+      cwd: session.cwd ?? undefined,
+      version: session.version ?? undefined,
+    }));
+}
+
 async function enumerateLive(): Promise<LiveSession[]> {
-  const [claude, codex] = await Promise.all([
+  const now = Date.now();
+  const [claude, codex, cursor] = await Promise.all([
     enumerateClaudeLive(),
-    Promise.resolve(enumerateCodexLive(Date.now())),
+    Promise.resolve(enumerateCodexLive(now)),
+    Promise.resolve(enumerateCursorLive(now)),
   ]);
-  return [...claude, ...codex];
+  return [...claude, ...codex, ...cursor];
 }
 
 async function pulse(): Promise<void> {
@@ -174,7 +194,7 @@ function watchRoot(root: string): void {
 export async function start(): Promise<void> {
   if (running) return;
   running = true;
-  for (const root of [CLAUDE_SESSIONS_DIR, CODEX_SESSIONS_DIR]) {
+  for (const root of [CLAUDE_SESSIONS_DIR, CODEX_SESSIONS_DIR, CURSOR_PROJECTS_DIR]) {
     try {
       await fsp.mkdir(root, { recursive: true });
     } catch (err) {
@@ -184,6 +204,7 @@ export async function start(): Promise<void> {
   unsubTracked = localRepos.onChange(() => schedulePulse());
   watchRoot(CLAUDE_SESSIONS_DIR);
   watchRoot(CODEX_SESSIONS_DIR);
+  watchRoot(CURSOR_PROJECTS_DIR);
   timer = setInterval(() => void pulse(), FALLBACK_MS);
   await pulse();
 }

@@ -4,7 +4,11 @@ import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessions, events, heartbeats, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { toSnapshot, loadInsightsForSessions } from "./snapshot";
+import {
+  toSnapshot,
+  loadInsightsForSessions,
+  sortByStateThenTime,
+} from "./snapshot";
 
 const SESSION_STATE_VALUES = Object.values(SessionState);
 
@@ -16,6 +20,9 @@ export const sessionRoutes = (db: Database) =>
     .get(
       "/sessions",
       async ({ user, query }) => {
+        // Fetch by recency, then re-sort by (state priority, lastTs). State
+        // classification happens in JS from heartbeat + event aggregates, so
+        // the canonical ordering can't be expressed in SQL.
         const rows = await db
           .select()
           .from(sessions)
@@ -46,7 +53,7 @@ export const sessionRoutes = (db: Database) =>
           snapshots = snapshots.filter((s) => s.project === query.project);
         }
 
-        return snapshots;
+        return sortByStateThenTime(snapshots);
       },
       {
         query: t.Object({

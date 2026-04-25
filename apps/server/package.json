@@ -9,7 +9,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "gen:db-schema": "bun run scripts/gen-db-schema.ts",
+    "gen:db-schema:check": "bun run scripts/gen-db-schema.ts -- --check"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.118",

@@ -4,8 +4,6 @@
 import type {
   AgentSessionRow,
   FeedSessionSnapshot,
-  OrgRepo,
-  OrgSummary,
   SessionSnapshot,
   SpotifyPresence,
 } from "@slashtalk/shared";
@@ -25,7 +23,7 @@ export type Avatar =
 export interface ChatHead {
   id: string;
   /** Picks the info-popover layout and routes session fetches. */
-  kind: "user" | "repo" | "agent";
+  kind: "user" | "agent";
   label: string;
   tint: string;
   avatar: Avatar;
@@ -35,15 +33,14 @@ export interface ChatHead {
   /** Epoch ms when this teammate's most recent PR opened/merged event landed.
    *  Renderer treats it as transient (animates while it's < a few seconds old). */
   prActivityAt?: number;
-  /** True when this user currently has at least one active MCP session. Renders
-   *  a green presence dot on the bubble. */
+  /** True when this user has at least one BUSY/ACTIVE session in the latest
+   *  feed poll — i.e. they're "working now". Renders a pulsing blue ring around
+   *  the bubble on the rail and suppresses the "last session" timestamp badge
+   *  so the live state reads cleanly. */
   live?: boolean;
   /** Set when the agent streamed new content while its info panel was not
    *  open. Cleared when the user opens the panel. Agent heads only. */
   unread?: boolean;
-  /** Only set when kind === "repo". */
-  repoId?: number;
-  repoFullName?: string;
 }
 
 export type Unsubscribe = () => void;
@@ -345,10 +342,29 @@ export interface ChatHeadsBridge {
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
 
-  // Project heads — GitHub repos the user has claimed. Rendered below the
-  // teammate rail in the overlay; ignored by other windows.
-  listProjects: () => Promise<ChatHead[]>;
-  onProjectsUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
+  // Rail pin toggle. Pinned = always on top (default). Unpinned = rail acts
+  // like a normal app window, on top only when Slashtalk is focused.
+  // sessionOnlyMode: when on AND unpinned, the rail stays hidden until the
+  // user has an active Claude Code session (or force-opens via the tray),
+  // then auto-hides 15 min after the last session ends.
+  rail: {
+    getPinned: () => Promise<boolean>;
+    setPinned: (pinned: boolean) => Promise<void>;
+    onPinnedChange: (cb: (pinned: boolean) => void) => Unsubscribe;
+    getSessionOnlyMode: () => Promise<boolean>;
+    setSessionOnlyMode: (enabled: boolean) => Promise<void>;
+    onSessionOnlyModeChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+  };
+
+  // Opt-in toggle for broadcasting the user's Spotify "Now Playing" to peers.
+  // Off by default — flipping on triggers the macOS Automation permission
+  // dialog. Non-macOS clients see isSupported = false.
+  spotifyShare: {
+    isSupported: () => Promise<boolean>;
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => Promise<void>;
+    onEnabledChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+  };
 
   // Info box (overlay → main). Show/hide are driven by hover; the rail keeps
   // the leave timer and asks main to hide after the user leaves the bubble
@@ -424,8 +440,7 @@ export interface ChatHeadsBridge {
   ) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
-  // Fetch sessions for a given chat head (user: own or a peer's; repo: all
-  // sessions on that repo across peers + self).
+  // Fetch sessions for a given chat head (self or a peer).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
   listAgentSessionsForAgent: (agentId: string) => Promise<AgentSessionRow[]>;
@@ -453,8 +468,6 @@ export interface ChatHeadsBridge {
     signOut: () => Promise<void>;
     onAuthState: (cb: (state: BackendAuthState) => void) => Unsubscribe;
 
-    listRepos: () => Promise<RepoSummary[]>;
-
     listTrackedRepos: () => Promise<TrackedRepo[]>;
     /** Opens a folder picker, claims + tracks. Resolves `null` if cancelled;
      *  rejects with a user-facing message on any other failure. */
@@ -463,22 +476,14 @@ export interface ChatHeadsBridge {
     onTrackedReposChange: (cb: (repos: TrackedRepo[]) => void) => Unsubscribe;
   };
 
-  // Org-scoped repo picker (tray popup). Backend stays unfiltered — these
-  // endpoints only drive the client-side filter of the chathead rail so the
-  // user controls which teammates they see locally.
-  orgs: {
-    list: () => Promise<OrgSummary[]>;
-    activeOrg: () => Promise<string | null>;
-    setActive: (login: string) => Promise<void>;
-    onListChange: (cb: (orgs: OrgSummary[]) => void) => Unsubscribe;
-    onActiveChange: (cb: (login: string | null) => void) => Unsubscribe;
-  };
-  repos: {
-    listForActiveOrg: () => Promise<OrgRepo[]>;
-    selection: () => Promise<string[]>;
-    toggle: (fullName: string) => Promise<string[]>;
-    onUpdate: (cb: (repos: OrgRepo[]) => void) => Unsubscribe;
-    onSelectionChange: (cb: (selected: string[]) => void) => Unsubscribe;
+  // Tray-popup local-repo picker. Selection is a per-device filter on top of
+  // the tracked-repo list — it only drives which peers appear on the chathead
+  // rail (peers without a session in any selected repo drop off). Adding a
+  // new tracked repo auto-selects it; removing one drops it from the set.
+  trackedRepos: {
+    selection: () => Promise<number[]>;
+    toggle: (repoId: number) => Promise<number[]>;
+    onSelectionChange: (cb: (selected: number[]) => void) => Unsubscribe;
   };
 
   debug: {

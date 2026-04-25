@@ -20,8 +20,6 @@ import type {
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
-  OrgRepo,
-  OrgSummary,
   SessionSnapshot,
   SpotifyPresence,
   SyncStateEntry,
@@ -279,6 +277,22 @@ function logHttp(
   else console[level](prefix);
 }
 
+/** Thrown by `jsonFetch` on any non-2xx response after the single-flight
+ *  JWT-refresh has been tried. Extends `Error` so older callers that just
+ *  read `.message` keep working; new callers can read `status` and `body`
+ *  to branch on structured server errors without regexing the message. */
+export class HttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: string,
+    method: string,
+    path: string,
+  ) {
+    super(`${method} ${path} failed (${status}): ${body}`);
+    this.name = "HttpError";
+  }
+}
+
 function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
   return doJsonFetch<T>(path, opts, false);
 }
@@ -326,7 +340,7 @@ async function doJsonFetch<T>(
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     logHttp("error", opts.method, path, String(res.status), ms, text.slice(0, 500));
-    throw new Error(`${opts.method} ${path} failed (${res.status}): ${text}`);
+    throw new HttpError(res.status, text, opts.method, path);
   }
 
   if (res.status === 204) {
@@ -403,26 +417,62 @@ async function doRefresh(): Promise<boolean> {
 
 // ---------- Public API ----------
 
-export function listRepos(): Promise<RepoSummary[]> {
-  return jsonFetch<RepoSummary[]>("/api/me/repos", { method: "GET" });
+/** Thrown by `claimRepo` with the server's structured error kind so callers
+ *  (e.g. the tray UI) can branch on `no_access` vs `token_expired` rather
+ *  than regexing the message. */
+export class ClaimRepoError extends Error {
+  constructor(
+    public readonly kind:
+      | "no_access"
+      | "token_expired"
+      | "rate_limited"
+      | "invalid_full_name"
+      | "upstream_unavailable"
+      | "unknown",
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "ClaimRepoError";
+  }
 }
 
-export function listOrgs(): Promise<OrgSummary[]> {
-  return jsonFetch<OrgSummary[]>("/api/me/orgs", { method: "GET" });
+export async function claimRepo(fullName: string): Promise<RepoSummary> {
+  try {
+    // Delegates to `jsonFetch` so the JWT single-flight refresh-on-401
+    // (doJsonFetch line 318) still runs before we treat a 401 as GitHub-side
+    // token_expired. Without this, a slashtalk-JWT expiry during a claim
+    // would misfire as "your GitHub token is stale."
+    return await jsonFetch<RepoSummary>("/api/me/repos", {
+      method: "POST",
+      body: { fullName },
+    });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      const parsed = parseClaimError(err.body);
+      const kind = (parsed?.error ?? "unknown") as ClaimRepoError["kind"];
+      throw new ClaimRepoError(
+        kind,
+        parsed?.message ?? `Claim failed (${err.status})`,
+        err.status,
+      );
+    }
+    throw err;
+  }
 }
 
-export function listOrgRepos(org: string): Promise<OrgRepo[]> {
-  return jsonFetch<OrgRepo[]>(
-    `/api/me/orgs/${encodeURIComponent(org)}/repos`,
-    { method: "GET" },
-  );
+interface ClaimErrorBody {
+  error?: string;
+  message?: string;
 }
 
-export function claimRepo(fullName: string): Promise<RepoSummary> {
-  return jsonFetch<RepoSummary>("/api/me/repos", {
-    method: "POST",
-    body: { fullName },
-  });
+function parseClaimError(body: string): ClaimErrorBody | null {
+  if (!body) return null;
+  try {
+    return JSON.parse(body) as ClaimErrorBody;
+  } catch {
+    return null;
+  }
 }
 
 export async function listTeammates(): Promise<TeammateSummary[]> {
@@ -450,13 +500,6 @@ export function listFeedSessionsForUser(
   login: string,
 ): Promise<FeedSessionSnapshot[]> {
   const qs = new URLSearchParams({ user: login });
-  return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
-}
-
-export function listFeedSessionsForRepo(
-  fullName: string,
-): Promise<FeedSessionSnapshot[]> {
-  const qs = new URLSearchParams({ repo: fullName });
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
 
@@ -489,7 +532,7 @@ export async function ingestChunk(args: {
   project: string;
   fromLineSeq: number;
   prefixHash: string;
-  source?: "claude" | "codex";
+  source?: "claude" | "codex" | "cursor";
   body: string;
 }): Promise<IngestResponse> {
   if (!creds) throw new Error("Not signed in");

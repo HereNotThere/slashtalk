@@ -64,13 +64,26 @@ function resolveWorktreeMainRepo(startDir: string): string | null {
 }
 
 const TRACKED_KEY = "trackedRepos";
+const SELECTION_KEY = "trackedReposSelection";
 
 let tracked: TrackedRepo[] = [];
+// Per-repo "include in rail filter" toggle. Default ON when a repo is added,
+// persisted across launches. Stored as repoId so rename of fullName on GitHub
+// doesn't desync the user's choice.
+let selectedIds = new Set<number>();
 const changes = createEmitter<TrackedRepo[]>();
+const selectionChanges = createEmitter<Set<number>>();
 
 export function restore(): void {
   const saved = store.get<TrackedRepo[]>(TRACKED_KEY);
   if (Array.isArray(saved)) tracked = saved;
+  const savedSelection = store.get<number[]>(SELECTION_KEY);
+  if (Array.isArray(savedSelection)) {
+    selectedIds = new Set(savedSelection.filter((n) => typeof n === "number"));
+  } else {
+    // First launch or legacy store: default every tracked repo ON.
+    selectedIds = new Set(tracked.map((t) => t.repoId));
+  }
   backend.onChange((state) => {
     if (state.signedIn) void rehydrateFromServer();
   });
@@ -92,7 +105,21 @@ async function rehydrateFromServer(): Promise<void> {
       fullName: r.fullName,
       localPath: r.localPath,
     }));
-    if (!sameTracked(tracked, next)) apply(next);
+    if (sameTracked(tracked, next)) return;
+    // Repos arriving from the server that we haven't seen locally default to
+    // ON in the rail filter. Without this, a user who adds a repo on another
+    // device would see it tracked here but silently filtered out of the rail.
+    const knownIds = new Set(tracked.map((t) => t.repoId));
+    let selectionMutated = false;
+    for (const row of next) {
+      if (!knownIds.has(row.repoId) && !selectedIds.has(row.repoId)) {
+        selectedIds.add(row.repoId);
+        selectionMutated = true;
+      }
+    }
+    if (selectionMutated) persistSelection();
+    apply(next);
+    if (selectionMutated) selectionChanges.emit(new Set(selectedIds));
   } catch (err) {
     console.warn(
       "[localRepos] rehydrate failed:",
@@ -115,14 +142,60 @@ export function list(): TrackedRepo[] {
 }
 
 export const onChange = changes.on;
+export const onSelectionChange = selectionChanges.on;
+
+/** Repo IDs currently included in the rail filter. */
+export function selectedRepoIds(): Set<number> {
+  return new Set(selectedIds);
+}
+
+/** FullNames of tracked+selected repos. Used by rail filter. */
+export function selectedFullNames(): Set<string> {
+  const byId = new Map(tracked.map((t) => [t.repoId, t.fullName.toLowerCase()]));
+  const out = new Set<string>();
+  for (const id of selectedIds) {
+    const fn = byId.get(id);
+    if (fn) out.add(fn);
+  }
+  return out;
+}
+
+/** Toggle a tracked repo's membership in the filter set. Returns the new
+ *  selected set. A repoId not currently tracked is ignored. */
+export function toggleSelected(repoId: number): Set<number> {
+  if (!tracked.some((t) => t.repoId === repoId)) return selectedIds;
+  if (selectedIds.has(repoId)) selectedIds.delete(repoId);
+  else selectedIds.add(repoId);
+  persistSelection();
+  selectionChanges.emit(new Set(selectedIds));
+  return selectedIds;
+}
 
 function persist(): void {
   store.set(TRACKED_KEY, tracked);
 }
 
+function persistSelection(): void {
+  store.set(SELECTION_KEY, [...selectedIds]);
+}
+
 function apply(next: TrackedRepo[]): void {
   tracked = next;
   persist();
+  // Prune selection to known IDs so a removed repo doesn't leave a dangling
+  // entry that would silently re-activate if the same repoId appeared later.
+  const known = new Set(tracked.map((t) => t.repoId));
+  let mutated = false;
+  for (const id of selectedIds) {
+    if (!known.has(id)) {
+      selectedIds.delete(id);
+      mutated = true;
+    }
+  }
+  if (mutated) {
+    persistSelection();
+    selectionChanges.emit(new Set(selectedIds));
+  }
   changes.emit(tracked);
 }
 
@@ -167,7 +240,22 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
     throw new Error(`${fullName} is already tracked`);
   }
 
-  const claimed = await backend.claimRepo(fullName);
+  let claimed;
+  try {
+    claimed = await backend.claimRepo(fullName);
+  } catch (err) {
+    // The server-side claim-gate (core-beliefs #12) returns structured errors
+    // that carry a user-facing `message`. On `token_expired`, also flip the UI
+    // to signed-out — the stored OAuth token no longer sees this user's
+    // repos, so everything downstream is broken until they re-auth.
+    if (err instanceof backend.ClaimRepoError) {
+      if (err.kind === "token_expired") {
+        void backend.signOut().catch(() => {});
+      }
+      throw new Error(err.message);
+    }
+    throw err;
+  }
   const entry: TrackedRepo = {
     repoId: claimed.repoId,
     fullName: claimed.fullName,
@@ -175,7 +263,12 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
   };
   const next = [...tracked, entry];
   await syncDeviceRepos(next);
+  // Auto-select on add: the common case is "I'm adding this because I care
+  // about it right now." Pruning in `apply()` handles the reverse.
+  selectedIds.add(entry.repoId);
+  persistSelection();
   apply(next);
+  selectionChanges.emit(new Set(selectedIds));
   return entry;
 }
 
@@ -189,7 +282,10 @@ export async function removeLocalRepo(repoId: number): Promise<TrackedRepo[]> {
 }
 
 export function clearOnSignOut(): void {
-  if (tracked.length === 0) return;
+  if (tracked.length === 0 && selectedIds.size === 0) return;
+  selectedIds.clear();
+  persistSelection();
+  selectionChanges.emit(new Set());
   apply([]);
 }
 

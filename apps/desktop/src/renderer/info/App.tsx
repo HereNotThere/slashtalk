@@ -10,6 +10,7 @@ import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
+import { Markdown } from "../shared/Markdown";
 import { BranchIcon, ClaudeIcon, OpenAIIcon } from "../shared/icons";
 
 const REFRESH_MS = 15_000;
@@ -120,18 +121,9 @@ export function App(): JSX.Element {
       <div ref={contentRef}>
         {head?.kind === "agent" ? (
           <AgentPanel head={head} />
-        ) : head?.kind === "repo" ? (
-          <>
-            <Header head={head} />
-            <Divider />
-            <RepoSessionsSection
-              sessions={sessions}
-              expandRequest={expandRequest}
-            />
-          </>
         ) : (
           <>
-            <Header head={head} />
+            <UserHeader head={head} />
             {spotify && <NowPlaying track={spotify} />}
             <Divider />
             <SessionsSection
@@ -187,11 +179,6 @@ function Divider(): JSX.Element {
   return <div className="mx-lg h-px bg-divider" />;
 }
 
-function Header({ head }: { head: ChatHead | null }): JSX.Element {
-  if (head?.kind === "repo") return <RepoHeader head={head} />;
-  return <UserHeader head={head} />;
-}
-
 function UserHeader({ head }: { head: ChatHead | null }): JSX.Element {
   const name = head?.label ?? "—";
   const time = new Date().toLocaleTimeString([], {
@@ -217,33 +204,6 @@ function UserHeader({ head }: { head: ChatHead | null }): JSX.Element {
           <span className="shrink-0">{time}</span>
         </div>
       </div>
-    </div>
-  );
-}
-
-function RepoHeader({ head }: { head: ChatHead }): JSX.Element {
-  const full = head.repoFullName ?? head.label;
-  const slash = full.lastIndexOf("/");
-  const owner = slash >= 0 ? full.slice(0, slash) : "";
-  const name = slash >= 0 ? full.slice(slash + 1) : full;
-  return (
-    <div className="flex items-start gap-md px-lg pt-lg pb-md">
-      <Avatar head={head} />
-      <div className="flex-1 min-w-0">
-        <div className="text-[19px] font-bold leading-tight truncate">
-          {name}
-        </div>
-        {owner && (
-          <div className="mt-1 text-[12px] text-muted truncate">{owner}</div>
-        )}
-      </div>
-      <button
-        onClick={() => window.chatheads.hideInfo()}
-        className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
-        aria-label="Close"
-      >
-        ✕
-      </button>
     </div>
   );
 }
@@ -345,107 +305,14 @@ function SessionsSection({
   );
 }
 
-// "Current" = live or paused sessions (heartbeat still alive).
-// "Completed" = server-classified RECENT/ENDED.
-const ACTIVE_STATES = new Set<SessionState>([
-  SessionState.BUSY,
-  SessionState.ACTIVE,
-  SessionState.IDLE,
-]);
-
-function tsOf(s: InfoSession): number {
-  return s.lastTs ? new Date(s.lastTs).getTime() : 0;
-}
-
-function RepoSessionsSection({
-  sessions,
-  expandRequest,
-}: {
-  sessions: InfoSession[] | null;
-  expandRequest: { id: string; nonce: number } | null;
-}): JSX.Element {
-  // Expansion state is shared across the two groups so expanding one session
-  // collapses a previously-expanded one regardless of which group it's in.
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!expandRequest || !sessions) return;
-    if (sessions.some((s) => s.id === expandRequest.id)) {
-      setExpandedId(expandRequest.id);
-    }
-  }, [expandRequest, sessions]);
-
-  if (sessions == null) {
-    return (
-      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
-        Loading…
-      </div>
-    );
-  }
-  if (sessions.length === 0) {
-    return (
-      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
-        No sessions yet.
-      </div>
-    );
-  }
-
-  // Sort by lastTs desc within each group — most recent activity on top.
-  const active = sessions
-    .filter((s) => ACTIVE_STATES.has(s.state))
-    .sort((a, b) => tsOf(b) - tsOf(a));
-  const completed = sessions
-    .filter((s) => !ACTIVE_STATES.has(s.state))
-    .sort((a, b) => tsOf(b) - tsOf(a));
-
-  const onToggle = (id: string): void =>
-    setExpandedId((cur) => (cur === id ? null : id));
-
-  return (
-    <div>
-      {active.length > 0 && (
-        <>
-          <div className="px-lg pt-md pb-1">
-            <SubHeader>Active</SubHeader>
-          </div>
-          <SessionList
-            sessions={active}
-            expandedId={expandedId}
-            onToggle={onToggle}
-            showPerson
-          />
-        </>
-      )}
-      {active.length > 0 && completed.length > 0 && (
-        <div className="mx-lg my-md h-px bg-divider" />
-      )}
-      {completed.length > 0 && (
-        <>
-          <div className="px-lg pt-md pb-1">
-            <SubHeader>Completed</SubHeader>
-          </div>
-          <SessionList
-            sessions={completed}
-            expandedId={expandedId}
-            onToggle={onToggle}
-            showPerson
-          />
-        </>
-      )}
-    </div>
-  );
-}
-
 function SessionList({
   sessions,
   expandedId,
   onToggle,
-  showPerson = false,
 }: {
   sessions: InfoSession[];
   expandedId: string | null;
   onToggle: (id: string) => void;
-  showPerson?: boolean;
 }): JSX.Element {
   return (
     <>
@@ -456,7 +323,6 @@ function SessionList({
             session={s}
             expanded={expandedId === s.id}
             onToggle={() => onToggle(s.id)}
-            showPerson={showPerson}
           />
         </Fragment>
       ))}
@@ -479,12 +345,10 @@ function SessionRow({
   session,
   expanded,
   onToggle,
-  showPerson = false,
 }: {
   session: InfoSession;
   expanded: boolean;
   onToggle: () => void;
-  showPerson?: boolean;
 }): JSX.Element {
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
@@ -492,40 +356,19 @@ function SessionRow({
   const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
   const status = statusLabel(session);
   const hasLocator = Boolean(repo) || Boolean(session.branch);
-  // FeedSessionSnapshot carries the owner's github_login + avatar_url. Own
-  // sessions (SessionSnapshot) don't, so the byline silently no-ops for them.
-  const personLogin =
-    showPerson && "github_login" in session ? session.github_login : null;
-  const personAvatar =
-    showPerson && "avatar_url" in session ? session.avatar_url : null;
 
   return (
     <div className={expanded ? "bg-surface" : undefined}>
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-center gap-2"
+        aria-expanded={expanded}
+        className={`w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-start gap-2 border-l-2 ${expanded ? "border-success/70" : "border-transparent"}`}
       >
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-medium text-fg truncate">
             {title}
           </div>
-          {personLogin && (
-            <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted min-w-0">
-              {personAvatar ? (
-                <img
-                  src={personAvatar}
-                  alt=""
-                  className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
-                />
-              ) : (
-                <span className="w-3.5 h-3.5 rounded-full bg-surface shrink-0" />
-              )}
-              <span className="truncate font-medium text-fg/80">
-                {personLogin}
-              </span>
-            </div>
-          )}
           {session.description && (
             <div className="mt-1 text-[12px] text-muted line-clamp-2">
               {session.description}
@@ -589,17 +432,19 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
       {summary && (
         <div>
           <SubHeader>Summary</SubHeader>
-          <div className="mt-1 text-[13px] text-fg leading-relaxed whitespace-pre-wrap">
+          <Markdown className="mt-1 text-[13px] [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
             {summary}
-          </div>
+          </Markdown>
         </div>
       )}
       {highlights.length > 0 && (
         <div>
           <SubHeader>Highlights</SubHeader>
-          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside">
+          <ul className="mt-1 text-[12.5px] text-fg/90 space-y-0.5 list-disc list-inside marker:text-subtle">
             {highlights.map((h, i) => (
-              <li key={i}>{h}</li>
+              <li key={i}>
+                <Markdown inline>{h}</Markdown>
+              </li>
             ))}
           </ul>
         </div>

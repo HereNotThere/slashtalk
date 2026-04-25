@@ -5,7 +5,7 @@
 
 import { inArray } from "drizzle-orm";
 import { classifySessionState } from "./state";
-import type { SessionState, EventSource } from "@slashtalk/shared";
+import type { EventSource, SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessionInsights } from "../db/schema";
 import {
@@ -16,7 +16,6 @@ import {
 interface SessionRow {
   sessionId: string;
   project: string;
-  source: EventSource;
   title: string | null;
   model: string | null;
   version: string | null;
@@ -157,7 +156,6 @@ export function buildSnapshot(
   return {
     id: session.sessionId,
     project: session.project,
-    source: session.source,
     title: summaryTitle ?? session.title,
     description: summaryDescription,
     rollingSummary,
@@ -232,22 +230,19 @@ export async function loadInsightsForSessions(
   return result;
 }
 
-/** State priority for feed ordering */
-const STATE_ORDER: Record<string, number> = {
-  busy: 0,
-  active: 1,
-  idle: 2,
-  recent: 3,
-  ended: 4,
-};
+// Two tiers only: currently live (busy/active) on top, everything else below.
+// Within each tier we sort by lastTs desc, so an idle-for-a-day session can't
+// outrank a just-paused one purely on state priority — idle means the
+// developer has moved on.
+const LIVE_STATES = new Set(["busy", "active"]);
 
 export function sortByStateThenTime<T extends { state: string; lastTs: string | null }>(
   items: T[]
 ): T[] {
   return items.sort((a, b) => {
-    const sa = STATE_ORDER[a.state] ?? 5;
-    const sb = STATE_ORDER[b.state] ?? 5;
-    if (sa !== sb) return sa - sb;
+    const la = LIVE_STATES.has(a.state) ? 0 : 1;
+    const lb = LIVE_STATES.has(b.state) ? 0 : 1;
+    if (la !== lb) return la - lb;
     const ta = a.lastTs ? new Date(a.lastTs).getTime() : 0;
     const tb = b.lastTs ? new Date(b.lastTs).getTime() : 0;
     return tb - ta;

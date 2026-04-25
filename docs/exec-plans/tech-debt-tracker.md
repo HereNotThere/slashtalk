@@ -58,3 +58,18 @@ Homepage/feed, session detail, settings, and login pages. Not yet implemented �
 
 **17. ~~Install script~~** ✅ `install/install.sh`
 Token exchange, repo discovery, initial upload, watch mode with 5s poll, launchd (macOS) and systemd (Linux) service installation.
+
+---
+
+## Security invariants — Tier-3 CI check candidates
+
+Scripted checks that would replace the human honor-system in [`docs/design-docs/core-beliefs.md`](../design-docs/core-beliefs.md) §§ 11-13 with mechanical guardrails. Tracked here until `scripts/check-invariants.ts` is wired into CI.
+
+**18. CI check: no direct cross-user reads that skip `user_repos`.**
+Grep every file under `apps/server/src/` that references `sessions`, `events`, or a `repo:<id>` Redis channel subscription and fail if the handler doesn't also touch `userRepos`. See [`core-beliefs #13`](../design-docs/core-beliefs.md#13-user_repos-is-the-only-authorization-for-cross-user-reads).
+
+**19. CI check: `POST /api/me/repos` always verifies.**
+Parse the handler body and fail if a `user_repos` insert is reached without a `verifyRepoAccess` (or equivalent `GET /repos/:owner/:name`) call on the path. See [`core-beliefs #12`](../design-docs/core-beliefs.md#12-repo-access-is-verified-not-asserted).
+
+**20. CI check: no GitHub App code paths.**
+Grep the repo for `installation_id`, `"GitHub App"`, `/app/installations`, `X-GitHub-Installation-Id`, and fail on any match under `apps/server/src/`. See [`core-beliefs #11`](../design-docs/core-beliefs.md#11-identity-is-user-oauth-no-github-app).

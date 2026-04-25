@@ -22,12 +22,10 @@ import type {
   McpTargetState,
   RailDebugSnapshot,
   ResponseOpenPayload,
-  RepoSummary,
   TrackedRepo,
   Unsubscribe,
   UpdateAgentInput,
 } from "../shared/types";
-import type { OrgRepo, OrgSummary } from "@slashtalk/shared";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
   const handler = (_e: Electron.IpcRendererEvent, payload: T): void =>
@@ -114,9 +112,28 @@ const bridge: ChatHeadsBridge = {
   list: () => ipcRenderer.invoke("heads:list") as Promise<ChatHead[]>,
   onUpdate: (cb) => subscribe<ChatHead[]>("heads:update", cb),
 
-  listProjects: () =>
-    ipcRenderer.invoke("projects:list") as Promise<ChatHead[]>,
-  onProjectsUpdate: (cb) => subscribe<ChatHead[]>("projects:update", cb),
+  rail: {
+    getPinned: () => ipcRenderer.invoke("rail:getPinned") as Promise<boolean>,
+    setPinned: (pinned: boolean) =>
+      ipcRenderer.invoke("rail:setPinned", pinned) as Promise<void>,
+    onPinnedChange: (cb) => subscribe<boolean>("rail:pinned", cb),
+    getSessionOnlyMode: () =>
+      ipcRenderer.invoke("rail:getSessionOnlyMode") as Promise<boolean>,
+    setSessionOnlyMode: (enabled: boolean) =>
+      ipcRenderer.invoke("rail:setSessionOnlyMode", enabled) as Promise<void>,
+    onSessionOnlyModeChange: (cb) =>
+      subscribe<boolean>("rail:sessionOnlyMode", cb),
+  },
+
+  spotifyShare: {
+    isSupported: () =>
+      ipcRenderer.invoke("spotify:isSupported") as Promise<boolean>,
+    getEnabled: () =>
+      ipcRenderer.invoke("spotify:getShareEnabled") as Promise<boolean>,
+    setEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke("spotify:setShareEnabled", enabled) as Promise<void>,
+    onEnabledChange: (cb) => subscribe<boolean>("spotify:shareEnabled", cb),
+  },
 
   showInfo: (headId, bubbleScreen) =>
     ipcRenderer.invoke(
@@ -219,9 +236,6 @@ const bridge: ChatHeadsBridge = {
     signOut: () => ipcRenderer.invoke("backend:signOut") as Promise<void>,
     onAuthState: (cb) => subscribe<BackendAuthState>("backend:authState", cb),
 
-    listRepos: () =>
-      ipcRenderer.invoke("backend:listRepos") as Promise<RepoSummary[]>,
-
     listTrackedRepos: () =>
       ipcRenderer.invoke("backend:listTrackedRepos") as Promise<TrackedRepo[]>,
     addLocalRepo: () =>
@@ -235,26 +249,13 @@ const bridge: ChatHeadsBridge = {
       subscribe<TrackedRepo[]>("backend:trackedRepos", cb),
   },
 
-  orgs: {
-    list: () => ipcRenderer.invoke("orgs:list") as Promise<OrgSummary[]>,
-    activeOrg: () =>
-      ipcRenderer.invoke("orgs:activeOrg") as Promise<string | null>,
-    setActive: (login) =>
-      ipcRenderer.invoke("orgs:setActive", login) as Promise<void>,
-    onListChange: (cb) => subscribe<OrgSummary[]>("orgs:listChange", cb),
-    onActiveChange: (cb) => subscribe<string | null>("orgs:activeChange", cb),
-  },
-
-  repos: {
-    listForActiveOrg: () =>
-      ipcRenderer.invoke("repos:listForActiveOrg") as Promise<OrgRepo[]>,
+  trackedRepos: {
     selection: () =>
-      ipcRenderer.invoke("repos:selection") as Promise<string[]>,
-    toggle: (fullName) =>
-      ipcRenderer.invoke("repos:toggle", fullName) as Promise<string[]>,
-    onUpdate: (cb) => subscribe<OrgRepo[]>("repos:update", cb),
+      ipcRenderer.invoke("trackedRepos:selection") as Promise<number[]>,
+    toggle: (repoId) =>
+      ipcRenderer.invoke("trackedRepos:toggle", repoId) as Promise<number[]>,
     onSelectionChange: (cb) =>
-      subscribe<string[]>("repos:selectionChange", cb),
+      subscribe<number[]>("trackedRepos:selectionChange", cb),
   },
 
   debug: {

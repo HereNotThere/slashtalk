@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { ChatAskResponse, ChatMessage, SpotifyPresence } from "@slashtalk/shared";
 import type {
   AgentHistoryPage,
-  AgentSessionRow,
+  ManagedAgentSessionRow,
   AgentSessionSummary,
   AgentStreamEvent,
   AgentSummary,
@@ -17,6 +17,7 @@ import type {
   GithubPendingConnect,
   InfoSession,
   McpInstallStatus,
+  McpInstallOptions,
   McpPresenceDetail,
   McpTarget,
   McpTargetState,
@@ -48,8 +49,10 @@ const bridge: ChatHeadsBridge = {
   },
 
   mcp: {
-    install: (target: McpTarget) =>
-      ipcRenderer.invoke("mcp:install", target) as Promise<McpTargetState>,
+    install: (target: McpTarget, options?: McpInstallOptions) =>
+      ipcRenderer.invoke("mcp:install", target, options) as Promise<
+        McpTargetState
+      >,
     uninstall: (target: McpTarget) =>
       ipcRenderer.invoke("mcp:uninstall", target) as Promise<McpTargetState>,
     status: () => ipcRenderer.invoke("mcp:status") as Promise<McpInstallStatus>,
@@ -203,7 +206,7 @@ const bridge: ChatHeadsBridge = {
 
   listAgentSessionsForAgent: (agentId) =>
     ipcRenderer.invoke("agentSessions:forAgent", agentId) as Promise<
-      AgentSessionRow[]
+      ManagedAgentSessionRow[]
     >,
 
   getSpotifyForLogin: (login) =>
@@ -234,6 +237,8 @@ const bridge: ChatHeadsBridge = {
     cancelSignIn: () =>
       ipcRenderer.invoke("backend:cancelSignIn") as Promise<void>,
     signOut: () => ipcRenderer.invoke("backend:signOut") as Promise<void>,
+    signOutEverywhere: () =>
+      ipcRenderer.invoke("backend:signOutEverywhere") as Promise<void>,
     onAuthState: (cb) => subscribe<BackendAuthState>("backend:authState", cb),
 
     listTrackedRepos: () =>

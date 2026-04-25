@@ -10,7 +10,7 @@ Source-only TypeScript types + runtime const objects (`SessionState`, `SOURCES`,
 
 ## What belongs here
 
-- Types used on both server and desktop (`SessionSnapshot`, `FeedSessionSnapshot`, `TokenUsage`, `PrActivityMessage`, `SessionUpdatedMessage`, `ChatMessage`, `ChatCitation`, `AgentSessionRow`, …).
+- Types used on both server and desktop (`SessionSnapshot`, `FeedSessionSnapshot`, `TokenUsage`, `PrActivityMessage`, `SessionUpdatedMessage`, `ChatMessage`, `ChatCitation`, `ManagedAgentSessionRow`, …).
 - Const objects used as runtime enums (`SessionState`, `SOURCES`, `EVENT_KINDS`, `PROVIDERS`).
 - API request/response interfaces (`IngestResponse`, `SyncStateEntry`, `ChatAskRequest`, `ChatAskResponse`, `ApiResponse<T>`, `ApiError`).
 

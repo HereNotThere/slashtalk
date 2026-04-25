@@ -27,7 +27,7 @@ Bun workspace monorepo. **`bun` is the only supported package manager** ([core-b
 | --- | --- | --- |
 | [`apps/server`](apps/server) | [AGENTS.md](apps/server/AGENTS.md) | Elysia backend (auth, ingest, sessions, social, analyzers, ws) |
 | [`apps/desktop`](apps/desktop) | [AGENTS.md](apps/desktop/AGENTS.md) | Electron overlay, 6 renderer windows + tray/dock chrome |
-| [`apps/mcp`](apps/mcp) | [AGENTS.md](apps/mcp/AGENTS.md) | MCP server (being consolidated into `apps/server`) |
+| [`apps/mcp`](apps/mcp) | [AGENTS.md](apps/mcp/AGENTS.md) | Deprecated standalone MCP service kept for migration-window legacy testing |
 | [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types |
 
 Per-workspace `AGENTS.md` shape varies intentionally by workspace role — server is recipe-heavy, desktop is design-system-heavy, mcp is transitional, shared is constraint-heavy. The minimum every workspace AGENTS.md must include is `Layout` + `Commands` + `Before committing`. See [`docs/CONVENTIONS.md#per-workspace-agentsmd`](docs/CONVENTIONS.md#per-workspace-agentsmd).
@@ -37,14 +37,16 @@ Per-workspace `AGENTS.md` shape varies intentionally by workspace role — serve
 | Prefix | Auth | Used by |
 | --- | --- | --- |
 | `/v1/*` | `apiKeyAuth` (Bearer token, SHA-256 compared) | Desktop + CLI |
+| `/mcp` | MCP OAuth access token; device API key for local proxy / legacy | MCP HTTP clients |
 | `/auth/*` + `/api/*` | `jwtAuth` (httpOnly `session` cookie or `Cookie:` header) | Browser + desktop cookie |
 | `/ws?token=…` | JWT, else API key | All clients |
 
-Mixing is a rule violation — see [core-beliefs #2](docs/design-docs/core-beliefs.md#2-route-prefix-encodes-auth).
+Mixing is a rule violation. Root `/mcp` is the explicit MCP resource-server exception because MCP protocol versioning happens in the initialize handshake — see [core-beliefs #2](docs/design-docs/core-beliefs.md#2-route-prefix-encodes-auth).
 
 ## Commands from repo root
 
 ```sh
+bun run dev                                    # start server + desktop for local development
 bun install                                    # install all workspaces
 bun --filter @slashtalk/server <script>
 bun --filter @slashtalk/electron <script>

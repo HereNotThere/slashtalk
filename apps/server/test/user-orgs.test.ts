@@ -142,6 +142,10 @@ describe("GET /api/me/orgs", () => {
     const res = await authed("/api/me/orgs");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
+
+    const fresh = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+    aliceCookie = getCookie(fresh, "session")!;
+    expect(aliceCookie).toBeTruthy();
   });
 
   it("caches the result — second call within TTL doesn't re-fetch", async () => {

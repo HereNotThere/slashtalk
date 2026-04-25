@@ -9,6 +9,9 @@ import { sessionRoutes } from "./sessions/routes";
 import { userRoutes, deviceReposRoutes } from "./user/routes";
 import { chatRoutes } from "./chat/routes";
 import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
+import { managedAgentSessionRoutes } from "./managed-agent-sessions/routes";
+import { mcpRoutes } from "./mcp/routes";
+import { mcpOAuthRoutes } from "./oauth/mcp";
 import { wsHandler } from "./ws/handler";
 import type { RedisBridge } from "./ws/redis-bridge";
 
@@ -18,7 +21,19 @@ const INSTALL_SCRIPT = await Bun.file(
 
 export function createApp(db: Database, redis: RedisBridge) {
   return new Elysia()
-    .use(cors())
+    .use(
+      cors({
+        allowedHeaders: [
+          "content-type",
+          "mcp-session-id",
+          "mcp-protocol-version",
+          "accept",
+          "authorization",
+          "cookie",
+        ],
+        exposeHeaders: ["mcp-session-id", "www-authenticate"],
+      }),
+    )
     .use(openapi())
     .get("/health", () => ({ status: "ok" }))
     .get("/install.sh", ({ set }) => {
@@ -33,6 +48,9 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(userRoutes(db))
     .use(deviceReposRoutes(db))
     .use(chatRoutes(db))
+    .use(managedAgentSessionRoutes(db))
+    .use(mcpOAuthRoutes(db))
+    .use(mcpRoutes())
     .use(spotifyPresenceRoutes(db, redis))
     .use(presenceReadRoutes(db, redis))
     .use(wsHandler(db, redis));

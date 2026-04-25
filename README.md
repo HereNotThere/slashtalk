@@ -144,27 +144,35 @@ bun test --cwd apps/server
 ## Desktop app (local dev)
 
 By default the packaged desktop talks to the hosted services
-(`https://slashtalk.onrender.com` for the API and
-`https://chatheads.onrender.com` for the MCP). To point the desktop at a
-locally-running backend instead, create `apps/desktop/.env` with all three
-URLs:
+(`https://slashtalk.onrender.com` for the API and `/mcp` on the same server
+for remote MCP). Local Claude Code and Codex installs point at the desktop-local
+proxy (`http://127.0.0.1:37613/mcp`) so the device API key stays in Electron
+safeStorage instead of AI-client config files. To point the desktop at a
+locally-running backend instead, create `apps/desktop/.env` with:
 
 ```
 MAIN_VITE_SLASHTALK_API_URL=http://localhost:10000
-MAIN_VITE_SLASHTALK_MCP_URL=http://localhost:3000/mcp
-MAIN_VITE_SLASHTALK_MCP_BASE_URL=http://localhost:3000
 ```
 
-Then run both backends and the desktop:
+`MAIN_VITE_SLASHTALK_MCP_URL` remains available as a remote-MCP escape hatch
+for the desktop proxy and self-session client, but the default remote target is
+`MAIN_VITE_SLASHTALK_API_URL + /mcp`. `SLASHTALK_LOCAL_MCP_PORT` can override
+the local proxy port for testing.
+
+Then start the backend and desktop from the repo root:
+
+```sh
+bun run dev:server
+bun run dev:desktop
+```
+
+Or run each process separately:
 
 ```sh
 # Terminal 1: slashtalk API server (port 10000)
 cd apps/server && bun run dev
 
-# Terminal 2: MCP server (port 3000)
-cd apps/mcp && bun run dev
-
-# Terminal 3: desktop
+# Terminal 2: desktop
 cd apps/desktop && bun run dev
 ```
 
@@ -174,15 +182,13 @@ Notes:
   env vars to the main process. Plain `SLASHTALK_*` in `.env` is ignored.
   (Plain `SLASHTALK_*` exported in your shell still works as a runtime
   override.)
-- Keep the API and MCP URLs pointed at the same environment. The desktop
-  device apiKey is minted by the API server and verified by the MCP server
-  via the shared `api_keys` table — mixing local API + hosted MCP (or vice
-  versa) sends a token to a service whose database doesn't know it,
-  producing `unauthorized` errors.
-- `apps/mcp/.env` only needs `DATABASE_URL` (point it at the same Postgres
-  the slashtalk API uses, e.g.
-  `postgres://slashtalk:slashtalk@localhost:5432/slashtalk`). The MCP
-  validates Bearer tokens against `api_keys` directly.
+- Keep API and explicit MCP override URLs pointed at the same environment.
+  The desktop device apiKey is minted by the API server and accepted by the
+  server-owned `/mcp` route for local-proxy and legacy compatibility. Direct
+  Claude Code and Codex clients can also authenticate to the same `/mcp` route
+  through MCP OAuth.
+- `apps/mcp` is deprecated for the migration window. Only start it when
+  testing legacy standalone-MCP behavior.
 - For a hosted-API + local-everything-else dev session, comment the local
   URLs out and the desktop falls back to the hosted defaults.
 

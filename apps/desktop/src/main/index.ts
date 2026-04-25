@@ -37,6 +37,8 @@ import * as ws from "./ws";
 import * as installMcp from "./installMcp";
 import * as chatheadsAuth from "./chatheadsAuth";
 import * as selfSession from "./selfSession";
+import { createLocalMcpProxy } from "./localMcpProxy";
+import { getLocalMcpProxySecret } from "./localMcpProxySecret";
 import * as anthropic from "./anthropic";
 import * as localAgent from "./localAgent";
 import * as agentStore from "./agentStore";
@@ -48,12 +50,18 @@ import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
 
-declare global {
-  namespace Electron {
-    interface App {
-      isQuitting?: boolean;
-    }
-  }
+installMcp.configureInstaller({
+  localProxySecret: getLocalMcpProxySecret,
+});
+
+const mcpProxy = createLocalMcpProxy({
+  getToken: backend.getApiKey,
+  getProxySecret: getLocalMcpProxySecret,
+  remoteMcpUrl: installMcp.remoteMcpUrl,
+});
+
+function appState(): typeof app & { isQuitting?: boolean } {
+  return app as typeof app & { isQuitting?: boolean };
 }
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -409,7 +417,7 @@ function createMainWindow(): void {
   // Slashtalk stays in the app switcher. Activating the app (dock/Cmd+Tab)
   // shows it again.
   mainWindow.on("close", (e) => {
-    if (!app.isQuitting) {
+    if (!appState().isQuitting) {
       e.preventDefault();
       mainWindow?.hide();
     }
@@ -1668,8 +1676,11 @@ ipcMain.handle(
   async (_e, agentId: string) => agentIngest.listForAgent(agentId),
 );
 
-ipcMain.handle("mcp:install", (_e, target: McpTarget) =>
-  installMcp.install(target, chatheadsAuth.getToken()),
+ipcMain.handle("mcp:install", (_e, target: McpTarget, options?: unknown) =>
+  installMcp.install(
+    target,
+    options as Parameters<typeof installMcp.install>[1],
+  ),
 );
 ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) =>
   installMcp.uninstall(target),
@@ -1973,22 +1984,22 @@ async function finalizeTeamSession(
 ): Promise<void> {
   const endedAt = new Date().toISOString();
   const base = {
-    agent_id: agent.id,
-    session_id: sessionId,
+    agentId: agent.id,
+    sessionId,
     mode: "cloud" as const,
     visibility: "team" as const,
     name: agent.name,
-    started_at: new Date(startedAtMs).toISOString(),
-    ended_at: endedAt,
-    last_activity: endedAt,
+    startedAt: new Date(startedAtMs).toISOString(),
+    endedAt,
+    lastActivity: endedAt,
   };
   try {
     const { summary, model } = await summarize.summarizeCloudSession(sessionId);
     await agentIngest.upsertSession({
       ...base,
       summary,
-      summary_model: model,
-      summary_ts: new Date().toISOString(),
+      summaryModel: model,
+      summaryTs: new Date().toISOString(),
     });
   } catch (err) {
     console.warn("[summarize] failed:", err);
@@ -2077,6 +2088,10 @@ ipcMain.handle("backend:signOut", async () => {
   await backend.signOut();
   localRepos.clearOnSignOut();
 });
+ipcMain.handle("backend:signOutEverywhere", async () => {
+  await backend.signOutEverywhere();
+  localRepos.clearOnSignOut();
+});
 
 function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
@@ -2085,11 +2100,12 @@ function applySyncForAuth(signedIn: boolean): void {
     updateSpotifyRunning();
     void peerPresence.start();
     ws.start();
-    const apiKey = backend.getApiKey();
-    if (apiKey) {
+    for (const target of ["claude-code", "codex"] as const) {
       void installMcp
-        .install("claude-code", apiKey)
-        .catch((err) => console.warn("installMcp.install failed:", err));
+        .install(target)
+        .catch((err) =>
+          console.warn(`installMcp.install ${target} failed:`, err),
+        );
     }
   } else {
     heartbeat.stop();
@@ -2097,9 +2113,13 @@ function applySyncForAuth(signedIn: boolean): void {
     updateSpotifyRunning();
     peerPresence.stop();
     ws.stop();
-    void installMcp
-      .uninstall("claude-code")
-      .catch((err) => console.warn("installMcp.uninstall failed:", err));
+    for (const target of ["claude-code", "codex"] as const) {
+      void installMcp
+        .uninstall(target)
+        .catch((err) =>
+          console.warn(`installMcp.uninstall ${target} failed:`, err),
+        );
+    }
   }
 }
 
@@ -2257,7 +2277,7 @@ function debugBackfillTimestamps(): void {
   // No-op; kept for reference.
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
   // "regular" but we set it explicitly, and force-show the dock icon in case
   // something demoted us to accessory mode.
@@ -2267,10 +2287,14 @@ app.whenReady().then(() => {
     void app.dock?.show();
   }
   backend.restore();
+  await backend.validateStoredSession();
   chatheadsAuth.restore();
   anthropic.restore();
   githubAuth.restore();
   localRepos.restore();
+  void mcpProxy
+    .start()
+    .catch((err) => console.warn("[localMcpProxy] start failed:", err));
   createTray();
   rail.start();
   selfSession.start();
@@ -2295,11 +2319,12 @@ app.on("before-quit", () => {
   // Flag read by mainWindow's "close" handler to allow actual destruction
   // during app quit (otherwise close is preventDefault'd and the app can't
   // shut down cleanly).
-  app.isQuitting = true;
+  appState().isQuitting = true;
 });
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  void mcpProxy.stop();
 });
 
 // Keep the app alive when all windows close — the mere presence of a

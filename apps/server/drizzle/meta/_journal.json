@@ -36,6 +36,34 @@
       "when": 1777219200002,
       "tag": "0004_confused_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777122627135,
+      "tag": "0005_tricky_rhino",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777133397427,
+      "tag": "0006_damp_longshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777135165823,
+      "tag": "0007_messy_lockheed",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777142158601,
+      "tag": "0008_workable_virginia_dare",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,8 @@ import {
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { decryptGithubToken } from "../auth/tokens";
+import { authAudit } from "../auth/audit";
+import { revokeAllUserCredentials } from "../auth/sessions";
 import { config } from "../config";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import type { OrgSummary, OrgRepo } from "@slashtalk/shared";
@@ -106,7 +108,14 @@ interface VerifiedRepo {
 
 type VerifyOutcome =
   | { ok: true; repo: VerifiedRepo }
-  | { ok: false; kind: "no_access" | "token_expired" | "upstream_unavailable" };
+  | {
+      ok: false;
+      kind:
+        | "no_access"
+        | "github_grant_revoked"
+        | "token_expired"
+        | "upstream_unavailable";
+    };
 
 /** Ask GitHub, using the user's stored OAuth token, whether they can see
  *  `owner/name`. 200 = yes (canonical repo data returned); 404 = no (fail
@@ -133,9 +142,15 @@ async function verifyRepoAccess(
   if (res.status === 404) {
     return { ok: false, kind: "no_access" };
   }
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     console.warn(
-      `[claim] GitHub ${res.status} on /repos/${owner}/${name} — token stale or scope missing`,
+      `[claim] GitHub 401 on /repos/${owner}/${name} — OAuth grant revoked or token invalid`,
+    );
+    return { ok: false, kind: "github_grant_revoked" };
+  }
+  if (res.status === 403) {
+    console.warn(
+      `[claim] GitHub 403 on /repos/${owner}/${name} — token stale or scope missing`,
     );
     return { ok: false, kind: "token_expired" };
   }
@@ -278,6 +293,11 @@ export const userRoutes = (db: Database) =>
 
         await db.delete(apiKeys).where(eq(apiKeys.deviceId, device.id));
         await db.delete(devices).where(eq(devices.id, device.id));
+        authAudit("device_credentials_revoked", {
+          userId: user.id,
+          deviceId: device.id,
+          scope: "device",
+        });
 
         return { ok: true };
       },
@@ -359,6 +379,18 @@ export const userRoutes = (db: Database) =>
               };
             }
             if (outcome.kind === "token_expired") {
+              set.status = 401;
+              return {
+                error: "token_expired",
+                message: "Re-sign in to slashtalk.",
+              };
+            }
+            if (outcome.kind === "github_grant_revoked") {
+              await revokeAllUserCredentials(
+                db,
+                user.id,
+                "github_grant_revoked",
+              );
               set.status = 401;
               return {
                 error: "token_expired",
@@ -480,7 +512,11 @@ export const userRoutes = (db: Database) =>
       } catch {
         return [];
       }
-      if (res.status === 401 || res.status === 403) return [];
+      if (res.status === 401) {
+        await revokeAllUserCredentials(db, user.id, "github_grant_revoked");
+        return [];
+      }
+      if (res.status === 403) return [];
       if (!res.ok) return [];
 
       const raw = (await res.json().catch(() => null)) as RawGithubOrg[] | null;
@@ -531,7 +567,15 @@ export const userRoutes = (db: Database) =>
           } catch {
             return [];
           }
-          if (res.status === 401 || res.status === 403) return [];
+          if (res.status === 401) {
+            await revokeAllUserCredentials(
+              db,
+              user.id,
+              "github_grant_revoked",
+            );
+            return [];
+          }
+          if (res.status === 403) return [];
           if (res.status === 404) return [];
           if (!res.ok) return [];
 

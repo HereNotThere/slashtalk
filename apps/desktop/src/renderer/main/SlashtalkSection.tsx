@@ -8,7 +8,9 @@ const PRIMARY_GRADIENT = "var(--gradient-primary)";
 export function SlashtalkSection(): JSX.Element {
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
   const [tracked, setTracked] = useState<TrackedRepo[]>([]);
-  const [busy, setBusy] = useState<null | "signIn" | "add">(null);
+  const [busy, setBusy] = useState<null | "signIn" | "add" | "globalSignOut">(
+    null,
+  );
   const [status, setStatus] = useState<Status>(null);
 
   useEffect(() => {
@@ -47,6 +49,26 @@ export function SlashtalkSection(): JSX.Element {
     await window.chatheads.backend.signOut();
   };
 
+  const signOutEverywhere = async (): Promise<void> => {
+    if (
+      !window.confirm(
+        "Sign out everywhere? This revokes all Slashtalk device keys and MCP OAuth sessions.",
+      )
+    ) {
+      return;
+    }
+
+    setBusy("globalSignOut");
+    setStatus(null);
+    try {
+      await window.chatheads.backend.signOutEverywhere();
+    } catch (err) {
+      setStatus({ kind: "err", text: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const addRepo = (): Promise<void> =>
     withBusy("add", async () => {
       const repo = await window.chatheads.backend.addLocalRepo();
@@ -69,7 +91,16 @@ export function SlashtalkSection(): JSX.Element {
           <span className="text-[13px] font-medium">
             @{auth.user.githubLogin}
           </span>
-          <LinkButton onClick={signOut}>Sign out</LinkButton>
+          <div className="flex items-center gap-2">
+            <LinkButton onClick={signOut}>Sign out</LinkButton>
+            <LinkButton
+              onClick={signOutEverywhere}
+              disabled={busy === "globalSignOut"}
+              danger
+            >
+              {busy === "globalSignOut" ? "Signing out..." : "Sign out everywhere"}
+            </LinkButton>
+          </div>
         </div>
       ) : null}
 
@@ -172,14 +203,23 @@ function SignedInBody({
 function LinkButton({
   onClick,
   children,
+  disabled = false,
+  danger = false,
 }: {
   onClick: () => void;
   children: React.ReactNode;
+  disabled?: boolean;
+  danger?: boolean;
 }): JSX.Element {
   return (
     <button
       onClick={onClick}
-      className="bg-transparent border-none text-link text-[12px] px-1 py-0.5 cursor-pointer hover:text-link-hover"
+      disabled={disabled}
+      className={`bg-transparent border-none text-[12px] px-1 py-0.5 cursor-pointer disabled:opacity-60 disabled:cursor-wait ${
+        danger
+          ? "text-danger hover:text-danger"
+          : "text-link hover:text-link-hover"
+      }`}
     >
       {children}
     </button>

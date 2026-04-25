@@ -11,7 +11,16 @@ import { db } from "../src/db";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { __clearOrgCaches } from "../src/user/routes";
-import { repos, userRepos, users } from "../src/db/schema";
+import {
+  apiKeys,
+  devices,
+  oauthTokens,
+  refreshTokens,
+  repos,
+  userRepos,
+  users,
+} from "../src/db/schema";
+import { hashToken } from "../src/auth/tokens";
 import { resetDatabase, getCookie } from "./helpers";
 
 let redis: RedisBridge;
@@ -184,6 +193,7 @@ describe("POST /api/me/repos — claim gate", () => {
 
   it("rejects with 401 token_expired when GitHub returns 401", async () => {
     repoResponse = { status: 401, body: { message: "Bad credentials" } };
+    const derived = await insertDerivedCredentials("github-401");
 
     await expectError(await claim("acme/x"), 401, "token_expired");
 
@@ -192,6 +202,42 @@ describe("POST /api/me/repos — claim gate", () => {
       .from(userRepos)
       .where(eq(userRepos.userId, aliceUserId));
     expect(rows.length).toBe(0);
+
+    const refreshRows = await db
+      .select()
+      .from(refreshTokens)
+      .where(eq(refreshTokens.userId, aliceUserId));
+    expect(refreshRows).toHaveLength(0);
+
+    const [apiKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.keyHash, await hashToken(derived.apiKey)));
+    expect(apiKey).toBeUndefined();
+
+    const [oauthToken] = await db
+      .select()
+      .from(oauthTokens)
+      .where(
+        eq(oauthTokens.accessTokenHash, await hashToken(derived.accessToken)),
+      );
+    expect(oauthToken?.revokedAt).toBeTruthy();
+
+    const [alice] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, aliceUserId));
+    expect(alice.credentialsRevokedAt).toBeTruthy();
+
+    const setup = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: aliceCookie },
+    });
+    expect(setup.status).toBe(401);
+
+    const fresh = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+    expect(fresh.status).toBe(200);
+    aliceCookie = getCookie(fresh, "session")!;
   });
 
   it("rejects with 502 upstream_unavailable on GitHub 5xx", async () => {
@@ -224,3 +270,29 @@ describe("POST /api/me/repos — claim gate", () => {
     await expectError(await claim("acme/r30"), 429, "rate_limited");
   });
 });
+
+async function insertDerivedCredentials(label: string) {
+  const [device] = await db
+    .insert(devices)
+    .values({ userId: aliceUserId, deviceName: `test-${label}`, os: "test" })
+    .returning();
+  const apiKey = `api-${crypto.randomUUID()}`;
+  await db.insert(apiKeys).values({
+    userId: aliceUserId,
+    deviceId: device.id,
+    keyHash: await hashToken(apiKey),
+  });
+  const accessToken = `mcp_at_${crypto.randomUUID()}`;
+  const refreshToken = `mcp_rt_${crypto.randomUUID()}`;
+  await db.insert(oauthTokens).values({
+    userId: aliceUserId,
+    clientId: `client-${label}`,
+    accessTokenHash: await hashToken(accessToken),
+    refreshTokenHash: await hashToken(refreshToken),
+    scope: "mcp:read mcp:write offline_access",
+    resource: `${baseUrl}/mcp`,
+    accessExpiresAt: new Date(Date.now() + 60_000),
+    refreshExpiresAt: new Date(Date.now() + 60_000),
+  });
+  return { apiKey, accessToken, refreshToken };
+}

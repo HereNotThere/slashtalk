@@ -2,7 +2,32 @@
 
 > Auto-generated from [`apps/server/src/db/schema.ts`](../../apps/server/src/db/schema.ts). Do not edit by hand. Regenerate with `bun run gen:db-schema` from `apps/server/`.
 
-Tables: `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
+Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `oauth_authorization_codes`, `oauth_clients`, `oauth_tokens`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
+
+## `agent_sessions`
+
+Drizzle export: `agentSessions`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `PgSerial` | pk, not null, has default |
+| `user_login` | `PgText` | not null |
+| `agent_id` | `PgText` | not null |
+| `session_id` | `PgText` | not null |
+| `mode` | `PgText` | not null |
+| `visibility` | `PgText` | not null, has default |
+| `name` | `PgText` | — |
+| `started_at` | `PgTimestamp` | not null |
+| `ended_at` | `PgTimestamp` | — |
+| `last_activity` | `PgTimestamp` | not null, has default |
+| `summary` | `PgText` | — |
+| `summary_model` | `PgText` | — |
+| `summary_ts` | `PgTimestamp` | — |
+
+**Indexes:**
+- `agent_sessions_user_session_key` (unique index) on `(user_login, session_id)`
+- `agent_sessions_user_started_idx` (index) on `(user_login, started_at)`
+- `agent_sessions_agent_started_idx` (index) on `(agent_id, started_at)`
 
 ## `api_keys`
 
@@ -98,6 +123,75 @@ Drizzle export: `heartbeats`.
 | `pid` | `PgInteger` | — |
 | `kind` | `PgText` | — |
 | `updated_at` | `PgTimestamp` | — |
+
+## `oauth_authorization_codes`
+
+Drizzle export: `oauthAuthorizationCodes`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `PgSerial` | pk, not null, has default |
+| `code_hash` | `PgText` | not null |
+| `user_id` | `PgInteger` | not null |
+| `client_id` | `PgText` | not null |
+| `redirect_uri` | `PgText` | not null |
+| `code_challenge` | `PgText` | not null |
+| `scope` | `PgText` | not null |
+| `resource` | `PgText` | not null |
+| `expires_at` | `PgTimestamp` | not null |
+| `used_at` | `PgTimestamp` | — |
+| `created_at` | `PgTimestamp` | has default |
+
+**Indexes:**
+- `oauth_authorization_codes_code_hash_key` (unique index) on `(code_hash)`
+- `oauth_authorization_codes_user_id_idx` (index) on `(user_id)`
+- `oauth_authorization_codes_client_id_idx` (index) on `(client_id)`
+
+## `oauth_clients`
+
+Drizzle export: `oauthClients`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `PgSerial` | pk, not null, has default |
+| `client_id` | `PgText` | not null |
+| `client_kind` | `PgText` | not null |
+| `client_name` | `PgText` | not null |
+| `redirect_uris` | `PgJsonb` | not null |
+| `grant_types` | `PgJsonb` | not null |
+| `response_types` | `PgJsonb` | not null |
+| `token_endpoint_auth_method` | `PgText` | not null |
+| `scope` | `PgText` | not null |
+| `created_at` | `PgTimestamp` | has default |
+| `updated_at` | `PgTimestamp` | has default |
+
+**Indexes:**
+- `oauth_clients_client_id_key` (unique index) on `(client_id)`
+- `oauth_clients_kind_idx` (index) on `(client_kind)`
+
+## `oauth_tokens`
+
+Drizzle export: `oauthTokens`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `PgSerial` | pk, not null, has default |
+| `user_id` | `PgInteger` | not null |
+| `client_id` | `PgText` | not null |
+| `access_token_hash` | `PgText` | not null |
+| `refresh_token_hash` | `PgText` | not null |
+| `scope` | `PgText` | not null |
+| `resource` | `PgText` | not null |
+| `access_expires_at` | `PgTimestamp` | not null |
+| `refresh_expires_at` | `PgTimestamp` | not null |
+| `revoked_at` | `PgTimestamp` | — |
+| `created_at` | `PgTimestamp` | has default |
+
+**Indexes:**
+- `oauth_tokens_access_token_hash_key` (unique index) on `(access_token_hash)`
+- `oauth_tokens_refresh_token_hash_key` (unique index) on `(refresh_token_hash)`
+- `oauth_tokens_user_id_idx` (index) on `(user_id)`
+- `oauth_tokens_client_id_idx` (index) on `(client_id)`
 
 ## `refresh_tokens`
 
@@ -238,6 +332,7 @@ Drizzle export: `users`.
 | `avatar_url` | `PgText` | — |
 | `display_name` | `PgText` | — |
 | `github_token` | `PgText` | not null |
+| `credentials_revoked_at` | `PgTimestamp` | — |
 | `created_at` | `PgTimestamp` | has default |
 | `updated_at` | `PgTimestamp` | has default |
 

@@ -20,6 +20,18 @@ export const config = Object.freeze({
     10,
   ),
   analyzerConcurrency: parseInt(process.env.ANALYZER_CONCURRENCY || "5", 10),
+  mcpRequestQuotaMax: parseInt(
+    process.env.MCP_REQUEST_QUOTA_MAX || "600",
+    10,
+  ),
+  mcpRequestQuotaWindowMs: parseInt(
+    process.env.MCP_REQUEST_QUOTA_WINDOW_MS || "60000",
+    10,
+  ),
+  mcpMaxConcurrentSessionsPerUser: parseInt(
+    process.env.MCP_MAX_CONCURRENT_SESSIONS_PER_USER || "20",
+    10,
+  ),
 });
 
 export type Config = typeof config;

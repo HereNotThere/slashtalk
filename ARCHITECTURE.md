@@ -121,9 +121,9 @@ Six renderer windows plus auxiliary system chrome (`trayPopup`, `dockPlaceholder
 
 Tailwind v4 via single shared `tailwind.css`.
 
-## MCP service (`apps/mcp/`)
+## MCP surface
 
-Standalone Bun service for MCP tools + managed-agent session ingest. **Being consolidated into `apps/server`** — see [`apps/mcp/AGENTS.md`](apps/mcp/AGENTS.md) and [`apps/mcp/README.md`](apps/mcp/README.md). New capability should land in `apps/server` when possible.
+`apps/server` serves the consolidated MCP HTTP resource at root `/mcp` and owns managed-agent session ingest at `/v1/managed-agent-sessions`. `/mcp` accepts standards-aligned MCP OAuth access tokens for direct Claude Code and Codex clients, while retaining Slashtalk device API key compatibility for the desktop-local proxy and legacy installs. `/v1/managed-agent-sessions` remains device API key authenticated. `apps/mcp/` remains in the repo as the deprecated standalone service for one migration window; new MCP capability should land in `apps/server`.
 
 ## Shared types (`packages/shared/src/`)
 

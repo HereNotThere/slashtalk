@@ -206,3 +206,108 @@ On 2026-04-25, assistant-run curl smoke verified:
 - Protected-resource metadata returns `resource`, `authorization_servers`, scopes, and bearer method.
 - Authorization-server metadata returns authorize/token/register endpoints, PKCE method, public-client token auth, scopes, and protected resources.
 - `/mcp` accepts `Authorization: Bearer slashtalk-oauth-spike-access` and returns a minimal MCP initialize result.
+
+## Observed Claude Code Behavior
+
+Observed on 2026-04-25 with Claude Code `2.1.119`.
+
+Dynamic Client Registration path:
+
+- Claude first called `POST /mcp` unauthenticated with `clientInfo.name="claude-code"` and MCP protocol `2025-11-25`.
+- Claude followed the RFC 9728 challenge and fetched `/.well-known/oauth-protected-resource`.
+- Claude fetched `/.well-known/oauth-authorization-server`.
+- Claude called `POST /oauth/register`.
+- DCR request body included:
+  - `client_name`: `Claude Code (slashtalk-oauth-spike)`
+  - `redirect_uris`: random `http://localhost:<port>/callback`
+  - `grant_types`: `authorization_code`, `refresh_token`
+  - `response_types`: `code`
+  - `token_endpoint_auth_method`: `none`
+  - `scope`: `mcp:read mcp:write`
+- Browser authorization request included:
+  - `client_id`: dynamic client id from registration response
+  - `code_challenge`
+  - `code_challenge_method=S256`
+  - `redirect_uri`: same localhost callback from registration
+  - `scope`: `mcp:read mcp:write offline_access`
+  - `resource`: `http://127.0.0.1:37620/mcp`
+  - `state`
+- Token request was `application/x-www-form-urlencoded` and included:
+  - `grant_type=authorization_code`
+  - `code`
+  - `code_verifier`
+  - `redirect_uri`
+  - `resource`
+  - `client_id`
+- After token exchange, Claude retried `POST /mcp` with bearer auth, sent `notifications/initialized`, opened the SSE stream with `GET /mcp`, and called `tools/list`.
+
+Static public-client path:
+
+- When installed with `--client-id slashtalk-static-claude-code --callback-port 37622`, Claude skipped `/oauth/register`.
+- Authorization request used `client_id=slashtalk-static-claude-code`.
+- Redirect URI was `http://localhost:37622/callback`.
+- Static-client flow still used PKCE, `offline_access`, `resource`, form-encoded token exchange, and completed MCP initialize/tools list with bearer auth.
+
+## Observed Codex Behavior
+
+Observed on 2026-04-25 with Codex MCP client `0.125.0`.
+
+Login behavior:
+
+- `codex mcp login slashtalk-oauth-spike` did not first call `/mcp` and did not fetch RFC 9728 protected-resource metadata in the observed path.
+- Codex probed authorization-server metadata variants:
+  - `/.well-known/oauth-authorization-server/mcp`
+  - `/mcp/.well-known/oauth-authorization-server`
+  - `/.well-known/oauth-authorization-server`
+  - `/.well-known/openid-configuration/mcp`
+  - `/mcp/.well-known/openid-configuration`
+- OAuth discovery requests carried `mcp-protocol-version: 2024-11-05`.
+- Codex called `POST /oauth/register`.
+- DCR request body included:
+  - `client_name`: `Codex`
+  - `redirect_uris`: random `http://127.0.0.1:<port>/callback`
+  - `grant_types`: `authorization_code`, `refresh_token`
+  - `response_types`: `code`
+  - `token_endpoint_auth_method`: `none`
+- Authorization request included:
+  - `client_id`: dynamic client id from registration response
+  - `code_challenge`
+  - `code_challenge_method=S256`
+  - `redirect_uri`
+  - `scope`: `mcp:read mcp:write offline_access`
+  - `state`
+- Authorization request did **not** include RFC 8707 `resource`.
+- Token request was `application/x-www-form-urlencoded` and included:
+  - `grant_type=authorization_code`
+  - `code`
+  - `code_verifier`
+  - `client_id`
+  - `redirect_uri`
+- Token request did **not** include RFC 8707 `resource`.
+
+Runtime MCP behavior after login:
+
+- Codex refreshed authorization-server metadata variants again before connecting.
+- Codex then called `POST /mcp` with bearer auth.
+- Runtime initialize used MCP protocol `2025-06-18`.
+- Runtime `clientInfo` was:
+
+```json
+{
+  "name": "codex-mcp-client",
+  "title": "Codex",
+  "version": "0.125.0"
+}
+```
+
+- Runtime capabilities included `elicitation.form`.
+- After initialize, Codex sent `notifications/initialized`, opened the SSE stream with `GET /mcp`, and called `tools/list` with `_meta.progressToken`.
+
+## Implementation Decisions From The Spike
+
+- Support Dynamic Client Registration because both Claude Code and Codex used it successfully.
+- Keep static public-client support because Claude Code works cleanly with `--client-id` and it gives us an admin-controlled fallback.
+- Do not require clients to send RFC 8707 `resource` during authorize/token; Claude sends it, Codex does not. Bind issued MCP tokens to the `/mcp` resource server-side from the login context and reject mismatched resource only when a client does send one.
+- Serve authorization-server metadata on all Codex-probed variants, not only the root RFC 8414 path.
+- Keep RFC 9728 Protected Resource Metadata and `WWW-Authenticate` challenge for Claude and spec-correct clients.
+- Accept public clients with `token_endpoint_auth_method=none` and require PKCE for authorization-code grants.

@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { db } from "../src/db";
+import { oauthAuthorizationCodes } from "../src/db/schema";
+import { hashToken } from "../src/auth/tokens";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
 
@@ -10,6 +13,7 @@ let baseUrl: string;
 let restoreFetch: () => void;
 let aliceApiKey: string;
 let bobApiKey: string;
+let aliceCookie: string;
 
 beforeAll(async () => {
   restoreFetch = mockGitHubAuth();
@@ -23,7 +27,7 @@ beforeAll(async () => {
   baseUrl = `http://localhost:${app.server!.port}`;
 
   const aliceRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
-  const aliceCookie = getCookie(aliceRes, "session")!;
+  aliceCookie = getCookie(aliceRes, "session")!;
 
   const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
     method: "POST",
@@ -288,16 +292,58 @@ describe("MCP OAuth discovery", () => {
     expect(badRedirect.status).toBe(400);
   });
 
+  it("routes unauthenticated authorization requests through GitHub sign-in and back", async () => {
+    const { challenge } = await pkcePair();
+    const authorizePath = `/oauth/authorize?${new URLSearchParams({
+      response_type: "code",
+      client_id: "slashtalk-static-claude-code",
+      redirect_uri: "http://localhost:37622/callback",
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      state: "client-state",
+    })}`;
+
+    const loginRequired = await fetch(`${baseUrl}${authorizePath}`, {
+      redirect: "manual",
+    });
+    expect(loginRequired.status).toBe(302);
+    const loginLocation = loginRequired.headers.get("location");
+    expect(loginLocation).toStartWith("/auth/github?");
+    expect(new URLSearchParams(loginLocation!.split("?")[1]).get("return_to")).toBe(
+      authorizePath,
+    );
+
+    const githubRedirect = await fetch(`${baseUrl}${loginLocation}`, {
+      redirect: "manual",
+    });
+    expect(githubRedirect.status).toBe(302);
+    const githubLocation = new URL(githubRedirect.headers.get("location")!);
+    const webState = githubLocation.searchParams.get("state");
+    expect(webState).toStartWith("web:");
+
+    const callback = await fetch(
+      `${baseUrl}/auth/github/callback?${new URLSearchParams({
+        code: "alice_code",
+        state: webState!,
+      })}`,
+      { redirect: "manual" },
+    );
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get("location")).toBe(authorizePath);
+    expect(callback.headers.get("set-cookie")).toContain("session=");
+  });
+
   it("accepts known static clients and rejects unknown static clients at authorize", async () => {
+    const { challenge } = await pkcePair();
     const known = await fetch(
       `${baseUrl}/oauth/authorize?${new URLSearchParams({
         response_type: "code",
         client_id: "slashtalk-static-claude-code",
         redirect_uri: "http://localhost:37622/callback",
-        code_challenge: "abc",
+        code_challenge: challenge,
         code_challenge_method: "S256",
       })}`,
-      { redirect: "manual" },
+      { redirect: "manual", headers: { Cookie: aliceCookie } },
     );
     expect(known.status).toBe(302);
     expect(known.headers.get("location")).toStartWith(
@@ -309,12 +355,164 @@ describe("MCP OAuth discovery", () => {
         response_type: "code",
         client_id: "unknown-client",
         redirect_uri: "http://localhost:37622/callback",
-        code_challenge: "abc",
+        code_challenge: challenge,
         code_challenge_method: "S256",
       })}`,
-      { redirect: "manual" },
+      { redirect: "manual", headers: { Cookie: aliceCookie } },
     );
     expect(unknown.status).toBe(400);
+  });
+
+  it("exchanges an authorization code with PKCE for MCP tokens", async () => {
+    const { clientId, redirectUri } = await registerDynamicOAuthClient();
+    const { verifier, challenge } = await pkcePair();
+    const code = await authorizeCode({
+      clientId,
+      redirectUri,
+      codeChallenge: challenge,
+      scope: "mcp:read mcp:write offline_access",
+      resource: `${baseUrl}/mcp`,
+    });
+
+    const token = await tokenExchange({
+      clientId,
+      redirectUri,
+      code,
+      codeVerifier: verifier,
+      resource: `${baseUrl}/mcp`,
+    });
+
+    expect(token.status).toBe(200);
+    const body = (await token.json()) as {
+      access_token: string;
+      token_type: string;
+      expires_in: number;
+      refresh_token: string;
+      scope: string;
+      resource: string;
+    };
+    expect(body.access_token).toStartWith("mcp_at_");
+    expect(body.refresh_token).toStartWith("mcp_rt_");
+    expect(body.token_type).toBe("Bearer");
+    expect(body.expires_in).toBeGreaterThan(0);
+    expect(body.scope).toBe("mcp:read mcp:write offline_access");
+    expect(body.resource).toBe(`${baseUrl}/mcp`);
+  });
+
+  it("allows token exchange without resource because Codex omits RFC 8707 resource", async () => {
+    const { clientId, redirectUri } = await registerDynamicOAuthClient();
+    const { verifier, challenge } = await pkcePair();
+    const code = await authorizeCode({
+      clientId,
+      redirectUri,
+      codeChallenge: challenge,
+      scope: "mcp:read mcp:write",
+    });
+
+    const token = await tokenExchange({
+      clientId,
+      redirectUri,
+      code,
+      codeVerifier: verifier,
+    });
+
+    expect(token.status).toBe(200);
+    const body = (await token.json()) as { resource: string };
+    expect(body.resource).toBe(`${baseUrl}/mcp`);
+  });
+
+  it("rejects token exchange with an invalid PKCE verifier", async () => {
+    const { clientId, redirectUri } = await registerDynamicOAuthClient();
+    const { challenge } = await pkcePair();
+    const code = await authorizeCode({
+      clientId,
+      redirectUri,
+      codeChallenge: challenge,
+    });
+
+    const token = await tokenExchange({
+      clientId,
+      redirectUri,
+      code,
+      codeVerifier: "wrong-verifier",
+    });
+
+    expect(token.status).toBe(400);
+    expect(await token.json()).toMatchObject({ error: "invalid_grant" });
+  });
+
+  it("rejects reused authorization codes", async () => {
+    const { clientId, redirectUri } = await registerDynamicOAuthClient();
+    const { verifier, challenge } = await pkcePair();
+    const code = await authorizeCode({
+      clientId,
+      redirectUri,
+      codeChallenge: challenge,
+    });
+
+    const first = await tokenExchange({
+      clientId,
+      redirectUri,
+      code,
+      codeVerifier: verifier,
+    });
+    expect(first.status).toBe(200);
+
+    const second = await tokenExchange({
+      clientId,
+      redirectUri,
+      code,
+      codeVerifier: verifier,
+    });
+    expect(second.status).toBe(400);
+    expect(await second.json()).toMatchObject({ error: "invalid_grant" });
+  });
+
+  it("rejects expired authorization codes", async () => {
+    const { clientId, redirectUri } = await registerDynamicOAuthClient();
+    const { verifier, challenge } = await pkcePair();
+    const code = await authorizeCode({
+      clientId,
+      redirectUri,
+      codeChallenge: challenge,
+    });
+
+    await db
+      .update(oauthAuthorizationCodes)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(oauthAuthorizationCodes.codeHash, await hashToken(code)));
+
+    const token = await tokenExchange({
+      clientId,
+      redirectUri,
+      code,
+      codeVerifier: verifier,
+    });
+
+    expect(token.status).toBe(400);
+    expect(await token.json()).toMatchObject({ error: "invalid_grant" });
+  });
+
+  it("rejects token exchange when a supplied resource does not match /mcp", async () => {
+    const { clientId, redirectUri } = await registerDynamicOAuthClient();
+    const { verifier, challenge } = await pkcePair();
+    const code = await authorizeCode({
+      clientId,
+      redirectUri,
+      codeChallenge: challenge,
+      resource: `${baseUrl}/mcp`,
+    });
+
+    const token = await tokenExchange({
+      clientId,
+      redirectUri,
+      code,
+      codeVerifier: verifier,
+      resource: `${baseUrl}/not-mcp`,
+    });
+
+    expect(token.status).toBe(400);
+    expect(await token.json()).toMatchObject({ error: "invalid_target" });
   });
 });
 
@@ -329,4 +527,96 @@ function initializeRequest() {
       clientInfo: { name: "server-test", version: "0.0.0" },
     },
   };
+}
+
+async function registerDynamicOAuthClient() {
+  const redirectUri = `http://127.0.0.1:${40_000 + Math.floor(Math.random() * 1_000)}/callback`;
+  const res = await fetch(`${baseUrl}/oauth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Codex",
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      scope: "mcp:read mcp:write offline_access",
+    }),
+  });
+  expect(res.status).toBe(201);
+  const body = (await res.json()) as { client_id: string };
+  return { clientId: body.client_id, redirectUri };
+}
+
+async function authorizeCode({
+  clientId,
+  redirectUri,
+  codeChallenge,
+  scope = "mcp:read mcp:write",
+  resource,
+}: {
+  clientId: string;
+  redirectUri: string;
+  codeChallenge: string;
+  scope?: string;
+  resource?: string;
+}) {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    scope,
+    state: "state-123",
+  });
+  if (resource) params.set("resource", resource);
+
+  const res = await fetch(`${baseUrl}/oauth/authorize?${params}`, {
+    redirect: "manual",
+    headers: { Cookie: aliceCookie },
+  });
+  expect(res.status).toBe(302);
+  const location = res.headers.get("location");
+  expect(location).toBeTruthy();
+  const redirect = new URL(location!);
+  expect(redirect.searchParams.get("state")).toBe("state-123");
+  const code = redirect.searchParams.get("code");
+  expect(code).toBeTruthy();
+  return code!;
+}
+
+async function tokenExchange({
+  clientId,
+  redirectUri,
+  code,
+  codeVerifier,
+  resource,
+}: {
+  clientId: string;
+  redirectUri: string;
+  code: string;
+  codeVerifier: string;
+  resource?: string;
+}) {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    code,
+    code_verifier: codeVerifier,
+  });
+  if (resource) body.set("resource", resource);
+  return fetch(`${baseUrl}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+}
+
+async function pkcePair(verifier = `verifier-${crypto.randomUUID()}`) {
+  const encoded = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  const challenge = Buffer.from(digest).toString("base64url");
+  return { verifier, challenge };
 }

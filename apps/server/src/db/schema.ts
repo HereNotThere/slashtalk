@@ -99,6 +99,59 @@ export const oauthClients = pgTable(
   ],
 );
 
+export const oauthAuthorizationCodes = pgTable(
+  "oauth_authorization_codes",
+  {
+    id: serial("id").primaryKey(),
+    codeHash: text("code_hash").notNull(),
+    userId: integer("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    clientId: text("client_id").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    codeChallenge: text("code_challenge").notNull(),
+    scope: text("scope").notNull(),
+    resource: text("resource").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("oauth_authorization_codes_code_hash_key").on(t.codeHash),
+    index("oauth_authorization_codes_user_id_idx").on(t.userId),
+    index("oauth_authorization_codes_client_id_idx").on(t.clientId),
+  ],
+);
+
+export const oauthTokens = pgTable(
+  "oauth_tokens",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    clientId: text("client_id").notNull(),
+    accessTokenHash: text("access_token_hash").notNull(),
+    refreshTokenHash: text("refresh_token_hash").notNull(),
+    scope: text("scope").notNull(),
+    resource: text("resource").notNull(),
+    accessExpiresAt: timestamp("access_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+    refreshExpiresAt: timestamp("refresh_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("oauth_tokens_access_token_hash_key").on(t.accessTokenHash),
+    uniqueIndex("oauth_tokens_refresh_token_hash_key").on(t.refreshTokenHash),
+    index("oauth_tokens_user_id_idx").on(t.userId),
+    index("oauth_tokens_client_id_idx").on(t.clientId),
+  ],
+);
+
 // ── Repos & Social Graph ────────────────────────────────────
 
 export const repos = pgTable("repos", {

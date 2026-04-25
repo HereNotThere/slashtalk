@@ -213,7 +213,7 @@ slashtalk/
 ├── packages/shared/        # Source-only TS types
 └── apps/
     ├── server/             # ElysiaJS backend (auth, ingest, sessions, ws, analyzers)
-    ├── desktop/            # Electron overlay, 7 BrowserWindows
+    ├── desktop/            # Electron overlay, 6 renderer windows + tray/dock chrome
     └── mcp/                # MCP server (being consolidated into server)
 ```
 

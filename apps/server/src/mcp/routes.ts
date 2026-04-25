@@ -1,4 +1,6 @@
 import { Elysia } from "elysia";
+import { eq } from "drizzle-orm";
+import { config } from "../config";
 import { db } from "../db";
 import { users, apiKeys, devices, oauthTokens } from "../db/schema";
 import { authAudit } from "../auth/audit";
@@ -6,14 +8,26 @@ import { hashToken } from "../auth/tokens";
 import { mcpResourceUrl, mcpWwwAuthenticate } from "../oauth/mcp";
 import { McpPresenceStore } from "./presence";
 import { McpSessionPool } from "./session-pool";
-import { eq } from "drizzle-orm";
 
-export const mcpRoutes = () => {
+type McpRouteOptions = {
+  requestQuotaMax?: number;
+  requestQuotaWindowMs?: number;
+  maxConcurrentSessionsPerUser?: number;
+};
+
+export const mcpRoutes = (options: McpRouteOptions = {}) => {
   const presence = new McpPresenceStore();
+  const limiter = new PerUserRequestLimiter({
+    max: options.requestQuotaMax ?? config.mcpRequestQuotaMax,
+    windowMs: options.requestQuotaWindowMs ?? config.mcpRequestQuotaWindowMs,
+  });
   const pool = new McpSessionPool({
     name: "slashtalk",
     version: "0.0.1",
     presence,
+    maxSessionsPerUser:
+      options.maxConcurrentSessionsPerUser ??
+      config.mcpMaxConcurrentSessionsPerUser,
   });
 
   return new Elysia({ name: "mcp" })
@@ -34,6 +48,18 @@ export const mcpRoutes = () => {
         return "Invalid or missing bearer token";
       }
 
+      const quota = limiter.record(auth.user.id);
+      if (!quota.ok) {
+        authAudit("mcp_request_rate_limited", {
+          userId: auth.user.id,
+          route: "/mcp",
+          limit: quota.limit,
+          windowMs: quota.windowMs,
+        });
+        set.status = 429;
+        return { error: "mcp_rate_limited" };
+      }
+
       return pool.handleRequest(request, {
         userId: auth.user.githubLogin,
         profile: {
@@ -47,6 +73,32 @@ export const mcpRoutes = () => {
       pool.shutdown();
     });
 };
+
+class PerUserRequestLimiter {
+  private buckets = new Map<number, number[]>();
+
+  constructor(private options: { max: number; windowMs: number }) {}
+
+  record(userId: number):
+    | { ok: true }
+    | { ok: false; limit: number; windowMs: number } {
+    const now = Date.now();
+    const cutoff = now - this.options.windowMs;
+    const bucket = this.buckets.get(userId)?.filter((ts) => ts > cutoff) ?? [];
+    if (bucket.length >= this.options.max) {
+      this.buckets.set(userId, bucket);
+      return {
+        ok: false,
+        limit: this.options.max,
+        windowMs: this.options.windowMs,
+      };
+    }
+
+    bucket.push(now);
+    this.buckets.set(userId, bucket);
+    return { ok: true };
+  }
+}
 
 type McpAuthResult =
   | {

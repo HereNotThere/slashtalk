@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { Elysia } from "elysia";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { db } from "../src/db";
 import { oauthAuthorizationCodes, oauthTokens } from "../src/db/schema";
 import { hashToken } from "../src/auth/tokens";
+import { mcpRoutes } from "../src/mcp/routes";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
 
@@ -270,6 +272,50 @@ describe("root /mcp", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list" }),
     });
     expect(crossUser.status).toBe(404);
+  });
+
+  it("enforces a per-user authenticated request quota", async () => {
+    const limited = new Elysia()
+      .use(mcpRoutes({ requestQuotaMax: 1, requestQuotaWindowMs: 60_000 }))
+      .listen(0);
+    const limitedUrl = `http://localhost:${limited.server!.port}`;
+
+    try {
+      const first = await initializeMcp(limitedUrl, aliceApiKey);
+      expect(first.status).toBe(200);
+
+      const second = await initializeMcp(limitedUrl, aliceApiKey);
+      expect(second.status).toBe(429);
+      expect(await second.json()).toEqual({ error: "mcp_rate_limited" });
+
+      const bob = await initializeMcp(limitedUrl, bobApiKey);
+      expect(bob.status).toBe(200);
+    } finally {
+      limited.stop();
+    }
+  });
+
+  it("enforces a per-user concurrent MCP session cap", async () => {
+    const limited = new Elysia()
+      .use(mcpRoutes({ maxConcurrentSessionsPerUser: 1 }))
+      .listen(0);
+    const limitedUrl = `http://localhost:${limited.server!.port}`;
+
+    try {
+      const first = await initializeMcp(limitedUrl, aliceApiKey);
+      expect(first.status).toBe(200);
+
+      const second = await initializeMcp(limitedUrl, aliceApiKey);
+      expect(second.status).toBe(429);
+      expect(await second.json()).toEqual({
+        error: "mcp_session_limit_exceeded",
+      });
+
+      const bob = await initializeMcp(limitedUrl, bobApiKey);
+      expect(bob.status).toBe(200);
+    } finally {
+      limited.stop();
+    }
   });
 });
 
@@ -991,6 +1037,18 @@ async function expectMcpInvalidToken(token: string, reason: string) {
   );
   expect(header).toContain('error="invalid_token"');
   expect(header).toContain(`error_description="${reason}"`);
+}
+
+function initializeMcp(url: string, token: string) {
+  return fetch(`${url}/mcp`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify(initializeRequest()),
+  });
 }
 
 async function captureAuthAuditLogs(fn: () => Promise<void>) {

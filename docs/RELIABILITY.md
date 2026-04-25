@@ -61,6 +61,17 @@ How the load-bearing flows (ingest, heartbeat, pub/sub, analyzers) degrade and r
 
 **Known gap.** WS clients ignore dropped messages — if a WebSocket reconnects after a `session_updated` was published during the gap, the client doesn't learn about it until the next message on the same channel. Mitigation: `/api/feed` is the source of truth; clients use WS as an invalidation signal, not state transport.
 
+## MCP abuse controls
+
+**Contract.** `POST /mcp` and other MCP HTTP calls authenticate first, then apply per-user limits before dispatching into the Streamable HTTP session pool.
+
+- `MCP_REQUEST_QUOTA_MAX` requests per `MCP_REQUEST_QUOTA_WINDOW_MS` are allowed per Slashtalk user. Defaults: 600 requests per 60 s.
+- `MCP_MAX_CONCURRENT_SESSIONS_PER_USER` active MCP sessions are allowed per Slashtalk user. Default: 20.
+- Request quota rejections return `429 { "error": "mcp_rate_limited" }` and emit `auth_audit` `mcp_request_rate_limited`.
+- Session cap rejections return `429 { "error": "mcp_session_limit_exceeded" }` and emit `mcp_session_limit_exceeded`.
+
+**Scope.** These limits protect authenticated per-user abuse and accidental client loops. IP-wide and global traffic shaping belongs at the edge/load balancer because the app server should not be the only line of defense for unauthenticated floods or distributed abuse.
+
 ## Analyzer scheduler
 
 **Contract.** `apps/server/src/analyzers/scheduler.ts` runs every `ANALYZER_TICK_MS` (default 300 s) when `ANTHROPIC_API_KEY` is set. Each tick:

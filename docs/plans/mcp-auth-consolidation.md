@@ -198,7 +198,7 @@ External grounding:
 - [x] Explicit sign-out-everywhere invalidates that user's refresh tokens, MCP OAuth tokens, and device API keys in one cascade; existing MCP sessions are forced to re-authenticate.
 - [ ] GitHub OAuth grant revocation detection calls the same global cascade.
 - [x] Sign-out-everywhere exists and is reachable from account settings.
-- [ ] `/mcp` enforces per-user request quotas and per-user concurrent MCP session caps in `apps/server`, with gateway-level IP/global abuse handling documented.
+- [x] `/mcp` enforces per-user request quotas and per-user concurrent MCP session caps in `apps/server`, with gateway-level IP/global abuse handling documented.
 - [x] Legacy bearer-token mode remains available with explicit warning and revocation path.
 - [ ] Cross-user MCP tools can only read data through existing `user_repos` authorization rules.
 - [ ] Server and desktop typechecks pass, server tests pass, and docs reflect the new default architecture.
@@ -223,6 +223,7 @@ External grounding:
 - **2026-04-25 — Phase 3 core OAuth implementation.** Added permanent OAuth metadata, Dynamic Client Registration, `oauth_clients`, `oauth_authorization_codes`, and `oauth_tokens` schema, auth-code + PKCE exchange, Slashtalk GitHub sign-in handoff for browser OAuth, and `/mcp` validation for short-lived resource-bound MCP access tokens. Device API key compatibility remains for the desktop-local proxy and legacy bearer installs.
 - **2026-04-25 — Final OAuth interop verification.** Claude Code 2.1.119 and Codex 0.125.0 both completed direct OAuth against `http://localhost:10000/mcp`. Codex required empty list handlers for `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list`; those are now registered explicitly because the current migration phase intentionally advertises no tools/resources/prompts. Remaining plan work is hardening: MCP refresh-token grant/rotation, structured auth audit logs, revocation scopes including sign-out-everywhere, per-user `/mcp` quotas/session caps, and optional desktop UI/settings polish.
 - **2026-04-25 — Hardening revocation scopes.** Added MCP OAuth refresh-token rotation, structured auth audit logs, and revocation scope tests. Normal sign-out now remains limited to the presented refresh token, device revoke remains scoped to one device API key, and explicit sign-out-everywhere cascades refresh tokens, device API keys, and MCP OAuth grants for the signed-in user while leaving other users untouched.
+- **2026-04-25 — MCP abuse hardening.** Added per-user authenticated `/mcp` request quotas and per-user concurrent MCP session caps with focused tests and documented the edge/gateway boundary for IP-wide or global abuse handling.
 
 ## Three questions
 

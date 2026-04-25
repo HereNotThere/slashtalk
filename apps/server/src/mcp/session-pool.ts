@@ -19,18 +19,23 @@ export type SessionPoolOptions = {
   presence: McpPresenceStore;
   idleTimeoutMs?: number;
   sweepIntervalMs?: number;
+  maxSessionsPerUser?: number;
 };
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 const DEFAULT_SWEEP_INTERVAL_MS = 5_000;
+const DEFAULT_MAX_SESSIONS_PER_USER = 20;
 
 export class McpSessionPool {
   private sessions = new Map<string, Session>();
   private sweeper: ReturnType<typeof setInterval>;
   private idleTimeoutMs: number;
+  private maxSessionsPerUser: number;
 
   constructor(private opts: SessionPoolOptions) {
     this.idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    this.maxSessionsPerUser =
+      opts.maxSessionsPerUser ?? DEFAULT_MAX_SESSIONS_PER_USER;
     const interval = opts.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS;
     this.sweeper = setInterval(() => this.sweepStale(), interval);
   }
@@ -55,6 +60,14 @@ export class McpSessionPool {
       this.opts.presence.touch(existing.userId, sessionId);
       if (req.method === "GET") this.watchForAbort(req, sessionId);
       return existing.transport.handleRequest(req);
+    }
+
+    if (this.countUserSessions(identity.userId) >= this.maxSessionsPerUser) {
+      log("warn", "mcp_session_limit_exceeded", {
+        userId: identity.userId,
+        limit: this.maxSessionsPerUser,
+      });
+      return jsonError("mcp_session_limit_exceeded", 429);
     }
 
     const peeked = await peekInitializeBody(req);
@@ -108,6 +121,14 @@ export class McpSessionPool {
       this.closeSession(sessionId, "stream_abort");
     };
     signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  private countUserSessions(userId: string): number {
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      if (session.userId === userId) count += 1;
+    }
+    return count;
   }
 
   private closeSession(sessionId: string, reason: string): void {

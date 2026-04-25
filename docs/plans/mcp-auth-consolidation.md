@@ -216,6 +216,7 @@ External grounding:
 - **2026-04-25 — TDD refinement.** Added test-first requirements and reordered implementation so each protocol/auth/access-control slice starts with failing tests before code changes. Scoped TDD to server contracts and config-writer fixtures while keeping real Claude Code/Codex interop as explicit manual acceptance.
 - **2026-04-25 — Manual QA refinement.** Added phase-specific MCP manual test runbooks and made assistant-run plus user-run Claude/Codex verification part of the done criteria after each significant MCP phase.
 - **2026-04-25 — Migration scope refinement.** Dropped the unused `share_workspace` test tool from Phase 1 consolidation; `/mcp` migration now verifies transport/auth/session behavior with an empty tool list until real MCP tools are added later.
+- **2026-04-25 — Phase 2 local proxy implementation.** Added desktop-local MCP proxy support and config-writer fixtures for Claude Code and Codex. Local installs now default to `http://127.0.0.1:37613/mcp` without static bearer material; the proxy injects the safeStorage-backed device API key per request. Legacy Claude bearer install remains as an explicit compatibility mode.
 
 ## Three questions
 

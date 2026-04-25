@@ -37,6 +37,7 @@ import * as ws from "./ws";
 import * as installMcp from "./installMcp";
 import * as chatheadsAuth from "./chatheadsAuth";
 import * as selfSession from "./selfSession";
+import { createLocalMcpProxy } from "./localMcpProxy";
 import * as anthropic from "./anthropic";
 import * as localAgent from "./localAgent";
 import * as agentStore from "./agentStore";
@@ -48,12 +49,13 @@ import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
 
-declare global {
-  namespace Electron {
-    interface App {
-      isQuitting?: boolean;
-    }
-  }
+const mcpProxy = createLocalMcpProxy({
+  getToken: backend.getApiKey,
+  remoteMcpUrl: installMcp.remoteMcpUrl,
+});
+
+function appState(): typeof app & { isQuitting?: boolean } {
+  return app as typeof app & { isQuitting?: boolean };
 }
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
@@ -409,7 +411,7 @@ function createMainWindow(): void {
   // Slashtalk stays in the app switcher. Activating the app (dock/Cmd+Tab)
   // shows it again.
   mainWindow.on("close", (e) => {
-    if (!app.isQuitting) {
+    if (!appState().isQuitting) {
       e.preventDefault();
       mainWindow?.hide();
     }
@@ -1668,8 +1670,11 @@ ipcMain.handle(
   async (_e, agentId: string) => agentIngest.listForAgent(agentId),
 );
 
-ipcMain.handle("mcp:install", (_e, target: McpTarget) =>
-  installMcp.install(target, chatheadsAuth.getToken()),
+ipcMain.handle("mcp:install", (_e, target: McpTarget, options?: unknown) =>
+  installMcp.install(
+    target,
+    options as Parameters<typeof installMcp.install>[1],
+  ),
 );
 ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) =>
   installMcp.uninstall(target),
@@ -2085,12 +2090,9 @@ function applySyncForAuth(signedIn: boolean): void {
     updateSpotifyRunning();
     void peerPresence.start();
     ws.start();
-    const apiKey = backend.getApiKey();
-    if (apiKey) {
-      void installMcp
-        .install("claude-code", apiKey)
-        .catch((err) => console.warn("installMcp.install failed:", err));
-    }
+    void installMcp
+      .install("claude-code")
+      .catch((err) => console.warn("installMcp.install failed:", err));
   } else {
     heartbeat.stop();
     uploader.reset();
@@ -2271,6 +2273,9 @@ app.whenReady().then(() => {
   anthropic.restore();
   githubAuth.restore();
   localRepos.restore();
+  void mcpProxy
+    .start()
+    .catch((err) => console.warn("[localMcpProxy] start failed:", err));
   createTray();
   rail.start();
   selfSession.start();
@@ -2295,11 +2300,12 @@ app.on("before-quit", () => {
   // Flag read by mainWindow's "close" handler to allow actual destruction
   // during app quit (otherwise close is preventDefault'd and the app can't
   // shut down cleanly).
-  app.isQuitting = true;
+  appState().isQuitting = true;
 });
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  void mcpProxy.stop();
 });
 
 // Keep the app alive when all windows close — the mere presence of a

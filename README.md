@@ -145,16 +145,19 @@ bun test --cwd apps/server
 
 By default the packaged desktop talks to the hosted services
 (`https://slashtalk.onrender.com` for the API and `/mcp` on the same server
-for MCP). To point the desktop at a locally-running backend instead, create
-`apps/desktop/.env` with:
+for remote MCP). Local Claude Code and Codex installs point at the desktop-local
+proxy (`http://127.0.0.1:37613/mcp`) so the device API key stays in Electron
+safeStorage instead of AI-client config files. To point the desktop at a
+locally-running backend instead, create `apps/desktop/.env` with:
 
 ```
 MAIN_VITE_SLASHTALK_API_URL=http://localhost:10000
 ```
 
-`MAIN_VITE_SLASHTALK_MCP_URL` and `MAIN_VITE_SLASHTALK_MCP_BASE_URL` remain
-available as escape hatches for the deprecated standalone MCP service, but the
-default is `MAIN_VITE_SLASHTALK_API_URL + /mcp`.
+`MAIN_VITE_SLASHTALK_MCP_URL` remains available as a remote-MCP escape hatch
+for the desktop proxy and self-session client, but the default remote target is
+`MAIN_VITE_SLASHTALK_API_URL + /mcp`. `SLASHTALK_LOCAL_MCP_PORT` can override
+the local proxy port for testing.
 
 Then start the backend and desktop from the repo root:
 

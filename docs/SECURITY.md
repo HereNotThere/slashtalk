@@ -51,9 +51,10 @@ Current consolidation behavior:
 - Desktop signs in through GitHub OAuth against `apps/server`.
 - `apps/server` issues a JWT/refresh pair, then the desktop exchanges a setup token for a device API key through `/v1/auth/exchange`.
 - `/mcp` accepts `Authorization: Bearer <device-api-key>` using the same `apiKeyAuth` middleware as `/v1/*`.
+- Local Claude Code and Codex installs should point at the desktop-local proxy (`http://127.0.0.1:37613/mcp` by default). The proxy injects the safeStorage-backed device API key per request, so client config does not store a static Slashtalk bearer.
 - `/v1/managed-agent-sessions` is also served by `apps/server` with `apiKeyAuth`; private managed-agent sessions are not returned by the list endpoint.
 
-The local-proxy and direct MCP OAuth flows are planned follow-up phases. Until OAuth lands, static bearer config remains a compatibility bridge and should be treated as a long-lived device credential: revoke the device API key if it is exposed.
+Direct MCP OAuth remains a planned follow-up phase. Until OAuth lands, static bearer config remains an explicit compatibility bridge and should be treated as a long-lived device credential: revoke the device API key if it is exposed.
 
 ## JWT session cookie
 

@@ -262,7 +262,12 @@ export interface AgentHistoryPage {
   nextCursor: string | null;
 }
 
-export type McpTarget = 'claude-code';
+export type McpTarget = 'claude-code' | 'codex';
+export type McpInstallMode = 'local-proxy' | 'legacy-bearer';
+
+export interface McpInstallOptions {
+  mode?: McpInstallMode;
+}
 
 export interface McpTargetState {
   installed: boolean;
@@ -271,6 +276,7 @@ export interface McpTargetState {
 
 export interface McpInstallStatus {
   claudeCode: McpTargetState;
+  codex: McpTargetState;
 }
 
 export type ResponseOpenPayload =
@@ -292,7 +298,10 @@ export interface ChatHeadsBridge {
 
   // MCP install into external AI clients.
   mcp: {
-    install: (target: McpTarget) => Promise<McpTargetState>;
+    install: (
+      target: McpTarget,
+      options?: McpInstallOptions,
+    ) => Promise<McpTargetState>;
     uninstall: (target: McpTarget) => Promise<McpTargetState>;
     status: () => Promise<McpInstallStatus>;
     url: () => Promise<string>;

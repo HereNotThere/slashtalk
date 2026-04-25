@@ -17,6 +17,7 @@ import type {
   GithubPendingConnect,
   InfoSession,
   McpInstallStatus,
+  McpInstallOptions,
   McpPresenceDetail,
   McpTarget,
   McpTargetState,
@@ -48,8 +49,10 @@ const bridge: ChatHeadsBridge = {
   },
 
   mcp: {
-    install: (target: McpTarget) =>
-      ipcRenderer.invoke("mcp:install", target) as Promise<McpTargetState>,
+    install: (target: McpTarget, options?: McpInstallOptions) =>
+      ipcRenderer.invoke("mcp:install", target, options) as Promise<
+        McpTargetState
+      >,
     uninstall: (target: McpTarget) =>
       ipcRenderer.invoke("mcp:uninstall", target) as Promise<McpTargetState>,
     status: () => ipcRenderer.invoke("mcp:status") as Promise<McpInstallStatus>,

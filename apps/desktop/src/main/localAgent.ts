@@ -110,9 +110,12 @@ export async function sendMessage(
     systemPrompt: agent.systemPrompt,
     permissionMode: "bypassPermissions" as PermissionMode,
     allowDangerouslySkipPermissions: true,
-    // Keep the agent self-contained — don't pull in the user's
-    // ~/.claude/settings.json, plugins, or global MCP servers for the MVP.
-    settingSources: [],
+    // Load the user's ~/.claude/settings.json so local agents inherit the same
+    // MCP servers (and hooks) the terminal `claude` uses. Project/local scopes
+    // are intentionally omitted: 'project' would pull CLAUDE.md and behave
+    // differently per cwd, and 'local' is per-checkout state we don't want
+    // leaking into agent runs.
+    settingSources: ["user"],
     ...(resume ? { resume } : {}),
   };
 

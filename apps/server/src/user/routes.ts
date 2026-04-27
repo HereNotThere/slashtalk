@@ -13,6 +13,7 @@ import {
   sessions,
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
+import { githubFetch } from "../auth/github-fetch";
 import { decryptGithubToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
 import { revokeAllUserCredentials } from "../auth/sessions";
@@ -129,34 +130,19 @@ async function verifyRepoAccess(
   owner: string,
   name: string,
 ): Promise<VerifyOutcome> {
-  let res: Response;
-  try {
-    res = await fetch(
-      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
-      { headers: githubHeaders(token) },
-    );
-  } catch (err) {
-    console.warn(`[claim] fetch /repos/${owner}/${name} threw:`, (err as Error).message);
+  const path = `/repos/${owner}/${name}`;
+  const result = await githubFetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    { headers: githubHeaders(token) },
+    `claim ${path}`,
+  );
+  if (!result.ok) {
+    if (result.reason === "not_found") return { ok: false, kind: "no_access" };
+    if (result.reason === "unauthorized") return { ok: false, kind: "github_grant_revoked" };
+    if (result.reason === "forbidden") return { ok: false, kind: "token_expired" };
     return { ok: false, kind: "upstream_unavailable" };
   }
-  if (res.status === 404) {
-    return { ok: false, kind: "no_access" };
-  }
-  if (res.status === 401) {
-    console.warn(
-      `[claim] GitHub 401 on /repos/${owner}/${name} — OAuth grant revoked or token invalid`,
-    );
-    return { ok: false, kind: "github_grant_revoked" };
-  }
-  if (res.status === 403) {
-    console.warn(`[claim] GitHub 403 on /repos/${owner}/${name} — token stale or scope missing`);
-    return { ok: false, kind: "token_expired" };
-  }
-  if (!res.ok) {
-    console.warn(`[claim] GitHub ${res.status} on /repos/${owner}/${name}`);
-    return { ok: false, kind: "upstream_unavailable" };
-  }
-  const raw = (await res.json().catch(() => null)) as {
+  const raw = (await result.res.json().catch(() => null)) as {
     id?: number;
     full_name?: string;
     name?: string;
@@ -164,7 +150,7 @@ async function verifyRepoAccess(
     private?: boolean;
   } | null;
   if (!raw || typeof raw.id !== "number" || !raw.full_name || !raw.name || !raw.owner?.login) {
-    console.warn(`[claim] malformed body from /repos/${owner}/${name}`);
+    console.warn(`[claim ${path}] malformed body`);
     return { ok: false, kind: "upstream_unavailable" };
   }
   return {
@@ -188,26 +174,19 @@ async function verifyRepoAccessWithGitHubAppUserToken(
   let url: string | null = "https://api.github.com/user/installations?per_page=100";
 
   while (url) {
-    let installationsRes: Response;
-    try {
-      installationsRes = await fetch(url, { headers: githubAppUserHeaders(token) });
-    } catch (err) {
-      console.warn("[claim] fetch /user/installations threw:", (err as Error).message);
+    const result = await githubFetch(
+      url,
+      { headers: githubAppUserHeaders(token) },
+      "claim /user/installations",
+    );
+    if (!result.ok) {
+      if (result.reason === "unauthorized" || result.reason === "forbidden") {
+        return { ok: false, kind: "github_app_required" };
+      }
       return { ok: false, kind: "upstream_unavailable" };
     }
 
-    if (installationsRes.status === 401 || installationsRes.status === 403) {
-      console.warn(
-        `[claim] GitHub ${installationsRes.status} on /user/installations — GitHub App user token stale or unauthorized`,
-      );
-      return { ok: false, kind: "github_app_required" };
-    }
-    if (!installationsRes.ok) {
-      console.warn(`[claim] GitHub ${installationsRes.status} on /user/installations`);
-      return { ok: false, kind: "upstream_unavailable" };
-    }
-
-    const installationsBody = (await installationsRes.json().catch(() => null)) as {
+    const installationsBody = (await result.res.json().catch(() => null)) as {
       installations?: Array<{
         id?: number;
         suspended_at?: string | null;
@@ -232,7 +211,7 @@ async function verifyRepoAccessWithGitHubAppUserToken(
       if (outcome.kind !== "no_access") return outcome;
     }
 
-    url = parseNextUrl(installationsRes.headers.get("link"));
+    url = parseNextUrl(result.res.headers.get("link"));
   }
 
   return { ok: false, kind: "no_access" };
@@ -245,46 +224,31 @@ async function findRepoInGitHubAppInstallation(
 ): Promise<VerifyOutcome> {
   let url: string | null =
     `https://api.github.com/user/installations/${installationId}/repositories?per_page=100`;
+  const logTag = `claim /user/installations/${installationId}/repositories`;
   while (url) {
-    let res: Response;
-    try {
-      res = await fetch(url, { headers: githubAppUserHeaders(token) });
-    } catch (err) {
-      console.warn(
-        `[claim] fetch /user/installations/${installationId}/repositories threw:`,
-        (err as Error).message,
-      );
+    const result = await githubFetch(url, { headers: githubAppUserHeaders(token) }, logTag);
+    if (!result.ok) {
+      if (result.reason === "not_found") return { ok: false, kind: "no_access" };
+      if (result.reason === "unauthorized" || result.reason === "forbidden") {
+        return { ok: false, kind: "github_app_required" };
+      }
       return { ok: false, kind: "upstream_unavailable" };
     }
 
-    if (res.status === 404) return { ok: false, kind: "no_access" };
-    if (res.status === 401 || res.status === 403) {
-      console.warn(
-        `[claim] GitHub ${res.status} on /user/installations/${installationId}/repositories — GitHub App user token stale or unauthorized`,
-      );
-      return { ok: false, kind: "github_app_required" };
-    }
-    if (!res.ok) {
-      console.warn(
-        `[claim] GitHub ${res.status} on /user/installations/${installationId}/repositories`,
-      );
-      return { ok: false, kind: "upstream_unavailable" };
-    }
-
-    const body = (await res.json().catch(() => null)) as { repositories?: RawGithubRepo[] } | null;
+    const body = (await result.res.json().catch(() => null)) as {
+      repositories?: RawGithubRepo[];
+    } | null;
     const repositories = body?.repositories ?? [];
     const match = repositories.find((repo) => repo.full_name?.toLowerCase() === normalizedFullName);
     if (match) {
       const repo = verifiedRepoFromRaw(match);
       if (!repo) {
-        console.warn(
-          `[claim] malformed repository body from /user/installations/${installationId}/repositories`,
-        );
+        console.warn(`[${logTag}] malformed repository body`);
         return { ok: false, kind: "upstream_unavailable" };
       }
       return { ok: true, repo };
     }
-    url = parseNextUrl(res.headers.get("link"));
+    url = parseNextUrl(result.res.headers.get("link"));
   }
 
   return { ok: false, kind: "no_access" };

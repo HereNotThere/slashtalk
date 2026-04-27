@@ -33,13 +33,8 @@ import type {
 } from "../shared/types";
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
+import { apiBaseUrl } from "./config";
 
-// `MAIN_VITE_SLASHTALK_API_URL` in apps/desktop/.env is baked in at build time
-// by electron-vite (the MAIN_VITE_ prefix is what makes it visible to the main
-// process). Runtime `SLASHTALK_API_URL` still works as an override for ad-hoc
-// local testing. Unset → hosted default.
-const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as string | undefined;
-const DEFAULT_BASE_URL = "https://slashtalk.onrender.com";
 const CREDS_KEY = "backendCredsEnc";
 
 interface StoredCreds {
@@ -53,10 +48,6 @@ interface StoredCreds {
 let creds: StoredCreds | null = null;
 let pendingSignIn: { cancel: (reason: string) => void } | null = null;
 const authChanges = createEmitter<BackendAuthState>();
-
-function baseUrl(): string {
-  return process.env["SLASHTALK_API_URL"] ?? BAKED_BASE_URL ?? DEFAULT_BASE_URL;
-}
 
 export const onChange = authChanges.on;
 
@@ -75,10 +66,6 @@ export function getJwt(): string | null {
  *  what the MCP backend expects as Bearer. */
 export function getApiKey(): string | null {
   return creds?.apiKey ?? null;
-}
-
-export function getBaseUrl(): string {
-  return baseUrl();
 }
 
 function persistCreds(): void {
@@ -193,7 +180,7 @@ function awaitLoopbackCallback(): Promise<CallbackParams> {
         reject(new Error("Failed to bind loopback port"));
         return;
       }
-      void shell.openExternal(`${baseUrl()}/auth/github?desktop_port=${addr.port}`);
+      void shell.openExternal(`${apiBaseUrl()}/auth/github?desktop_port=${addr.port}`);
     });
   });
 }
@@ -464,7 +451,7 @@ function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
 
 async function doJsonFetch<T>(path: string, opts: FetchOpts, retried: boolean): Promise<T> {
   const auth: Auth = opts.auth ?? "session";
-  const url = `${baseUrl()}${path}`;
+  const url = `${apiBaseUrl()}${path}`;
   const headers: Record<string, string> = { Accept: "application/json" };
 
   if (auth === "apiKey") {
@@ -546,7 +533,7 @@ async function doRefresh(): Promise<boolean> {
   const started = Date.now();
   let res: Response;
   try {
-    res = await fetch(`${baseUrl()}/auth/refresh`, {
+    res = await fetch(`${apiBaseUrl()}/auth/refresh`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -733,7 +720,7 @@ export async function ingestChunk(args: {
     prefixHash: args.prefixHash,
     source: args.source ?? "claude",
   });
-  const res = await fetch(`${baseUrl()}/v1/ingest?${qs.toString()}`, {
+  const res = await fetch(`${apiBaseUrl()}/v1/ingest?${qs.toString()}`, {
     method: "POST",
     headers: {
       Accept: "application/json",

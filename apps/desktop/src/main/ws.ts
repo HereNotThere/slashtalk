@@ -14,6 +14,7 @@
 
 import WebSocket from "ws";
 import * as backend from "./backend";
+import { apiBaseUrl } from "./config";
 import { createEmitter } from "./emitter";
 import type { PrActivityMessage, SessionUpdatedMessage } from "@slashtalk/shared";
 
@@ -137,7 +138,7 @@ function open(): void {
 }
 
 function wsUrl(jwt: string): string {
-  const base = backend.getBaseUrl();
+  const base = apiBaseUrl();
   const url = new URL(base);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = url.pathname.replace(/\/$/, "") + "/ws" || "/ws";

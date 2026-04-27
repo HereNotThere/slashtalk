@@ -14,17 +14,16 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as store from "./store";
 import * as chatheadsAuth from "./chatheadsAuth";
-import * as backend from "./backend";
 import * as githubAuth from "./githubDeviceAuth";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 import { createEmitter } from "./emitter";
+import { anthropicApiKeyFromEnv, mcpUrl } from "./config";
 import type { AgentHistoryPage, AgentMsg, AssistantBlock, McpServerInput } from "../shared/types";
 
 const ENV_KEY = "anthropic.environmentId";
 const VAULT_KEY = "anthropic.vaultId";
 const API_KEY_STORE_KEY = "anthropic.apiKeyEnc";
 
-const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as string | undefined;
 const SLASHTALK_MCP_NAME = "slashtalk-mcp";
 
 const GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/";
@@ -37,10 +36,6 @@ let storedApiKey: string | null = null;
 const configuredChanges = createEmitter<boolean>();
 export const onConfiguredChange = configuredChanges.on;
 
-function slashtalkMcpUrl(): string {
-  return process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? `${backend.getBaseUrl()}/mcp`;
-}
-
 /** Load the persisted API key on startup. Must run before any UI asks
  *  isConfigured(). */
 export function restore(): void {
@@ -48,7 +43,7 @@ export function restore(): void {
 }
 
 function apiKey(): string | null {
-  return storedApiKey ?? process.env["ANTHROPIC_API_KEY"] ?? null;
+  return storedApiKey ?? anthropicApiKeyFromEnv();
 }
 
 export function isConfigured(): boolean {
@@ -169,7 +164,7 @@ async function ensureSlashtalkCredential(vaultId: string): Promise<void> {
     display_name: "Slashtalk MCP",
     auth: {
       type: "static_bearer",
-      mcp_server_url: slashtalkMcpUrl(),
+      mcp_server_url: mcpUrl(),
       token,
     },
   });
@@ -302,7 +297,7 @@ async function buildAgentConfig(input: CreateAgentInput): Promise<{
       ? [
           {
             name: SLASHTALK_MCP_NAME,
-            url: slashtalkMcpUrl(),
+            url: mcpUrl(),
           },
         ]
       : []),

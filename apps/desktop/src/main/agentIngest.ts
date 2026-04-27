@@ -6,7 +6,7 @@
 
 import type { ManagedAgentSessionRow } from "@slashtalk/shared";
 import * as chatheadsAuth from "./chatheadsAuth";
-import * as backend from "./backend";
+import { apiBaseUrl } from "./config";
 import type { LocalAgent } from "./agentStore";
 
 let loggedUnauthorized = false;
@@ -35,7 +35,7 @@ export interface UpsertSessionPayload {
 
 export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
   const token = chatheadsAuth.getToken();
-  const base = backend.getBaseUrl();
+  const base = apiBaseUrl();
   if (!token) {
     // Not signed into the Slashtalk backend yet. Skip silently — teammates
     // can't see any ingest anyway, and the agent still runs locally.
@@ -72,7 +72,7 @@ async function listSessions(params: {
 }): Promise<ManagedAgentSessionRow[]> {
   const token = chatheadsAuth.getToken();
   if (!token) return [];
-  const base = backend.getBaseUrl();
+  const base = apiBaseUrl();
   try {
     const url = new URL(`${base}/v1/managed-agent-sessions`);
     if (params.userLogin) url.searchParams.set("userLogin", params.userLogin);

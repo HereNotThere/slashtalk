@@ -7,6 +7,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { localMcpPort, mcpUrl as configMcpUrl } from "./config";
 
 export type McpTarget = "claude-code" | "codex";
 export type McpInstallMode = "local-proxy" | "legacy-bearer";
@@ -49,31 +50,11 @@ export interface Installer {
   remoteMcpUrl: () => string;
 }
 
-const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as string | undefined;
-const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as string | undefined;
-const DEFAULT_BASE_URL = "https://slashtalk.onrender.com";
 const MCP_KEY = "slashtalk-mcp";
 export const LOCAL_PROXY_SECRET_HEADER = "X-Slashtalk-Proxy-Token";
-export const DEFAULT_LOCAL_MCP_PORT = 37613;
+export { DEFAULT_LOCAL_MCP_PORT } from "./config";
+export { localMcpPort };
 let fallbackLocalProxySecret: string | null = null;
-
-function backendBaseUrl(): string {
-  return process.env["SLASHTALK_API_URL"] ?? BAKED_BASE_URL ?? DEFAULT_BASE_URL;
-}
-
-function defaultRemoteMcpUrl(): string {
-  return process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? `${backendBaseUrl()}/mcp`;
-}
-
-export function localMcpPort(): number {
-  const raw = process.env["SLASHTALK_LOCAL_MCP_PORT"];
-  if (!raw) return DEFAULT_LOCAL_MCP_PORT;
-  const port = Number(raw);
-  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
-    throw new Error(`Invalid SLASHTALK_LOCAL_MCP_PORT: ${raw}`);
-  }
-  return port;
-}
 
 export function localProxyMcpUrl(): string {
   return `http://127.0.0.1:${localMcpPort()}/mcp`;
@@ -218,7 +199,7 @@ export function createInstaller(deps: InstallerDeps = {}): Installer {
   const homeDir = deps.homeDir ?? os.homedir();
   const getLocalProxyUrl = deps.localProxyUrl ?? localProxyMcpUrl;
   const getLocalProxySecret = deps.localProxySecret ?? defaultLocalProxySecret;
-  const getRemoteMcpUrl = deps.remoteMcpUrl ?? defaultRemoteMcpUrl;
+  const getRemoteMcpUrl = deps.remoteMcpUrl ?? configMcpUrl;
 
   return {
     async install(target, optionsOrToken) {

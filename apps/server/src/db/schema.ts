@@ -271,6 +271,7 @@ export const sessions = pgTable(
     toolUseNames: jsonb("tool_use_names").default({}),
     queued: jsonb("queued").default([]),
     recentEvents: jsonb("recent_events").default([]),
+    recentPrompts: jsonb("recent_prompts").default([]),
     serverLineSeq: bigint("server_line_seq", { mode: "number" }).default(0),
     prefixHash: text("prefix_hash"),
   },

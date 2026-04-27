@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
 import { SessionState } from "@slashtalk/shared";
-import type { EventSource, RecentEvent, SpotifyPresence, TokenUsage } from "@slashtalk/shared";
+import type { EventSource, RecentPrompt, SpotifyPresence, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
@@ -418,8 +418,10 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
       ? session.lastUserPrompt
       : null);
   const highlights = Array.isArray(session.highlights) ? session.highlights : [];
-  const recent = Array.isArray(session.recent) ? session.recent : [];
-  const hasAnything = Boolean(summary) || highlights.length > 0 || recent.length > 0;
+  // Latest activity is the developer's recent prompts — what they asked for —
+  // not the mixed event ring buffer (which surfaces tool calls / git plumbing).
+  const recentPrompts = Array.isArray(session.recentPrompts) ? session.recentPrompts : [];
+  const hasAnything = Boolean(summary) || highlights.length > 0 || recentPrompts.length > 0;
   return (
     <div className="px-4 pb-4 space-y-3">
       {summary && (
@@ -442,13 +444,16 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
           </ul>
         </div>
       )}
-      {recent.length > 0 && (
+      {recentPrompts.length > 0 && (
         <div>
           <SubHeader>Latest activity</SubHeader>
           <div className="mt-1 space-y-3">
-            {recent.slice(0, 4).map((e, i) => (
-              <ActivityRow key={i} event={e} />
-            ))}
+            {recentPrompts
+              .slice(-4)
+              .reverse()
+              .map((p, i) => (
+                <PromptRow key={i} prompt={p} />
+              ))}
           </div>
         </div>
       )}
@@ -457,13 +462,13 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
   );
 }
 
-function ActivityRow({ event }: { event: RecentEvent }): JSX.Element {
+function PromptRow({ prompt }: { prompt: RecentPrompt }): JSX.Element {
   return (
     <div className="flex items-start gap-2">
       <ArrowRightIcon className="w-3.5 h-3.5 text-subtle shrink-0 mt-0.5" aria-hidden />
       <div className="flex-1 min-w-0">
-        <div className="text-base text-fg leading-snug break-words">{event.summary}</div>
-        <div className="mt-0.5 text-xs text-subtle">{fmtAgo(event.ts)}</div>
+        <div className="text-base text-fg leading-snug break-words line-clamp-3">{prompt.text}</div>
+        <div className="mt-0.5 text-xs text-subtle">{fmtAgo(prompt.ts)}</div>
       </div>
     </div>
   );

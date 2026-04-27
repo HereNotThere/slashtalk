@@ -5,7 +5,7 @@ import type { events } from "../db/schema";
 import { compactEvent, isNarrativeEvent } from "./event-compact";
 import { MODELS } from "../models";
 
-const VERSION = "1";
+const VERSION = "2";
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const LINE_SEQ_DELTA = 50;
 const MIN_EVENTS_FOR_FIRST_SUMMARY = 5;
@@ -20,29 +20,40 @@ const SCHEMA = {
   properties: {
     summary: {
       type: "string",
-      description: "3-5 sentences in present tense narrating what is happening in this session.",
+      description:
+        "3-5 sentences in present tense describing the session's overall goal and current approach — the feature/fix/refactor at the heart of the work.",
     },
     highlights: {
       type: "array",
       items: { type: "string" },
       maxItems: 3,
-      description: "Up to 3 short bullets capturing recent key moments or open loops.",
+      description:
+        "Up to 3 short bullets naming substantive code or product changes (new modules, refactors, behavior changes, files added/deleted, design decisions). Skip git plumbing, merges, commits, branch ops, and dev-server status.",
     },
   },
   required: ["summary", "highlights"],
 };
 
-const SYSTEM = `You narrate a live coding session so a teammate glancing at a sidebar instantly gets what's going on.
+const SYSTEM = `You narrate a coding session so a teammate glancing at a sidebar instantly gets the *point* of the work — the feature, fix, or refactor at the heart of the session, not the most recent keystroke.
 
-summary: 3-5 present-tense sentences. Punchy verbs, concrete nouns. Name the file, the function, the bug, the approach being tried. Show momentum — what was just attempted, what's happening now, what's stuck.
+summary: 3-5 present-tense sentences. Punchy verbs, concrete nouns. Name the file, the function, the bug, the approach being tried. Anchor on the session's goal — what is the developer building or fixing? — and use recent activity to flesh out *how* they're doing it, not to redirect the narrative.
 
 Hard rules:
 - Never narrate clock times or durations. Do not write "between 1:10 and 1:34" or "over the last N minutes".
 - Never say "the user", "the developer", "Claude", or "the assistant". Describe the work itself, not who is doing it. ("Chasing a race in the WebSocket reconnect. Swapping exponential backoff in after the leaking-socket fix failed QA.")
 - Do not count tool calls, tokens, files, or messages — those stats live elsewhere.
-- If a prior summary is given, evolve it — carry forward open threads, don't restart from scratch.
+- Treat coda activity as backdrop, not headline: merging main, fast-forwarding commits, deleting branches, running tests, dev-server status, idling, "awaiting next task". The summary should still be about the substantive work.
+- If a prior summary is given, evolve it — carry forward open threads. Only pivot when the developer has clearly moved on to a new substantive task.
 
-highlights: up to 3 short bullets — a surprising finding, a failing test, a pivot, an open question. Skip routine edits and anything already obvious from the summary.`;
+highlights: up to 3 short bullets naming *substantive code or product changes* — a new module/component, a refactor, a behavior change, a file added or deleted, a design decision, a surprising finding, a failing test, an open question. Each bullet should describe *what changed in the codebase or product*, not what happened in git.
+
+Do NOT highlight any of the following:
+- merges, fast-forwards, commits pushed to main, branches created/deleted
+- dev-server runs, type-check passes, lint runs
+- idle time, paused state, "awaiting next task"
+- routine edits already obvious from the summary
+
+If you can't find 3 substantive code/product changes, return fewer bullets — or none. Empty highlights are better than filler.`;
 
 function buildPrompt(
   ctx: AnalyzerContext,

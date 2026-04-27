@@ -208,6 +208,23 @@ export interface SessionUpdatedMessage {
   state?: SessionState;
 }
 
+/** WS push: an analyzer cron published new output for a session.
+ *
+ *  Fired from `apps/server/src/analyzers/scheduler.ts` after each successful
+ *  analyzer run. The desktop info popover treats this as "your cached
+ *  insights for this session are stale — replace with `output`". */
+export interface SessionInsightsUpdatedMessage {
+  type: "session_insights_updated";
+  session_id: string;
+  repo_id: number;
+  /** Analyzer name (e.g. "summary", "rolling-summary") — the output shape
+   *  varies by analyzer, see apps/server/src/analyzers/registry.ts. */
+  analyzer: string;
+  output: unknown;
+  /** ISO8601 */
+  analyzed_at: string;
+}
+
 /**
  * Chat (team-presence Q&A). The server is stateless: the client owns the
  * thread and re-sends the full `messages` array on every turn. Tool turns

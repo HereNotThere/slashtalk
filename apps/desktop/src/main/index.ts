@@ -533,6 +533,7 @@ async function showInfo(
     });
     // A newer show/hide may have fired while we awaited load.
     if (selectedHeadId !== head.id) return;
+    if (win.isDestroyed()) return;
   }
 
   // Size the window using the cached height for this head (if we've rendered
@@ -651,7 +652,8 @@ function sendOverlayConfig(): void {
   }
   lastSentDock = dock;
   const send = (): void => {
-    overlayWindow?.webContents.send("overlay:config", dock);
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    overlayWindow.webContents.send("overlay:config", dock);
   };
   if (overlayWindow.webContents.isLoading()) {
     overlayWindow.webContents.once("did-finish-load", send);

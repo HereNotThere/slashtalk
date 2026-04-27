@@ -47,6 +47,7 @@ function ensureResponseWindow(): BrowserWindow {
 export function showResponse(payload: ResponseOpenPayload): void {
   const win = ensureResponseWindow();
   const send = (): void => {
+    if (win.isDestroyed()) return;
     win.webContents.send("response:open", payload);
   };
   if (win.webContents.isLoading()) {

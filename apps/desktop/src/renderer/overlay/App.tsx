@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
-import { CloseIcon, PlusIcon, SearchIcon } from "../shared/icons";
+import { MagnifyingGlassIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 const DRAG_THRESHOLD = 4;
 const REORDER_ANIM_MS = 280;
@@ -309,7 +309,7 @@ export function App(): JSX.Element {
   const inactiveCount = inactivePeers.length;
   useEffect(() => {
     if (!headsLoaded) return;
-    const RAIL_OUTER_PAD_PX = 16; // py-lg / px-lg main-axis padding on the rail
+    const RAIL_OUTER_PAD_PX = 16; // py-4 / px-4 main-axis padding on the rail
     const wrapperCount = 3 + activeCount; // search + self + active + create
     let length = wrapperCount * STACK_WRAPPER_PX;
     if (inactiveCount > 0) {
@@ -333,15 +333,15 @@ export function App(): JSX.Element {
   // between bubbles, which was causing the hover/info-card to flicker.
   // Cross-axis padding lives on each bubble wrapper (not the rail container)
   // so the hit area extends to the window edge — moving the cursor near the
-  // edge still triggers the bubble's hover. Main-axis padding (`py-lg`) stays
+  // edge still triggers the bubble's hover. Main-axis padding (`py-4`) stays
   // on the rail so first/last bubbles get breathing room above/below.
   const stackClass = isHorizontal
-    ? "flex flex-row items-center px-lg box-border w-screen"
-    : "flex flex-col items-center py-lg box-border h-screen";
+    ? "flex flex-row items-center px-4 box-border w-screen"
+    : "flex flex-col items-center py-4 box-border h-screen";
   const peersClass = isHorizontal
     ? "h-full flex-1 min-w-0 flex flex-row items-center overflow-x-auto overflow-y-hidden no-scrollbar"
     : "w-full flex-1 min-h-0 flex flex-col items-center overflow-y-auto overflow-x-hidden no-scrollbar";
-  const bubblePadClass = isHorizontal ? "shrink-0 px-[7px] py-md" : "shrink-0 py-[7px] px-md";
+  const bubblePadClass = isHorizontal ? "shrink-0 px-[7px] py-3" : "shrink-0 py-[7px] px-3";
   return (
     <div ref={stackRef} className={stackClass}>
       <div className={bubblePadClass}>
@@ -461,7 +461,9 @@ function SearchBubble({ open }: { open: boolean }): JSX.Element {
         hover:scale-[1.03] hover:bg-black/20
       "
     >
-      <div className="pointer-events-none scale-125">{open ? <CloseIcon /> : <SearchIcon />}</div>
+      <div className="pointer-events-none">
+        {open ? <XMarkIcon className="w-5 h-5" /> : <MagnifyingGlassIcon className="w-5 h-5" />}
+      </div>
     </div>
   );
 }
@@ -481,8 +483,8 @@ function CreateBubble(): JSX.Element {
         hover:scale-[1.03] hover:bg-black/20
       "
     >
-      <div className="pointer-events-none scale-125">
-        <PlusIcon />
+      <div className="pointer-events-none">
+        <PlusIcon className="w-5 h-5" />
       </div>
     </div>
   );
@@ -561,7 +563,7 @@ function Bubble({
           aria-hidden
           className="
             absolute -inset-0.5 rounded-full
-            border-2 border-accent pointer-events-none z-3
+            border-2 border-primary pointer-events-none z-3
           "
           style={{ animation: "live-ring 1.6s ease-in-out infinite" }}
         />

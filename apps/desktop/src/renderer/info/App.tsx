@@ -221,33 +221,36 @@ function UserHeader({
   isSelf: boolean;
 }): JSX.Element {
   const name = head?.label ?? "—";
-  // Peer mode: use the persisted timezone for time, persisted city for label,
-  // and geocode that city for the weather icon. Self mode falls back to the
-  // local-resolve path (Intl + ipapi) so cards stay populated even before
-  // PR #139 lands a value on the server for the user.
-  const tz = location?.timezone ?? undefined;
-  const time = new Date().toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: tz,
-  });
+  // Self: resolve locally as before. Peer with data: show their tz/city.
+  // Peer with no server data yet: render only name + avatar — falling back
+  // to local would mislabel the peer's card with our clock.
   const { city, icon } = useLocationWeather(isSelf ? undefined : (location ?? undefined));
+  const showLocationRow = isSelf || location !== null;
+  const time = showLocationRow
+    ? new Date().toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: location?.timezone ?? undefined,
+      })
+    : null;
   const totalTokensLabel = fmtTokens(sumSessionTokens(sessions));
   return (
     <div className="flex items-start gap-3 px-4 pt-4 pb-3">
       <Avatar head={head} />
       <div className="flex-1 min-w-0">
         <div className="text-lg font-bold leading-tight truncate">{name}</div>
-        <div className="mt-1 flex items-center gap-1.5 text-sm text-muted whitespace-nowrap min-w-0">
-          {city && (
-            <>
-              {icon && <span className="shrink-0">{icon}</span>}
-              <span className="truncate">{city}</span>
-              <span className="text-subtle shrink-0">·</span>
-            </>
-          )}
-          <span className="shrink-0">{time}</span>
-        </div>
+        {showLocationRow && (
+          <div className="mt-1 flex items-center gap-1.5 text-sm text-muted whitespace-nowrap min-w-0">
+            {city && (
+              <>
+                {icon && <span className="shrink-0">{icon}</span>}
+                <span className="truncate">{city}</span>
+                <span className="text-subtle shrink-0">·</span>
+              </>
+            )}
+            {time && <span className="shrink-0">{time}</span>}
+          </div>
+        )}
         {totalTokensLabel && (
           <div className="mt-1 flex items-center gap-1.5 text-sm text-muted">
             <ClaudeIcon />

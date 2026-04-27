@@ -165,24 +165,33 @@ async function fetchWeatherIconCached(lat: number, lon: number): Promise<string 
   return icon;
 }
 
-/** When `override.city` is provided we render that peer's location: skip
- *  local IP/timezone resolution, skip the server-report, and only geocode
- *  the supplied city to drive the weather icon. */
-export function useLocationWeather(override?: {
-  timezone: string | null;
-  city: string | null;
-}): LocationWeather {
+/** Calling without arguments runs the existing self path: resolve via local
+ *  timezone, IP fallback, and report back to main.
+ *
+ *  Passing `override` (even `null` or `{city: null}`) switches to peer mode:
+ *  no local resolve, no server report. If `override.city` is set we geocode
+ *  it for the weather icon; otherwise the hook returns empty state so the
+ *  caller can render nothing for a peer we don't have data on yet. */
+export function useLocationWeather(
+  override?: { timezone: string | null; city: string | null } | null,
+): LocationWeather {
+  const isPeerMode = override !== undefined;
   const overrideCity = override?.city ?? null;
-  const [state, setState] = useState<LocationWeather>({
-    city: overrideCity ?? cachedLocation?.city ?? null,
-    icon: overrideCity ? null : (cachedWeather?.icon ?? null),
+
+  const [state, setState] = useState<LocationWeather>(() => {
+    if (isPeerMode) return { city: overrideCity, icon: null };
+    return {
+      city: cachedLocation?.city ?? null,
+      icon: cachedWeather?.icon ?? null,
+    };
   });
 
   useEffect(() => {
     let cancelled = false;
 
-    if (overrideCity) {
+    if (isPeerMode) {
       setState({ city: overrideCity, icon: null });
+      if (!overrideCity) return;
       void resolvePeerCity(overrideCity).then(async (loc) => {
         if (cancelled || !loc) return;
         setState((s) => (s.city === loc.city ? s : { ...s, city: loc.city }));
@@ -223,7 +232,7 @@ export function useLocationWeather(override?: {
     return () => {
       cancelled = true;
     };
-  }, [overrideCity]);
+  }, [isPeerMode, overrideCity]);
 
   return state;
 }

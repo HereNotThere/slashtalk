@@ -2,23 +2,16 @@ import { useEffect, useState } from "react";
 import { Button } from "../shared/Button";
 import { SlashtalkLogo } from "../shared/icons";
 import { SlashtalkSection } from "./SlashtalkSection";
-import { AgentsSection } from "./AgentsSection";
+// AgentsSection hidden for now — re-import alongside its render below to restore.
 import type { BackendAuthState } from "../../shared/types";
 
 export function App(): JSX.Element {
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
   const [signingIn, setSigningIn] = useState(false);
-  const [agentCreatorSignal, setAgentCreatorSignal] = useState(0);
 
   useEffect(() => {
     void window.chatheads.backend.getAuthState().then(setAuth);
     return window.chatheads.backend.onAuthState(setAuth);
-  }, []);
-
-  useEffect(() => {
-    return window.chatheads.onOpenAgentCreator(() => {
-      setAgentCreatorSignal((value) => value + 1);
-    });
   }, []);
 
   if (!auth.signedIn) {
@@ -62,7 +55,6 @@ export function App(): JSX.Element {
       </header>
 
       <SlashtalkSection />
-      <AgentsSection openCreatorSignal={agentCreatorSignal} />
     </>
   );
 }

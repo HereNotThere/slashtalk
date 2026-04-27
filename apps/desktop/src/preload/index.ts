@@ -110,6 +110,15 @@ const bridge: ChatHeadsBridge = {
     setSessionOnlyMode: (enabled: boolean) =>
       ipcRenderer.invoke("rail:setSessionOnlyMode", enabled) as Promise<void>,
     onSessionOnlyModeChange: (cb) => subscribe<boolean>("rail:sessionOnlyMode", cb),
+    getCollapseInactive: () => ipcRenderer.invoke("rail:getCollapseInactive") as Promise<boolean>,
+    setCollapseInactive: (enabled: boolean) =>
+      ipcRenderer.invoke("rail:setCollapseInactive", enabled) as Promise<void>,
+    onCollapseInactiveChange: (cb) => subscribe<boolean>("rail:collapseInactive", cb),
+    getShowActivityTimestamps: () =>
+      ipcRenderer.invoke("rail:getShowActivityTimestamps") as Promise<boolean>,
+    setShowActivityTimestamps: (shown: boolean) =>
+      ipcRenderer.invoke("rail:setShowActivityTimestamps", shown) as Promise<void>,
+    onShowActivityTimestampsChange: (cb) => subscribe<boolean>("rail:showActivityTimestamps", cb),
   },
 
   spotifyShare: {
@@ -124,6 +133,8 @@ const bridge: ChatHeadsBridge = {
     ipcRenderer.invoke("heads:showInfo", headId, bubbleScreen) as Promise<void>,
   infoHoverEnter: () => ipcRenderer.invoke("info:hoverEnter") as Promise<void>,
   infoHoverLeave: () => ipcRenderer.invoke("info:hoverLeave") as Promise<void>,
+  onInfoState: (cb) => subscribe<{ visible: boolean; headId: string | null }>("info:state", cb),
+  setOverlayLength: (length) => ipcRenderer.invoke("overlay:setLength", length) as Promise<void>,
 
   toggleChat: () => ipcRenderer.invoke("chat:toggle") as Promise<void>,
   hideChat: () => ipcRenderer.invoke("chat:hide") as Promise<void>,

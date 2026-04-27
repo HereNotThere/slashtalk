@@ -62,11 +62,14 @@ const mcpProxy = createLocalMcpProxy({
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
 // BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/SearchBubble/CreateBubble (45px),
-// SPACING ↔ `gap-[14px]` on the stack (14px),
-// PADDING_X ↔ `px-md` on the stack (12px),
-// PADDING_Y ↔ `py-lg` on the stack (16px). Drift here = popovers misalign.
+// BUBBLE_PAD ↔ `py-[7px]` (vertical rail) / `px-[7px]` (horizontal rail) on
+//   each bubble's wrapper (7px). Adjacent wrappers touch — no flex gap — so
+//   adjacent paddings sum to a visual 14px stride between bubbles.
+// PADDING_X ↔ `px-md` on the stack (12px) — cross-axis padding on the rail.
+// PADDING_Y ↔ `py-lg` on the stack (16px) — main-axis padding on the rail.
+// Drift here = popovers misalign.
 const BUBBLE_SIZE = 45;
-const SPACING = 14;
+const BUBBLE_PAD = 7;
 const PADDING_X = 12;
 const PADDING_Y = 16;
 const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
@@ -119,6 +122,8 @@ let infoHideFadeTimer: NodeJS.Timeout | null = null;
 const POSITION_KEY = "overlayPosition";
 const PINNED_KEY = "railPinned";
 const SESSION_ONLY_KEY = "railSessionOnlyMode";
+const COLLAPSE_INACTIVE_KEY = "railCollapseInactive";
+const SHOW_ACTIVITY_TIMESTAMPS_KEY = "showActivityTimestamps";
 const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
 
 // 15-min grace window after the user's last active session ends (or after they
@@ -145,6 +150,19 @@ function getRailSessionOnlyMode(): boolean {
 // when the user explicitly ticks the toggle in the tray popup.
 function getSpotifyShareEnabled(): boolean {
   return store.get<boolean>(SPOTIFY_SHARE_KEY) ?? false;
+}
+
+// On by default — peers idle past 24h collapse into a hover-expanding stack
+// so the rail stays compact. Users can opt out via the tray to render every
+// teammate inline.
+function getRailCollapseInactive(): boolean {
+  return store.get<boolean>(COLLAPSE_INACTIVE_KEY) ?? true;
+}
+
+// On by default — the "Xm" / "Xh" / "Xd" age pill renders on each chathead.
+// Users can toggle off in the tray to declutter the rail.
+function getShowActivityTimestamps(): boolean {
+  return store.get<boolean>(SHOW_ACTIVITY_TIMESTAMPS_KEY) ?? true;
 }
 
 function updateSpotifyRunning(): void {
@@ -314,6 +332,14 @@ function broadcastRailSessionOnlyMode(): void {
   broadcastToRailTargets("rail:sessionOnlyMode", getRailSessionOnlyMode());
 }
 
+function broadcastRailCollapseInactive(): void {
+  broadcastToRailTargets("rail:collapseInactive", getRailCollapseInactive());
+}
+
+function broadcastShowActivityTimestamps(): void {
+  broadcastToRailTargets("rail:showActivityTimestamps", getShowActivityTimestamps());
+}
+
 let overlayWindow: BrowserWindow | null = null;
 let infoWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
@@ -356,7 +382,7 @@ let isDraggingStack = false;
 
 // Dock-to-edge feature. During drag we show a dashed ghost at the nearest dock
 // slot (center-left / center-right); on release the overlay tweens to it.
-const DOCK_EDGE_MARGIN = 24;
+const DOCK_EDGE_MARGIN = 6;
 const DOCK_ANIM_MS = 180;
 let dockPlaceholderWindow: BrowserWindow | null = null;
 // Monotonic counter — each new tween takes the next token; in-flight steps
@@ -370,8 +396,10 @@ let overlayAnimToken = 0;
 // (height for vertical rail, width for horizontal). Cross-axis is always
 // OVERLAY_WIDTH.
 function overlayLength(count: number): number {
+  // Each bubble wrapper is BUBBLE_SIZE + (BUBBLE_PAD * 2) and wrappers touch
+  // (no flex gap). +2 covers the search and create control bubbles.
   const n = count + 2;
-  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + PADDING_Y * 2;
+  return n * (BUBBLE_SIZE + BUBBLE_PAD * 2) + PADDING_Y * 2;
 }
 
 function overlaySize(
@@ -511,6 +539,8 @@ function ensureOverlay(): BrowserWindow {
 
 const OVERLAY_SCREEN_MARGIN = 40;
 
+let desiredOverlayLength: number | null = null;
+
 function resizeOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const display = screen.getDisplayMatching(overlayWindow.getBounds());
@@ -519,7 +549,10 @@ function resizeOverlay(): void {
   // Main-axis cap — leaves OVERLAY_SCREEN_MARGIN at each end.
   const axisExtent = dock.orientation === "vertical" ? wa.height : wa.width;
   const maxLength = Math.max(overlayLength(0), axisExtent - OVERLAY_SCREEN_MARGIN * 2);
-  const length = Math.min(overlayLength(heads.length), maxLength);
+  // Renderer-reported length wins when present — it knows about the inactive
+  // stack's collapsed/expanded state, which main can't infer from heads alone.
+  const baseLength = desiredOverlayLength ?? overlayLength(heads.length);
+  const length = Math.min(baseLength, maxLength);
   const size =
     dock.orientation === "vertical"
       ? { width: OVERLAY_WIDTH, height: length }
@@ -603,10 +636,11 @@ function positionInfo(headId: string, bubbleScreen?: { x: number; y: number }): 
 
   // Fallback coord when the renderer didn't report a bubble rect (e.g.
   // repositions during drag/slide). Derived from the head's position on the
-  // rail.
-  const cell = BUBBLE_SIZE + SPACING;
+  // rail. Each wrapper is `cell` long; the bubble inside sits BUBBLE_PAD past
+  // the wrapper top.
+  const cell = BUBBLE_SIZE + BUBBLE_PAD * 2;
   const idx = heads.findIndex((h) => h.id === headId);
-  const fallbackAxisOffset = PADDING_Y + Math.max(0, idx) * cell;
+  const fallbackAxisOffset = PADDING_Y + BUBBLE_PAD + Math.max(0, idx) * cell;
 
   if (dock.orientation === "vertical") {
     const infoX =
@@ -698,6 +732,7 @@ async function showInfo(
   const firstShow = !win.isVisible();
   positionInfo(head.id, bubbleScreen);
   if (firstShow) win.showInactive();
+  broadcastInfoState(true, head.id);
 
   // Cache miss: fetch in the background and push the result to the renderer.
   // The renderer's load-effect is keyed on head.id, so a re-hover of the same
@@ -741,6 +776,7 @@ function cancelHideInfo(): void {
 
 function hideInfoNow(): void {
   selectedHeadId = null;
+  broadcastInfoState(false, null);
   if (infoWindow && !infoWindow.isDestroyed()) {
     infoWindow.webContents.send("info:hide");
     // Defer the actual NSWindow hide until the renderer's fade-out completes
@@ -871,6 +907,11 @@ function broadcastChatVisible(visible: boolean): void {
   overlayWindow.webContents.send("chat:state", { visible });
 }
 
+function broadcastInfoState(visible: boolean, headId: string | null): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send("info:state", { visible, headId });
+}
+
 function sendChatConfig(): void {
   if (!chatWindow || chatWindow.isDestroyed()) return;
   const anchor = chatAnchorFromDock(currentDock());
@@ -965,6 +1006,18 @@ ipcMain.handle("rail:setSessionOnlyMode", (_e, enabled: boolean): void => {
   broadcastRailSessionOnlyMode();
 });
 
+ipcMain.handle("rail:getCollapseInactive", (): boolean => getRailCollapseInactive());
+ipcMain.handle("rail:setCollapseInactive", (_e, enabled: boolean): void => {
+  store.set(COLLAPSE_INACTIVE_KEY, !!enabled);
+  broadcastRailCollapseInactive();
+});
+
+ipcMain.handle("rail:getShowActivityTimestamps", (): boolean => getShowActivityTimestamps());
+ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
+  store.set(SHOW_ACTIVITY_TIMESTAMPS_KEY, !!shown);
+  broadcastShowActivityTimestamps();
+});
+
 ipcMain.handle("spotify:isSupported", (): boolean => process.platform === "darwin");
 ipcMain.handle("spotify:getShareEnabled", (): boolean => getSpotifyShareEnabled());
 ipcMain.handle("spotify:setShareEnabled", async (_e, enabled: boolean): Promise<void> => {
@@ -1035,6 +1088,14 @@ ipcMain.handle(
 ipcMain.handle("info:hide", (): void => scheduleHideInfo());
 ipcMain.handle("info:hoverEnter", (): void => cancelHideInfo());
 ipcMain.handle("info:hoverLeave", (): void => scheduleHideInfo());
+
+ipcMain.handle("overlay:setLength", (_e, length: number): void => {
+  if (typeof length !== "number" || !Number.isFinite(length) || length <= 0) return;
+  const next = Math.round(length);
+  if (next === desiredOverlayLength) return;
+  desiredOverlayLength = next;
+  resizeOverlay();
+});
 
 ipcMain.handle("chat:toggle", (): void => toggleChat());
 ipcMain.handle("chat:hide", (): void => hideChat());

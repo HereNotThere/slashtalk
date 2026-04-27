@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config";
+import { MODELS } from "../models";
 
-const MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 400;
 const COUNT = 6;
 const MAX_PHRASE_CHARS = 48;
@@ -121,7 +121,7 @@ export async function generateGerunds(prompt: string): Promise<string[]> {
   if (!config.anthropicApiKey) return FALLBACK;
   try {
     const resp = await client().messages.create({
-      model: MODEL,
+      model: MODELS.haiku,
       max_tokens: MAX_TOKENS,
       system: [
         {

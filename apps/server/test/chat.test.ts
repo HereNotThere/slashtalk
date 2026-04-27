@@ -586,6 +586,15 @@ describe("chat tool: get_team_activity — default-exclude ended", () => {
     });
   });
 
+  it("openPrs[] honors an explicit state filter", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "apps/server/src/old/fix.ts",
+      state: "busy",
+    });
+    expect(result.openPrs).toEqual([]);
+  });
+
   it("openPrs is omitted when filePath is unset", async () => {
     const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
     expect(result.openPrs).toBeUndefined();

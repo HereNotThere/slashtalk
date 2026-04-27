@@ -222,7 +222,9 @@ export async function getTeamActivityImpl(
     if (args.filePath) {
       const editedPaths = snapshot.topFilesEdited.map(([p]) => p);
       if (!editedPaths.some((p) => pathMatches(p, args.filePath!))) continue;
-      filePathMatchedSessions.push(s);
+      if (!args.state || snapshot.state === args.state) {
+        filePathMatchedSessions.push(s);
+      }
     }
     if (args.state && snapshot.state !== args.state) continue;
     if (omitEnded && snapshot.state === "ended") continue;

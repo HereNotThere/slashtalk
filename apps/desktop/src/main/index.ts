@@ -14,7 +14,6 @@ import type {
   AgentSessionSummary,
   AgentStreamEvent,
   AgentSummary,
-  ChatAnchor,
   ChatHead,
   CreateAgentInput,
   DockConfig,
@@ -56,6 +55,13 @@ import {
   screenIdOf,
 } from "./windows/dock-geometry";
 import {
+  configureChat,
+  hideChat,
+  repositionChatIfVisible,
+  sendChatConfig,
+  toggleChat,
+} from "./windows/chat";
+import {
   configureHoverPolling,
   startHoverPolling,
   stopHoverPolling,
@@ -84,14 +90,6 @@ const mcpProxy = createLocalMcpProxy({
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
 const INFO_GAP = 8; // distance from the pill's outer edge to the info window
-
-const CHAT_WIDTH = 560;
-const CHAT_HEIGHT = 80; // transparent window; pill + breathing room for CSS shadow
-// Distance from the chat window's left edge to the center of the leading icon
-// circle inside the pill — container p-sm (8) + inner pl-2 (8) + half icon (20).
-// Used to align the pill's icon over the chat bubble's position. Keep in sync
-// with the pill layout in renderer/chat/App.tsx.
-const CHAT_ICON_OFFSET = 36;
 
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
@@ -226,7 +224,6 @@ function broadcastShowActivityTimestamps(): void {
 
 let overlayWindow: BrowserWindow | null = null;
 let infoWindow: BrowserWindow | null = null;
-let chatWindow: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
 let selectedHeadId: string | null = null;
@@ -654,110 +651,9 @@ function repositionInfoIfVisible(): void {
   positionInfo(selectedHeadId);
 }
 
-// -------- Chat input popover --------
-//
-// Transparent window anchored on the search bubble (the leading cell in the rail).
-// The chat renderer paints its own pill + shadow; we just size + position the
-// frame.
+// -------- Overlay-renderer notifications --------
 
-let lastSentChatAnchor: ChatAnchor | null = null;
 let lastSentDock: DockConfig | null = null;
-
-function ensureChatWindow(): BrowserWindow {
-  if (chatWindow && !chatWindow.isDestroyed()) return chatWindow;
-
-  chatWindow = new BrowserWindow({
-    width: CHAT_WIDTH,
-    height: CHAT_HEIGHT,
-    frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    alwaysOnTop: true,
-    resizable: false,
-    movable: false,
-    skipTaskbar: true,
-    show: false,
-    hasShadow: false,
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-
-  chatWindow.setAlwaysOnTop(true, "floating");
-  chatWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-  loadRenderer(chatWindow, "chat");
-
-  // On every (re)load, the renderer's anchor state resets to its default.
-  // Clear the dedup so the current anchor is re-sent even if it matches the
-  // last value main observed.
-  chatWindow.webContents.on("did-finish-load", () => {
-    lastSentChatAnchor = null;
-    sendChatConfig();
-  });
-
-  chatWindow.on("blur", () => hideChat());
-  chatWindow.on("closed", () => {
-    chatWindow = null;
-    lastSentChatAnchor = null;
-  });
-
-  return chatWindow;
-}
-
-// Which end of the pill the search-icon circle sits at. Vertical rails still
-// extend inward from the screen edge. Horizontal rails now have search on the
-// leading/left cell, so the pill extends rightward from that bubble.
-function chatAnchorFromDock(dock: DockConfig): ChatAnchor {
-  if (dock.orientation === "horizontal") return "left";
-  return dock.side === "start" ? "left" : "right";
-}
-
-function positionChat(): void {
-  if (!chatWindow || chatWindow.isDestroyed()) return;
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-
-  const stackBounds = overlayWindow.getBounds();
-  const dock = currentDock();
-  const anchor = chatAnchorFromDock(dock);
-
-  if (dock.orientation === "vertical") {
-    // Search bubble pinned to the top of the overlay (flex-none in the
-    // renderer). Anchor from window bounds so this works whether content fits
-    // or the peer list is scrolling under a height cap.
-    const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
-    const bubbleCenterY = stackBounds.y + PADDING_Y + BUBBLE_SIZE / 2;
-    const chatX =
-      anchor === "left"
-        ? bubbleCenterX - CHAT_ICON_OFFSET
-        : bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
-    const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2);
-    chatWindow.setBounds({
-      x: Math.round(chatX),
-      y: chatY,
-      width: CHAT_WIDTH,
-      height: CHAT_HEIGHT,
-    });
-    return;
-  }
-
-  // Horizontal rail: search bubble pinned to the left end of the row. Pill
-  // lives on the inner side of the rail (below for top, above for bottom),
-  // extending rightward from the bubble.
-  const bubbleCenterX = stackBounds.x + PADDING_Y + BUBBLE_SIZE / 2;
-  const chatX = bubbleCenterX - CHAT_ICON_OFFSET;
-  const chatY =
-    dock.side === "start"
-      ? stackBounds.y + stackBounds.height + INFO_GAP
-      : stackBounds.y - INFO_GAP - CHAT_HEIGHT;
-  chatWindow.setBounds({
-    x: Math.round(chatX),
-    y: Math.round(chatY),
-    width: CHAT_WIDTH,
-    height: CHAT_HEIGHT,
-  });
-}
 
 function broadcastChatVisible(visible: boolean): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
@@ -767,21 +663,6 @@ function broadcastChatVisible(visible: boolean): void {
 function broadcastInfoState(visible: boolean, headId: string | null): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   overlayWindow.webContents.send("info:state", { visible, headId });
-}
-
-function sendChatConfig(): void {
-  if (!chatWindow || chatWindow.isDestroyed()) return;
-  const anchor = chatAnchorFromDock(currentDock());
-  if (anchor === lastSentChatAnchor) return;
-  lastSentChatAnchor = anchor;
-  const send = (): void => {
-    chatWindow?.webContents.send("chat:config", { anchor });
-  };
-  if (chatWindow.webContents.isLoading()) {
-    chatWindow.webContents.once("did-finish-load", send);
-  } else {
-    send();
-  }
 }
 
 // Tell the overlay renderer which dock it's in so it can pick flex direction,
@@ -806,37 +687,6 @@ function sendOverlayConfig(): void {
   } else {
     send();
   }
-}
-
-function showChat(): void {
-  const win = ensureChatWindow();
-  sendChatConfig();
-  positionChat();
-  win.show();
-  win.focus();
-  broadcastChatVisible(true);
-}
-
-function hideChat(): void {
-  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
-    chatWindow.hide();
-  }
-  broadcastChatVisible(false);
-}
-
-function toggleChat(): void {
-  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
-    hideChat();
-  } else {
-    showChat();
-  }
-}
-
-function repositionChatIfVisible(): void {
-  if (!chatWindow || chatWindow.isDestroyed() || !chatWindow.isVisible()) return;
-  // Anchor may flip if the rail crossed the screen midline during a drag.
-  sendChatConfig();
-  positionChat();
 }
 
 // -------- IPC --------
@@ -1785,6 +1635,11 @@ function debugBackfillTimestamps(): void {
   // No-op; kept for reference.
 }
 
+configureChat({
+  getOverlay: () => overlayWindow,
+  getCurrentDock: currentDock,
+  onVisibilityChange: broadcastChatVisible,
+});
 configureResponse({ onClose: hideChat });
 configureHoverPolling({
   getOverlay: () => overlayWindow,

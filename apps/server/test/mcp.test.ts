@@ -95,12 +95,8 @@ describe("root /mcp", () => {
     expect(invalid.headers.get("www-authenticate")).toContain(
       `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
     );
-    expect(invalid.headers.get("www-authenticate")).toContain(
-      'error="invalid_token"',
-    );
-    expect(invalid.headers.get("www-authenticate")).toContain(
-      'error_description="unknown token"',
-    );
+    expect(invalid.headers.get("www-authenticate")).toContain('error="invalid_token"');
+    expect(invalid.headers.get("www-authenticate")).toContain('error_description="unknown token"');
   });
 
   it("does not expose the MCP presence debug snapshot publicly", async () => {
@@ -162,9 +158,7 @@ describe("root /mcp", () => {
     await db
       .update(oauthTokens)
       .set({ resource: `${baseUrl}/not-mcp` })
-      .where(
-        eq(oauthTokens.accessTokenHash, await hashToken(wrongResource.accessToken)),
-      );
+      .where(eq(oauthTokens.accessTokenHash, await hashToken(wrongResource.accessToken)));
     await expectMcpInvalidToken(wrongResource.accessToken, "resource mismatch");
 
     const noReadScope = await issueMcpOAuthToken({ scope: "mcp:write" });
@@ -303,9 +297,7 @@ describe("root /mcp", () => {
   });
 
   it("enforces a per-user concurrent MCP session cap", async () => {
-    const limited = new Elysia()
-      .use(mcpRoutes({ maxConcurrentSessionsPerUser: 1 }))
-      .listen(0);
+    const limited = new Elysia().use(mcpRoutes({ maxConcurrentSessionsPerUser: 1 })).listen(0);
     const limitedUrl = `http://localhost:${limited.server!.port}`;
 
     try {
@@ -356,9 +348,7 @@ describe("MCP OAuth discovery", () => {
   it("uses configured base URL for non-loopback OAuth metadata origins", async () => {
     const configuredOrigin = new URL(config.baseUrl).origin;
     const res = await app.handle(
-      new Request(
-        "http://internal-render/.well-known/oauth-protected-resource/mcp",
-      ),
+      new Request("http://internal-render/.well-known/oauth-protected-resource/mcp"),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -411,11 +401,7 @@ describe("MCP OAuth discovery", () => {
       expect(body.registration_endpoint).toBe(`${baseUrl}/oauth/register`);
       expect(body.code_challenge_methods_supported).toEqual(["S256"]);
       expect(body.token_endpoint_auth_methods_supported).toEqual(["none"]);
-      expect(body.scopes_supported).toEqual([
-        "mcp:read",
-        "mcp:write",
-        "offline_access",
-      ]);
+      expect(body.scopes_supported).toEqual(["mcp:read", "mcp:write", "offline_access"]);
       expect(body.protected_resources).toEqual([`${baseUrl}/mcp`]);
     });
   }
@@ -560,9 +546,7 @@ describe("MCP OAuth discovery", () => {
     expect(loginRequired.status).toBe(302);
     const loginLocation = loginRequired.headers.get("location");
     expect(loginLocation).toStartWith("/auth/github?");
-    expect(new URLSearchParams(loginLocation!.split("?")[1]).get("return_to")).toBe(
-      authorizePath,
-    );
+    expect(new URLSearchParams(loginLocation!.split("?")[1]).get("return_to")).toBe(authorizePath);
 
     const githubRedirect = await fetch(`${baseUrl}${loginLocation}`, {
       redirect: "manual",
@@ -597,9 +581,7 @@ describe("MCP OAuth discovery", () => {
       { redirect: "manual", headers: { Cookie: aliceCookie } },
     );
     expect(known.status).toBe(302);
-    expect(known.headers.get("location")).toStartWith(
-      "http://localhost:37622/callback?code=",
-    );
+    expect(known.headers.get("location")).toStartWith("http://localhost:37622/callback?code=");
 
     const unknown = await fetch(
       `${baseUrl}/oauth/authorize?${new URLSearchParams({
@@ -1014,9 +996,7 @@ async function mcpSessionRequest({
 async function mcpJson(res: Response) {
   const text = await res.text();
   if (text.startsWith("event:")) {
-    const dataLine = text
-      .split("\n")
-      .find((line) => line.startsWith("data: "));
+    const dataLine = text.split("\n").find((line) => line.startsWith("data: "));
     expect(dataLine).toBeTruthy();
     return JSON.parse(dataLine!.slice("data: ".length));
   }
@@ -1183,9 +1163,7 @@ async function expectMcpInvalidToken(token: string, reason: string) {
 
   expect(res.status).toBe(401);
   const header = res.headers.get("www-authenticate");
-  expect(header).toContain(
-    `resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
-  );
+  expect(header).toContain(`resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`);
   expect(header).toContain('error="invalid_token"');
   expect(header).toContain(`error_description="${reason}"`);
 }

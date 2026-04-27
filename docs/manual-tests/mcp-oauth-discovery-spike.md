@@ -27,7 +27,11 @@ bun --filter @slashtalk/server spike:mcp-oauth
 Expected startup log:
 
 ```json
-{"msg":"mcp_oauth_spike_listening","url":"http://127.0.0.1:37620","resource":"http://127.0.0.1:37620/mcp"}
+{
+  "msg": "mcp_oauth_spike_listening",
+  "url": "http://127.0.0.1:37620",
+  "resource": "http://127.0.0.1:37620/mcp"
+}
 ```
 
 Override the port if needed:

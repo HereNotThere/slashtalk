@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type {
-  BackendAuthState,
-  GithubAppStatus,
-  TrackedRepo,
-} from "../../shared/types";
+import type { BackendAuthState, GithubAppStatus, TrackedRepo } from "../../shared/types";
 
 type Status = { kind: "ok" | "err"; text: string } | null;
 type Busy = null | "signIn" | "repoAccess" | "add" | "globalSignOut";
@@ -178,16 +174,10 @@ export function SlashtalkSection(): JSX.Element {
     <section className="bg-card rounded-2xl p-4">
       {auth.signedIn ? (
         <div className="flex items-center justify-between mb-3">
-          <span className="text-[13px] font-medium">
-            @{auth.user.githubLogin}
-          </span>
+          <span className="text-[13px] font-medium">@{auth.user.githubLogin}</span>
           <div className="flex items-center gap-2">
             <LinkButton onClick={signOut}>Sign out</LinkButton>
-            <LinkButton
-              onClick={signOutEverywhere}
-              disabled={busy === "globalSignOut"}
-              danger
-            >
+            <LinkButton onClick={signOutEverywhere} disabled={busy === "globalSignOut"} danger>
               {busy === "globalSignOut" ? "Signing out..." : "Sign out everywhere"}
             </LinkButton>
           </div>
@@ -208,9 +198,7 @@ export function SlashtalkSection(): JSX.Element {
             transition-[filter]
           "
         >
-          {busy === "signIn"
-            ? "Waiting for browser…"
-            : "→  Sign in to Slashtalk"}
+          {busy === "signIn" ? "Waiting for browser…" : "→  Sign in to Slashtalk"}
         </button>
       ) : (
         <SignedInBody
@@ -296,7 +284,7 @@ function SignedInBody({
         <div className="text-[12px] text-subtle mt-3 leading-snug">
           {needsRepoAccess
             ? "Connect repo access once, then pick a folder that's a clone of one of your GitHub repos."
-            : "No local repos tracked yet. Click \"Add local repo\" and pick a folder that's a clone of one of your GitHub repos."}
+            : 'No local repos tracked yet. Click "Add local repo" and pick a folder that\'s a clone of one of your GitHub repos.'}
         </div>
       ) : (
         <div className="flex flex-col gap-1.5 mt-3">
@@ -306,9 +294,7 @@ function SignedInBody({
               className="flex items-center gap-2.5 px-3 py-2 bg-surface rounded-lg"
             >
               <span className="text-[13px] font-medium">{t.fullName}</span>
-              <span className="text-[12px] text-subtle truncate">
-                {t.localPath}
-              </span>
+              <span className="text-[12px] text-subtle truncate">{t.localPath}</span>
               <button
                 onClick={() => onRemove(t.repoId)}
                 className="ml-auto bg-transparent border-none text-subtle cursor-pointer hover:text-fg"
@@ -342,8 +328,8 @@ function RepoAccessPanel({
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium">Connect repo access</div>
           <div className="text-[12px] text-subtle leading-snug mt-0.5">
-            Approve the Slashtalk GitHub App once so private repos can be
-            verified without granting broad OAuth repo access.
+            Approve the Slashtalk GitHub App once so private repos can be verified without granting
+            broad OAuth repo access.
           </div>
           <div className="flex items-center gap-2 mt-2">
             <InlineButton onClick={onConnect} disabled={busy}>
@@ -354,9 +340,7 @@ function RepoAccessPanel({
             </InlineButton>
           </div>
           {watching ? (
-            <div className="text-[11px] text-subtle mt-2">
-              Waiting for GitHub approval...
-            </div>
+            <div className="text-[11px] text-subtle mt-2">Waiting for GitHub approval...</div>
           ) : null}
         </div>
       </div>
@@ -389,13 +373,7 @@ function StepBadgeRow({
   );
 }
 
-function StepBadge({
-  value,
-  success = false,
-}: {
-  value: string;
-  success?: boolean;
-}): JSX.Element {
+function StepBadge({ value, success = false }: { value: string; success?: boolean }): JSX.Element {
   return (
     <span
       className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 ${
@@ -449,9 +427,7 @@ function LinkButton({
       onClick={onClick}
       disabled={disabled}
       className={`bg-transparent border-none text-[12px] px-1 py-0.5 cursor-pointer disabled:opacity-60 disabled:cursor-wait ${
-        danger
-          ? "text-danger hover:text-danger"
-          : "text-link hover:text-link-hover"
+        danger ? "text-danger hover:text-danger" : "text-link hover:text-link-hover"
       }`}
     >
       {children}

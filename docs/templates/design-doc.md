@@ -36,5 +36,5 @@ Tier-3 enforcement scans.
 
 ## See also
 
-- [`<related-doc>`](<path>) — <why related>
+- [`<related-doc>`](path) — <why related>
 - [`core-beliefs #<N>`](core-beliefs.md#<anchor>) — <if this design-doc has a corresponding numbered rule>

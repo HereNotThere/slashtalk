@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
@@ -145,8 +139,7 @@ export function App(): JSX.Element {
     const onDown = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       downPos = { x: e.screenX, y: e.screenY };
-      const target =
-        e.target instanceof Element ? e.target.closest("[data-bubble]") : null;
+      const target = e.target instanceof Element ? e.target.closest("[data-bubble]") : null;
       downAction = target?.hasAttribute("data-search")
         ? "search"
         : target?.hasAttribute("data-create")
@@ -194,10 +187,7 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  const hoverEnterBubble = (
-    headId: string,
-    bubbleScreen: { x: number; y: number },
-  ): void => {
+  const hoverEnterBubble = (headId: string, bubbleScreen: { x: number; y: number }): void => {
     if (hoverShowTimer.current != null) {
       window.clearTimeout(hoverShowTimer.current);
     }
@@ -218,15 +208,14 @@ export function App(): JSX.Element {
     void window.chatheads.infoHoverLeave();
   };
 
-  const registerBubble = (id: string) => (el: HTMLDivElement | null): void => {
-    if (el) bubbleRefs.current.set(id, el);
-    else bubbleRefs.current.delete(id);
-  };
+  const registerBubble =
+    (id: string) =>
+    (el: HTMLDivElement | null): void => {
+      if (el) bubbleRefs.current.set(id, el);
+      else bubbleRefs.current.delete(id);
+    };
 
-  const handleBubbleEnter = (
-    headId: string,
-    e: React.MouseEvent<HTMLDivElement>,
-  ): void => {
+  const handleBubbleEnter = (headId: string, e: React.MouseEvent<HTMLDivElement>): void => {
     const rect = e.currentTarget.getBoundingClientRect();
     const screenX = Math.round(rect.left + window.screenX);
     const screenY = Math.round(rect.top + window.screenY);
@@ -258,11 +247,7 @@ export function App(): JSX.Element {
           onMouseEnter={(e) => handleBubbleEnter(self.id, e)}
           onMouseLeave={hoverLeaveBubble}
         >
-          <Bubble
-            head={self}
-            onHoverEnter={() => {}}
-            onHoverLeave={() => {}}
-          />
+          <Bubble head={self} onHoverEnter={() => {}} onHoverLeave={() => {}} />
         </div>
       )}
       {peers.length > 0 && (
@@ -275,11 +260,7 @@ export function App(): JSX.Element {
               onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
               onMouseLeave={hoverLeaveBubble}
             >
-              <Bubble
-                head={h}
-                onHoverEnter={() => {}}
-                onHoverLeave={() => {}}
-              />
+              <Bubble head={h} onHoverEnter={() => {}} onHoverLeave={() => {}} />
             </div>
           ))}
         </div>
@@ -304,9 +285,7 @@ function SearchBubble({ open }: { open: boolean }): JSX.Element {
         hover:scale-[1.03] hover:bg-black/20
       "
     >
-      <div className="pointer-events-none scale-125">
-        {open ? <CloseIcon /> : <SearchIcon />}
-      </div>
+      <div className="pointer-events-none scale-125">{open ? <CloseIcon /> : <SearchIcon />}</div>
     </div>
   );
 }

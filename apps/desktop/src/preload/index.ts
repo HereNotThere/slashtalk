@@ -30,8 +30,7 @@ import type {
 } from "../shared/types";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
-  const handler = (_e: Electron.IpcRendererEvent, payload: T): void =>
-    cb(payload);
+  const handler = (_e: Electron.IpcRendererEvent, payload: T): void => cb(payload);
   ipcRenderer.on(channel, handler);
   return () => {
     ipcRenderer.off(channel, handler);
@@ -40,20 +39,16 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 
 const bridge: ChatHeadsBridge = {
   auth: {
-    getState: () =>
-      ipcRenderer.invoke("chatheads:getAuthState") as Promise<ChatHeadsAuthState>,
+    getState: () => ipcRenderer.invoke("chatheads:getAuthState") as Promise<ChatHeadsAuthState>,
     signIn: () => ipcRenderer.invoke("chatheads:signIn") as Promise<void>,
-    cancelSignIn: () =>
-      ipcRenderer.invoke("chatheads:cancelSignIn") as Promise<void>,
+    cancelSignIn: () => ipcRenderer.invoke("chatheads:cancelSignIn") as Promise<void>,
     signOut: () => ipcRenderer.invoke("chatheads:signOut") as Promise<void>,
     onState: (cb) => subscribe<ChatHeadsAuthState>("chatheads:authState", cb),
   },
 
   mcp: {
     install: (target: McpTarget, options?: McpInstallOptions) =>
-      ipcRenderer.invoke("mcp:install", target, options) as Promise<
-        McpTargetState
-      >,
+      ipcRenderer.invoke("mcp:install", target, options) as Promise<McpTargetState>,
     uninstall: (target: McpTarget) =>
       ipcRenderer.invoke("mcp:uninstall", target) as Promise<McpTargetState>,
     status: () => ipcRenderer.invoke("mcp:status") as Promise<McpInstallStatus>,
@@ -63,23 +58,17 @@ const bridge: ChatHeadsBridge = {
   },
 
   github: {
-    isConfigured: () =>
-      ipcRenderer.invoke("github:isConfigured") as Promise<boolean>,
-    getState: () =>
-      ipcRenderer.invoke("github:getState") as Promise<GithubConnectState>,
-    connect: () =>
-      ipcRenderer.invoke("github:connect") as Promise<GithubPendingConnect>,
-    cancelConnect: () =>
-      ipcRenderer.invoke("github:cancelConnect") as Promise<void>,
+    isConfigured: () => ipcRenderer.invoke("github:isConfigured") as Promise<boolean>,
+    getState: () => ipcRenderer.invoke("github:getState") as Promise<GithubConnectState>,
+    connect: () => ipcRenderer.invoke("github:connect") as Promise<GithubPendingConnect>,
+    cancelConnect: () => ipcRenderer.invoke("github:cancelConnect") as Promise<void>,
     disconnect: () => ipcRenderer.invoke("github:disconnect") as Promise<void>,
     onState: (cb) => subscribe<GithubConnectState>("github:state", cb),
   },
 
   agents: {
-    isConfigured: () =>
-      ipcRenderer.invoke("agents:isConfigured") as Promise<boolean>,
-    setApiKey: (key) =>
-      ipcRenderer.invoke("agents:setApiKey", key) as Promise<void>,
+    isConfigured: () => ipcRenderer.invoke("agents:isConfigured") as Promise<boolean>,
+    setApiKey: (key) => ipcRenderer.invoke("agents:setApiKey", key) as Promise<void>,
     clearApiKey: () => ipcRenderer.invoke("agents:clearApiKey") as Promise<void>,
     onConfiguredChange: (cb) => subscribe<boolean>("agents:configured", cb),
     list: () => ipcRenderer.invoke("agents:list") as Promise<AgentSummary[]>,
@@ -107,10 +96,7 @@ const bridge: ChatHeadsBridge = {
     onEvent: (cb) => subscribe<AgentStreamEvent>("agents:event", cb),
     onListChange: (cb) => subscribe<AgentSummary[]>("agents:listChange", cb),
     onSessionsChange: (cb) =>
-      subscribe<{ agentId: string; sessions: AgentSessionSummary[] }>(
-        "agents:sessionsChange",
-        cb,
-      ),
+      subscribe<{ agentId: string; sessions: AgentSessionSummary[] }>("agents:sessionsChange", cb),
   },
 
   list: () => ipcRenderer.invoke("heads:list") as Promise<ChatHead[]>,
@@ -118,54 +104,40 @@ const bridge: ChatHeadsBridge = {
 
   rail: {
     getPinned: () => ipcRenderer.invoke("rail:getPinned") as Promise<boolean>,
-    setPinned: (pinned: boolean) =>
-      ipcRenderer.invoke("rail:setPinned", pinned) as Promise<void>,
+    setPinned: (pinned: boolean) => ipcRenderer.invoke("rail:setPinned", pinned) as Promise<void>,
     onPinnedChange: (cb) => subscribe<boolean>("rail:pinned", cb),
-    getSessionOnlyMode: () =>
-      ipcRenderer.invoke("rail:getSessionOnlyMode") as Promise<boolean>,
+    getSessionOnlyMode: () => ipcRenderer.invoke("rail:getSessionOnlyMode") as Promise<boolean>,
     setSessionOnlyMode: (enabled: boolean) =>
       ipcRenderer.invoke("rail:setSessionOnlyMode", enabled) as Promise<void>,
-    onSessionOnlyModeChange: (cb) =>
-      subscribe<boolean>("rail:sessionOnlyMode", cb),
+    onSessionOnlyModeChange: (cb) => subscribe<boolean>("rail:sessionOnlyMode", cb),
   },
 
   spotifyShare: {
-    isSupported: () =>
-      ipcRenderer.invoke("spotify:isSupported") as Promise<boolean>,
-    getEnabled: () =>
-      ipcRenderer.invoke("spotify:getShareEnabled") as Promise<boolean>,
+    isSupported: () => ipcRenderer.invoke("spotify:isSupported") as Promise<boolean>,
+    getEnabled: () => ipcRenderer.invoke("spotify:getShareEnabled") as Promise<boolean>,
     setEnabled: (enabled: boolean) =>
       ipcRenderer.invoke("spotify:setShareEnabled", enabled) as Promise<void>,
     onEnabledChange: (cb) => subscribe<boolean>("spotify:shareEnabled", cb),
   },
 
   showInfo: (headId, bubbleScreen) =>
-    ipcRenderer.invoke(
-      "heads:showInfo",
-      headId,
-      bubbleScreen,
-    ) as Promise<void>,
-  infoHoverEnter: () =>
-    ipcRenderer.invoke("info:hoverEnter") as Promise<void>,
-  infoHoverLeave: () =>
-    ipcRenderer.invoke("info:hoverLeave") as Promise<void>,
+    ipcRenderer.invoke("heads:showInfo", headId, bubbleScreen) as Promise<void>,
+  infoHoverEnter: () => ipcRenderer.invoke("info:hoverEnter") as Promise<void>,
+  infoHoverLeave: () => ipcRenderer.invoke("info:hoverLeave") as Promise<void>,
 
   toggleChat: () => ipcRenderer.invoke("chat:toggle") as Promise<void>,
   hideChat: () => ipcRenderer.invoke("chat:hide") as Promise<void>,
   onChatState: (cb) => subscribe<{ visible: boolean }>("chat:state", cb),
-  onChatConfig: (cb) =>
-    subscribe<{ anchor: ChatAnchor }>("chat:config", cb),
+  onChatConfig: (cb) => subscribe<{ anchor: ChatAnchor }>("chat:config", cb),
   onOverlayConfig: (cb) => subscribe<DockConfig>("overlay:config", cb),
-  openAgentCreator: () =>
-    ipcRenderer.invoke("app:openAgentCreator") as Promise<void>,
+  openAgentCreator: () => ipcRenderer.invoke("app:openAgentCreator") as Promise<void>,
   onOpenAgentCreator: (cb) => {
     const handler = (): void => cb();
     ipcRenderer.on("agents:openCreator", handler);
     return () => ipcRenderer.off("agents:openCreator", handler);
   },
 
-  openResponse: (message) =>
-    ipcRenderer.invoke("response:open", message) as Promise<void>,
+  openResponse: (message) => ipcRenderer.invoke("response:open", message) as Promise<void>,
   onResponseOpen: (cb) => subscribe<ResponseOpenPayload>("response:open", cb),
 
   askChat: (messages: ChatMessage[]) =>
@@ -193,94 +165,62 @@ const bridge: ChatHeadsBridge = {
     return () => ipcRenderer.off("info:hide", handler);
   },
   onInfoPresence: (cb) =>
-    subscribe<{ login: string; spotify: SpotifyPresence | null }>(
-      "info:presence",
-      cb,
-    ),
+    subscribe<{ login: string; spotify: SpotifyPresence | null }>("info:presence", cb),
   hideInfo: () => ipcRenderer.invoke("info:hide") as Promise<void>,
 
   listSessionsForHead: (headId) =>
     ipcRenderer.invoke("sessions:forHead", headId) as Promise<InfoSession[]>,
 
-  preloadSessions: (headId) =>
-    ipcRenderer.invoke("sessions:preload", headId) as Promise<void>,
+  preloadSessions: (headId) => ipcRenderer.invoke("sessions:preload", headId) as Promise<void>,
 
   listAgentSessionsForAgent: (agentId) =>
-    ipcRenderer.invoke("agentSessions:forAgent", agentId) as Promise<
-      ManagedAgentSessionRow[]
-    >,
+    ipcRenderer.invoke("agentSessions:forAgent", agentId) as Promise<ManagedAgentSessionRow[]>,
 
   getSpotifyForLogin: (login) =>
-    ipcRenderer.invoke(
-      "spotify:forLogin",
-      login,
-    ) as Promise<SpotifyPresence | null>,
+    ipcRenderer.invoke("spotify:forLogin", login) as Promise<SpotifyPresence | null>,
 
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,
 
-  copyText: (text) =>
-    ipcRenderer.invoke("clipboard:writeText", text) as Promise<void>,
-  openExternal: (url) =>
-    ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
+  copyText: (text) => ipcRenderer.invoke("clipboard:writeText", text) as Promise<void>,
+  openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
   selectDirectory: (defaultPath) =>
-    ipcRenderer.invoke("dialog:selectDirectory", defaultPath) as Promise<
-      string | null
-    >,
+    ipcRenderer.invoke("dialog:selectDirectory", defaultPath) as Promise<string | null>,
 
-  requestResize: (height) =>
-    ipcRenderer.invoke("window:requestResize", height) as Promise<void>,
+  requestResize: (height) => ipcRenderer.invoke("window:requestResize", height) as Promise<void>,
 
   backend: {
-    getAuthState: () =>
-      ipcRenderer.invoke("backend:getAuthState") as Promise<BackendAuthState>,
+    getAuthState: () => ipcRenderer.invoke("backend:getAuthState") as Promise<BackendAuthState>,
     signIn: () => ipcRenderer.invoke("backend:signIn") as Promise<void>,
-    cancelSignIn: () =>
-      ipcRenderer.invoke("backend:cancelSignIn") as Promise<void>,
+    cancelSignIn: () => ipcRenderer.invoke("backend:cancelSignIn") as Promise<void>,
     signOut: () => ipcRenderer.invoke("backend:signOut") as Promise<void>,
-    signOutEverywhere: () =>
-      ipcRenderer.invoke("backend:signOutEverywhere") as Promise<void>,
+    signOutEverywhere: () => ipcRenderer.invoke("backend:signOutEverywhere") as Promise<void>,
     onAuthState: (cb) => subscribe<BackendAuthState>("backend:authState", cb),
     getGithubAppStatus: () =>
       ipcRenderer.invoke("backend:getGithubAppStatus") as Promise<GithubAppStatus>,
-    connectGithubApp: () =>
-      ipcRenderer.invoke("backend:connectGithubApp") as Promise<void>,
+    connectGithubApp: () => ipcRenderer.invoke("backend:connectGithubApp") as Promise<void>,
 
     listTrackedRepos: () =>
       ipcRenderer.invoke("backend:listTrackedRepos") as Promise<TrackedRepo[]>,
-    addLocalRepo: () =>
-      ipcRenderer.invoke("backend:addLocalRepo") as Promise<TrackedRepo | null>,
+    addLocalRepo: () => ipcRenderer.invoke("backend:addLocalRepo") as Promise<TrackedRepo | null>,
     removeLocalRepo: (repoId) =>
-      ipcRenderer.invoke(
-        "backend:removeLocalRepo",
-        repoId,
-      ) as Promise<TrackedRepo[]>,
-    onTrackedReposChange: (cb) =>
-      subscribe<TrackedRepo[]>("backend:trackedRepos", cb),
+      ipcRenderer.invoke("backend:removeLocalRepo", repoId) as Promise<TrackedRepo[]>,
+    onTrackedReposChange: (cb) => subscribe<TrackedRepo[]>("backend:trackedRepos", cb),
   },
 
   trackedRepos: {
-    selection: () =>
-      ipcRenderer.invoke("trackedRepos:selection") as Promise<number[]>,
-    toggle: (repoId) =>
-      ipcRenderer.invoke("trackedRepos:toggle", repoId) as Promise<number[]>,
-    onSelectionChange: (cb) =>
-      subscribe<number[]>("trackedRepos:selectionChange", cb),
+    selection: () => ipcRenderer.invoke("trackedRepos:selection") as Promise<number[]>,
+    toggle: (repoId) => ipcRenderer.invoke("trackedRepos:toggle", repoId) as Promise<number[]>,
+    onSelectionChange: (cb) => subscribe<number[]>("trackedRepos:selectionChange", cb),
   },
 
   debug: {
-    railSnapshot: () =>
-      ipcRenderer.invoke("debug:railSnapshot") as Promise<RailDebugSnapshot>,
-    refreshRail: () =>
-      ipcRenderer.invoke("debug:refreshRail") as Promise<RailDebugSnapshot>,
-    shuffleRail: () =>
-      ipcRenderer.invoke("debug:shuffleRail") as Promise<void>,
-    addFakeTeammate: () =>
-      ipcRenderer.invoke("debug:addFakeTeammate") as Promise<void>,
-    removeFakeTeammate: () =>
-      ipcRenderer.invoke("debug:removeFakeTeammate") as Promise<void>,
-    replayEnterAnimation: () =>
-      ipcRenderer.invoke("debug:replayEnterAnimation") as Promise<void>,
+    railSnapshot: () => ipcRenderer.invoke("debug:railSnapshot") as Promise<RailDebugSnapshot>,
+    refreshRail: () => ipcRenderer.invoke("debug:refreshRail") as Promise<RailDebugSnapshot>,
+    shuffleRail: () => ipcRenderer.invoke("debug:shuffleRail") as Promise<void>,
+    addFakeTeammate: () => ipcRenderer.invoke("debug:addFakeTeammate") as Promise<void>,
+    removeFakeTeammate: () => ipcRenderer.invoke("debug:removeFakeTeammate") as Promise<void>,
+    replayEnterAnimation: () => ipcRenderer.invoke("debug:replayEnterAnimation") as Promise<void>,
   },
   onDebugReplayEnter: (cb) => {
     const handler = (): void => cb();

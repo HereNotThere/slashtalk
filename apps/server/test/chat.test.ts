@@ -1,21 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "../src/db";
-import {
-  users,
-  repos,
-  userRepos,
-  sessions,
-  sessionInsights,
-  heartbeats,
-} from "../src/db/schema";
+import { users, repos, userRepos, sessions, sessionInsights, heartbeats } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { mockGitHubAuth, resetDatabase, getCookie } from "./helpers";
-import {
-  getTeamActivityImpl,
-  getSessionImpl,
-} from "../src/chat/tools";
+import { getTeamActivityImpl, getSessionImpl } from "../src/chat/tools";
 import { loadSessionCards } from "../src/chat/cards";
 import { SUMMARY_ANALYZER } from "../src/analyzers/names";
 
@@ -53,14 +43,8 @@ beforeAll(async () => {
   const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
   expect(getCookie(bobRes, "session")).toBeTruthy();
 
-  const [alice] = await db
-    .select()
-    .from(users)
-    .where(eq(users.githubLogin, "alice"));
-  const [bob] = await db
-    .select()
-    .from(users)
-    .where(eq(users.githubLogin, "bob"));
+  const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
+  const [bob] = await db.select().from(users).where(eq(users.githubLogin, "bob"));
   aliceId = alice.id;
   bobId = bob.id;
 
@@ -136,7 +120,10 @@ beforeAll(async () => {
       analyzerVersion: 1,
       model: "claude-haiku-4-5-20251001",
       inputLineSeq: 0,
-      output: { title: "Wiring WS reconnect", description: "Bob is working on the WebSocket reconnect logic" },
+      output: {
+        title: "Wiring WS reconnect",
+        description: "Bob is working on the WebSocket reconnect logic",
+      },
     },
   ]);
 
@@ -258,9 +245,7 @@ describe("chat tool: get_team_activity", () => {
 
   it("excludes sessions outside the caller's repo graph", async () => {
     const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
-    const allSessionIds = result.teammates.flatMap((t) =>
-      t.sessions.map((s) => s.id),
-    );
+    const allSessionIds = result.teammates.flatMap((t) => t.sessions.map((s) => s.id));
     expect(allSessionIds).not.toContain(OUTSIDER_SESSION);
   });
 
@@ -299,9 +284,7 @@ describe("chat tool: get_team_activity", () => {
       sinceHours: 24,
       repoFullName: "team/slashtalk",
     });
-    const sessionIds = result.teammates.flatMap((t) =>
-      t.sessions.map((s) => s.id),
-    );
+    const sessionIds = result.teammates.flatMap((t) => t.sessions.map((s) => s.id));
     expect(sessionIds).toContain(BOB_SESSION);
     expect(sessionIds).not.toContain(OUTSIDER_SESSION);
   });
@@ -358,10 +341,7 @@ describe("chat tool: get_session", () => {
 
 describe("chat cards: loadSessionCards", () => {
   it("hydrates compact cards for visible sessions in input order", async () => {
-    const cards = await loadSessionCards(db, aliceId, [
-      BOB_SESSION,
-      ALICE_SESSION,
-    ]);
+    const cards = await loadSessionCards(db, aliceId, [BOB_SESSION, ALICE_SESSION]);
     expect(cards.map((c) => c.id)).toEqual([BOB_SESSION, ALICE_SESSION]);
     const bob = cards[0];
     expect(bob.user.login).toBe("bob");
@@ -371,10 +351,7 @@ describe("chat cards: loadSessionCards", () => {
   });
 
   it("drops sessions outside the caller's repo graph", async () => {
-    const cards = await loadSessionCards(db, aliceId, [
-      BOB_SESSION,
-      OUTSIDER_SESSION,
-    ]);
+    const cards = await loadSessionCards(db, aliceId, [BOB_SESSION, OUTSIDER_SESSION]);
     expect(cards.map((c) => c.id)).toEqual([BOB_SESSION]);
   });
 
@@ -401,4 +378,3 @@ describe("chat cards: loadSessionCards", () => {
     expect(await loadSessionCards(db, aliceId, [OUTSIDER_SESSION])).toEqual([]);
   });
 });
-

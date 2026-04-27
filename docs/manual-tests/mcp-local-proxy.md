@@ -100,7 +100,7 @@ curl -i http://127.0.0.1:37613/mcp \
 Expected body includes:
 
 ```json
-{"tools":[]}
+{ "tools": [] }
 ```
 
 ## Real Client Checks

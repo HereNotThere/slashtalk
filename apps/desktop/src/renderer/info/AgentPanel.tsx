@@ -30,11 +30,7 @@ export function AgentPanel({ head }: { head: ChatHead }): JSX.Element {
   }, [agentId]);
 
   if (!agentId) {
-    return (
-      <div className="px-lg py-md text-[12px] text-subtle">
-        Agent not found.
-      </div>
-    );
+    return <div className="px-lg py-md text-[12px] text-subtle">Agent not found.</div>;
   }
 
   const openSession = async (id: string): Promise<void> => {
@@ -121,9 +117,7 @@ function AgentHeader({
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <div className="text-[17px] font-bold truncate flex-1 min-w-0">
-            {head.label}
-          </div>
+          <div className="text-[17px] font-bold truncate flex-1 min-w-0">{head.label}</div>
           <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-card border border-border text-muted">
             {(agent?.mode ?? "cloud") === "local" ? "Local" : "Cloud"}
           </span>
@@ -146,9 +140,7 @@ function AgentHeader({
           </button>
         </div>
         {agent?.description && (
-          <div className="text-[12px] text-muted mt-0.5 truncate">
-            {agent.description}
-          </div>
+          <div className="text-[12px] text-muted mt-0.5 truncate">{agent.description}</div>
         )}
         <div className="text-[11px] text-subtle mt-0.5 flex items-center gap-1 min-w-0">
           <span className="font-mono truncate">
@@ -235,9 +227,7 @@ function AgentSessions({
                 key={session.id}
                 session={session}
                 onOpen={() => onOpenSession(session.id)}
-                onRemove={() =>
-                  void window.chatheads.agents.removeSession(agentId, session.id)
-                }
+                onRemove={() => void window.chatheads.agents.removeSession(agentId, session.id)}
               />
             ))}
             {pastSessions.length > 0 && (
@@ -337,12 +327,8 @@ function PastSummary({ row }: { row: ManagedAgentSessionRow }): JSX.Element {
       onClick={() => setOpen((value) => !value)}
       className="w-full text-left bg-surface rounded-xl px-3 py-2 hover:bg-surface-hover"
     >
-      <div className="text-[12px] font-medium truncate">
-        {row.name ?? "Archived session"}
-      </div>
-      <div className="text-[11px] text-subtle">
-        {new Date(row.lastActivity).toLocaleString()}
-      </div>
+      <div className="text-[12px] font-medium truncate">{row.name ?? "Archived session"}</div>
+      <div className="text-[11px] text-subtle">{new Date(row.lastActivity).toLocaleString()}</div>
       {open && (
         <div className="mt-2 text-[12px] text-muted whitespace-pre-wrap leading-snug">
           {row.summary ?? "No summary captured."}
@@ -447,11 +433,7 @@ export function AgentChat({
 
   const loadOlder = async (): Promise<void> => {
     if (!nextCursor) return;
-    const page = await window.chatheads.agents.history(
-      agentId,
-      sessionId,
-      nextCursor,
-    );
+    const page = await window.chatheads.agents.history(agentId, sessionId, nextCursor);
     setMsgs((prev) => [...page.msgs, ...prev]);
     setNextCursor(page.nextCursor);
   };
@@ -497,7 +479,11 @@ export function AgentChat({
   };
 
   return (
-    <div className={fullHeight ? "flex flex-col h-screen" : "flex flex-col min-h-[240px] max-h-[620px]"}>
+    <div
+      className={
+        fullHeight ? "flex flex-col h-screen" : "flex flex-col min-h-[240px] max-h-[620px]"
+      }
+    >
       <AgentHeader
         head={head}
         agent={agent}
@@ -566,9 +552,7 @@ function MsgRow({ msg }: { msg: AgentMsg }): JSX.Element {
         {msg.blocks.map((block, index) => (
           <AssistantBlockView key={index} block={block} />
         ))}
-        {msg.phase && (
-          <div className="text-[11px] text-subtle italic">{msg.phase}</div>
-        )}
+        {msg.phase && <div className="text-[11px] text-subtle italic">{msg.phase}</div>}
       </div>
     </div>
   );
@@ -592,9 +576,7 @@ function AssistantBlockView({ block }: { block: AssistantBlock }): JSX.Element {
         {block.name} · {block.status}
       </div>
       {block.resultSummary && (
-        <div className="mt-1 text-[12px] text-muted whitespace-pre-wrap">
-          {block.resultSummary}
-        </div>
+        <div className="mt-1 text-[12px] text-muted whitespace-pre-wrap">{block.resultSummary}</div>
       )}
     </div>
   );

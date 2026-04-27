@@ -30,10 +30,9 @@ export const users = pgTable("users", {
   githubAppTokenExpiresAt: timestamp("github_app_token_expires_at", {
     withTimezone: true,
   }),
-  githubAppRefreshTokenExpiresAt: timestamp(
-    "github_app_refresh_token_expires_at",
-    { withTimezone: true },
-  ),
+  githubAppRefreshTokenExpiresAt: timestamp("github_app_refresh_token_expires_at", {
+    withTimezone: true,
+  }),
   githubAppConnectedAt: timestamp("github_app_connected_at", {
     withTimezone: true,
   }),
@@ -198,7 +197,7 @@ export const userRepos = pgTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.repoId] }),
     index("user_repos_repo_id_idx").on(t.repoId),
-  ]
+  ],
 );
 
 export const deviceExcludedRepos = pgTable(
@@ -211,7 +210,7 @@ export const deviceExcludedRepos = pgTable(
       .references(() => repos.id, { onDelete: "cascade" })
       .notNull(),
   },
-  (t) => [primaryKey({ columns: [t.deviceId, t.repoId] })]
+  (t) => [primaryKey({ columns: [t.deviceId, t.repoId] })],
 );
 
 export const deviceRepoPaths = pgTable(
@@ -225,7 +224,7 @@ export const deviceRepoPaths = pgTable(
       .notNull(),
     localPath: text("local_path").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.deviceId, t.repoId] })]
+  (t) => [primaryKey({ columns: [t.deviceId, t.repoId] })],
 );
 
 // ── Sessions & Events ───────────────────────────────────────
@@ -278,7 +277,7 @@ export const sessions = pgTable(
   (t) => [
     index("sessions_user_last_ts_idx").on(t.userId, t.lastTs),
     index("sessions_repo_last_ts_idx").on(t.repoId, t.lastTs),
-  ]
+  ],
 );
 
 export const events = pgTable(
@@ -314,7 +313,7 @@ export const events = pgTable(
     uniqueIndex("events_event_id_idx")
       .on(t.eventId)
       .where(sql`event_id is not null`),
-  ]
+  ],
 );
 
 export const heartbeats = pgTable("heartbeats", {
@@ -340,9 +339,7 @@ export const agentSessions = pgTable(
     name: text("name"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
-    lastActivity: timestamp("last_activity", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    lastActivity: timestamp("last_activity", { withTimezone: true }).notNull().defaultNow(),
     summary: text("summary"),
     summaryModel: text("summary_model"),
     summaryTs: timestamp("summary_ts", { withTimezone: true }),
@@ -365,9 +362,7 @@ export const sessionInsights = pgTable(
     analyzerName: text("analyzer_name").notNull(),
     analyzerVersion: text("analyzer_version").notNull(),
     output: jsonb("output").notNull(),
-    inputLineSeq: bigint("input_line_seq", { mode: "number" })
-      .notNull()
-      .default(0),
+    inputLineSeq: bigint("input_line_seq", { mode: "number" }).notNull().default(0),
     model: text("model").notNull(),
     tokensIn: integer("tokens_in").default(0),
     tokensOut: integer("tokens_out").default(0),

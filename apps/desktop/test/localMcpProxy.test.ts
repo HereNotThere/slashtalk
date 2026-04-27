@@ -187,10 +187,7 @@ describe("localMcpProxy", () => {
       });
       await fetchStarted;
       req.destroy();
-      await Promise.race([
-        abortObserved,
-        new Promise((resolve) => setTimeout(resolve, 250)),
-      ]);
+      await Promise.race([abortObserved, new Promise((resolve) => setTimeout(resolve, 250))]);
 
       expect(upstreamAborted).toBe(true);
     } finally {

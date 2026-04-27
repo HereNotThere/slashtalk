@@ -35,14 +35,14 @@ See also core-beliefs [#11](design-docs/core-beliefs.md#11-identity-is-user-oaut
 
 ## Token storage and hashing
 
-| Artifact | At rest | Returned to caller |
-| --- | --- | --- |
-| GitHub OAuth access token | AES-256-GCM ciphertext in `users.github_token`, keyed by `ENCRYPTION_KEY` (format: `hex(iv):hex(ciphertext)` — WebCrypto appends the auth tag to the ciphertext; see `apps/server/src/auth/tokens.ts`) | Never. Used server-side for PR polling only. |
-| GitHub App user access/refresh tokens | AES-256-GCM ciphertext in `users.github_app_user_token` and `users.github_app_refresh_token`, keyed by `ENCRYPTION_KEY` | Never. Used server-side for private repo metadata verification only. |
-| Refresh token | SHA-256 hash in `refresh_tokens.token_hash` | Plaintext exactly once, at issuance, as an httpOnly cookie. |
-| API key | SHA-256 hash in `api_keys.key_hash` | Plaintext exactly once, at `/v1/auth/exchange` response. |
-| Setup token | SHA-256 hash in `setup_tokens.token`… (stored hashed) | Plaintext exactly once, to the desktop app during the loopback-port callback. |
-| MCP OAuth token | SHA-256 hashes in `oauth_tokens.access_token_hash` and `oauth_tokens.refresh_token_hash` | Plaintext exactly once, at `/oauth/token` issuance or refresh rotation. |
+| Artifact                              | At rest                                                                                                                                                                                                | Returned to caller                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| GitHub OAuth access token             | AES-256-GCM ciphertext in `users.github_token`, keyed by `ENCRYPTION_KEY` (format: `hex(iv):hex(ciphertext)` — WebCrypto appends the auth tag to the ciphertext; see `apps/server/src/auth/tokens.ts`) | Never. Used server-side for PR polling only.                                  |
+| GitHub App user access/refresh tokens | AES-256-GCM ciphertext in `users.github_app_user_token` and `users.github_app_refresh_token`, keyed by `ENCRYPTION_KEY`                                                                                | Never. Used server-side for private repo metadata verification only.          |
+| Refresh token                         | SHA-256 hash in `refresh_tokens.token_hash`                                                                                                                                                            | Plaintext exactly once, at issuance, as an httpOnly cookie.                   |
+| API key                               | SHA-256 hash in `api_keys.key_hash`                                                                                                                                                                    | Plaintext exactly once, at `/v1/auth/exchange` response.                      |
+| Setup token                           | SHA-256 hash in `setup_tokens.token`… (stored hashed)                                                                                                                                                  | Plaintext exactly once, to the desktop app during the loopback-port callback. |
+| MCP OAuth token                       | SHA-256 hashes in `oauth_tokens.access_token_hash` and `oauth_tokens.refresh_token_hash`                                                                                                               | Plaintext exactly once, at `/oauth/token` issuance or refresh rotation.       |
 
 **Rule.** Raw tokens, hashes, and encryption keys are never logged, returned in error responses, or serialized into Redis messages.
 

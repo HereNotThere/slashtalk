@@ -28,11 +28,7 @@ function installEmptyListHandlers(server: McpServer): void {
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
-export function log(
-  level: LogLevel,
-  msg: string,
-  data: Record<string, unknown> = {},
-): void {
+export function log(level: LogLevel, msg: string, data: Record<string, unknown> = {}): void {
   const line = JSON.stringify({
     level,
     msg,

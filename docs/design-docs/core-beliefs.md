@@ -17,6 +17,7 @@ The load-bearing rules for this codebase. Each is stated with **Why** (why we ca
 **Why.** The two auth plugins (`jwtAuth`, `apiKeyAuth`) derive different context shapes. Mixing them on a single route makes 401s unpredictable and blurs the trust boundary.
 
 **How to apply.**
+
 - `/v1/*` → `apiKeyAuth` only (desktop/CLI clients).
 - `/auth/*` + `/api/*` → `jwtAuth` only (browser / desktop cookie).
 - `/mcp` → explicit MCP resource-server exception. It accepts MCP OAuth access tokens for direct MCP clients and Slashtalk device API keys for the desktop-local proxy / legacy bridge; do not bury MCP under `/v1` because MCP protocol versioning is negotiated in the initialize handshake.
@@ -39,6 +40,7 @@ A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, n
 **Why.** Hand-editing `_journal.json` or resequencing committed migrations breaks fresh bootstraps and diverges the `when` field. Existing incident captured in memory `feedback_drizzle_journal_when`.
 
 **How to apply.**
+
 1. Edit `apps/server/src/db/schema.ts`.
 2. `bun run db:generate` from `apps/server/`.
 3. Review generated SQL; for renames/destructive ops, regenerate as `--custom`.
@@ -103,6 +105,7 @@ A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, n
 **Why.** Requiring an org-admin install for basic identity gates adoption on someone other than the end user. slashtalk's promise is that any signed-in user can start with normal GitHub OAuth and no broad repo scope. Private repos still need GitHub-confirmed visibility, so the narrow exception is a GitHub App user authorization with repository Metadata read-only, installed only on selected repos.
 
 **How to apply.**
+
 - OAuth scope stays `read:user read:org` ([docs/SECURITY.md § OAuth scope](../SECURITY.md)).
 - Identity, org picker, and public repo checks use the calling user's OAuth App token via [`fetchUserGithubToken`](../../apps/server/src/user/routes.ts).
 - Private repo claim fallback may use the calling user's GitHub App user token via [`fetchUserGithubAppToken`](../../apps/server/src/auth/github-app.ts). Do not request OAuth `repo` scope.
@@ -115,6 +118,7 @@ A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, n
 **Why.** `user_repos` is the single authorization source for the feed, session, event, and WebSocket channels. A row must represent a user GitHub has confirmed can read the repo — otherwise every downstream check becomes a sieve. A pre-gate bug in [PR #85](https://github.com/HereNotThere/slashtalk/pull/85) let any JWT holder claim any `owner/name` and inherit the real collaborators' visibility.
 
 **How to apply.**
+
 - [`POST /api/me/repos`](../../apps/server/src/user/routes.ts) calls `GET /repos/:owner/:name` with the user's OAuth token and requires `200` before inserting a `user_repos` row. OAuth `404` with no linked GitHub App = fail closed with 403 `no_access` plus a GitHub App `connectUrl`; OAuth `404` with a linked GitHub App retries with the GitHub App user token. GitHub App `404` = fail closed with 403 `no_access` plus an install/configure `connectUrl`. `401/403` = fail closed with 401 `token_expired`. Never fall back to "accept."
 - Never hand-insert `user_repos` rows from migrations, seed scripts, or other routes; go through the same gate (or run [`scripts/reverify-claims.ts`](../../apps/server/scripts/reverify-claims.ts) afterward to catch drift).
 - A per-user rate limit on the claim endpoint stops brute-force repo enumeration with a stolen JWT.
@@ -126,6 +130,7 @@ A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, n
 **Why.** Sessions, events, and WS fan-out channels (`repo:<id>`) all assume that a `user_repos` row = "this user is a legitimate reader of this repo." Any read path that doesn't join through `user_repos` silently leaks one user's data to another.
 
 **How to apply.**
+
 - Every route that returns another user's data — [`/api/feed`](../../apps/server/src/social/routes.ts), `/api/feed?user=` / `?repo=`, [`/api/feed/users`](../../apps/server/src/social/routes.ts), [`/api/session/:id`](../../apps/server/src/sessions/routes.ts), `/api/session/:id/events` — joins on or filters by `user_repos` scoped to the caller.
 - The WS channel subscription list in [`ws/handler.ts`](../../apps/server/src/ws/handler.ts) is built from `user_repos` only.
 - When adding a new cross-user surface, trace the authorization path back to `user_repos` before merging.

@@ -22,7 +22,10 @@ function redactHeaders(headers: Headers): Record<string, string> {
 
 async function bodyPreview(req: Request): Promise<unknown> {
   if (req.method === "GET" || req.method === "HEAD") return null;
-  const text = await req.clone().text().catch(() => "");
+  const text = await req
+    .clone()
+    .text()
+    .catch(() => "");
   if (!text) return null;
   try {
     return JSON.parse(text);
@@ -50,7 +53,10 @@ function json(body: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json");
   headers.set("access-control-allow-origin", "*");
-  headers.set("access-control-allow-headers", "authorization, content-type, accept, mcp-session-id, mcp-protocol-version");
+  headers.set(
+    "access-control-allow-headers",
+    "authorization, content-type, accept, mcp-session-id, mcp-protocol-version",
+  );
   headers.set("access-control-expose-headers", "www-authenticate, mcp-session-id");
   return new Response(JSON.stringify(body), { ...init, headers });
 }
@@ -100,9 +106,7 @@ function authorizationServerMetadata(): Response {
 
 async function registerClient(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const redirectUris = Array.isArray(body["redirect_uris"])
-    ? body["redirect_uris"]
-    : [];
+  const redirectUris = Array.isArray(body["redirect_uris"]) ? body["redirect_uris"] : [];
   return json(
     {
       client_id: "slashtalk-oauth-spike-client",
@@ -173,10 +177,7 @@ async function handleMcp(req: Request): Promise<Response> {
   }
 
   if (request.method === "tools/list") {
-    return json(
-      { jsonrpc: "2.0", id: request.id ?? null, result: { tools: [] } },
-      { headers },
-    );
+    return json({ jsonrpc: "2.0", id: request.id ?? null, result: { tools: [] } }, { headers });
   }
 
   if (request.method?.startsWith("notifications/")) {

@@ -38,19 +38,14 @@ describe("parseSpotifyOutput", () => {
   });
 
   it("returns null when any core field is empty", () => {
-    expect(
-      parseSpotifyOutput("playing\tspotify:track:abc\t\tArtist"),
-    ).toBeNull();
-    expect(
-      parseSpotifyOutput("playing\tspotify:track:abc\tTitle\t"),
-    ).toBeNull();
+    expect(parseSpotifyOutput("playing\tspotify:track:abc\t\tArtist")).toBeNull();
+    expect(parseSpotifyOutput("playing\tspotify:track:abc\tTitle\t")).toBeNull();
   });
 
   it("preserves punctuation and unicode in name/artist (no re-encoding)", () => {
-    const raw =
-      "playing\tspotify:track:abc\tWhat's Up? (Remastered) — 2021\tDJ “Kōji” Ōshō";
+    const raw = "playing\tspotify:track:abc\tWhat's Up? (Remastered) — 2021\tDJ “Kōji” Ōshō";
     const got = parseSpotifyOutput(raw);
     expect(got?.name).toBe("What's Up? (Remastered) — 2021");
-    expect(got?.artist).toBe('DJ “Kōji” Ōshō');
+    expect(got?.artist).toBe("DJ “Kōji” Ōshō");
   });
 });

@@ -56,9 +56,7 @@ export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
         return;
       }
       const preview = await res.text().catch(() => "");
-      console.warn(
-        `[agentIngest] upsert ${res.status}: ${preview.slice(0, 200)}`,
-      );
+      console.warn(`[agentIngest] upsert ${res.status}: ${preview.slice(0, 200)}`);
     }
   } catch (err) {
     console.warn("[agentIngest] upsert failed:", err);
@@ -89,9 +87,7 @@ async function listSessions(params: {
         return [];
       }
       const preview = await res.text().catch(() => "");
-      console.warn(
-        `[agentIngest] list ${res.status}: ${preview.slice(0, 200)}`,
-      );
+      console.warn(`[agentIngest] list ${res.status}: ${preview.slice(0, 200)}`);
       return [];
     }
     const body = (await res.json()) as { sessions?: ManagedAgentSessionRow[] };

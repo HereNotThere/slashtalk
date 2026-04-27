@@ -87,13 +87,7 @@ export function update(
   patch: Partial<
     Pick<
       LocalAgent,
-      | "name"
-      | "description"
-      | "systemPrompt"
-      | "model"
-      | "cwd"
-      | "visibility"
-      | "mcpServers"
+      "name" | "description" | "systemPrompt" | "model" | "cwd" | "visibility" | "mcpServers"
     >
   >,
 ): LocalAgent | undefined {
@@ -113,9 +107,7 @@ export function remove(id: string): void {
 
 export function setActiveSession(agentId: string, sessionId: string | null): void {
   const next = load().map((a) =>
-    a.id === agentId
-      ? { ...a, activeSessionId: sessionId ?? undefined }
-      : a,
+    a.id === agentId ? { ...a, activeSessionId: sessionId ?? undefined } : a,
   );
   save(next);
 }
@@ -136,16 +128,10 @@ export function addSession(agentId: string, session: LocalSession): void {
   save(next);
 }
 
-export function setSessionTitle(
-  agentId: string,
-  sessionId: string,
-  title: string,
-): void {
+export function setSessionTitle(agentId: string, sessionId: string, title: string): void {
   const next = load().map((a) => {
     if (a.id !== agentId) return a;
-    const sessions = a.sessions.map((s) =>
-      s.id === sessionId ? { ...s, title } : s,
-    );
+    const sessions = a.sessions.map((s) => (s.id === sessionId ? { ...s, title } : s));
     return { ...a, sessions };
   });
   save(next);
@@ -153,11 +139,7 @@ export function setSessionTitle(
 
 /** Adds to the running token total for a live session (called on every
  *  span.model_request_end event). Initializes if not yet set. */
-export function addSessionUsage(
-  agentId: string,
-  sessionId: string,
-  delta: SessionTokens,
-): void {
+export function addSessionUsage(agentId: string, sessionId: string, delta: SessionTokens): void {
   const next = load().map((a) => {
     if (a.id !== agentId) return a;
     const sessions = a.sessions.map((s) =>
@@ -178,16 +160,10 @@ export function addSessionUsage(
 
 /** Replaces the session's token total (used by backfill, which computes the
  *  full sum in one pass). */
-export function setSessionUsage(
-  agentId: string,
-  sessionId: string,
-  total: SessionTokens,
-): void {
+export function setSessionUsage(agentId: string, sessionId: string, total: SessionTokens): void {
   const next = load().map((a) => {
     if (a.id !== agentId) return a;
-    const sessions = a.sessions.map((s) =>
-      s.id === sessionId ? { ...s, tokens: total } : s,
-    );
+    const sessions = a.sessions.map((s) => (s.id === sessionId ? { ...s, tokens: total } : s));
     return { ...a, sessions };
   });
   save(next);
@@ -205,8 +181,7 @@ export function removeSession(agentId: string, sessionId: string): void {
     return {
       ...a,
       sessions: a.sessions.filter((s) => s.id !== sessionId),
-      activeSessionId:
-        a.activeSessionId === sessionId ? undefined : a.activeSessionId,
+      activeSessionId: a.activeSessionId === sessionId ? undefined : a.activeSessionId,
     };
   });
   save(next);
@@ -233,8 +208,7 @@ export function reconcileSessions(
       };
     });
     // If the currently-active session got archived away, clear the pointer.
-    const stillActive =
-      a.activeSessionId && merged.some((s) => s.id === a.activeSessionId);
+    const stillActive = a.activeSessionId && merged.some((s) => s.id === a.activeSessionId);
     return {
       ...a,
       sessions: merged,

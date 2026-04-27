@@ -8,10 +8,7 @@ import { classifySessionState } from "./state";
 import type { EventSource, SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessionInsights } from "../db/schema";
-import {
-  SUMMARY_ANALYZER,
-  ROLLING_SUMMARY_ANALYZER,
-} from "../analyzers/names";
+import { SUMMARY_ANALYZER, ROLLING_SUMMARY_ANALYZER } from "../analyzers/names";
 
 interface SessionRow {
   sessionId: string;
@@ -72,7 +69,7 @@ export function toSnapshot(
   session: SessionRow,
   heartbeat: HeartbeatRow | null,
   insights?: SessionInsightsForSnapshot | null,
-  now?: Date
+  now?: Date,
 ) {
   const currentTime = now ?? new Date();
   const state = classifySessionState({
@@ -90,19 +87,15 @@ export function buildSnapshot(
   heartbeat: HeartbeatRow | null,
   state: SessionState,
   insights?: SessionInsightsForSnapshot | null,
-  now?: Date
+  now?: Date,
 ) {
   const currentTime = now ?? new Date();
   const lastTs = session.lastTs;
   const firstTs = session.firstTs;
 
-  const idleS = lastTs
-    ? Math.floor((currentTime.getTime() - lastTs.getTime()) / 1000)
-    : null;
+  const idleS = lastTs ? Math.floor((currentTime.getTime() - lastTs.getTime()) / 1000) : null;
   const durationS =
-    firstTs && lastTs
-      ? Math.floor((lastTs.getTime() - firstTs.getTime()) / 1000)
-      : null;
+    firstTs && lastTs ? Math.floor((lastTs.getTime() - firstTs.getTime()) / 1000) : null;
 
   const tokens = {
     in: session.tokensIn ?? 0,
@@ -116,10 +109,7 @@ export function buildSnapshot(
   const cacheHitRate = totalInput > 0 ? tokens.cacheRead / totalInput : null;
 
   const durationMin = durationS ? durationS / 60 : null;
-  const burnPerMin =
-    durationMin && durationMin > 0
-      ? Math.round(tokens.out / durationMin)
-      : null;
+  const burnPerMin = durationMin && durationMin > 0 ? Math.round(tokens.out / durationMin) : null;
 
   // Outstanding tools → currentTool
   const outstanding = (session.outstandingTools ?? {}) as Record<
@@ -127,8 +117,7 @@ export function buildSnapshot(
     { name: string; desc: string | null; started: number }
   >;
   const toolEntries = Object.values(outstanding);
-  const currentTool =
-    toolEntries.length > 0 ? toolEntries[toolEntries.length - 1] : null;
+  const currentTool = toolEntries.length > 0 ? toolEntries[toolEntries.length - 1] : null;
 
   // Filter queued by last_boundary_ts
   const allQueued = (session.queued ?? []) as Array<{
@@ -137,9 +126,7 @@ export function buildSnapshot(
     mode: string | null;
   }>;
   const boundaryTs = session.lastBoundaryTs;
-  const queued = boundaryTs
-    ? allQueued.filter((q) => new Date(q.ts) > boundaryTs)
-    : allQueued;
+  const queued = boundaryTs ? allQueued.filter((q) => new Date(q.ts) > boundaryTs) : allQueued;
 
   // LLM-derived overrides — prefer summary.title when present so the UI
   // doesn't fall back to lastUserPrompt. Leave heuristic title in place as a
@@ -224,8 +211,7 @@ export async function loadInsightsForSessions(
     if (row.analyzerName === SUMMARY_ANALYZER) {
       slot.summary = row.output as SessionInsightsForSnapshot["summary"];
     } else if (row.analyzerName === ROLLING_SUMMARY_ANALYZER) {
-      slot.rollingSummary =
-        row.output as SessionInsightsForSnapshot["rollingSummary"];
+      slot.rollingSummary = row.output as SessionInsightsForSnapshot["rollingSummary"];
     }
     result.set(row.sessionId, slot);
   }
@@ -239,7 +225,7 @@ export async function loadInsightsForSessions(
 const LIVE_STATES = new Set(["busy", "active"]);
 
 export function sortByStateThenTime<T extends { state: string; lastTs: string | null }>(
-  items: T[]
+  items: T[],
 ): T[] {
   return items.sort((a, b) => {
     const la = LIVE_STATES.has(a.state) ? 0 : 1;

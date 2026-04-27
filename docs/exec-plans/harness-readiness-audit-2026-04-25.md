@@ -17,12 +17,12 @@ A repo is harness-ready when an agent can climb four rungs in order:
 
 ## Scorecard
 
-| Rung | Status | One-line read |
-| --- | --- | --- |
-| 1. Legibility | **PARTIAL** | Doc set is unusually good in substance, but has a factual contradiction, two empty undocumented subdirs, no `docs/README.md`, and a two-tier hierarchy nobody explains. Surface looks YES; structure says PARTIAL. |
-| 2. Enforcement | **PARTIAL** | TS strict + CI typecheck/test in place. **No lint in `apps/server`**, no pre-commit hooks, no `scripts/check-invariants.ts` for the 13 core-beliefs. |
-| 3. Observability | **NO** | Bare `console.log` / `console.error` across analyzers, ingest, and ws bridge. No structured logger. No Sentry, no OTel. Local docker-compose is good; runtime is opaque. |
-| 4. Memory | **PARTIAL** | `core-beliefs.md` (13 rules with Why + How) is best-in-class. **No `.claude/skills/`**, no ADRs by name, no runbooks. Per-workspace `AGENTS.md` files exist but freelance their structure. |
+| Rung             | Status      | One-line read                                                                                                                                                                                                      |
+| ---------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1. Legibility    | **PARTIAL** | Doc set is unusually good in substance, but has a factual contradiction, two empty undocumented subdirs, no `docs/README.md`, and a two-tier hierarchy nobody explains. Surface looks YES; structure says PARTIAL. |
+| 2. Enforcement   | **PARTIAL** | TS strict + CI typecheck/test in place. **No lint in `apps/server`**, no pre-commit hooks, no `scripts/check-invariants.ts` for the 13 core-beliefs.                                                               |
+| 3. Observability | **NO**      | Bare `console.log` / `console.error` across analyzers, ingest, and ws bridge. No structured logger. No Sentry, no OTel. Local docker-compose is good; runtime is opaque.                                           |
+| 4. Memory        | **PARTIAL** | `core-beliefs.md` (13 rules with Why + How) is best-in-class. **No `.claude/skills/`**, no ADRs by name, no runbooks. Per-workspace `AGENTS.md` files exist but freelance their structure.                         |
 
 Workflow shape: short PRs and CI gates yes; planning docs sparse. Maintenance: deletion bias visible in git log; no scheduled cleanup automation.
 
@@ -38,7 +38,7 @@ The first audit pass scored this YES because `AGENTS.md`, `CLAUDE.md`, `ARCHITEC
 - [`apps/desktop/AGENTS.md`](../../apps/desktop/AGENTS.md) describes **six renderer windows** ("`main`, `overlay`, `info`, `chat`, `response`, `statusbar`").
 - An agent asked to "fix `trayPopup`" reads the workspace doc, sees no mention, may conclude it's vestigial. **PR-quality risk: high.**
 
-**Fix:** clarify in `ARCHITECTURE.md` which are renderer windows vs system chrome. Proposed line: *"Six renderer windows (`main`, `overlay`, `info`, `chat`, `response`, `statusbar`), plus `trayPopup` and `dockPlaceholder` as system-level chrome managed from the main process."*
+**Fix:** clarify in `ARCHITECTURE.md` which are renderer windows vs system chrome. Proposed line: _"Six renderer windows (`main`, `overlay`, `info`, `chat`, `response`, `statusbar`), plus `trayPopup` and `dockPlaceholder` as system-level chrome managed from the main process."_
 
 ### 1.2 Empty undocumented subdirectories
 
@@ -85,25 +85,25 @@ An agent reading server's AGENTS.md learns to expect "Adding X" recipes; switchi
 
 ### Sample-task navigation
 
-| Task | Path verdict |
-| --- | --- |
-| Add a new ingest analyzer | **CLEAN** — root AGENTS.md → `apps/server/AGENTS.md#Adding-an-LLM-analyzer`, all files named explicitly. |
-| Understand the auth model | **FORKED** — `SECURITY.md` + `ARCHITECTURE.md` + `core-beliefs.md` + `CLAUDE.md` all describe parts. Three sources, mild redundancy. |
-| Understand the database schema | **CLEAN** — `docs/generated/db-schema.md` for read; `apps/server/AGENTS.md#Adding-a-database-column-or-table` for edit. |
-| Load-bearing invariants | **CLEAN** — `core-beliefs.md` is the canonical 13-rule source. CLAUDE.md correctly redirects. |
-| How desktop talks to server | **FORKED** — overview in `ARCHITECTURE.md`; desktop side in `apps/desktop/AGENTS.md`; server routes in `apps/server/AGENTS.md`. Three docs needed. |
+| Task                           | Path verdict                                                                                                                                       |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new ingest analyzer      | **CLEAN** — root AGENTS.md → `apps/server/AGENTS.md#Adding-an-LLM-analyzer`, all files named explicitly.                                           |
+| Understand the auth model      | **FORKED** — `SECURITY.md` + `ARCHITECTURE.md` + `core-beliefs.md` + `CLAUDE.md` all describe parts. Three sources, mild redundancy.               |
+| Understand the database schema | **CLEAN** — `docs/generated/db-schema.md` for read; `apps/server/AGENTS.md#Adding-a-database-column-or-table` for edit.                            |
+| Load-bearing invariants        | **CLEAN** — `core-beliefs.md` is the canonical 13-rule source. CLAUDE.md correctly redirects.                                                      |
+| How desktop talks to server    | **FORKED** — overview in `ARCHITECTURE.md`; desktop side in `apps/desktop/AGENTS.md`; server routes in `apps/server/AGENTS.md`. Three docs needed. |
 
 ---
 
 ## Rung 2 — Enforcement (PARTIAL)
 
-| Requirement | Status | Evidence |
-| --- | --- | --- |
-| Custom lints encoding taste invariants | **PARTIAL** | `apps/desktop/eslint.config.js` exists. **`apps/server` has no linter.** No repo-wide lints. No `scripts/check-invariants.ts` for the 13 core-beliefs (Tier 3 in `tech-debt-tracker.md` §18–20). |
-| Structural tests | **PARTIAL** | `apps/server/test/` has 9 test files (~650 lines total — shallow for a multi-domain system). `apps/desktop` has 3 unit tests. No architectural-invariant tests (e.g., "every cross-user route joins `user_repos`", "every Elysia plugin has a unique `name`"). |
-| Fast, reliable test suite | **YES** | `.github/workflows/ci.yml` runs `bun test` against containerized Postgres + Redis with health checks. |
-| Type checking as first-class gate | **YES** | `tsconfig.json` has `strict: true`. CI runs `bun run typecheck` before tests. CLAUDE.md rule #9 mandates TS strict everywhere. |
-| Pre-commit hooks matching local dev | **NO** | No `.husky/`, no `lefthook.yml`, no lint-staged. Pre-commit checklists are documented in `AGENTS.md` and `CLAUDE.md` and run by hand. |
+| Requirement                            | Status      | Evidence                                                                                                                                                                                                                                                       |
+| -------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Custom lints encoding taste invariants | **PARTIAL** | `apps/desktop/eslint.config.js` exists. **`apps/server` has no linter.** No repo-wide lints. No `scripts/check-invariants.ts` for the 13 core-beliefs (Tier 3 in `tech-debt-tracker.md` §18–20).                                                               |
+| Structural tests                       | **PARTIAL** | `apps/server/test/` has 9 test files (~650 lines total — shallow for a multi-domain system). `apps/desktop` has 3 unit tests. No architectural-invariant tests (e.g., "every cross-user route joins `user_repos`", "every Elysia plugin has a unique `name`"). |
+| Fast, reliable test suite              | **YES**     | `.github/workflows/ci.yml` runs `bun test` against containerized Postgres + Redis with health checks.                                                                                                                                                          |
+| Type checking as first-class gate      | **YES**     | `tsconfig.json` has `strict: true`. CI runs `bun run typecheck` before tests. CLAUDE.md rule #9 mandates TS strict everywhere.                                                                                                                                 |
+| Pre-commit hooks matching local dev    | **NO**      | No `.husky/`, no `lefthook.yml`, no lint-staged. Pre-commit checklists are documented in `AGENTS.md` and `CLAUDE.md` and run by hand.                                                                                                                          |
 
 **Notable asymmetry:** desktop has ESLint; server (the security-critical path with auth, ingest, `user_repos` gating) does not. Inverted from where the priority should be.
 
@@ -111,12 +111,12 @@ An agent reading server's AGENTS.md learns to expect "Adding X" recipes; switchi
 
 ## Rung 3 — Observability (NO)
 
-| Requirement | Status | Evidence |
-| --- | --- | --- |
-| Worktree-local app instances | **YES** | `docker-compose.yml` spins up Postgres + Redis. Desktop points at local backend via `MAIN_VITE_SLASHTALK_API_URL`. Agents can run isolated copies. |
-| Browser/UI access for frontend work | **PARTIAL** | Electron with HMR; DevTools attachable. **No Playwright/Puppeteer E2E setup.** |
-| Local observability stack | **NO** | Bare `console.log` / `console.error` across `apps/server/src/analyzers/scheduler.ts`, ingest paths, ws bridge. No structured logger (pino/winston). No trace correlation. No metrics. |
-| Production error feedback wired in | **NO** | No Sentry, no Datadog, no error tracking visible in code. `SECURITY.md` covers token encryption but observability is unmentioned. |
+| Requirement                         | Status      | Evidence                                                                                                                                                                              |
+| ----------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Worktree-local app instances        | **YES**     | `docker-compose.yml` spins up Postgres + Redis. Desktop points at local backend via `MAIN_VITE_SLASHTALK_API_URL`. Agents can run isolated copies.                                    |
+| Browser/UI access for frontend work | **PARTIAL** | Electron with HMR; DevTools attachable. **No Playwright/Puppeteer E2E setup.**                                                                                                        |
+| Local observability stack           | **NO**      | Bare `console.log` / `console.error` across `apps/server/src/analyzers/scheduler.ts`, ingest paths, ws bridge. No structured logger (pino/winston). No trace correlation. No metrics. |
+| Production error feedback wired in  | **NO**      | No Sentry, no Datadog, no error tracking visible in code. `SECURITY.md` covers token encryption but observability is unmentioned.                                                     |
 
 **Why this rung matters extra for slashtalk specifically:** the product itself is "make Claude Code coding sessions legible to humans." A repo whose own runtime is operationally illegible to its agents is a self-contradicting product story. Closing this is the single highest-leverage move for the codebase as a whole.
 
@@ -124,12 +124,12 @@ An agent reading server's AGENTS.md learns to expect "Adding X" recipes; switchi
 
 ## Rung 4 — Memory (PARTIAL)
 
-| Requirement | Status | Evidence |
-| --- | --- | --- |
-| Skill files (`.claude/skills/*`) | **NO** | No `.claude/` directory. Recipes for "add a route", "add an analyzer", "add a DB table" exist as prose in `apps/server/AGENTS.md` but are not push-button skills. |
-| Episodic decision capture | **PARTIAL** | `core-beliefs.md` encodes 13 rules with Why + How (excellent). `tech-debt-tracker.md` lists 20 tracked items. **No ADRs by name.** Recent commits show `feat/fix/refactor` style without rationale capture in PR descriptions. |
-| Lessons / runbooks | **NO** | CLAUDE.md cites two memory slugs (`feedback_drizzle_journal_when`, `feedback_strict_tracking`) but no runbook files exist. No incident-response or "how we recovered from X" docs. |
-| Folder-level identity | **PARTIAL** | Each workspace has an `AGENTS.md`. None have a `CLAUDE.md` or `.claude/` for sub-system memory. |
+| Requirement                      | Status      | Evidence                                                                                                                                                                                                                       |
+| -------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Skill files (`.claude/skills/*`) | **NO**      | No `.claude/` directory. Recipes for "add a route", "add an analyzer", "add a DB table" exist as prose in `apps/server/AGENTS.md` but are not push-button skills.                                                              |
+| Episodic decision capture        | **PARTIAL** | `core-beliefs.md` encodes 13 rules with Why + How (excellent). `tech-debt-tracker.md` lists 20 tracked items. **No ADRs by name.** Recent commits show `feat/fix/refactor` style without rationale capture in PR descriptions. |
+| Lessons / runbooks               | **NO**      | CLAUDE.md cites two memory slugs (`feedback_drizzle_journal_when`, `feedback_strict_tracking`) but no runbook files exist. No incident-response or "how we recovered from X" docs.                                             |
+| Folder-level identity            | **PARTIAL** | Each workspace has an `AGENTS.md`. None have a `CLAUDE.md` or `.claude/` for sub-system memory.                                                                                                                                |
 
 ---
 
@@ -175,13 +175,13 @@ Each gap names the rung, the cost, and a concrete first move.
 
 Three days of focused work moves this repo from ~60% to ~90% harness-ready by the checklist. Sequenced for highest leverage first:
 
-| Day | Work | Outcome |
-| --- | --- | --- |
-| 1 | Adopt pino across `apps/server`. Wire Sentry hook for unhandled errors. | Closes Observability — the highest-leverage gap. |
-| 2 (am) | Add `lefthook.yml` for typecheck + test + db-schema:check. | Mechanical pre-commit. |
-| 2 (pm) | `apps/server/eslint.config.js` with layering + plugin-name + ban-console rules. | Closes asymmetry with desktop. |
-| 3 (am) | Lift `AGENTS.md` "Adding X" recipes into `.claude/skills/*`. | Memory rung from PARTIAL → YES. |
-| 3 (pm) | Legibility batch fix (window count, three READMEs, two-tier resolution, naming convention). | Legibility from PARTIAL → YES. |
+| Day    | Work                                                                                        | Outcome                                          |
+| ------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| 1      | Adopt pino across `apps/server`. Wire Sentry hook for unhandled errors.                     | Closes Observability — the highest-leverage gap. |
+| 2 (am) | Add `lefthook.yml` for typecheck + test + db-schema:check.                                  | Mechanical pre-commit.                           |
+| 2 (pm) | `apps/server/eslint.config.js` with layering + plugin-name + ban-console rules.             | Closes asymmetry with desktop.                   |
+| 3 (am) | Lift `AGENTS.md` "Adding X" recipes into `.claude/skills/*`.                                | Memory rung from PARTIAL → YES.                  |
+| 3 (pm) | Legibility batch fix (window count, three READMEs, two-tier resolution, naming convention). | Legibility from PARTIAL → YES.                   |
 
 After this sprint: Legibility YES, Enforcement YES (Tier 2 done; Tier 3 invariant script still deferred), Observability YES (basic), Memory YES (skills + core-beliefs + per-workspace AGENTS).
 

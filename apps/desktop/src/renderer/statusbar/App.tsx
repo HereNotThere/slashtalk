@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import type {
-  BackendAuthState,
-  GithubAppStatus,
-  TrackedRepo,
-} from "../../shared/types";
+import type { BackendAuthState, GithubAppStatus, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 
 export function App(): JSX.Element {
@@ -30,9 +26,7 @@ export function App(): JSX.Element {
     void window.chatheads.rail.getSessionOnlyMode().then((v) => {
       if (alive) setSessionOnly(v);
     });
-    const off = window.chatheads.rail.onSessionOnlyModeChange((v) =>
-      setSessionOnly(v),
-    );
+    const off = window.chatheads.rail.onSessionOnlyModeChange((v) => setSessionOnly(v));
     return () => {
       alive = false;
       off();
@@ -47,9 +41,7 @@ export function App(): JSX.Element {
     void window.chatheads.spotifyShare.getEnabled().then((v) => {
       if (alive) setSpotifyShare(v);
     });
-    const off = window.chatheads.spotifyShare.onEnabledChange((v) =>
-      setSpotifyShare(v),
-    );
+    const off = window.chatheads.spotifyShare.onEnabledChange((v) => setSpotifyShare(v));
     return () => {
       alive = false;
       off();
@@ -60,11 +52,7 @@ export function App(): JSX.Element {
   const repos = useTrackedRepos();
   const [githubAppRefreshKey, setGithubAppRefreshKey] = useState(0);
   const [githubAppWatch, setGithubAppWatch] = useState(false);
-  const githubApp = useGithubAppStatus(
-    auth.signedIn,
-    githubAppRefreshKey,
-    githubAppWatch,
-  );
+  const githubApp = useGithubAppStatus(auth.signedIn, githubAppRefreshKey, githubAppWatch);
   const selected = useSelection();
   const [busy, setBusy] = useState<null | "add" | "repoAccess">(null);
   const [addError, setAddError] = useState<string | null>(null);
@@ -101,16 +89,9 @@ export function App(): JSX.Element {
             void window.chatheads.rail.setPinned(v);
           }}
         />
-        <SessionOnlyRow
-          enabled={sessionOnly}
-          disabled={pinned}
-          onChange={onSessionOnlyChange}
-        />
+        <SessionOnlyRow enabled={sessionOnly} disabled={pinned} onChange={onSessionOnlyChange} />
         {spotifySupported ? (
-          <SpotifyShareRow
-            enabled={spotifyShare}
-            onChange={onSpotifyShareChange}
-          />
+          <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
         ) : null}
         <Divider />
         <Footer />
@@ -162,9 +143,7 @@ export function App(): JSX.Element {
       <Body
         repos={repos}
         selected={selected}
-        onRemove={(repoId) =>
-          void window.chatheads.backend.removeLocalRepo(repoId)
-        }
+        onRemove={(repoId) => void window.chatheads.backend.removeLocalRepo(repoId)}
       />
       {addError ? <ErrorNote message={addError} /> : null}
       <AddButton
@@ -181,16 +160,9 @@ export function App(): JSX.Element {
           void window.chatheads.rail.setPinned(v);
         }}
       />
-      <SessionOnlyRow
-        enabled={sessionOnly}
-        disabled={pinned}
-        onChange={onSessionOnlyChange}
-      />
+      <SessionOnlyRow enabled={sessionOnly} disabled={pinned} onChange={onSessionOnlyChange} />
       {spotifySupported ? (
-        <SpotifyShareRow
-          enabled={spotifyShare}
-          onChange={onSpotifyShareChange}
-        />
+        <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
       ) : null}
       <Divider />
       <Footer />
@@ -201,9 +173,7 @@ export function App(): JSX.Element {
 // ---------- Layout shell ----------
 
 function Shell({ children }: { children: React.ReactNode }): JSX.Element {
-  return (
-    <div className="box-border p-lg flex flex-col gap-md">{children}</div>
-  );
+  return <div className="box-border p-lg flex flex-col gap-md">{children}</div>;
 }
 
 function Divider(): JSX.Element {
@@ -212,9 +182,7 @@ function Divider(): JSX.Element {
 
 function Header(): JSX.Element {
   return (
-    <div className="px-1 py-0.5 text-[11px] uppercase tracking-wide text-fg/55">
-      Your repos
-    </div>
+    <div className="px-1 py-0.5 text-[11px] uppercase tracking-wide text-fg/55">Your repos</div>
   );
 }
 
@@ -237,9 +205,7 @@ function Body({
     );
   }
   // Stable alpha order — repos don't reorder when selection flips.
-  const sorted = [...repos].sort((a, b) =>
-    a.fullName.localeCompare(b.fullName),
-  );
+  const sorted = [...repos].sort((a, b) => a.fullName.localeCompare(b.fullName));
   return (
     <div className="flex flex-col gap-0.5 max-h-[320px] overflow-y-auto">
       {sorted.map((r) => (
@@ -281,12 +247,8 @@ function RepoRow({
       >
         <Checkbox checked={checked} />
         <span className="flex-1 min-w-0 flex flex-col">
-          <span className="truncate text-[13px] leading-tight">
-            {repo.fullName}
-          </span>
-          <span className="truncate text-[11px] text-fg/45 leading-tight">
-            {repo.localPath}
-          </span>
+          <span className="truncate text-[13px] leading-tight">{repo.fullName}</span>
+          <span className="truncate text-[11px] text-fg/45 leading-tight">{repo.localPath}</span>
         </span>
       </button>
       <button
@@ -371,7 +333,7 @@ function AddButton({
           ? "Opening GitHub..."
           : watchingRepoAccess
             ? "Waiting for GitHub..."
-          : "Connect repo access"
+            : "Connect repo access"
         : busy
           ? "Choosing folder..."
           : "+ Add local repo"}
@@ -427,9 +389,7 @@ function RepoAccessPrompt({
           Refresh
         </button>
       </div>
-      {watching ? (
-        <div className="text-fg/55 mt-2">Waiting for GitHub approval...</div>
-      ) : null}
+      {watching ? <div className="text-fg/55 mt-2">Waiting for GitHub approval...</div> : null}
     </div>
   );
 }
@@ -450,9 +410,7 @@ function ErrorNote({ message }: { message: string }): JSX.Element {
     );
   }
 
-  return (
-    <div className="px-1.5 py-1 text-[12px] text-red-500/90">{message}</div>
-  );
+  return <div className="px-1.5 py-1 text-[12px] text-red-500/90">{message}</div>;
 }
 
 // ---------- Pin toggle ----------
@@ -520,11 +478,7 @@ function SessionOnlyRow({
       type="button"
       disabled={disabled}
       onClick={() => onChange(!enabled)}
-      title={
-        disabled
-          ? "Turn off \u201cKeep rail on top\u201d to use this mode"
-          : undefined
-      }
+      title={disabled ? "Turn off \u201cKeep rail on top\u201d to use this mode" : undefined}
       className={`
         w-full flex items-center gap-2 px-1.5 py-1 rounded-md
         bg-transparent border-none text-fg [font:inherit]
@@ -554,9 +508,7 @@ function SignedOutPrompt(): JSX.Element {
 function Footer(): JSX.Element {
   return (
     <div className="flex gap-2">
-      <FooterButton onClick={() => window.chatheads.openMain()}>
-        Settings
-      </FooterButton>
+      <FooterButton onClick={() => window.chatheads.openMain()}>Settings</FooterButton>
       <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
     </div>
   );
@@ -670,9 +622,7 @@ function useSelection(): Set<number> {
     void window.chatheads.trackedRepos.selection().then((list) => {
       setSelected(new Set(list));
     });
-    return window.chatheads.trackedRepos.onSelectionChange((list) =>
-      setSelected(new Set(list)),
-    );
+    return window.chatheads.trackedRepos.onSelectionChange((list) => setSelected(new Set(list)));
   }, []);
   return selected;
 }

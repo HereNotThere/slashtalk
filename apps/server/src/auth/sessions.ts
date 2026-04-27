@@ -50,19 +50,13 @@ export async function rotateSessionTokens(
   presented: string,
 ): Promise<{ jwt: string; refreshToken: string; userId: number } | null> {
   const hash = await hashToken(presented);
-  const [rt] = await db
-    .delete(refreshTokens)
-    .where(eq(refreshTokens.tokenHash, hash))
-    .returning();
+  const [rt] = await db.delete(refreshTokens).where(eq(refreshTokens.tokenHash, hash)).returning();
   if (!rt || rt.expiresAt < new Date()) return null;
   const issued = await issueSessionTokens(db, jwt, rt.userId);
   return { ...issued, userId: rt.userId };
 }
 
-export async function revokeRefreshToken(
-  db: Database,
-  presented: string,
-): Promise<void> {
+export async function revokeRefreshToken(db: Database, presented: string): Promise<void> {
   const hash = await hashToken(presented);
   const [revoked] = await db
     .delete(refreshTokens)

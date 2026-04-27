@@ -1,11 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { SessionState } from "@slashtalk/shared";
-import type {
-  EventSource,
-  RecentEvent,
-  SpotifyPresence,
-  TokenUsage,
-} from "@slashtalk/shared";
+import type { EventSource, RecentEvent, SpotifyPresence, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
@@ -126,10 +121,7 @@ export function App(): JSX.Element {
             <UserHeader head={head} />
             {spotify && <NowPlaying track={spotify} />}
             <Divider />
-            <SessionsSection
-              sessions={sessions}
-              expandRequest={expandRequest}
-            />
+            <SessionsSection sessions={sessions} expandRequest={expandRequest} />
           </>
         )}
       </div>
@@ -162,14 +154,7 @@ function NowPlaying({ track }: { track: SpotifyPresence }): JSX.Element {
 
 function SpotifyIcon(): JSX.Element {
   return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="#1DB954"
-      className="shrink-0"
-      aria-hidden
-    >
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="#1DB954" className="shrink-0" aria-hidden>
       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.586 14.424a.623.623 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 1 1-.277-1.215c3.809-.871 7.077-.496 9.713 1.115a.623.623 0 0 1 .206.857zm1.223-2.723a.78.78 0 0 1-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 1 1-.45-1.494c3.633-1.102 8.147-.568 11.232 1.328a.78.78 0 0 1 .255 1.075zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.935.935 0 1 1-.542-1.79c3.532-1.072 9.404-.865 13.115 1.338a.935.935 0 0 1-.956 1.608z" />
     </svg>
   );
@@ -190,9 +175,7 @@ function UserHeader({ head }: { head: ChatHead | null }): JSX.Element {
     <div className="flex items-start gap-md px-lg pt-lg pb-md">
       <Avatar head={head} />
       <div className="flex-1 min-w-0">
-        <div className="text-[19px] font-bold leading-tight truncate">
-          {name}
-        </div>
+        <div className="text-[19px] font-bold leading-tight truncate">{name}</div>
         <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted whitespace-nowrap min-w-0">
           {city && (
             <>
@@ -222,10 +205,7 @@ function Avatar({ head }: { head: ChatHead | null }): JSX.Element {
   const tint = head?.tint ?? "var(--color-surface)";
   return (
     <div className="relative w-12 h-12 rounded-full flex items-center justify-center text-[26px] shrink-0 overflow-hidden">
-      <div
-        className="absolute inset-0 rounded-full opacity-30"
-        style={{ background: tint }}
-      />
+      <div className="absolute inset-0 rounded-full opacity-30" style={{ background: tint }} />
       <span className="relative leading-none">{emoji}</span>
     </div>
   );
@@ -233,9 +213,7 @@ function Avatar({ head }: { head: ChatHead | null }): JSX.Element {
 
 function SubHeader({ children }: { children: string }): JSX.Element {
   return (
-    <div className="text-[11px] font-semibold tracking-wider uppercase text-subtle">
-      {children}
-    </div>
+    <div className="text-[11px] font-semibold tracking-wider uppercase text-subtle">{children}</div>
   );
 }
 
@@ -262,18 +240,10 @@ function SessionsSection({
   }, [expandRequest, sessions]);
 
   if (sessions == null) {
-    return (
-      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
-        Loading…
-      </div>
-    );
+    return <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">Loading…</div>;
   }
   if (sessions.length === 0) {
-    return (
-      <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">
-        No sessions yet.
-      </div>
-    );
+    return <div className="px-lg py-md text-[12px] text-subtle min-h-[60px]">No sessions yet.</div>;
   }
   const visible =
     showAll || sessions.length <= DEFAULT_SESSION_LIMIT
@@ -285,9 +255,7 @@ function SessionsSection({
       <SessionList
         sessions={visible}
         expandedId={expandedId}
-        onToggle={(id) =>
-          setExpandedId((cur) => (cur === id ? null : id))
-        }
+        onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
       />
       {hasMore && (
         <>
@@ -319,11 +287,7 @@ function SessionList({
       {sessions.map((s, i) => (
         <Fragment key={s.id}>
           {i > 0 && <div className="mx-lg h-px bg-divider" />}
-          <SessionRow
-            session={s}
-            expanded={expandedId === s.id}
-            onToggle={() => onToggle(s.id)}
-          />
+          <SessionRow session={s} expanded={expandedId === s.id} onToggle={() => onToggle(s.id)} />
         </Fragment>
       ))}
     </>
@@ -366,21 +330,15 @@ function SessionRow({
         className={`w-full text-left px-lg py-md cursor-pointer hover:bg-surface/60 transition-colors flex items-start gap-2 border-l-2 ${expanded ? "border-success/70" : "border-transparent"}`}
       >
         <div className="flex-1 min-w-0">
-          <div className="text-[14px] font-medium text-fg truncate">
-            {title}
-          </div>
+          <div className="text-[14px] font-medium text-fg truncate">{title}</div>
           {session.description && (
-            <div className="mt-1 text-[12px] text-muted line-clamp-2">
-              {session.description}
-            </div>
+            <div className="mt-1 text-[12px] text-muted line-clamp-2">{session.description}</div>
           )}
           {hasLocator && (
             <div className="mt-1 flex min-w-0">
               <span className="inline-flex items-center gap-1 font-mono text-[10.5px] leading-none px-1.5 py-0.5 rounded bg-surface/70 text-fg/75 min-w-0 max-w-full">
                 {repo && <span className="truncate">{repo}</span>}
-                {repo && session.branch && (
-                  <span className="text-subtle shrink-0 px-0.5">·</span>
-                )}
+                {repo && session.branch && <span className="text-subtle shrink-0 px-0.5">·</span>}
                 {session.branch && (
                   <>
                     <span className="text-subtle shrink-0">
@@ -397,9 +355,7 @@ function SessionRow({
               <ProviderIcon source={session.source} />
               {tokensLabel && <span className="shrink-0">{tokensLabel}</span>}
               {status && (
-                <span
-                  className={`shrink-0 ml-auto ${status.isLive ? "text-accent" : ""}`}
-                >
+                <span className={`shrink-0 ml-auto ${status.isLive ? "text-accent" : ""}`}>
                   {status.isLive ? <WorkingIndicator /> : status.text}
                 </span>
               )}
@@ -425,8 +381,7 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
   // Without this, .map crashes the whole tree and the card goes blank.
   const highlights = Array.isArray(session.highlights) ? session.highlights : [];
   const recent = Array.isArray(session.recent) ? session.recent : [];
-  const hasAnything =
-    Boolean(summary) || highlights.length > 0 || recent.length > 0;
+  const hasAnything = Boolean(summary) || highlights.length > 0 || recent.length > 0;
   return (
     <div className="px-lg pb-lg space-y-md">
       {summary && (
@@ -459,9 +414,7 @@ function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
           </div>
         </div>
       )}
-      {!hasAnything && (
-        <div className="text-[12px] text-subtle">No activity yet.</div>
-      )}
+      {!hasAnything && <div className="text-[12px] text-subtle">No activity yet.</div>}
     </div>
   );
 }
@@ -471,12 +424,8 @@ function ActivityRow({ event }: { event: RecentEvent }): JSX.Element {
     <div className="flex items-start gap-2">
       <ArrowIcon />
       <div className="flex-1 min-w-0">
-        <div className="text-[13px] text-fg leading-snug break-words">
-          {event.summary}
-        </div>
-        <div className="mt-0.5 text-[11.5px] text-subtle">
-          {fmtAgo(event.ts)}
-        </div>
+        <div className="text-[13px] text-fg leading-snug break-words">{event.summary}</div>
+        <div className="mt-0.5 text-[11.5px] text-subtle">{fmtAgo(event.ts)}</div>
       </div>
     </div>
   );
@@ -510,13 +459,9 @@ function statusLabel(s: InfoSession): StatusInfo | null {
         isLive: false,
       };
     case SessionState.RECENT:
-      return s.lastTs
-        ? { text: `paused ${fmtAgo(s.lastTs)}`, isLive: false }
-        : null;
+      return s.lastTs ? { text: `paused ${fmtAgo(s.lastTs)}`, isLive: false } : null;
     case SessionState.ENDED:
-      return s.lastTs
-        ? { text: `ended ${fmtAgo(s.lastTs)}`, isLive: false }
-        : null;
+      return s.lastTs ? { text: `ended ${fmtAgo(s.lastTs)}`, isLive: false } : null;
     default:
       return null;
   }
@@ -548,11 +493,7 @@ function WorkingIndicator(): JSX.Element {
 function ProviderIcon({ source }: { source: EventSource }): JSX.Element {
   const label = source === "codex" ? "OpenAI Codex" : "Claude Code";
   return (
-    <span
-      className="shrink-0 text-subtle"
-      title={label}
-      aria-label={label}
-    >
+    <span className="shrink-0 text-subtle" title={label} aria-label={label}>
       {source === "codex" ? <OpenAIIcon /> : <ClaudeIcon />}
     </span>
   );

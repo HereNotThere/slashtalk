@@ -25,8 +25,7 @@ const SYNC_STATE_KEY = "uploaderSyncState";
 const DEBOUNCE_MS = 150;
 const PERSIST_DEBOUNCE_MS = 500;
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODEX_ROLLOUT_RE =
   /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
@@ -133,10 +132,7 @@ function sourceForPath(filePath: string): EventSource | null {
 }
 
 function isClaudeSessionJsonl(filePath: string): boolean {
-  return (
-    filePath.endsWith(".jsonl") &&
-    UUID_RE.test(path.basename(filePath, ".jsonl"))
-  );
+  return filePath.endsWith(".jsonl") && UUID_RE.test(path.basename(filePath, ".jsonl"));
 }
 
 function isCodexSessionJsonl(filePath: string): boolean {
@@ -176,9 +172,7 @@ function sessionIdFromPath(filePath: string, source: EventSource): string | null
 
 function matchQuoted(text: string, key: string): string | null {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(
-    new RegExp(`"${escaped}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`)
-  );
+  const match = text.match(new RegExp(`"${escaped}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
   if (!match?.[1]) return null;
   try {
     return JSON.parse(`"${match[1]}"`) as string;
@@ -241,10 +235,7 @@ function scanCodexHeader(buf: Buffer, filePath: string): SessionHeader {
           cli_version?: unknown;
         };
       };
-      const payload =
-        parsed.payload && typeof parsed.payload === "object"
-          ? parsed.payload
-          : null;
+      const payload = parsed.payload && typeof parsed.payload === "object" ? parsed.payload : null;
       if (!sessionId) {
         const value = payload?.id ?? parsed.id;
         if (typeof value === "string") sessionId = value;
@@ -352,9 +343,7 @@ function scanCursorToolCwd(buf: Buffer): string | null {
       if (!isObj(parsed.message) || !Array.isArray(parsed.message.content)) continue;
       for (const block of parsed.message.content) {
         if (!isObj(block) || block.type !== "tool_use") continue;
-        const candidate = cursorPathFromToolInput(
-          isObj(block.input) ? block.input : null,
-        );
+        const candidate = cursorPathFromToolInput(isObj(block.input) ? block.input : null);
         if (candidate) return candidate;
       }
     } catch {
@@ -368,8 +357,7 @@ async function scanCursorHeader(buf: Buffer, filePath: string): Promise<SessionH
   const sessionId = sessionIdFromPath(filePath, "cursor");
   const workspaceRoot = cursorWorkspaceRootFromFile(filePath);
   const cwd =
-    (workspaceRoot ? await readCursorWorkspaceCwd(workspaceRoot) : null) ??
-    scanCursorToolCwd(buf);
+    (workspaceRoot ? await readCursorWorkspaceCwd(workspaceRoot) : null) ?? scanCursorToolCwd(buf);
   return {
     sessionId,
     cwd,
@@ -429,9 +417,7 @@ function synthesizeCursorChunk(
   const lines = raw.split("\n");
   if (lines[lines.length - 1] === "") lines.pop();
   const startMs =
-    Number.isFinite(stat.birthtimeMs) && stat.birthtimeMs > 0
-      ? stat.birthtimeMs
-      : stat.mtimeMs;
+    Number.isFinite(stat.birthtimeMs) && stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
 
   return (
     lines
@@ -570,9 +556,7 @@ async function syncFileInner(filePath: string): Promise<void> {
     entry.tracked = shouldUploadSource(source, header.cwd);
     persistSoon();
     if (!entry.tracked) {
-      console.log(
-        `[uploader] skip ${sessionId} (${source}) — cwd not tracked (${header.cwd})`,
-      );
+      console.log(`[uploader] skip ${sessionId} (${source}) — cwd not tracked (${header.cwd})`);
       return;
     }
 
@@ -593,13 +577,7 @@ async function ingestTail(
   if (!tail) return;
   const body =
     entry.source === "cursor"
-      ? synthesizeCursorChunk(
-          tail.chunk,
-          stat,
-          entry.lineSeq,
-          entry.cwd,
-          entry.version,
-        )
+      ? synthesizeCursorChunk(tail.chunk, stat, entry.lineSeq, entry.cwd, entry.version)
       : tail.chunk.toString("utf8");
 
   const res = await backend.ingestChunk({

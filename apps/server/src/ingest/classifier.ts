@@ -16,10 +16,7 @@ function isObj(v: unknown): v is JsonObj {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-export function classifyEvent(
-  source: EventSource,
-  event: unknown
-): NormalizedEvent {
+export function classifyEvent(source: EventSource, event: unknown): NormalizedEvent {
   if (!isObj(event)) {
     return norm({ ts: new Date(), rawType: "unknown", kind: "unknown" });
   }
@@ -62,9 +59,7 @@ function claudeKind(rawType: string, ev: JsonObj): EventKind {
 function hasToolResultBlock(ev: JsonObj): boolean {
   const message = ev.message;
   if (!isObj(message) || !Array.isArray(message.content)) return false;
-  return message.content.some(
-    (b) => isObj(b) && b.type === "tool_result"
-  );
+  return message.content.some((b) => isObj(b) && b.type === "tool_result");
 }
 
 function looksLikeCliCommand(ev: JsonObj): boolean {
@@ -149,11 +144,7 @@ function classifyCursor(ev: JsonObj): NormalizedEvent {
   });
 }
 
-function codexKind(
-  topType: string,
-  payloadType: string | null,
-  payload: JsonObj
-): EventKind {
+function codexKind(topType: string, payloadType: string | null, payload: JsonObj): EventKind {
   const topHit = CODEX_TOP_KIND[topType];
   if (topHit) return topHit;
 
@@ -174,7 +165,7 @@ function codexKind(
 
 function norm(
   partial: Pick<NormalizedEvent, "ts" | "rawType" | "kind"> &
-    Partial<Pick<NormalizedEvent, "turnId" | "callId" | "eventId" | "parentId">>
+    Partial<Pick<NormalizedEvent, "turnId" | "callId" | "eventId" | "parentId">>,
 ): NormalizedEvent {
   return {
     turnId: null,

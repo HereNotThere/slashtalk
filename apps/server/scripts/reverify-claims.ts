@@ -48,16 +48,11 @@ const BATCH_SLEEP_MS = 100;
 // 50 claims would otherwise run WebCrypto 50 times.
 const tokenCache = new Map<number, Promise<string | null>>();
 
-function decryptOnce(
-  userId: number,
-  ciphertext: string | null,
-): Promise<string | null> {
+function decryptOnce(userId: number, ciphertext: string | null): Promise<string | null> {
   const hit = tokenCache.get(userId);
   if (hit) return hit;
   const promise = ciphertext
-    ? decryptGithubToken(ciphertext, config.encryptionKey).catch(
-        () => null as string | null,
-      )
+    ? decryptGithubToken(ciphertext, config.encryptionKey).catch(() => null as string | null)
     : Promise.resolve<string | null>(null);
   tokenCache.set(userId, promise);
   return promise;
@@ -103,7 +98,8 @@ async function main(): Promise<void> {
   );
 
   const outcome: Outcome = { kept: 0, revoked: 0, reauthNeeded: 0, errored: 0 };
-  const revokeList: Array<{ userId: number; repoId: number; fullName: string; userLogin: string }> = [];
+  const revokeList: Array<{ userId: number; repoId: number; fullName: string; userLogin: string }> =
+    [];
   const reauthList: Array<{ userLogin: string; fullName: string }> = [];
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
@@ -140,9 +136,7 @@ async function main(): Promise<void> {
     }
   }
   if (reauthList.length > 0) {
-    console.log(
-      `[reverify] ${reauthList.length} rows pending reauth (left in place):`,
-    );
+    console.log(`[reverify] ${reauthList.length} rows pending reauth (left in place):`);
     // Compact: group by user, list distinct repo count.
     const byUser = new Map<string, number>();
     for (const r of reauthList) byUser.set(r.userLogin, (byUser.get(r.userLogin) ?? 0) + 1);
@@ -155,12 +149,7 @@ async function main(): Promise<void> {
     for (const r of revokeList) {
       await db
         .delete(userRepos)
-        .where(
-          and(
-            eq(userRepos.userId, r.userId),
-            eq(userRepos.repoId, r.repoId),
-          ),
-        );
+        .where(and(eq(userRepos.userId, r.userId), eq(userRepos.repoId, r.repoId)));
     }
     console.log(`[reverify] deleted ${revokeList.length} user_repos rows`);
   }

@@ -13,9 +13,7 @@ async function tmpHome(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(
-    tmpRoots.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
-  );
+  await Promise.all(tmpRoots.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
 describe("installMcp", () => {
@@ -70,9 +68,7 @@ describe("installMcp", () => {
       token: "device-api-key",
     });
 
-    const config = JSON.parse(
-      await fs.readFile(path.join(home, ".claude.json"), "utf8"),
-    );
+    const config = JSON.parse(await fs.readFile(path.join(home, ".claude.json"), "utf8"));
     expect(config.mcpServers["slashtalk-mcp"]).toEqual({
       type: "http",
       url: "https://api.example.com/mcp",
@@ -103,9 +99,7 @@ describe("installMcp", () => {
     expect(text).toContain("[mcp_servers.slashtalk-mcp]");
     expect(text).toContain('url = "http://127.0.0.1:37613/mcp"');
     expect(text).toContain("enabled = true");
-    expect(text).toContain(
-      'http_headers = { "X-Slashtalk-Proxy-Token" = "local-proxy-secret" }',
-    );
+    expect(text).toContain('http_headers = { "X-Slashtalk-Proxy-Token" = "local-proxy-secret" }');
     expect(text).not.toContain("device-api-key");
     expect(text).not.toContain("Authorization");
     expect(text).not.toContain("bearer_token");

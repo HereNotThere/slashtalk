@@ -1,11 +1,7 @@
 import { SessionPool } from "./session-pool.ts";
 import { PresenceStore, type PresenceEvent } from "./presence.ts";
 import { log } from "./server.ts";
-import {
-  extractBearer,
-  verifyApiKey,
-  type ApiKeyIdentity,
-} from "./api-key-auth.ts";
+import { extractBearer, verifyApiKey, type ApiKeyIdentity } from "./api-key-auth.ts";
 import { installPage } from "./install-page.ts";
 import {
   handleList as handleAgentSessionList,
@@ -87,16 +83,10 @@ export function runHttp(options: HttpOptions): {
         const identity = await resolveIdentity(req);
         if (!identity) return withHeaders(unauthorized(cors), cors);
         if (req.method === "PUT") {
-          return withHeaders(
-            await handleAgentSessionUpsert(req, identity.userLogin),
-            cors,
-          );
+          return withHeaders(await handleAgentSessionUpsert(req, identity.userLogin), cors);
         }
         if (req.method === "GET") {
-          return withHeaders(
-            await handleAgentSessionList(url, identity.userLogin),
-            cors,
-          );
+          return withHeaders(await handleAgentSessionList(url, identity.userLogin), cors);
         }
       }
 
@@ -130,11 +120,10 @@ async function resolveIdentity(req: Request): Promise<ApiKeyIdentity | null> {
 }
 
 function unauthorized(cors: Record<string, string>): Response {
-  return json(
-    { error: "unauthorized" },
-    401,
-    { ...cors, "www-authenticate": 'Bearer realm="slashtalk-mcp"' },
-  );
+  return json({ error: "unauthorized" }, 401, {
+    ...cors,
+    "www-authenticate": 'Bearer realm="slashtalk-mcp"',
+  });
 }
 
 function buildCorsHeaders(req: Request): Record<string, string> {
@@ -165,10 +154,7 @@ function withHeaders(res: Response, extra: Record<string, string>): Response {
   });
 }
 
-function presenceStream(
-  presence: PresenceStore,
-  cors: Record<string, string>,
-): Response {
+function presenceStream(presence: PresenceStore, cors: Record<string, string>): Response {
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;

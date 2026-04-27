@@ -30,7 +30,7 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
     jwt({
       name: "jwt",
       secret: config.jwtSecret,
-    })
+    }),
   )
   .derive({ as: "scoped" }, async ({ jwt, cookie: { session }, set }) => {
     const token = session?.value;
@@ -39,9 +39,7 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
       throw new Error("Unauthorized");
     }
 
-    const payload = (await jwt.verify(token as string)) as
-      | false
-      | SessionJwtPayload;
+    const payload = (await jwt.verify(token as string)) as false | SessionJwtPayload;
     if (!payload || !payload.sub) {
       set.status = 401;
       throw new Error("Invalid token");
@@ -87,11 +85,7 @@ export const apiKeyAuth = new Elysia({ name: "auth/apiKey" }).derive(
     const key = authHeader.slice(7);
     const keyHash = await hashToken(key);
 
-    const [apiKey] = await db
-      .select()
-      .from(apiKeys)
-      .where(eq(apiKeys.keyHash, keyHash))
-      .limit(1);
+    const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash)).limit(1);
 
     if (!apiKey) {
       set.status = 401;
@@ -116,11 +110,8 @@ export const apiKeyAuth = new Elysia({ name: "auth/apiKey" }).derive(
       .limit(1);
 
     // Update last_used_at
-    await db
-      .update(apiKeys)
-      .set({ lastUsedAt: new Date() })
-      .where(eq(apiKeys.id, apiKey.id));
+    await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, apiKey.id));
 
     return { user, device: device ?? null };
-  }
+  },
 );

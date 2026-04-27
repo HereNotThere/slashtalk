@@ -47,11 +47,7 @@ async function readBody(req: http.IncomingMessage): Promise<Buffer | undefined> 
   return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
 }
 
-function response(
-  res: http.ServerResponse,
-  status: number,
-  text: string,
-): void {
+function response(res: http.ServerResponse, status: number, text: string): void {
   res.writeHead(status, {
     "content-type": "text/plain; charset=utf-8",
     "cache-control": "no-store",
@@ -73,10 +69,7 @@ function upstreamUrl(base: string, incomingUrl: string | undefined): URL {
   return target;
 }
 
-function forwardedHeaders(
-  req: http.IncomingMessage,
-  token: string,
-): Headers {
+function forwardedHeaders(req: http.IncomingMessage, token: string): Headers {
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
     const lower = name.toLowerCase();
@@ -100,9 +93,7 @@ function copyResponseHeaders(upstream: Response, res: http.ServerResponse): void
   });
 }
 
-export function createLocalMcpProxy(
-  deps: LocalMcpProxyDeps = {},
-): LocalMcpProxy {
+export function createLocalMcpProxy(deps: LocalMcpProxyDeps = {}): LocalMcpProxy {
   let server: http.Server | null = null;
   let boundPort = deps.port ?? localMcpPort();
   const getToken = deps.getToken ?? (() => null);
@@ -117,9 +108,7 @@ export function createLocalMcpProxy(
     }
 
     const expectedProxySecret = getProxySecret();
-    const suppliedProxySecret = headerValue(
-      req.headers[LOCAL_PROXY_SECRET_HEADER.toLowerCase()],
-    );
+    const suppliedProxySecret = headerValue(req.headers[LOCAL_PROXY_SECRET_HEADER.toLowerCase()]);
     if (!expectedProxySecret || suppliedProxySecret !== expectedProxySecret) {
       response(res, 401, "Invalid Slashtalk local proxy token");
       return;
@@ -202,10 +191,7 @@ export function createLocalMcpProxy(
           if (addr?.port) boundPort = addr.port;
           server = next;
           console.log("[localMcpProxy] listening", {
-            url:
-              deps.port === undefined
-                ? localProxyMcpUrl()
-                : `http://127.0.0.1:${boundPort}/mcp`,
+            url: deps.port === undefined ? localProxyMcpUrl() : `http://127.0.0.1:${boundPort}/mcp`,
           });
           resolve();
         });

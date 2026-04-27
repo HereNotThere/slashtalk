@@ -33,11 +33,7 @@ beforeAll(async () => {
     init?: RequestInit,
   ): Promise<Response> => {
     const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
     if (url === "https://github.com/login/oauth/access_token") {
       const body = JSON.parse(init?.body as string);
@@ -78,16 +74,11 @@ beforeAll(async () => {
         init?.headers instanceof Headers
           ? init.headers.get("authorization")
           : Array.isArray(init?.headers)
-            ? init.headers.find(
-                ([key]) => key.toLowerCase() === "authorization",
-              )?.[1]
+            ? init.headers.find(([key]) => key.toLowerCase() === "authorization")?.[1]
             : (init?.headers as Record<string, string> | undefined)?.Authorization;
-      return new Response(
-        JSON.stringify(authorization === "Bearer ghu_app_bob" ? BOB : ALICE),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify(authorization === "Bearer ghu_app_bob" ? BOB : ALICE), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     return originalFetch(input, init);
@@ -133,9 +124,7 @@ describe("GitHub App authorization", () => {
       redirect: "manual",
     });
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe(
-      "/auth/github?return_to=%2Fauth%2Fgithub-app",
-    );
+    expect(res.headers.get("location")).toBe("/auth/github?return_to=%2Fauth%2Fgithub-app");
   });
 
   it("preserves explicit install intent through Slashtalk sign-in", async () => {
@@ -159,9 +148,7 @@ describe("GitHub App authorization", () => {
     const location = new URL(start.headers.get("location")!);
     expect(location.origin).toBe("https://github.com");
     expect(location.pathname).toBe("/login/oauth/authorize");
-    expect(location.searchParams.get("client_id")).toBe(
-      config.githubAppClientId,
-    );
+    expect(location.searchParams.get("client_id")).toBe(config.githubAppClientId);
     expect(location.searchParams.get("redirect_uri")).toBe(
       "http://localhost:10000/auth/github-app/callback",
     );
@@ -175,10 +162,7 @@ describe("GitHub App authorization", () => {
     );
     expect(callback.status).toBe(200);
 
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "alice"));
+    const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
     expect(alice.githubAppUserToken).toBeTruthy();
     expect(alice.githubAppRefreshToken).toBeTruthy();
     expect(alice.githubAppTokenExpiresAt).toBeTruthy();
@@ -199,9 +183,7 @@ describe("GitHub App authorization", () => {
     expect(body.installUrl).toBe(
       `https://github.com/apps/${config.githubAppSlug}/installations/new`,
     );
-    expect(body.connectUrl).toStartWith(
-      "http://localhost:10000/auth/github-app?intent=",
-    );
+    expect(body.connectUrl).toStartWith("http://localhost:10000/auth/github-app?intent=");
   });
 
   it("binds desktop connect intents to the desktop-authenticated user", async () => {
@@ -232,10 +214,7 @@ describe("GitHub App authorization", () => {
     );
     expect(callback.status).toBe(200);
 
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "alice"));
+    const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
     expect(alice.githubAppUserToken).toBeTruthy();
   });
 
@@ -256,10 +235,7 @@ describe("GitHub App authorization", () => {
     );
     expect(callback.status).toBe(403);
 
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "alice"));
+    const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
     expect(alice.githubAppUserToken).toBeNull();
   });
 
@@ -274,9 +250,7 @@ describe("GitHub App authorization", () => {
     expect(start.status).toBe(302);
     const location = new URL(start.headers.get("location")!);
     expect(location.origin).toBe("https://github.com");
-    expect(location.pathname).toBe(
-      `/apps/${config.githubAppSlug}/installations/new`,
-    );
+    expect(location.pathname).toBe(`/apps/${config.githubAppSlug}/installations/new`);
     expect(location.searchParams.get("state")).toBeTruthy();
   });
 });

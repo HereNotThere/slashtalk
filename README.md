@@ -226,11 +226,11 @@ slashtalk/
 
 ## Key scripts
 
-| Command | Directory | Description |
-|---------|-----------|-------------|
-| `bun run dev` | `apps/server` | Start with file watching |
-| `bun run start` | `apps/server` | Start without watching |
+| Command               | Directory     | Description                 |
+| --------------------- | ------------- | --------------------------- |
+| `bun run dev`         | `apps/server` | Start with file watching    |
+| `bun run start`       | `apps/server` | Start without watching      |
 | `bun run db:generate` | `apps/server` | Generate Drizzle migrations |
-| `bun run db:migrate` | `apps/server` | Apply migrations |
-| `bun run typecheck` | `apps/server` | TypeScript type check |
-| `bun test` | `apps/server` | Run test suite |
+| `bun run db:migrate`  | `apps/server` | Apply migrations            |
+| `bun run typecheck`   | `apps/server` | TypeScript type check       |
+| `bun test`            | `apps/server` | Run test suite              |

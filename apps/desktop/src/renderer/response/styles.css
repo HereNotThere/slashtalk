@@ -8,7 +8,9 @@
 }
 
 @keyframes slashtalk-dot {
-  0%, 60%, 100% {
+  0%,
+  60%,
+  100% {
     opacity: 0.55;
     transform: translateX(0);
   }
@@ -19,7 +21,8 @@
 }
 
 @keyframes slashtalk-icon-breathe {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     filter: drop-shadow(0 0 0 rgba(46, 207, 129, 0));
   }

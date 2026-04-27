@@ -1,13 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "../src/db";
-import {
-  apiKeys,
-  devices,
-  oauthTokens,
-  refreshTokens,
-  users,
-} from "../src/db/schema";
+import { apiKeys, devices, oauthTokens, refreshTokens, users } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { hashToken } from "../src/auth/tokens";
@@ -278,9 +272,7 @@ describe("/auth/logout", () => {
       .from(refreshTokens)
       .where(eq(refreshTokens.userId, alice.userId));
     const otherSessionHash = await hashToken(otherSession.refreshToken);
-    expect(
-      remainingRefreshes.some((row) => row.tokenHash === otherSessionHash),
-    ).toBe(true);
+    expect(remainingRefreshes.some((row) => row.tokenHash === otherSessionHash)).toBe(true);
 
     const [apiKey] = await db
       .select()
@@ -291,9 +283,7 @@ describe("/auth/logout", () => {
     const [oauthToken] = await db
       .select()
       .from(oauthTokens)
-      .where(
-        eq(oauthTokens.accessTokenHash, await hashToken(bundle.accessToken)),
-      );
+      .where(eq(oauthTokens.accessTokenHash, await hashToken(bundle.accessToken)));
     expect(oauthToken?.revokedAt).toBeNull();
 
     const setup = await fetch(`${baseUrl}/api/me/setup-token`, {
@@ -386,32 +376,20 @@ describe("/auth/logout-everywhere", () => {
     const [aliceOauth] = await db
       .select()
       .from(oauthTokens)
-      .where(
-        eq(
-          oauthTokens.accessTokenHash,
-          await hashToken(aliceBundle.accessToken),
-        ),
-      );
+      .where(eq(oauthTokens.accessTokenHash, await hashToken(aliceBundle.accessToken)));
     expect(aliceOauth?.revokedAt).toBeTruthy();
 
     const [bobOauth] = await db
       .select()
       .from(oauthTokens)
-      .where(
-        eq(oauthTokens.accessTokenHash, await hashToken(bobBundle.accessToken)),
-      );
+      .where(eq(oauthTokens.accessTokenHash, await hashToken(bobBundle.accessToken)));
     expect(bobOauth?.revokedAt).toBeNull();
 
     const after = await mcpInitialize(aliceBundle.accessToken);
     expect(after.status).toBe(401);
-    expect(after.headers.get("www-authenticate")).toContain(
-      'error_description="revoked"',
-    );
+    expect(after.headers.get("www-authenticate")).toContain('error_description="revoked"');
 
-    const [aliceUser] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, alice.userId));
+    const [aliceUser] = await db.select().from(users).where(eq(users.id, alice.userId));
     expect(aliceUser.credentialsRevokedAt).toBeTruthy();
 
     const oldJwtSetup = await fetch(`${baseUrl}/api/me/setup-token`, {
@@ -437,14 +415,8 @@ describe("sign-in issues session + refresh cookies", () => {
     expect(getCookie(res, "refresh")).toBeTruthy();
 
     // The refresh row exists for Bob.
-    const [bob] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "bob"));
-    const rows = await db
-      .select()
-      .from(refreshTokens)
-      .where(eq(refreshTokens.userId, bob.id));
+    const [bob] = await db.select().from(users).where(eq(users.githubLogin, "bob"));
+    const rows = await db.select().from(refreshTokens).where(eq(refreshTokens.userId, bob.id));
     expect(rows.length).toBeGreaterThan(0);
   });
 });

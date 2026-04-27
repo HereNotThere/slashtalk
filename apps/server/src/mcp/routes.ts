@@ -26,8 +26,7 @@ export const mcpRoutes = (options: McpRouteOptions = {}) => {
     version: "0.0.1",
     presence,
     maxSessionsPerUser:
-      options.maxConcurrentSessionsPerUser ??
-      config.mcpMaxConcurrentSessionsPerUser,
+      options.maxConcurrentSessionsPerUser ?? config.mcpMaxConcurrentSessionsPerUser,
   });
 
   return new Elysia({ name: "mcp" })
@@ -41,9 +40,7 @@ export const mcpRoutes = (options: McpRouteOptions = {}) => {
         set.status = 401;
         set.headers["www-authenticate"] = mcpWwwAuthenticate(
           mcpOrigin(request),
-          auth.reason
-            ? { code: "invalid_token", description: auth.reason }
-            : undefined,
+          auth.reason ? { code: "invalid_token", description: auth.reason } : undefined,
         );
         return "Invalid or missing bearer token";
       }
@@ -78,9 +75,7 @@ class PerUserRequestLimiter {
 
   constructor(private options: { max: number; windowMs: number }) {}
 
-  record(userId: number):
-    | { ok: true }
-    | { ok: false; limit: number; windowMs: number } {
+  record(userId: number): { ok: true } | { ok: false; limit: number; windowMs: number } {
     const now = Date.now();
     const cutoff = now - this.options.windowMs;
     const bucket = this.buckets.get(userId)?.filter((ts) => ts > cutoff) ?? [];
@@ -115,17 +110,9 @@ async function authenticateMcpRequest(request: Request): Promise<McpAuthResult> 
   const bearer = authHeader.slice(7);
   const tokenHash = await hashToken(bearer);
 
-  const [apiKey] = await db
-    .select()
-    .from(apiKeys)
-    .where(eq(apiKeys.keyHash, tokenHash))
-    .limit(1);
+  const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, tokenHash)).limit(1);
   if (apiKey) {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, apiKey.userId))
-      .limit(1);
+    const [user] = await db.select().from(users).where(eq(users.id, apiKey.userId)).limit(1);
     if (!user) return { ok: false, reason: "unknown user" };
 
     const [device] = await db
@@ -134,10 +121,7 @@ async function authenticateMcpRequest(request: Request): Promise<McpAuthResult> 
       .where(eq(devices.id, apiKey.deviceId))
       .limit(1);
 
-    await db
-      .update(apiKeys)
-      .set({ lastUsedAt: new Date() })
-      .where(eq(apiKeys.id, apiKey.id));
+    await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, apiKey.id));
 
     return { ok: true, user, device: device ?? null, method: "api_key" };
   }
@@ -161,11 +145,7 @@ async function authenticateMcpRequest(request: Request): Promise<McpAuthResult> 
     return { ok: false, reason: "insufficient scope" };
   }
 
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, oauthToken.userId))
-    .limit(1);
+  const [user] = await db.select().from(users).where(eq(users.id, oauthToken.userId)).limit(1);
   if (!user) return { ok: false, reason: "unknown user" };
 
   return { ok: true, user, device: null, method: "oauth" };

@@ -3,11 +3,7 @@ import { eq, sql, and, gt, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import {
-  toSnapshot,
-  sortByStateThenTime,
-  loadInsightsForSessions,
-} from "../sessions/snapshot";
+import { toSnapshot, sortByStateThenTime, loadInsightsForSessions } from "../sessions/snapshot";
 import { HEARTBEAT_FRESH_S } from "../sessions/state";
 import { normalizeFullName } from "./github-sync";
 
@@ -44,9 +40,7 @@ export const socialRoutes = (db: Database) =>
             .where(eq(users.githubLogin, query.user))
             .limit(1);
           if (filterUser) {
-            sessionRows = sessionRows.filter(
-              (s) => s.userId === filterUser.id
-            );
+            sessionRows = sessionRows.filter((s) => s.userId === filterUser.id);
           } else {
             return [];
           }
@@ -60,9 +54,7 @@ export const socialRoutes = (db: Database) =>
             .where(eq(repos.fullName, normalizeFullName(query.repo)))
             .limit(1);
           if (filterRepo) {
-            sessionRows = sessionRows.filter(
-              (s) => s.repoId === filterRepo.id
-            );
+            sessionRows = sessionRows.filter((s) => s.repoId === filterRepo.id);
           } else {
             return [];
           }
@@ -72,10 +64,7 @@ export const socialRoutes = (db: Database) =>
         const sessionIds = sessionRows.map((s) => s.sessionId);
         const hbRows =
           sessionIds.length > 0
-            ? await db
-                .select()
-                .from(heartbeats)
-                .where(inArray(heartbeats.sessionId, sessionIds))
+            ? await db.select().from(heartbeats).where(inArray(heartbeats.sessionId, sessionIds))
             : [];
         const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
 
@@ -96,9 +85,7 @@ export const socialRoutes = (db: Database) =>
 
         // Get repo info for augmentation
         const repoIdSet = [
-          ...new Set(
-            sessionRows.map((s) => s.repoId).filter(Boolean) as number[]
-          ),
+          ...new Set(sessionRows.map((s) => s.repoId).filter(Boolean) as number[]),
         ];
         const repoRows =
           repoIdSet.length > 0
@@ -114,11 +101,7 @@ export const socialRoutes = (db: Database) =>
         // Build augmented snapshots
         let snapshots = sessionRows.map((s) => {
           const hb = hbMap.get(s.sessionId) ?? null;
-          const snapshot = toSnapshot(
-            s,
-            hb,
-            insightsMap.get(s.sessionId) ?? null,
-          );
+          const snapshot = toSnapshot(s, hb, insightsMap.get(s.sessionId) ?? null);
           const u = userMap.get(s.userId);
           const r = s.repoId ? repoMap.get(s.repoId) : null;
           return {
@@ -143,14 +126,12 @@ export const socialRoutes = (db: Database) =>
           repo: t.Optional(t.String()),
           state: t.Optional(t.String()),
         }),
-      }
+      },
     )
 
     // GET /api/feed/users — users in social graph with session counts
     .get("/feed/users", async ({ user }) => {
-      const freshHeartbeatCutoff = new Date(
-        Date.now() - HEARTBEAT_FRESH_S * 1000,
-      );
+      const freshHeartbeatCutoff = new Date(Date.now() - HEARTBEAT_FRESH_S * 1000);
       const peerUserIds = await db
         .selectDistinct({ userId: userRepos.userId })
         .from(userRepos)
@@ -160,19 +141,14 @@ export const socialRoutes = (db: Database) =>
             db
               .select({ repoId: userRepos.repoId })
               .from(userRepos)
-              .where(eq(userRepos.userId, user.id))
-          )
+              .where(eq(userRepos.userId, user.id)),
+          ),
         );
 
-      const userIds = peerUserIds
-        .map((r) => r.userId)
-        .filter((id) => id !== user.id);
+      const userIds = peerUserIds.map((r) => r.userId).filter((id) => id !== user.id);
       if (userIds.length === 0) return [];
 
-      const peerUsers = await db
-        .select()
-        .from(users)
-        .where(inArray(users.id, userIds));
+      const peerUsers = await db.select().from(users).where(inArray(users.id, userIds));
 
       const [sessionCountRows, activeCountRows, peerRepoRows] = await Promise.all([
         db
@@ -191,10 +167,7 @@ export const socialRoutes = (db: Database) =>
           .from(sessions)
           .innerJoin(heartbeats, eq(heartbeats.sessionId, sessions.sessionId))
           .where(
-            and(
-              inArray(sessions.userId, userIds),
-              gt(heartbeats.updatedAt, freshHeartbeatCutoff),
-            ),
+            and(inArray(sessions.userId, userIds), gt(heartbeats.updatedAt, freshHeartbeatCutoff)),
           )
           .groupBy(sessions.userId),
         db
@@ -207,12 +180,8 @@ export const socialRoutes = (db: Database) =>
           .where(inArray(userRepos.userId, userIds)),
       ]);
 
-      const sessionCountByUser = new Map(
-        sessionCountRows.map((row) => [row.userId, row.count]),
-      );
-      const activeCountByUser = new Map(
-        activeCountRows.map((row) => [row.userId, row.count]),
-      );
+      const sessionCountByUser = new Map(sessionCountRows.map((row) => [row.userId, row.count]));
+      const activeCountByUser = new Map(activeCountRows.map((row) => [row.userId, row.count]));
       const reposByUser = new Map<number, string[]>();
       for (const row of peerRepoRows) {
         const existing = reposByUser.get(row.userId);

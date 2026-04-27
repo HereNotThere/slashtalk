@@ -2,11 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, SessionCard, SessionState } from "@slashtalk/shared";
-import type {
-  AgentSummary,
-  ChatHead,
-  ResponseOpenPayload,
-} from "../../shared/types";
+import type { AgentSummary, ChatHead, ResponseOpenPayload } from "../../shared/types";
 import { AgentChat } from "../info/AgentPanel";
 import { SendIcon } from "../shared/icons";
 
@@ -68,7 +64,6 @@ const MARKDOWN_CLASSES =
   "[&_hr]:border-divider [&_hr]:my-6 " +
   "[&_a]:text-link [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-link-hover";
 
-
 export function App(): JSX.Element {
   const [payload, setPayload] = useState<ResponseOpenPayload | null>(null);
 
@@ -82,11 +77,7 @@ export function App(): JSX.Element {
     return <AgentResponse payload={payload} />;
   }
 
-  return (
-    <MessageResponse
-      message={payload?.kind === "message" ? payload.message : null}
-    />
-  );
+  return <MessageResponse message={payload?.kind === "message" ? payload.message : null} />;
 }
 
 function AgentResponse({
@@ -204,10 +195,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
   function handleFollowUpSend(): void {
     const trimmed = followUp.trim();
     if (!trimmed || loading) return;
-    const next: ChatMessage[] = [
-      ...messages,
-      { role: "user", content: trimmed },
-    ];
+    const next: ChatMessage[] = [...messages, { role: "user", content: trimmed }];
     setMessages(next);
     setFollowUp("");
     void ask(next, trimmed);
@@ -238,9 +226,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
                     {m.content.replace(CITATION_TOKEN, "")}
                   </ReactMarkdown>
                 </div>
-                {m.cards && m.cards.length > 0 && (
-                  <SessionCardStack cards={m.cards} />
-                )}
+                {m.cards && m.cards.length > 0 && <SessionCardStack cards={m.cards} />}
               </div>
             ),
           )}
@@ -248,9 +234,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
           {loading && (
             <div className="flex items-center gap-2.5 text-[14px]">
               <SlashtalkSpinner />
-              <span className="shimmer-text italic">
-                {gerunds[gerundIdx] ?? gerunds[0]}...
-              </span>
+              <span className="shimmer-text italic">{gerunds[gerundIdx] ?? gerunds[0]}...</span>
             </div>
           )}
 
@@ -285,9 +269,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
                   handleFollowUpSend();
                 }
               }}
-              placeholder={
-                loading ? "Waiting for reply..." : "Reply to Slashtalk..."
-              }
+              placeholder={loading ? "Waiting for reply..." : "Reply to Slashtalk..."}
               disabled={loading}
               className="
                 flex-1 min-w-0 bg-transparent border-none outline-none
@@ -365,34 +347,20 @@ function SessionCardView({ card }: { card: SessionCard }): JSX.Element {
       <Avatar src={card.user.avatarUrl} fallback={name} />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-medium text-fg truncate">
-            {primary}
-          </span>
+          <span className="text-sm font-medium text-fg truncate">{primary}</span>
           <StateDot state={card.state} />
         </div>
         <div className="text-xs text-subtle truncate">{meta}</div>
-        {tool && (
-          <div className="text-xs text-muted/70 truncate">{tool}</div>
-        )}
+        {tool && <div className="text-xs text-muted/70 truncate">{tool}</div>}
       </div>
     </button>
   );
 }
 
-function Avatar({
-  src,
-  fallback,
-}: {
-  src: string | null;
-  fallback: string;
-}): JSX.Element {
+function Avatar({ src, fallback }: { src: string | null; fallback: string }): JSX.Element {
   if (src) {
     return (
-      <img
-        src={src}
-        alt=""
-        className="w-8 h-8 rounded-full shrink-0 bg-surface object-cover"
-      />
+      <img src={src} alt="" className="w-8 h-8 rounded-full shrink-0 bg-surface object-cover" />
     );
   }
   return (

@@ -51,7 +51,7 @@ function render(
       lines.push("**Indexes:**");
       for (const ix of cfg.indexes) {
         const cols = ix.config.columns
-          .map((col) => (is(col, SQL) ? "expr" : col.name ?? "expr"))
+          .map((col) => (is(col, SQL) ? "expr" : (col.name ?? "expr")))
           .join(", ");
         const kind = ix.config.unique ? "unique index" : "index";
         lines.push(`- \`${ix.config.name}\` (${kind}) on \`(${cols})\``);

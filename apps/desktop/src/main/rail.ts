@@ -43,11 +43,7 @@ function bucketOf(lastActionAt: number | null | undefined, now: number): number 
 
 // Stable-sort by bucket, breaking ties by prior rail position so peers in the
 // same bucket don't swap when either one emits an event.
-function sortByBucket(
-  next: ChatHead[],
-  prior: ChatHead[],
-  now: number,
-): ChatHead[] {
+function sortByBucket(next: ChatHead[], prior: ChatHead[], now: number): ChatHead[] {
   const priorIndex = new Map<string, number>();
   prior.forEach((h, i) => priorIndex.set(h.id, i));
   return [...next].sort((a, b) => {
@@ -79,14 +75,7 @@ const PR_ACTIVITY_TTL_MS = 8_000;
 const debugFakes: ChatHead[] = [];
 let debugFakeSeq = 0;
 const DEBUG_EMOJIS = ["🦊", "🐼", "🐙", "🦄", "🐸", "🐵", "🦉", "🐧", "🐝"];
-const DEBUG_TINTS = [
-  "#ff6b6b",
-  "#4ecdc4",
-  "#ffd166",
-  "#9b5de5",
-  "#06d6a0",
-  "#f15bb5",
-];
+const DEBUG_TINTS = ["#ff6b6b", "#4ecdc4", "#ffd166", "#9b5de5", "#06d6a0", "#f15bb5"];
 
 export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
@@ -102,9 +91,7 @@ export function userHeadId(login: string): string {
 }
 
 export function parseUserHeadId(headId: string): string | null {
-  return headId.startsWith(USER_HEAD_PREFIX)
-    ? headId.slice(USER_HEAD_PREFIX.length)
-    : null;
+  return headId.startsWith(USER_HEAD_PREFIX) ? headId.slice(USER_HEAD_PREFIX.length) : null;
 }
 
 export function agentHeadId(agentId: string): string {
@@ -112,9 +99,7 @@ export function agentHeadId(agentId: string): string {
 }
 
 export function parseAgentHeadId(headId: string): string | null {
-  return headId.startsWith(AGENT_HEAD_PREFIX)
-    ? headId.slice(AGENT_HEAD_PREFIX.length)
-    : null;
+  return headId.startsWith(AGENT_HEAD_PREFIX) ? headId.slice(AGENT_HEAD_PREFIX.length) : null;
 }
 
 function headForUser(
@@ -148,18 +133,10 @@ function headForAgent(agent: LocalAgent): ChatHead {
   };
 }
 
-function selfHead(
-  lastActivityAt?: number | null,
-  isLive?: boolean,
-): ChatHead | null {
+function selfHead(lastActivityAt?: number | null, isLive?: boolean): ChatHead | null {
   const state = backend.getAuthState();
   if (!state.signedIn) return null;
-  return headForUser(
-    state.user.githubLogin,
-    state.user.avatarUrl,
-    lastActivityAt,
-    isLive,
-  );
+  return headForUser(state.user.githubLogin, state.user.avatarUrl, lastActivityAt, isLive);
 }
 
 function sameHeads(a: ChatHead[], b: ChatHead[]): boolean {
@@ -172,8 +149,7 @@ function sameHeads(a: ChatHead[], b: ChatHead[]): boolean {
     if (a[i].kind !== b[i].kind) return false;
     // Compare bucketed activity, not raw ms — sub-label changes shouldn't
     // retrigger animations or reorders.
-    if (bucketOf(a[i].lastActionAt, now) !== bucketOf(b[i].lastActionAt, now))
-      return false;
+    if (bucketOf(a[i].lastActionAt, now) !== bucketOf(b[i].lastActionAt, now)) return false;
     if (a[i].live !== b[i].live) return false;
     if (a[i].unread !== b[i].unread) return false;
     if (a[i].prActivityAt !== b[i].prActivityAt) return false;
@@ -197,11 +173,7 @@ async function refresh(): Promise<void> {
   }
   console.log(`[rail] refresh as ${initialSelf.label}`);
   const now = Date.now();
-  const agentHeads = sortByBucket(
-    agentStore.list().map(headForAgent),
-    heads,
-    now,
-  );
+  const agentHeads = sortByBucket(agentStore.list().map(headForAgent), heads, now);
   try {
     // Fetch peers and feed in parallel. Each peer's "last activity" is the
     // timestamp of the most recent session in the feed keyed by login — no
@@ -231,8 +203,7 @@ async function refresh(): Promise<void> {
     console.log(
       `[rail] self=${initialSelf.label} selfLastTs=${selfLastTs} feedCount=${feedSessions.length} latestByLogin=${JSON.stringify([...latestByLogin.entries()])}`,
     );
-    const self =
-      selfHead(selfLastTs, liveByLogin.has(initialSelf.label)) ?? initialSelf;
+    const self = selfHead(selfLastTs, liveByLogin.has(initialSelf.label)) ?? initialSelf;
 
     // Client-side filter: drop peers whose sessions don't land on a repo the
     // user has locally tracked AND left selected in the tray popup. Backend
@@ -244,9 +215,7 @@ async function refresh(): Promise<void> {
     const filteredPeers =
       trackedCount === 0
         ? peers
-        : peers.filter((p) =>
-            p.repos.some((r) => selectedRepos.has(r.toLowerCase())),
-          );
+        : peers.filter((p) => p.repos.some((r) => selectedRepos.has(r.toLowerCase())));
 
     const peerHeads = filteredPeers.map((t) =>
       headForUser(

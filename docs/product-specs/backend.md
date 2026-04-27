@@ -580,10 +580,9 @@ The script is a POSIX-compatible shell script that:
 ```
 
 so the server records `device_repo_paths` and
-`device_excluded_repos`.
-7. After repo registration, the server rematches any existing
-   owner-only sessions for that device using the newly stored
-   `device_repo_paths`.
+`device_excluded_repos`. 7. After repo registration, the server rematches any existing
+owner-only sessions for that device using the newly stored
+`device_repo_paths`.
 
 ### 6.3 Initial Upload
 

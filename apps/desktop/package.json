@@ -40,7 +40,10 @@
       "identity": null
     }
   },
-  "trustedDependencies": ["electron", "esbuild"],
+  "trustedDependencies": [
+    "electron",
+    "esbuild"
+  ],
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.118",
     "@anthropic-ai/sdk": "^0.90.0",

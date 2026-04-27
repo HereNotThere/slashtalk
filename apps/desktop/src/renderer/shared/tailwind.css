@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
 @keyframes shimmer-char {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* Pulsing ring around a rail chathead whose user has a live session. Shares
@@ -10,8 +15,13 @@
  * "working now…" label feel like one signal. Floor is a touch higher than the
  * text shimmer because a thin ring reads as blinking at low opacity. */
 @keyframes live-ring {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

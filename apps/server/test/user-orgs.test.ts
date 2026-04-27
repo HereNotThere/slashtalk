@@ -31,17 +31,12 @@ beforeAll(async () => {
     init?: RequestInit,
   ): Promise<Response> => {
     const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
     if (url === "https://github.com/login/oauth/access_token") {
-      return new Response(
-        JSON.stringify({ access_token: "ghtoken_alice_code" }),
-        { headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ access_token: "ghtoken_alice_code" }), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
     if (url === "https://api.github.com/user") {
       return new Response(JSON.stringify(ALICE), {

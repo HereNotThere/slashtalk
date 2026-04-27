@@ -30,13 +30,13 @@ How the load-bearing flows (ingest, heartbeat, pub/sub, analyzers) degrade and r
 
 **State classification** (`apps/server/src/sessions/state.ts`):
 
-| State | Condition |
-| --- | --- |
-| `BUSY` | heartbeat < 30 s old **and** `sessions.in_turn = true` |
-| `ACTIVE` | heartbeat < 30 s old **and** last event < 30 s old |
-| `IDLE` | heartbeat < 30 s old **and** last event ≥ 30 s old |
-| `RECENT` | heartbeat ≥ 30 s old **and** last event < 1 h old |
-| `ENDED` | otherwise |
+| State    | Condition                                              |
+| -------- | ------------------------------------------------------ |
+| `BUSY`   | heartbeat < 30 s old **and** `sessions.in_turn = true` |
+| `ACTIVE` | heartbeat < 30 s old **and** last event < 30 s old     |
+| `IDLE`   | heartbeat < 30 s old **and** last event ≥ 30 s old     |
+| `RECENT` | heartbeat ≥ 30 s old **and** last event < 1 h old      |
+| `ENDED`  | otherwise                                              |
 
 **Why `in_turn` is load-bearing.** A silent thinking block can run for tens of seconds with zero JSONL events. `in_turn` flips `true` on every real user prompt or queued command, and `false` only on an assistant event with `stop_reason == "end_turn"`. Classifying solely by "time since last event" loses the BUSY state during thinking. Do not collapse.
 
@@ -50,11 +50,11 @@ How the load-bearing flows (ingest, heartbeat, pub/sub, analyzers) degrade and r
 
 **Channels in production.**
 
-| Channel | Message types | Publisher |
-| --- | --- | --- |
-| `repo:<id>` | `session_updated` | ingest + heartbeat |
-| `repo:<id>` | `session_insights_updated` | analyzer scheduler |
-| `repo:<id>` | `pr_activity` | PR poller |
+| Channel         | Message types                    | Publisher            |
+| --------------- | -------------------------------- | -------------------- |
+| `repo:<id>`     | `session_updated`                | ingest + heartbeat   |
+| `repo:<id>`     | `session_insights_updated`       | analyzer scheduler   |
+| `repo:<id>`     | `pr_activity`                    | PR poller            |
 | `user:<userId>` | `presence` (Spotify now-playing) | `presence/routes.ts` |
 
 **Liveness.** Server sends `{ type: "ping" }` every 30 s on every WS connection (Render's load balancer requires <60 s idle).

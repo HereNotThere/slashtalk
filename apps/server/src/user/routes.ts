@@ -44,10 +44,7 @@ const orgReposCache = new Map<string, { at: number; value: OrgRepo[] }>();
 // the same (user, fullName) pair (desktop double-clicks, retry-on-failure).
 // Keyed by `${userId}:${fullName-lower}`.
 const CLAIM_VERIFY_TTL_MS = 60_000;
-const claimVerifyCache = new Map<
-  string,
-  { at: number; value: VerifiedRepo }
->();
+const claimVerifyCache = new Map<string, { at: number; value: VerifiedRepo }>();
 
 // Per-user rate-limit for `POST /api/me/repos`. Blocks an adversary with a
 // stolen JWT from enumerating private repos by brute-forcing fullNames.
@@ -61,10 +58,7 @@ const claimRateBuckets = new Map<number, number[]>();
 const SWEEP_THRESHOLD = 5_000;
 
 function sweepClaimCaches(now: number): void {
-  if (
-    claimRateBuckets.size < SWEEP_THRESHOLD &&
-    claimVerifyCache.size < SWEEP_THRESHOLD
-  ) {
+  if (claimRateBuckets.size < SWEEP_THRESHOLD && claimVerifyCache.size < SWEEP_THRESHOLD) {
     return;
   }
   const rateCutoff = now - CLAIM_RATE_WINDOW_MS;
@@ -142,10 +136,7 @@ async function verifyRepoAccess(
       { headers: githubHeaders(token) },
     );
   } catch (err) {
-    console.warn(
-      `[claim] fetch /repos/${owner}/${name} threw:`,
-      (err as Error).message,
-    );
+    console.warn(`[claim] fetch /repos/${owner}/${name} threw:`, (err as Error).message);
     return { ok: false, kind: "upstream_unavailable" };
   }
   if (res.status === 404) {
@@ -158,9 +149,7 @@ async function verifyRepoAccess(
     return { ok: false, kind: "github_grant_revoked" };
   }
   if (res.status === 403) {
-    console.warn(
-      `[claim] GitHub 403 on /repos/${owner}/${name} — token stale or scope missing`,
-    );
+    console.warn(`[claim] GitHub 403 on /repos/${owner}/${name} — token stale or scope missing`);
     return { ok: false, kind: "token_expired" };
   }
   if (!res.ok) {
@@ -174,13 +163,7 @@ async function verifyRepoAccess(
     owner?: { login?: string };
     private?: boolean;
   } | null;
-  if (
-    !raw ||
-    typeof raw.id !== "number" ||
-    !raw.full_name ||
-    !raw.name ||
-    !raw.owner?.login
-  ) {
+  if (!raw || typeof raw.id !== "number" || !raw.full_name || !raw.name || !raw.owner?.login) {
     console.warn(`[claim] malformed body from /repos/${owner}/${name}`);
     return { ok: false, kind: "upstream_unavailable" };
   }
@@ -202,18 +185,14 @@ async function verifyRepoAccessWithGitHubAppUserToken(
   name: string,
 ): Promise<VerifyOutcome> {
   const normalizedFullName = `${owner}/${name}`.toLowerCase();
-  let url: string | null =
-    "https://api.github.com/user/installations?per_page=100";
+  let url: string | null = "https://api.github.com/user/installations?per_page=100";
 
   while (url) {
     let installationsRes: Response;
     try {
       installationsRes = await fetch(url, { headers: githubAppUserHeaders(token) });
     } catch (err) {
-      console.warn(
-        "[claim] fetch /user/installations threw:",
-        (err as Error).message,
-      );
+      console.warn("[claim] fetch /user/installations threw:", (err as Error).message);
       return { ok: false, kind: "upstream_unavailable" };
     }
 
@@ -224,23 +203,17 @@ async function verifyRepoAccessWithGitHubAppUserToken(
       return { ok: false, kind: "github_app_required" };
     }
     if (!installationsRes.ok) {
-      console.warn(
-        `[claim] GitHub ${installationsRes.status} on /user/installations`,
-      );
+      console.warn(`[claim] GitHub ${installationsRes.status} on /user/installations`);
       return { ok: false, kind: "upstream_unavailable" };
     }
 
-    const installationsBody = (await installationsRes.json().catch(
-      () => null,
-    )) as
-      | {
-          installations?: Array<{
-            id?: number;
-            suspended_at?: string | null;
-            app_slug?: string;
-          }>;
-        }
-      | null;
+    const installationsBody = (await installationsRes.json().catch(() => null)) as {
+      installations?: Array<{
+        id?: number;
+        suspended_at?: string | null;
+        app_slug?: string;
+      }>;
+    } | null;
     const installations =
       installationsBody?.installations?.filter(
         (installation) =>
@@ -298,13 +271,9 @@ async function findRepoInGitHubAppInstallation(
       return { ok: false, kind: "upstream_unavailable" };
     }
 
-    const body = (await res.json().catch(() => null)) as
-      | { repositories?: RawGithubRepo[] }
-      | null;
+    const body = (await res.json().catch(() => null)) as { repositories?: RawGithubRepo[] } | null;
     const repositories = body?.repositories ?? [];
-    const match = repositories.find(
-      (repo) => repo.full_name?.toLowerCase() === normalizedFullName,
-    );
+    const match = repositories.find((repo) => repo.full_name?.toLowerCase() === normalizedFullName);
     if (match) {
       const repo = verifiedRepoFromRaw(match);
       if (!repo) {
@@ -322,12 +291,7 @@ async function findRepoInGitHubAppInstallation(
 }
 
 function verifiedRepoFromRaw(raw: RawGithubRepo): VerifiedRepo | null {
-  if (
-    typeof raw.id !== "number" ||
-    !raw.full_name ||
-    !raw.name ||
-    !raw.owner?.login
-  ) {
+  if (typeof raw.id !== "number" || !raw.full_name || !raw.name || !raw.owner?.login) {
     return null;
   }
   return {
@@ -339,10 +303,7 @@ function verifiedRepoFromRaw(raw: RawGithubRepo): VerifiedRepo | null {
   };
 }
 
-async function fetchUserGithubToken(
-  db: Database,
-  userId: number,
-): Promise<string | null> {
+async function fetchUserGithubToken(db: Database, userId: number): Promise<string | null> {
   const [row] = await db
     .select({ githubToken: users.githubToken })
     .from(users)
@@ -442,9 +403,7 @@ export const userRoutes = (db: Database) =>
         const [device] = await db
           .select()
           .from(devices)
-          .where(
-            and(eq(devices.id, Number(params.id)), eq(devices.userId, user.id)),
-          )
+          .where(and(eq(devices.id, Number(params.id)), eq(devices.userId, user.id)))
           .limit(1);
 
         if (!device) {
@@ -577,11 +536,7 @@ export const userRoutes = (db: Database) =>
               };
             }
             if (outcome.kind === "github_grant_revoked") {
-              await revokeAllUserCredentials(
-                db,
-                user.id,
-                "github_grant_revoked",
-              );
+              await revokeAllUserCredentials(db, user.id, "github_grant_revoked");
               set.status = 401;
               return {
                 error: "token_expired",
@@ -649,7 +604,7 @@ export const userRoutes = (db: Database) =>
         body: t.Object({
           fullName: t.String({ minLength: 3, maxLength: 140 }),
         }),
-      }
+      },
     )
 
     // GET /api/me/github-app/status — whether this user has linked the
@@ -659,9 +614,7 @@ export const userRoutes = (db: Database) =>
       return {
         ...status,
         installUrl: status.configured ? githubAppInstallUrl() : null,
-        connectUrl: status.configured
-          ? githubAppConnectUrlForUser(user.id)
-          : githubAppConnectUrl(),
+        connectUrl: status.configured ? githubAppConnectUrlForUser(user.id) : githubAppConnectUrl(),
       };
     })
 
@@ -671,15 +624,10 @@ export const userRoutes = (db: Database) =>
       async ({ user, params }) => {
         await db
           .delete(userRepos)
-          .where(
-            and(
-              eq(userRepos.userId, user.id),
-              eq(userRepos.repoId, Number(params.repoId))
-            )
-          );
+          .where(and(eq(userRepos.userId, user.id), eq(userRepos.repoId, Number(params.repoId))));
         return { ok: true };
       },
-      { params: t.Object({ repoId: t.String() }) }
+      { params: t.Object({ repoId: t.String() }) },
     )
 
     // POST /api/me/setup-token — generate a new setup token
@@ -709,10 +657,9 @@ export const userRoutes = (db: Database) =>
 
       let res: Response;
       try {
-        res = await fetch(
-          "https://api.github.com/user/orgs?per_page=100",
-          { headers: githubHeaders(token) },
-        );
+        res = await fetch("https://api.github.com/user/orgs?per_page=100", {
+          headers: githubHeaders(token),
+        });
       } catch {
         return [];
       }
@@ -772,20 +719,14 @@ export const userRoutes = (db: Database) =>
             return [];
           }
           if (res.status === 401) {
-            await revokeAllUserCredentials(
-              db,
-              user.id,
-              "github_grant_revoked",
-            );
+            await revokeAllUserCredentials(db, user.id, "github_grant_revoked");
             return [];
           }
           if (res.status === 403) return [];
           if (res.status === 404) return [];
           if (!res.ok) return [];
 
-          const raw = (await res
-            .json()
-            .catch(() => null)) as RawGithubRepo[] | null;
+          const raw = (await res.json().catch(() => null)) as RawGithubRepo[] | null;
           if (!Array.isArray(raw)) break;
 
           for (const r of raw) {
@@ -841,11 +782,7 @@ export const deviceReposRoutes = (db: Database) =>
             set.status = 401;
             throw new Error("Invalid API key");
           }
-          const [user] = await db
-            .select()
-            .from(users)
-            .where(eq(users.id, apiKey.userId))
-            .limit(1);
+          const [user] = await db.select().from(users).where(eq(users.id, apiKey.userId)).limit(1);
           if (!user) {
             set.status = 401;
             throw new Error("User not found");
@@ -913,9 +850,7 @@ export const deviceReposRoutes = (db: Database) =>
           .innerJoin(repos, eq(repos.id, userRepos.repoId))
           .where(eq(userRepos.userId, user.id));
 
-        const repoIdByFullName = new Map(
-          visibleRepos.map((repo) => [repo.fullName, repo.repoId]),
-        );
+        const repoIdByFullName = new Map(visibleRepos.map((repo) => [repo.fullName, repo.repoId]));
         const visibleRepoIds = new Set(visibleRepos.map((repo) => repo.repoId));
         const skippedRepos: string[] = [];
 
@@ -924,10 +859,7 @@ export const deviceReposRoutes = (db: Database) =>
           fullName?: string;
           repoFullName?: string;
         }): number | null => {
-          if (
-            typeof input.repoId === "number" &&
-            visibleRepoIds.has(input.repoId)
-          ) {
+          if (typeof input.repoId === "number" && visibleRepoIds.has(input.repoId)) {
             return input.repoId;
           }
 
@@ -941,9 +873,7 @@ export const deviceReposRoutes = (db: Database) =>
 
         // Store local path → repo mappings (from install-time discovery)
         let repoPathsStored = 0;
-        await db
-          .delete(deviceRepoPaths)
-          .where(eq(deviceRepoPaths.deviceId, deviceId));
+        await db.delete(deviceRepoPaths).where(eq(deviceRepoPaths.deviceId, deviceId));
 
         if (body.repoPaths !== undefined) {
           const repoPathsByRepoId = new Map<number, string>();
@@ -960,13 +890,13 @@ export const deviceReposRoutes = (db: Database) =>
             repoPathsByRepoId.set(repoId, repoPath.localPath);
           }
 
-          const normalizedRepoPaths = Array.from(
-            repoPathsByRepoId.entries(),
-          ).map(([repoId, localPath]) => ({
-            deviceId,
-            repoId,
-            localPath,
-          }));
+          const normalizedRepoPaths = Array.from(repoPathsByRepoId.entries()).map(
+            ([repoId, localPath]) => ({
+              deviceId,
+              repoId,
+              localPath,
+            }),
+          );
 
           repoPathsStored = normalizedRepoPaths.length;
           if (normalizedRepoPaths.length > 0) {
@@ -975,9 +905,7 @@ export const deviceReposRoutes = (db: Database) =>
         }
 
         // Store exclusions
-        await db
-          .delete(deviceExcludedRepos)
-          .where(eq(deviceExcludedRepos.deviceId, deviceId));
+        await db.delete(deviceExcludedRepos).where(eq(deviceExcludedRepos.deviceId, deviceId));
 
         const excludedRepoIds = new Set<number>();
         for (const repoId of body.excludedRepoIds ?? []) {

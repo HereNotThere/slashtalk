@@ -20,13 +20,11 @@ const SCHEMA = {
   properties: {
     title: {
       type: "string",
-      description:
-        "5-8 word label for this session in sentence case, no ending period.",
+      description: "5-8 word label for this session in sentence case, no ending period.",
     },
     description: {
       type: "string",
-      description:
-        "1-2 sentences describing the intent and current approach of the session.",
+      description: "1-2 sentences describing the intent and current approach of the session.",
     },
   },
   required: ["title", "description"],
@@ -104,23 +102,19 @@ export const summaryAnalyzer: Analyzer<SummaryOutput> = {
     if (currentSeq - prevSeq >= LINE_SEQ_REFRESH_DELTA) return true;
 
     const analyzedAt = existing.analyzedAt?.getTime() ?? 0;
-    return (
-      Date.now() - analyzedAt >= REFRESH_MIN_MS && currentSeq > prevSeq
-    );
+    return Date.now() - analyzedAt >= REFRESH_MIN_MS && currentSeq > prevSeq;
   },
 
   async run(ctx): Promise<AnalyzerResult<SummaryOutput>> {
     const recent = await ctx.recentEvents();
-    const prior =
-      (ctx.existingInsight?.output as SummaryOutput | undefined) ?? null;
+    const prior = (ctx.existingInsight?.output as SummaryOutput | undefined) ?? null;
     const prompt = buildPrompt(ctx, recent, prior);
     const result = await callStructured<SummaryOutput>({
       model: MODEL,
       system: SYSTEM,
       prompt,
       toolName: "emit_summary",
-      toolDescription:
-        "Emit the title and 1-2 sentence description for this coding session.",
+      toolDescription: "Emit the title and 1-2 sentence description for this coding session.",
       schema: SCHEMA,
       maxTokens: 300,
     });

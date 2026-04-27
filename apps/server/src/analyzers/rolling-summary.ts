@@ -20,15 +20,13 @@ const SCHEMA = {
   properties: {
     summary: {
       type: "string",
-      description:
-        "3-5 sentences in present tense narrating what is happening in this session.",
+      description: "3-5 sentences in present tense narrating what is happening in this session.",
     },
     highlights: {
       type: "array",
       items: { type: "string" },
       maxItems: 3,
-      description:
-        "Up to 3 short bullets capturing recent key moments or open loops.",
+      description: "Up to 3 short bullets capturing recent key moments or open loops.",
     },
   },
   required: ["summary", "highlights"],
@@ -60,9 +58,7 @@ function buildPrompt(
     parts.push(`most recent user prompt:\n${s.lastUserPrompt}`);
   }
 
-  const edited = Array.isArray(s.topFilesEdited)
-    ? s.topFilesEdited.slice(0, 5)
-    : [];
+  const edited = Array.isArray(s.topFilesEdited) ? s.topFilesEdited.slice(0, 5) : [];
   if (edited.length) parts.push(`top files edited: ${JSON.stringify(edited)}`);
 
   const narrative = recent.filter(isNarrativeEvent);
@@ -70,9 +66,7 @@ function buildPrompt(
     const compact = narrative.map(compactEvent).join("\n");
     parts.push(`recent events (oldest first):\n${compact}`);
   } else if (Array.isArray(s.recentEvents) && s.recentEvents.length) {
-    parts.push(
-      `recent events (ring buffer):\n${JSON.stringify(s.recentEvents).slice(0, 4000)}`,
-    );
+    parts.push(`recent events (ring buffer):\n${JSON.stringify(s.recentEvents).slice(0, 4000)}`);
   }
 
   return parts.join("\n\n");
@@ -98,16 +92,12 @@ export const rollingSummaryAnalyzer: Analyzer<RollingSummaryOutput> = {
     if (currentSeq - prevSeq >= LINE_SEQ_DELTA) return true;
 
     const analyzedAt = existing.analyzedAt?.getTime() ?? 0;
-    return (
-      Date.now() - analyzedAt >= REFRESH_INTERVAL_MS && currentSeq > prevSeq
-    );
+    return Date.now() - analyzedAt >= REFRESH_INTERVAL_MS && currentSeq > prevSeq;
   },
 
   async run(ctx): Promise<AnalyzerResult<RollingSummaryOutput>> {
     const recent = await ctx.recentEvents();
-    const prior =
-      (ctx.existingInsight?.output as RollingSummaryOutput | undefined) ??
-      null;
+    const prior = (ctx.existingInsight?.output as RollingSummaryOutput | undefined) ?? null;
     const prompt = buildPrompt(ctx, recent, prior);
     const result = await callStructured<RollingSummaryOutput>({
       model: MODEL,

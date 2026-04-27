@@ -31,9 +31,7 @@ function ev(overrides: {
 
 describe("pr-poller: toPrMessage", () => {
   it("maps action=opened to 'opened'", () => {
-    const msg = toPrMessage(
-      ev({ action: "opened", title: "Add login", prNumber: 42 }),
-    );
+    const msg = toPrMessage(ev({ action: "opened", title: "Add login", prNumber: 42 }));
     expect(msg).not.toBeNull();
     expect(msg!.action).toBe("opened");
     expect(msg!.login).toBe("alice");
@@ -49,9 +47,7 @@ describe("pr-poller: toPrMessage", () => {
   });
 
   it("maps closed + merged=true to 'merged'", () => {
-    const msg = toPrMessage(
-      ev({ action: "closed", merged: true, prNumber: 9 }),
-    );
+    const msg = toPrMessage(ev({ action: "closed", merged: true, prNumber: 9 }));
     expect(msg?.action).toBe("merged");
   });
 

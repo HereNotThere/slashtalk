@@ -10,13 +10,13 @@ These files follow the [llms.txt convention](https://llmstxt.org) for plain-text
 
 ## What's here
 
-| File | Library | Used in |
-| --- | --- | --- |
-| [`anthropic-sdk-llms.txt`](anthropic-sdk-llms.txt) | Anthropic SDK | `apps/server/src/analyzers/llm.ts` |
-| [`drizzle-llms.txt`](drizzle-llms.txt) | Drizzle ORM | `apps/server/src/db/` |
-| [`electron-llms.txt`](electron-llms.txt) | Electron | `apps/desktop/` |
-| [`elysia-llms.txt`](elysia-llms.txt) | Elysia | `apps/server/` |
-| [`ioredis-llms.txt`](ioredis-llms.txt) | ioredis | `apps/server/src/ws/redis-bridge.ts` |
+| File                                               | Library       | Used in                              |
+| -------------------------------------------------- | ------------- | ------------------------------------ |
+| [`anthropic-sdk-llms.txt`](anthropic-sdk-llms.txt) | Anthropic SDK | `apps/server/src/analyzers/llm.ts`   |
+| [`drizzle-llms.txt`](drizzle-llms.txt)             | Drizzle ORM   | `apps/server/src/db/`                |
+| [`electron-llms.txt`](electron-llms.txt)           | Electron      | `apps/desktop/`                      |
+| [`elysia-llms.txt`](elysia-llms.txt)               | Elysia        | `apps/server/`                       |
+| [`ioredis-llms.txt`](ioredis-llms.txt)             | ioredis       | `apps/server/src/ws/redis-bridge.ts` |
 
 ## Naming
 

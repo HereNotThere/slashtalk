@@ -14,7 +14,7 @@ Replace every <placeholder>. Delete this comment block before committing.
 
 ## Scope
 
-<What this surface does. What it does *not* do. Drawing the boundary explicitly is more useful than describing the inside in detail.>
+<What this surface does. What it does _not_ do. Drawing the boundary explicitly is more useful than describing the inside in detail.>
 
 ## Authentication
 
@@ -47,11 +47,11 @@ Replace every <placeholder>. Delete this comment block before committing.
 
 **Errors:**
 
-| Status | `error` code | When |
-| --- | --- | --- |
-| 400 | `<code>` | <condition> |
-| 401 | `<code>` | <condition> |
-| 403 | `<code>` | <condition> |
+| Status | `error` code | When        |
+| ------ | ------------ | ----------- |
+| 400    | `<code>`     | <condition> |
+| 401    | `<code>`     | <condition> |
+| 403    | `<code>`     | <condition> |
 
 **Side effects:**
 
@@ -72,5 +72,5 @@ Replace every <placeholder>. Delete this comment block before committing.
 
 ## See also
 
-- [`<related-spec>`](<path>) — <why related>
+- [`<related-spec>`](path) — <why related>
 - [`<related-design-doc>`](../design-docs/<name>.md) — <why related>

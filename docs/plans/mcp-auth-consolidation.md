@@ -130,7 +130,7 @@ External grounding:
     - Normal sign-out revokes only the presented refresh token and clears local desktop credentials; it does not revoke other devices or MCP OAuth grants.
     - Device revoke revokes that device's API key, any local-proxy sessions bound to it, and any MCP OAuth grants explicitly tied to that device/client if such binding exists.
     - Global revoke covers GitHub OAuth grant revocation and explicit sign-out-everywhere; it invalidates all user refresh tokens, MCP OAuth access/refresh tokens, and device API keys in one transaction.
-    Add a manual sign-out-everywhere control surfaced via user account settings.
+      Add a manual sign-out-everywhere control surfaced via user account settings.
 36. Write failing tests for `/mcp` rate limits: per-user request quota, per-user concurrent session cap, and successful requests below the cap.
 37. Apply `/mcp` per-user request quotas and per-user concurrent MCP session caps in `apps/server`. Document gateway-level IP/global abuse handling in `docs/RELIABILITY.md`.
 38. Add `docs/manual-tests/mcp-oauth-final.md` with full Claude Code and Codex OAuth setup, expected browser/login flow, expected token and tool-call logs, negative tests for revoked/wrong-resource tokens, and cleanup steps.

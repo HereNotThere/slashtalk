@@ -56,9 +56,7 @@ export function githubAppConnectUrlForUser(
 `/auth/github-app` validates that signed intent and writes it to an httpOnly callback cookie. The callback uses that intent to select the Slashtalk user instead of trusting the browser session:
 
 ```ts
-const intent = verifyGithubAppConnectIntent(
-  stringCookieValue(cookie[INTENT_COOKIE]?.value),
-);
+const intent = verifyGithubAppConnectIntent(stringCookieValue(cookie[INTENT_COOKIE]?.value));
 const user = intent
   ? await findUserById(db, intent.userId)
   : await sessionUser(db, jwt, stringCookieValue(cookie.session?.value));
@@ -71,9 +69,7 @@ const identity = await fetchGitHubUserIdentity(tokenData.access_token);
 if (!identity || identity.id !== user.githubId) {
   set.status = identity ? 403 : 502;
   return {
-    error: identity
-      ? "GitHub App account mismatch"
-      : "GitHub App identity check failed",
+    error: identity ? "GitHub App account mismatch" : "GitHub App identity check failed",
   };
 }
 

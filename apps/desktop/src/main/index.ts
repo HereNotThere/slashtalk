@@ -58,8 +58,8 @@ import {
 import {
   configureChat,
   hideChat,
+  isChatVisible,
   repositionChatIfVisible,
-  sendChatConfig,
   toggleChat,
 } from "./windows/chat";
 import {
@@ -965,7 +965,6 @@ ipcMain.handle("drag:end", (): void => {
   // size via its resize event during the animation, but with the right flex
   // orientation already in place.
   sendOverlayConfig();
-  sendChatConfig();
   // Keep isDraggingStack on through the slide so bubble hovers under the
   // moving window don't pop the info card mid-tween.
   animateOverlayTo(overlayWindow, target, DOCK_ANIM_MS, {
@@ -1290,12 +1289,8 @@ ipcMain.handle(
       };
 
       if (isLocalAgent(row)) {
-        void localAgent.sendMessage(
-          streamSessionId,
-          text,
-          row,
-          handleEvent,
-          () => emitSessionsChange(agentId),
+        void localAgent.sendMessage(streamSessionId, text, row, handleEvent, () =>
+          emitSessionsChange(agentId),
         );
       } else {
         void anthropic.sendMessage(streamSessionId, text, handleEvent);
@@ -1656,6 +1651,7 @@ configureChat({
   getOverlay: () => overlayWindow,
   getCurrentDock: currentDock,
   onVisibilityChange: broadcastChatVisible,
+  resolveRailVisibility,
 });
 configureResponse({ onClose: hideChat });
 configureHoverPolling({
@@ -1668,6 +1664,7 @@ configureRailVisibility({
   isRailPinned: getRailPinned,
   isSessionOnlyMode: getRailSessionOnlyMode,
   isSelfLive: () => rail.isSelfLive(),
+  isChatVisible,
 });
 
 app.whenReady().then(async () => {

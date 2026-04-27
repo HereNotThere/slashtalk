@@ -7,7 +7,6 @@ import type {
   AgentStreamEvent,
   AgentSummary,
   BackendAuthState,
-  ChatAnchor,
   ChatHead,
   ChatHeadsAuthState,
   ChatHeadsBridge,
@@ -139,7 +138,6 @@ const bridge: ChatHeadsBridge = {
   toggleChat: () => ipcRenderer.invoke("chat:toggle") as Promise<void>,
   hideChat: () => ipcRenderer.invoke("chat:hide") as Promise<void>,
   onChatState: (cb) => subscribe<{ visible: boolean }>("chat:state", cb),
-  onChatConfig: (cb) => subscribe<{ anchor: ChatAnchor }>("chat:config", cb),
   onOverlayConfig: (cb) => subscribe<DockConfig>("overlay:config", cb),
   openAgentCreator: () => ipcRenderer.invoke("app:openAgentCreator") as Promise<void>,
   onOpenAgentCreator: (cb) => {

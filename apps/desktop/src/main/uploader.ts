@@ -1,7 +1,7 @@
 // Watches Claude, Codex, and Cursor session JSONLs and ships new lines to
-// /v1/ingest. Claude/Codex only upload when the cwd is under a tracked repo;
-// Cursor uploads whenever we can resolve a cwd/project and sharing is decided
-// server-side via repo matching.
+// /v1/ingest. Every source only uploads when the cwd is under a tracked
+// local repo (`localRepos.isPathTracked(cwd)`); see CLAUDE.md rule #6 and
+// the `feedback_strict_tracking` memory.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -402,10 +402,6 @@ async function readTail(
   return { chunk: buf.subarray(0, lastNl + 1), consumed: lastNl + 1 };
 }
 
-function shouldUploadSource(source: EventSource, cwd: string): boolean {
-  return source === "cursor" ? true : localRepos.isPathTracked(cwd);
-}
-
 function synthesizeCursorChunk(
   chunk: Buffer,
   stat: fs.Stats,
@@ -553,7 +549,7 @@ async function syncFileInner(filePath: string): Promise<void> {
       return;
     }
 
-    entry.tracked = shouldUploadSource(source, header.cwd);
+    entry.tracked = localRepos.isPathTracked(header.cwd);
     persistSoon();
     if (!entry.tracked) {
       console.log(`[uploader] skip ${sessionId} (${source}) — cwd not tracked (${header.cwd})`);

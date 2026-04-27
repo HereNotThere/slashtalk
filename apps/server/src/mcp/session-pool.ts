@@ -10,8 +10,6 @@ type Session = {
   server: McpServer;
   transport: WebStandardStreamableHTTPServerTransport;
   userId: string;
-  lastActivity: number;
-  activeStreams: number;
 };
 
 export type SessionPoolOptions = {
@@ -19,26 +17,17 @@ export type SessionPoolOptions = {
   version: string;
   db: Database;
   presence: McpPresenceStore;
-  idleTimeoutMs?: number;
-  sweepIntervalMs?: number;
   maxSessionsPerUser?: number;
 };
 
-const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
-const DEFAULT_SWEEP_INTERVAL_MS = 5_000;
 const DEFAULT_MAX_SESSIONS_PER_USER = 20;
 
 export class McpSessionPool {
   private sessions = new Map<string, Session>();
-  private sweeper: ReturnType<typeof setInterval>;
-  private idleTimeoutMs: number;
   private maxSessionsPerUser: number;
 
   constructor(private opts: SessionPoolOptions) {
-    this.idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.maxSessionsPerUser = opts.maxSessionsPerUser ?? DEFAULT_MAX_SESSIONS_PER_USER;
-    const interval = opts.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS;
-    this.sweeper = setInterval(() => this.sweepStale(), interval);
   }
 
   async handleRequest(req: Request, identity: Identity): Promise<Response> {
@@ -57,9 +46,7 @@ export class McpSessionPool {
         });
         return jsonError("unknown_mcp_session", 404);
       }
-      existing.lastActivity = Date.now();
       this.opts.presence.touch(existing.userId, sessionId);
-      if (req.method === "GET") this.watchForAbort(req, sessionId);
       return existing.transport.handleRequest(req);
     }
 
@@ -87,13 +74,7 @@ export class McpSessionPool {
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: (sid) => {
-        this.sessions.set(sid, {
-          server,
-          transport,
-          userId,
-          lastActivity: Date.now(),
-          activeStreams: 0,
-        });
+        this.sessions.set(sid, { server, transport, userId });
         this.opts.presence.online(userId, sid, clientInfo, profile);
         log("info", "mcp_session_opened", { sessionId: sid, userId, clientInfo });
       },
@@ -111,21 +92,7 @@ export class McpSessionPool {
   }
 
   shutdown(): void {
-    clearInterval(this.sweeper);
-  }
-
-  private watchForAbort(req: Request, sessionId: string): void {
-    const signal = req.signal;
-    if (!signal || signal.aborted) return;
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    session.activeStreams++;
-    const onAbort = () => {
-      const s = this.sessions.get(sessionId);
-      if (s) s.activeStreams = Math.max(0, s.activeStreams - 1);
-      this.closeSession(sessionId, "stream_abort");
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
+    for (const sid of [...this.sessions.keys()]) this.closeSession(sid, "shutdown");
   }
 
   private countUserSessions(userId: string): number {
@@ -142,14 +109,6 @@ export class McpSessionPool {
     this.sessions.delete(sessionId);
     this.opts.presence.offline(s.userId, sessionId);
     log("info", "mcp_session_closed", { sessionId, userId: s.userId, reason });
-  }
-
-  private sweepStale(): void {
-    const cutoff = Date.now() - this.idleTimeoutMs;
-    for (const [sid, s] of this.sessions) {
-      if (s.activeStreams > 0) continue;
-      if (s.lastActivity < cutoff) this.closeSession(sid, "idle_timeout");
-    }
   }
 }
 

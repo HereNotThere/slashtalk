@@ -1,0 +1,17 @@
+node_modules
+out
+dist
+build
+coverage
+.turbo
+.vite
+.next
+.cache
+
+# generated
+apps/server/drizzle
+docs/generated
+bun.lock
+package-lock.json
+pnpm-lock.yaml
+yarn.lock

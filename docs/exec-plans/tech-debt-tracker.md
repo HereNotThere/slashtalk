@@ -127,6 +127,18 @@ Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026
 
 ---
 
+## Multi-instance readiness — before we scale `apps/server` past one replica
+
+The MCP transport keeps each session as a live `McpServer` + `WebStandardStreamableHTTPServerTransport` instance in process memory (`apps/server/src/mcp/session-pool.ts`). That is correct for the MCP spec — sessions are connections, not records — and a DB-backed session store would be a category error. But two adjacent pieces of state need to move to Redis before we run more than one server replica.
+
+**40. Sticky routing on the `Mcp-Session-Id` header at the load balancer.** With multiple replicas, a request carrying a session ID can land on a replica that doesn't own it and gets a spec-correct but disruptive 404. The MCP TypeScript SDK assumes sticky routing ([typescript-sdk #330](https://github.com/modelcontextprotocol/typescript-sdk/issues/330)). Implement at the LB (header- or cookie-based affinity); no code change in the server.
+
+**41. Move `McpPresenceStore` onto `RedisBridge` pub/sub.** Today `apps/server/src/mcp/presence.ts` is an in-memory `Map`, so `get_team_activity` only sees teammates connected to the same replica as the caller. The presence events (`online` / `offline` / `activity`) are already shaped like a pub/sub stream — fan them through `apps/server/src/ws/redis-bridge.ts` and have each replica subscribe. Soft-fail contract from [`core-beliefs #7`](../design-docs/core-beliefs.md#7-redis-publishing-is-soft-fail) applies.
+
+**42. SSE resumability via `EventStore`.** The MCP spec defines an `EventStore` hook so reconnecting clients can replay events with `Last-Event-ID`. We don't pass one. Only matters when we ship a tool that streams progress over a long-lived SSE; today's tools are short request/response. Pick this up the first time we add a streaming tool, not before.
+
+---
+
 ## Sprint sequencing
 
 Three days moves the repo from ~60% to ~90% harness-ready by the audit's checklist:

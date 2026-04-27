@@ -8,6 +8,7 @@ import { ingestRoutes } from "./ingest/routes";
 import { socialRoutes } from "./social/routes";
 import { sessionRoutes } from "./sessions/routes";
 import { userRoutes, deviceReposRoutes } from "./user/routes";
+import { claimRoutes } from "./user/claim";
 import { orgsRoutes } from "./user/orgs";
 import { chatRoutes } from "./chat/routes";
 import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
@@ -49,6 +50,7 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(socialRoutes(db))
     .use(sessionRoutes(db))
     .use(userRoutes(db))
+    .use(claimRoutes(db))
     .use(orgsRoutes(db))
     .use(deviceReposRoutes(db))
     .use(chatRoutes(db))

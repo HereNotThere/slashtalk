@@ -1,25 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { CloseIcon, SendIcon } from "../shared/icons";
+import { MagnifyingGlassIcon, PaperAirplaneIcon } from "@heroicons/react/24/outline";
+import { Button } from "../shared/Button";
 
-// Pill-shaped input popover. Esc or blur (main handles blur) dismisses.
-// No submit handling yet — this is the visual shell; backend integration lands
-// with the chat/ask endpoint.
-//
-// `anchor` tracks which side of the pill the leading search-icon circle sits
-// on, so the icon always overlaps the chat bubble on the rail regardless of
-// which screen edge the rail is anchored to. Main sends this via `chat:config`.
+// Frost + rim are painted natively by main (vibrancy + setMacCornerRadius),
+// so this renderer is just transparent content on top of that material.
 export function App(): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
-  const [anchor, setAnchor] = useState<"left" | "right">("left");
 
-  useEffect(() => {
-    return window.chatheads.onChatConfig((cfg) => setAnchor(cfg.anchor));
-  }, []);
-
-  // Autofocus whenever the window becomes visible. Electron re-mounts only
-  // when hot-reloaded, so we also refocus on window `focus` to cover
-  // show-after-hide cycles (the window is hidden, not destroyed).
   useEffect(() => {
     const focus = (): void => inputRef.current?.focus();
     focus();
@@ -44,60 +32,34 @@ export function App(): JSX.Element {
     }
   };
 
-  const mirrored = anchor === "right";
-
   return (
-    <div className="w-full h-full flex items-center justify-center p-sm">
-      <div
-        className={`
-          w-full flex items-center gap-md h-14 rounded-full bg-card
-          shadow-[0_8px_24px_rgba(0,0,0,0.22),0_2px_6px_rgba(0,0,0,0.12)]
-          ${mirrored ? "flex-row-reverse pr-2 pl-md" : "pl-2 pr-md"}
-        `}
-      >
-        <button
-          onClick={() => void window.chatheads.hideChat()}
-          className="w-10 h-10 rounded-full bg-surface flex items-center justify-center shrink-0 text-muted hover:opacity-70 transition-opacity cursor-pointer"
-          aria-label="Close"
-        >
-          <CloseIcon />
-        </button>
-        <input
-          ref={inputRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Ask about what your team has been doing..."
-          className="
-            flex-1 min-w-0 bg-transparent border-none outline-none
-            text-[15px] text-fg placeholder:text-subtle
-          "
-        />
-        {value.trim() ? (
-          <button
-            onClick={handleSend}
-            style={{ background: "var(--gradient-primary)" }}
-            className="
-              w-10 h-10 rounded-full flex items-center justify-center
-              shrink-0 text-white shadow-[0_2px_6px_rgba(11,183,100,0.35)]
-              hover:brightness-110 transition-[filter] cursor-pointer
-            "
-            aria-label="Send"
-          >
-            <SendIcon />
-          </button>
-        ) : (
-          <kbd
-            className="
-              px-1.5 py-0.5 rounded-md bg-surface text-subtle
-              text-[11px] font-mono font-medium leading-none
-              shrink-0
-            "
-          >
-            esc
-          </kbd>
-        )}
-      </div>
+    <div className="w-screen h-screen flex items-center gap-3 px-3">
+      <Button
+        variant="ghost"
+        size="lg"
+        round
+        onClick={() => void window.chatheads.hideChat()}
+        aria-label="Close search"
+        icon={<MagnifyingGlassIcon className="w-5 h-5" />}
+        className="bg-bubble text-fg outline-1 -outline-offset-1 outline-bubble-outline hover:bg-bubble"
+      />
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder="Ask about what your team has been doing..."
+        className="flex-1 min-w-0 bg-transparent border-none outline-none text-md text-fg placeholder:text-subtle"
+      />
+      <Button
+        variant="primary"
+        size="lg"
+        round
+        onClick={handleSend}
+        disabled={!value.trim()}
+        aria-label="Send"
+        icon={<PaperAirplaneIcon className="w-5 h-5" />}
+      />
     </div>
   );
 }

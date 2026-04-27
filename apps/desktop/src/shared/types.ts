@@ -53,10 +53,6 @@ export interface DockConfig {
   side: DockSide;
 }
 
-// Chat pill layout hint. `anchor` = which end of the pill the search-icon
-// circle sits at so it overlaps the search bubble on the rail.
-export type ChatAnchor = "left" | "right";
-
 // slashtalk backend types
 export interface BackendUser {
   githubLogin: string;
@@ -406,8 +402,6 @@ export interface ChatHeadsBridge {
   hideChat: () => Promise<void>;
   /** Overlay subscribes so it can hide the chat bubble while the pill is open. */
   onChatState: (cb: (state: { visible: boolean }) => void) => Unsubscribe;
-  /** Chat renderer subscribes so it can mirror layout based on rail side. */
-  onChatConfig: (cb: (cfg: { anchor: ChatAnchor }) => void) => Unsubscribe;
   /** Overlay renderer subscribes to learn the current dock so it can swap
    *  flex direction / scroll axis / FLIP tracking. */
   onOverlayConfig: (cb: (cfg: DockConfig) => void) => Unsubscribe;

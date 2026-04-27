@@ -221,7 +221,7 @@ export function App(): JSX.Element {
 // ---------- Layout shell ----------
 
 function Shell({ children }: { children: React.ReactNode }): JSX.Element {
-  return <div className="box-border p-lg flex flex-col gap-md">{children}</div>;
+  return <div className="box-border p-4 flex flex-col gap-3">{children}</div>;
 }
 
 function Divider(): JSX.Element {
@@ -229,9 +229,7 @@ function Divider(): JSX.Element {
 }
 
 function Header(): JSX.Element {
-  return (
-    <div className="px-1 py-0.5 text-[11px] uppercase tracking-wide text-fg/55">Your repos</div>
-  );
+  return <div className="px-1 py-0.5 text-xs uppercase tracking-wide text-fg/55">Your repos</div>;
 }
 
 // ---------- Body ----------
@@ -247,7 +245,7 @@ function Body({
 }): JSX.Element {
   if (repos.length === 0) {
     return (
-      <div className="px-1.5 py-1 text-[12px] text-fg/55">
+      <div className="px-1.5 py-1 text-sm text-fg/55">
         No repos added yet. Click &ldquo;Add local repo&rdquo; below.
       </div>
     );
@@ -281,7 +279,7 @@ function RepoRow({
     <div
       className="
         group w-full flex items-center gap-2 px-1.5 py-1 rounded-md
-        hover:bg-surface-strong
+        hover:bg-surface-alt
       "
     >
       <button
@@ -295,8 +293,8 @@ function RepoRow({
       >
         <Checkbox checked={checked} />
         <span className="flex-1 min-w-0 flex flex-col">
-          <span className="truncate text-[13px] leading-tight">{repo.fullName}</span>
-          <span className="truncate text-[11px] text-fg/45 leading-tight">{repo.localPath}</span>
+          <span className="truncate text-base leading-tight">{repo.fullName}</span>
+          <span className="truncate text-xs text-fg/45 leading-tight">{repo.localPath}</span>
         </span>
       </button>
       <button
@@ -311,7 +309,7 @@ function RepoRow({
           w-5 h-5 flex items-center justify-center rounded
           bg-transparent border-none text-fg/40 cursor-pointer [font:inherit]
           opacity-0 group-hover:opacity-100
-          hover:bg-surface-strong-hover hover:text-fg
+          hover:bg-surface-alt-hover hover:text-fg
         "
       >
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
@@ -370,9 +368,9 @@ function AddButton({
       disabled={busy || watchingRepoAccess}
       className="
         w-full px-2.5 py-1.5 rounded-md
-        bg-surface-strong border-none text-fg cursor-pointer [font:inherit]
-        text-[13px]
-        hover:bg-surface-strong-hover
+        bg-surface-alt border-none text-fg cursor-pointer [font:inherit]
+        text-base
+        hover:bg-surface-alt-hover
         disabled:opacity-[0.5] disabled:cursor-default
       "
     >
@@ -404,7 +402,7 @@ function RepoAccessPrompt({
     <div
       className="
         px-2.5 py-2 rounded-md border border-fg/10
-        bg-surface-strong text-[12px] text-fg
+        bg-surface-alt text-sm text-fg
       "
     >
       <div className="font-medium mb-0.5">Finish GitHub setup</div>
@@ -417,7 +415,7 @@ function RepoAccessPrompt({
           onClick={onConnect}
           disabled={busy}
           className="
-            px-2 py-1 rounded bg-surface-strong-hover border-none
+            px-2 py-1 rounded bg-surface-alt-hover border-none
             text-fg cursor-pointer [font:inherit]
             disabled:opacity-50 disabled:cursor-wait
           "
@@ -449,7 +447,7 @@ function ErrorNote({ message }: { message: string }): JSX.Element {
       <div
         className="
           px-2.5 py-2 rounded-md border border-fg/10
-          bg-surface-strong text-[12px] text-fg
+          bg-surface-alt text-sm text-fg
         "
       >
         <div className="font-medium mb-0.5">Private repo access needed</div>
@@ -458,7 +456,7 @@ function ErrorNote({ message }: { message: string }): JSX.Element {
     );
   }
 
-  return <div className="px-1.5 py-1 text-[12px] text-red-500/90">{message}</div>;
+  return <div className="px-1.5 py-1 text-sm text-danger">{message}</div>;
 }
 
 // ---------- Pin toggle ----------
@@ -477,12 +475,12 @@ function PinRow({
       className="
         w-full flex items-center gap-2 px-1.5 py-1 rounded-md
         bg-transparent border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-strong
+        hover:bg-surface-alt
         text-left
       "
     >
       <Checkbox checked={pinned} />
-      <span className="flex-1 text-[13px]">Keep rail on top</span>
+      <span className="flex-1 text-base">Keep rail on top</span>
     </button>
   );
 }
@@ -502,12 +500,12 @@ function SpotifyShareRow({
       className="
         w-full flex items-center gap-2 px-1.5 py-1 rounded-md
         bg-transparent border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-strong
+        hover:bg-surface-alt
         text-left
       "
     >
       <Checkbox checked={enabled} />
-      <span className="flex-1 text-[13px]">Share Spotify Now Playing</span>
+      <span className="flex-1 text-base">Share Spotify Now Playing</span>
     </button>
   );
 }
@@ -526,12 +524,12 @@ function CollapseInactiveRow({
       className="
         w-full flex items-center gap-2 px-1.5 py-1 rounded-md
         bg-transparent border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-strong
+        hover:bg-surface-alt
         text-left
       "
     >
       <Checkbox checked={enabled} />
-      <span className="flex-1 text-[13px]">Stack inactive teammates</span>
+      <span className="flex-1 text-base">Stack inactive teammates</span>
     </button>
   );
 }
@@ -550,12 +548,12 @@ function ShowActivityTimestampsRow({
       className="
         w-full flex items-center gap-2 px-1.5 py-1 rounded-md
         bg-transparent border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-strong
+        hover:bg-surface-alt
         text-left
       "
     >
       <Checkbox checked={shown} />
-      <span className="flex-1 text-[13px]">Show activity timestamps</span>
+      <span className="flex-1 text-base">Show activity timestamps</span>
     </button>
   );
 }
@@ -579,11 +577,11 @@ function SessionOnlyRow({
         w-full flex items-center gap-2 px-1.5 py-1 rounded-md
         bg-transparent border-none text-fg [font:inherit]
         text-left
-        ${disabled ? "opacity-40 cursor-default" : "cursor-pointer hover:bg-surface-strong"}
+        ${disabled ? "opacity-40 cursor-default" : "cursor-pointer hover:bg-surface-alt"}
       `}
     >
       <Checkbox checked={enabled} />
-      <span className="flex-1 text-[13px]">Show rail only during active sessions</span>
+      <span className="flex-1 text-base">Show rail only during active sessions</span>
     </button>
   );
 }
@@ -592,8 +590,8 @@ function SessionOnlyRow({
 
 function SignedOutPrompt(): JSX.Element {
   return (
-    <div className="flex flex-col gap-md px-1 py-1">
-      <div className="text-[13px] text-fg">Sign in to add your repos.</div>
+    <div className="flex flex-col gap-3 px-1 py-1">
+      <div className="text-base text-fg">Sign in to add your repos.</div>
       <FooterButton onClick={() => window.chatheads.backend.signIn()}>
         Sign in with GitHub
       </FooterButton>
@@ -625,8 +623,8 @@ function FooterButton({
       disabled={disabled}
       className="
         flex-1 px-2.5 py-1.5 rounded-md
-        bg-surface-strong border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-strong-hover
+        bg-surface-alt border-none text-fg cursor-pointer [font:inherit]
+        hover:bg-surface-alt-hover
         disabled:opacity-[0.35] disabled:cursor-default
       "
     >

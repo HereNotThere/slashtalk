@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Inter is loaded via a <link> tag in each window's index.html. We can't
+ * @import it here because downstream window styles.css files chain through
+ * this file, and CSS @import must be the first statement in every consumer. */
+
 @keyframes shimmer-char {
   0%,
   100% {
@@ -25,168 +29,138 @@
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Design tokens. Defined as CSS variables so themes swap without re-rendering.
- * Default values = dark theme. Light theme overrides live below.
+ * Design tokens. See `docs/design.md` for the system rules. Default values =
+ * dark theme. Light theme overrides live below. Three blocks must stay in
+ * sync: @theme (dark), :root.theme-light, and the prefers-color-scheme media
+ * query (OS-light fallback).
  * ──────────────────────────────────────────────────────────────────────────── */
 
 @theme {
   /* Pin Tailwind's numeric spacing scale (w-14, p-4, gap-2, …) to 4px per unit
-   * so it stays consistent even though the app sets html font-size: 13px below.
-   * Without this, 1rem = 13px and `w-14` renders at 45.5px instead of 56px. */
+   * so it stays consistent even though html font-size is 13px. */
   --spacing: 4px;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* opaque surfaces */
-  --color-bg: #1e1e1e;
-  --color-card: #242424;
+  /* Type scale — seven stops. See design.md §3. */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
 
-  /* text */
-  --color-fg: #eee;
-  --color-muted: #bbb;
-  --color-subtle: #888;
-  --color-link: #aaa;
-  --color-link-hover: #fff;
+  /* ─── Neutrals (60%) ───────────────────────────────────────────── */
+  --color-bg: #1a1a1a;
+  --color-surface: #242424;
+  --color-surface-2: #2c2c2c;
 
-  /* borders / dividers */
+  /* ─── Secondary (30%) ──────────────────────────────────────────── */
+  --color-surface-alt: rgba(255, 255, 255, 0.06);
+  --color-surface-alt-hover: rgba(255, 255, 255, 0.1);
+
   --color-border: #3a3a3a;
   --color-divider: rgba(255, 255, 255, 0.1);
 
-  /* opaque buttons (main window) */
-  --color-button: #2a2a2a;
-  --color-button-hover: #333;
+  --color-fg: #eeeeee;
+  --color-muted: #b8b8b8;
+  --color-subtle: #888888;
 
-  /* brand */
-  --color-accent: #2f6df1;
-  --color-accent-hover: #2560db;
-  --color-accent-fg: #eee;
+  /* ─── Primary (10%) ────────────────────────────────────────────── */
+  --color-primary: #1dc374;
+  --color-primary-hover: #16a060;
+  --color-primary-fg: #ffffff;
+  --color-primary-soft: rgba(29, 195, 116, 0.15);
 
-  /* status */
-  --color-danger: #ff6d6d;
-  --color-success: #37c76a;
-  --color-warning: #e0a550;
-  --color-info: #a78bdc;
-  --color-chat: #1dc374;
-  --color-chat-hover: #0bb764;
-  --gradient-primary: linear-gradient(180deg, #2ecf81 0%, #0bb764 100%);
+  /* ─── Semantic feedback ────────────────────────────────────────── */
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --color-info: #3b82f6;
 
-  /* translucent surfaces (used over vibrancy popover) */
-  --color-surface: rgba(255, 255, 255, 0.06);
-  --color-surface-hover: rgba(255, 255, 255, 0.12);
-  --color-surface-strong: rgba(255, 255, 255, 0.08);
-  --color-surface-strong-hover: rgba(255, 255, 255, 0.15);
-  --color-tile: rgba(255, 255, 255, 0.04);
-  --color-tile-hover: rgba(255, 255, 255, 0.09);
+  /* ─── Window-specific surfaces ─────────────────────────────────── */
+  /* Code blocks in markdown */
   --color-code: rgba(255, 255, 255, 0.07);
-
-  /* chat-specific surfaces (Claude-style) */
-  --color-user-bubble: #2d2d2d;
-  --color-input-surface: #272727;
-
-  /* overlay bubble */
+  /* Overlay bubble (rail chatheads) */
   --color-bubble: rgba(255, 255, 255, 0.18);
   --color-bubble-outline: rgba(255, 255, 255, 0.45);
 
-  /* spacing — t-shirt scale (works with p-/m-/gap-/space-x-/space-y-) */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 12px;
-  --spacing-lg: 16px;
-  --spacing-xl: 24px;
-  --spacing-2xl: 32px;
+  /* ─── Elevation ────────────────────────────────────────────────── */
+  /* Only allowed shadow — for cards / popovers / dock. Not for buttons. */
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 /* Light theme — applied either by explicit class or by OS preference when no
- * explicit override is set. */
+ * explicit override is set. The two blocks below MUST stay byte-for-byte
+ * identical (one for explicit override, one for OS-light fallback). */
 @layer base {
-  :root.theme-light,
-  :root:where(:not(.theme-dark):not(.theme-light)) {
-    /* fall through — dark stays as defined in @theme */
-  }
-
   :root.theme-light {
     --color-bg: #faf9f7;
-    --color-card: #ffffff;
-    --color-user-bubble: #f1efea;
-    --color-input-surface: #ffffff;
+    --color-surface: #ffffff;
+    --color-surface-2: #ffffff;
+
+    --color-surface-alt: rgba(0, 0, 0, 0.04);
+    --color-surface-alt-hover: rgba(0, 0, 0, 0.07);
+
+    --color-border: #d8d6d2;
+    --color-divider: rgba(0, 0, 0, 0.08);
 
     --color-fg: #1a1a1a;
-    --color-muted: #555;
-    --color-subtle: #777;
-    --color-link: #555;
-    --color-link-hover: #000;
+    --color-muted: #555555;
+    --color-subtle: #888888;
 
-    --color-border: #d0d0d0;
-    --color-divider: rgba(0, 0, 0, 0.1);
+    --color-primary: #16a060;
+    --color-primary-hover: #128450;
+    --color-primary-fg: #ffffff;
+    --color-primary-soft: rgba(22, 160, 96, 0.12);
 
-    --color-button: #ececec;
-    --color-button-hover: #dcdcdc;
+    --color-success: #16a34a;
+    --color-danger: #dc2626;
+    --color-warning: #d97706;
+    --color-info: #2563eb;
 
-    --color-accent: #2f6df1;
-    --color-accent-hover: #2560db;
-    --color-accent-fg: #ffffff;
-
-    --color-danger: #d32f2f;
-    --color-success: #2e8b4f;
-    --color-warning: #c48930;
-    --color-info: #8b6fc0;
-    --color-chat: #e6724a;
-    --color-chat-hover: #d9603a;
-
-    --color-surface: rgba(0, 0, 0, 0.05);
-    --color-surface-hover: rgba(0, 0, 0, 0.08);
-    --color-surface-strong: rgba(0, 0, 0, 0.06);
-    --color-surface-strong-hover: rgba(0, 0, 0, 0.1);
-    --color-tile: rgba(0, 0, 0, 0.04);
-    --color-tile-hover: rgba(0, 0, 0, 0.07);
     --color-code: rgba(0, 0, 0, 0.06);
-
     --color-bubble: rgba(255, 255, 255, 0.85);
     --color-bubble-outline: rgba(0, 0, 0, 0.2);
+
+    --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
   }
 
   /* OS = light, no explicit override → use light palette */
   @media (prefers-color-scheme: light) {
     :root:not(.theme-dark):not(.theme-light) {
       --color-bg: #faf9f7;
-      --color-card: #ffffff;
-      --color-user-bubble: #f1efea;
-      --color-input-surface: #ffffff;
+      --color-surface: #ffffff;
+      --color-surface-2: #ffffff;
+
+      --color-surface-alt: rgba(0, 0, 0, 0.04);
+      --color-surface-alt-hover: rgba(0, 0, 0, 0.07);
+
+      --color-border: #d8d6d2;
+      --color-divider: rgba(0, 0, 0, 0.08);
 
       --color-fg: #1a1a1a;
-      --color-muted: #555;
-      --color-subtle: #777;
-      --color-link: #555;
-      --color-link-hover: #000;
+      --color-muted: #555555;
+      --color-subtle: #888888;
 
-      --color-border: #d0d0d0;
-      --color-divider: rgba(0, 0, 0, 0.1);
+      --color-primary: #16a060;
+      --color-primary-hover: #128450;
+      --color-primary-fg: #ffffff;
+      --color-primary-soft: rgba(22, 160, 96, 0.12);
 
-      --color-button: #ececec;
-      --color-button-hover: #dcdcdc;
+      --color-success: #16a34a;
+      --color-danger: #dc2626;
+      --color-warning: #d97706;
+      --color-info: #2563eb;
 
-      --color-accent: #2f6df1;
-      --color-accent-hover: #2560db;
-      --color-accent-fg: #ffffff;
-
-      --color-danger: #d32f2f;
-      --color-success: #2e8b4f;
-      --color-warning: #c48930;
-      --color-info: #8b6fc0;
-      --color-chat: #e6724a;
-      --color-chat-hover: #d9603a;
-
-      --color-surface: rgba(0, 0, 0, 0.05);
-      --color-surface-hover: rgba(0, 0, 0, 0.08);
-      --color-surface-strong: rgba(0, 0, 0, 0.06);
-      --color-surface-strong-hover: rgba(0, 0, 0, 0.1);
-      --color-tile: rgba(0, 0, 0, 0.04);
-      --color-tile-hover: rgba(0, 0, 0, 0.07);
       --color-code: rgba(0, 0, 0, 0.06);
-
       --color-bubble: rgba(255, 255, 255, 0.85);
       --color-bubble-outline: rgba(0, 0, 0, 0.2);
+
+      --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
     }
   }
 
@@ -202,5 +176,7 @@
     font-family: var(--font-sans);
     color: var(--color-fg);
     font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }

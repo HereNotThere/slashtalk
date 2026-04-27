@@ -6,6 +6,8 @@ export function App(): JSX.Element {
   useAutoResize();
   const [pinned, setPinned] = useState<boolean>(true);
   const [sessionOnly, setSessionOnly] = useState<boolean>(false);
+  const [collapseInactive, setCollapseInactive] = useState<boolean>(false);
+  const [showActivityTimestamps, setShowActivityTimestamps] = useState<boolean>(true);
   const [spotifySupported, setSpotifySupported] = useState<boolean>(false);
   const [spotifyShare, setSpotifyShare] = useState<boolean>(false);
 
@@ -27,6 +29,32 @@ export function App(): JSX.Element {
       if (alive) setSessionOnly(v);
     });
     const off = window.chatheads.rail.onSessionOnlyModeChange((v) => setSessionOnly(v));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.rail.getCollapseInactive().then((v) => {
+      if (alive) setCollapseInactive(v);
+    });
+    const off = window.chatheads.rail.onCollapseInactiveChange((v) => setCollapseInactive(v));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.rail.getShowActivityTimestamps().then((v) => {
+      if (alive) setShowActivityTimestamps(v);
+    });
+    const off = window.chatheads.rail.onShowActivityTimestampsChange((v) =>
+      setShowActivityTimestamps(v),
+    );
     return () => {
       alive = false;
       off();
@@ -67,6 +95,16 @@ export function App(): JSX.Element {
     void window.chatheads.rail.setSessionOnlyMode(v);
   };
 
+  const onCollapseInactiveChange = (v: boolean): void => {
+    setCollapseInactive(v);
+    void window.chatheads.rail.setCollapseInactive(v);
+  };
+
+  const onShowActivityTimestampsChange = (v: boolean): void => {
+    setShowActivityTimestamps(v);
+    void window.chatheads.rail.setShowActivityTimestamps(v);
+  };
+
   useEffect(() => {
     if (!auth.signedIn || githubApp?.connected) setGithubAppWatch(false);
   }, [auth.signedIn, githubApp?.connected]);
@@ -90,6 +128,11 @@ export function App(): JSX.Element {
           }}
         />
         <SessionOnlyRow enabled={sessionOnly} disabled={pinned} onChange={onSessionOnlyChange} />
+        <CollapseInactiveRow enabled={collapseInactive} onChange={onCollapseInactiveChange} />
+        <ShowActivityTimestampsRow
+          shown={showActivityTimestamps}
+          onChange={onShowActivityTimestampsChange}
+        />
         {spotifySupported ? (
           <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
         ) : null}
@@ -161,6 +204,11 @@ export function App(): JSX.Element {
         }}
       />
       <SessionOnlyRow enabled={sessionOnly} disabled={pinned} onChange={onSessionOnlyChange} />
+      <CollapseInactiveRow enabled={collapseInactive} onChange={onCollapseInactiveChange} />
+      <ShowActivityTimestampsRow
+        shown={showActivityTimestamps}
+        onChange={onShowActivityTimestampsChange}
+      />
       {spotifySupported ? (
         <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
       ) : null}
@@ -460,6 +508,54 @@ function SpotifyShareRow({
     >
       <Checkbox checked={enabled} />
       <span className="flex-1 text-[13px]">Share Spotify Now Playing</span>
+    </button>
+  );
+}
+
+function CollapseInactiveRow({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!enabled)}
+      className="
+        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
+        bg-transparent border-none text-fg cursor-pointer [font:inherit]
+        hover:bg-surface-strong
+        text-left
+      "
+    >
+      <Checkbox checked={enabled} />
+      <span className="flex-1 text-[13px]">Stack inactive teammates</span>
+    </button>
+  );
+}
+
+function ShowActivityTimestampsRow({
+  shown,
+  onChange,
+}: {
+  shown: boolean;
+  onChange: (shown: boolean) => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!shown)}
+      className="
+        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
+        bg-transparent border-none text-fg cursor-pointer [font:inherit]
+        hover:bg-surface-strong
+        text-left
+      "
+    >
+      <Checkbox checked={shown} />
+      <span className="flex-1 text-[13px]">Show activity timestamps</span>
     </button>
   );
 }

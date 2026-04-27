@@ -46,6 +46,9 @@ interface ClaudeEventPayload {
     prompt?: string;
     commandMode?: string;
   };
+  prNumber?: number;
+  prUrl?: string;
+  prRepository?: string;
 }
 
 interface CursorEventPayload {
@@ -344,6 +347,12 @@ function summarizeClaudeEvent(event: ClaudeEventPayload): string | null {
   }
   if (event.type === "attachment" && event.attachment?.type === "queued_command") {
     return `queued: ${truncate(event.attachment.prompt ?? "", 60)}`;
+  }
+  if (event.type === "pr-link") {
+    if (event.prRepository && typeof event.prNumber === "number") {
+      return `PR ${event.prRepository}#${event.prNumber}`;
+    }
+    if (event.prUrl) return `PR ${event.prUrl}`;
   }
   return event.type;
 }

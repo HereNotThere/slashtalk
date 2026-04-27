@@ -1,8 +1,8 @@
 import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
-import { loadInsightsForSessions, toSnapshot } from "../sessions/snapshot";
-import type { EventSource, SessionState } from "@slashtalk/shared";
+import { loadInsightsForSessions, loadPrsForSessions, toSnapshot } from "../sessions/snapshot";
+import type { EventSource, SessionPr, SessionState } from "@slashtalk/shared";
 import { normalizeFullName } from "../social/github-sync";
 import { isCollisionIgnoredPath } from "../correlate/file-index";
 
@@ -19,6 +19,7 @@ export interface TeamActivitySessionSummary {
   lastUserPrompt: string | null;
   topFilesEdited: string[];
   toolErrors: number;
+  pr: SessionPr | null;
 }
 
 export interface TeamActivityTeammate {
@@ -29,10 +30,27 @@ export interface TeamActivityTeammate {
   sessions: TeamActivitySessionSummary[];
 }
 
+/** Open PR overlap surfaced when a `filePath` query matches a teammate session
+ *  whose branch has an open PR. Returned even when the matching session is
+ *  `ended` — the PR itself is the conflict signal, not whether the author is
+ *  currently typing. Deduped by (repo, prNumber). */
+export interface OpenPrOverlap {
+  prNumber: number;
+  prUrl: string;
+  prTitle: string;
+  repo: string;
+  branch: string;
+  authorLogin: string;
+  /** Most recent matching session ID (for follow-up `get_session`). */
+  sessionId: string;
+}
+
 export interface TeamActivityResult {
   teammates: TeamActivityTeammate[];
   /** Inclusive window start, ISO8601 */
   since: string;
+  /** Open PRs touching the queried `filePath`. Omitted when `filePath` is unset. */
+  openPrs?: OpenPrOverlap[];
 }
 
 export interface GetTeamActivityArgs {
@@ -42,6 +60,9 @@ export interface GetTeamActivityArgs {
   login?: string;
   repoFullName?: string;
   filePath?: string;
+  /** Opt back in to ended sessions in the teammates roll-up. Default omits
+   *  them so "what's the team doing" doesn't drown in merge cleanup. */
+  includeEnded?: boolean;
 }
 
 const SESSIONS_PER_USER_CAP = 3;
@@ -145,7 +166,7 @@ export async function getTeamActivityImpl(
     ...new Set(sessionRows.map((s) => s.repoId).filter((id): id is number => id !== null)),
   ];
 
-  const [hbRows, userRows, repoRows, insightsMap] = await Promise.all([
+  const [hbRows, userRows, repoRows, insightsMap, prMap] = await Promise.all([
     sessionIds.length
       ? db.select().from(heartbeats).where(inArray(heartbeats.sessionId, sessionIds))
       : Promise.resolve([]),
@@ -165,10 +186,27 @@ export async function getTeamActivityImpl(
           .where(inArray(repos.id, repoIdsInUse))
       : Promise.resolve([]),
     loadInsightsForSessions(db, sessionIds),
+    loadPrsForSessions(
+      db,
+      sessionRows.map((s) => ({
+        sessionId: s.sessionId,
+        repoId: s.repoId,
+        branch: s.branch,
+      })),
+    ),
   ]);
   const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
   const userMap = new Map(userRows.map((u) => [u.id, u]));
   const repoMap = new Map(repoRows.map((r) => [r.id, r]));
+
+  // Default behavior: hide `ended` sessions from the rollup so "what's the
+  // team doing" doesn't drown in merge cleanup from earlier in the window.
+  // Caller can opt back in with `state: "ended"` or `includeEnded: true`.
+  const omitEnded = !args.includeEnded && args.state !== "ended";
+
+  // Track filePath-matched sessions before the ended filter so openPrs[]
+  // can surface PRs from sessions whose author has already moved on.
+  const filePathMatchedSessions: typeof sessionRows = [];
 
   // sessionRows is already ordered `lastTs desc nulls last`, so the first
   // time a user's id appears is their most recent session — we rely on that
@@ -179,12 +217,15 @@ export async function getTeamActivityImpl(
       s,
       hbMap.get(s.sessionId) ?? null,
       insightsMap.get(s.sessionId) ?? null,
+      prMap.get(s.sessionId) ?? null,
     );
-    if (args.state && snapshot.state !== args.state) continue;
     if (args.filePath) {
       const editedPaths = snapshot.topFilesEdited.map(([p]) => p);
       if (!editedPaths.some((p) => pathMatches(p, args.filePath!))) continue;
+      filePathMatchedSessions.push(s);
     }
+    if (args.state && snapshot.state !== args.state) continue;
+    if (omitEnded && snapshot.state === "ended") continue;
     const arr = byUser.get(s.userId) ?? [];
     if (arr.length >= SESSIONS_PER_USER_CAP) continue;
     arr.push({
@@ -200,6 +241,7 @@ export async function getTeamActivityImpl(
       lastUserPrompt: truncate(snapshot.lastUserPrompt, LAST_PROMPT_MAX_CHARS),
       topFilesEdited: snapshot.topFilesEdited.slice(0, TOP_FILES_IN_ROLLUP).map(([path]) => path),
       toolErrors: snapshot.toolErrors,
+      pr: snapshot.pr ?? null,
     });
     byUser.set(s.userId, arr);
   }
@@ -218,7 +260,38 @@ export async function getTeamActivityImpl(
   // For conflict-detection lookups, the caller is the one editing the file —
   // surfacing themselves as overlap is noise.
   const finalTeammates = args.filePath ? teammates.filter((t) => !t.isSelf) : teammates;
-  return { teammates: finalTeammates, since: since.toISOString() };
+
+  const result: TeamActivityResult = {
+    teammates: finalTeammates,
+    since: since.toISOString(),
+  };
+
+  if (args.filePath) {
+    // Open PRs are stronger conflict signal than "is anyone typing right now".
+    // Walk filePath-matched sessions newest-first and dedupe by (repo, PR#).
+    const seen = new Set<string>();
+    const openPrs: OpenPrOverlap[] = [];
+    for (const s of filePathMatchedSessions) {
+      if (s.userId === userId) continue;
+      const pr = prMap.get(s.sessionId);
+      if (!pr || pr.state !== "open") continue;
+      const key = `${s.repoId}:${pr.number}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      openPrs.push({
+        prNumber: pr.number,
+        prUrl: pr.url,
+        prTitle: pr.title,
+        repo: s.repoId ? (repoMap.get(s.repoId)?.fullName ?? "") : "",
+        branch: s.branch ?? "",
+        authorLogin: pr.authorLogin,
+        sessionId: s.sessionId,
+      });
+    }
+    result.openPrs = openPrs;
+  }
+
+  return result;
 }
 
 function pathMatches(a: string, b: string): boolean {
@@ -266,7 +339,7 @@ export async function getSessionImpl(
     return { kind: "error", message: "session not visible to caller" };
   }
 
-  const [hbRows, insightsMap, userRows, repoRows] = await Promise.all([
+  const [hbRows, insightsMap, userRows, repoRows, prMap] = await Promise.all([
     db.select().from(heartbeats).where(eq(heartbeats.sessionId, args.sessionId)).limit(1),
     loadInsightsForSessions(db, [args.sessionId]),
     db
@@ -275,8 +348,14 @@ export async function getSessionImpl(
       .where(eq(users.id, row.userId))
       .limit(1),
     db.select({ fullName: repos.fullName }).from(repos).where(eq(repos.id, row.repoId)).limit(1),
+    loadPrsForSessions(db, [{ sessionId: args.sessionId, repoId: row.repoId, branch: row.branch }]),
   ]);
-  const snapshot = toSnapshot(row, hbRows[0] ?? null, insightsMap.get(args.sessionId) ?? null);
+  const snapshot = toSnapshot(
+    row,
+    hbRows[0] ?? null,
+    insightsMap.get(args.sessionId) ?? null,
+    prMap.get(args.sessionId) ?? null,
+  );
   const u = userRows[0];
   const r = repoRows[0];
 
@@ -313,7 +392,7 @@ export function buildChatTools(
     {
       name: "get_team_activity",
       description:
-        "Per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Returns teammates (including the caller) with up to 3 recent sessions each. Each session carries title, description, state, repo, branch, lastTs, current tool, a truncated last user prompt, top edited files, tool-error count, and source (claude|codex). Filter by login or repoFullName to scope the answer; prefer those filters over fetching everyone and filtering locally. Pass `filePath` to find which other teammates are currently editing a specific file (the caller is excluded from this view).",
+        'Per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Returns teammates (including the caller) with up to 3 recent sessions each. Each session carries title, description, state, repo, branch, lastTs, current tool, a truncated last user prompt, top edited files, tool-error count, source (claude|codex), and `pr` (open/closed/merged PR matched by branch, when known). State thresholds: `busy` = heartbeat fresh (<30s) and in a turn; `active` = heartbeat fresh and last event <30s; `idle` = heartbeat fresh, last event >30s; `recent` = no fresh heartbeat but last event <1h; `ended` = no fresh heartbeat and last event >1h. By default `ended` sessions are omitted from the teammates roll-up (set `includeEnded: true` or `state: "ended"` to include them). Filter by login or repoFullName to scope the answer; prefer those filters over fetching everyone and filtering locally. Pass `filePath` to find which other teammates are currently editing a specific file (the caller is excluded from this view); the response also includes a top-level `openPrs` array of any open PRs whose branch had a teammate session touching that file — even when that session is `ended`, since the PR is the conflict signal.',
       input_schema: {
         type: "object",
         properties: {
@@ -331,8 +410,14 @@ export function buildChatTools(
           },
           state: {
             type: "string",
-            enum: ["busy", "active", "idle", "recent"],
-            description: "Filter to a single session state",
+            enum: ["busy", "active", "idle", "recent", "ended"],
+            description:
+              "Filter to a single session state. Pass `ended` to opt into ended sessions (otherwise omitted by default).",
+          },
+          includeEnded: {
+            type: "boolean",
+            description:
+              "Include `ended` sessions in the teammates roll-up without filtering to only ended. Default false.",
           },
           login: {
             type: "string",
@@ -347,7 +432,7 @@ export function buildChatTools(
           filePath: {
             type: "string",
             description:
-              "Conflict-detection filter. When set, returns only teammates with a recent session whose top edited files include this path; the caller is omitted. Absolute or repo-relative paths are accepted — matching is segment-aware suffix on both sides. Lockfiles and similar high-traffic paths (package.json, bun.lock, yarn.lock, …) always return no overlap; they are noise, not collaboration. Pair with `repoFullName` to keep the answer tight.",
+              "Conflict-detection filter. When set, returns only teammates with a recent session whose top edited files include this path; the caller is omitted. Response also includes a top-level `openPrs` array of any open PRs whose branch had a teammate session touching that file. Absolute or repo-relative paths are accepted — matching is segment-aware suffix on both sides. Lockfiles and similar high-traffic paths (package.json, bun.lock, yarn.lock, …) always return no overlap; they are noise, not collaboration. Pair with `repoFullName` to keep the answer tight.",
           },
         },
       },

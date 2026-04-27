@@ -8,7 +8,7 @@ export interface McpToolContext {
   userId: number;
 }
 
-const stateSchema = z.enum(["busy", "active", "idle", "recent"]);
+const stateSchema = z.enum(["busy", "active", "idle", "recent", "ended"]);
 
 export function registerTeamActivityTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
@@ -16,7 +16,7 @@ export function registerTeamActivityTools(server: McpServer, ctx: McpToolContext
     {
       title: "Get team activity",
       description:
-        "Return a per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Use this for two things. (1) Team-status questions: 'what did the team do today?', 'what did eric do today?', 'what is happening in owner/repo?'. (2) Proactive conflict detection: whenever the user is about to edit a file, call this with `repoFullName` and `filePath` set to surface live overlap with teammates currently editing the same file. In the conflict-detection case, only mention overlap to the user if a returned session is `busy` or `active` and belongs to someone else; stay silent otherwise. Prefer `since` over `sinceHours` for calendar-relative questions like 'today'.",
+        "Return a per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Use this for two things. (1) Team-status questions: 'what did the team do today?', 'what did eric do today?', 'what is happening in owner/repo?'. (2) Proactive conflict detection: whenever the user is about to edit a file, call this with `repoFullName` and `filePath` set to surface live overlap with teammates currently editing the same file. In the conflict-detection case, mention overlap to the user when (a) a returned session is `busy` or `active` and belongs to someone else, OR (b) the response's `openPrs` array is non-empty — an open PR on that file from another teammate is a conflict signal even if no one is currently typing. Stay silent otherwise. State thresholds: `busy` = heartbeat fresh (<30s) and in a turn; `active` = heartbeat fresh and last event <30s; `idle` = heartbeat fresh and last event >30s; `recent` = no fresh heartbeat but last event <1h; `ended` = no fresh heartbeat and last event >1h. By default `ended` sessions are omitted from the teammates roll-up — pass `includeEnded: true` or `state: \"ended\"` to include them. Each session also carries `pr` (the matched PR by branch, when known). Prefer `since` over `sinceHours` for calendar-relative questions like 'today'.",
       inputSchema: {
         sinceHours: z
           .number()
@@ -33,7 +33,17 @@ export function registerTeamActivityTools(server: McpServer, ctx: McpToolContext
           .describe(
             "ISO8601 inclusive window start. Prefer this for calendar-relative questions like today.",
           ),
-        state: stateSchema.optional().describe("Filter to one computed session state."),
+        state: stateSchema
+          .optional()
+          .describe(
+            "Filter to one computed session state. Pass `ended` to opt into ended sessions (omitted by default).",
+          ),
+        includeEnded: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include `ended` sessions in the roll-up without filtering to only ended. Default false.",
+          ),
         login: z
           .string()
           .optional()
@@ -46,7 +56,7 @@ export function registerTeamActivityTools(server: McpServer, ctx: McpToolContext
           .string()
           .optional()
           .describe(
-            "Conflict-detection filter. When set, returns only teammates with a recent session whose top edited files include this path; the caller is omitted. Absolute or repo-relative paths are accepted — matching is segment-aware suffix on both sides. Lockfiles and similar high-traffic paths (package.json, bun.lock, yarn.lock, …) always return no overlap; they are noise, not collaboration. Pair with `repoFullName` to keep the answer tight.",
+            "Conflict-detection filter. When set, returns only teammates with a recent session whose top edited files include this path; the caller is omitted. Response also gains a top-level `openPrs` array of any open PRs whose branch had a teammate session touching that file (included even if the matching session is `ended`). Absolute or repo-relative paths are accepted — matching is segment-aware suffix on both sides. Lockfiles and similar high-traffic paths (package.json, bun.lock, yarn.lock, …) always return no overlap; they are noise, not collaboration. Pair with `repoFullName` to keep the answer tight.",
           ),
       },
       annotations: {

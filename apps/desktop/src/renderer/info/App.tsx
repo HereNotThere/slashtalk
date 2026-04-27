@@ -22,7 +22,13 @@ const REFRESH_MS = 15_000;
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
-  const [questions, setQuestions] = useState<ChatThread[] | null>(null);
+  // Questions are keyed by the login they belong to. The render guard checks
+  // `login === head.label` so a head switch can never momentarily attribute
+  // one user's questions to another while the next fetch is in flight.
+  const [questions, setQuestions] = useState<{
+    login: string;
+    threads: ChatThread[];
+  } | null>(null);
   const [visible, setVisible] = useState(false);
   const [expandRequest, setExpandRequest] = useState<{
     id: string;
@@ -84,30 +90,36 @@ export function App(): JSX.Element {
     if (!head) return;
     if (head.kind === "agent") {
       setSessions([]);
-      setQuestions([]);
+      setQuestions({ login: head.label, threads: [] });
       return;
     }
     let cancelled = false;
+    const headLogin = head.label;
     const load = async (): Promise<void> => {
       try {
         const [rows, sp, qs] = await Promise.all([
           window.chatheads.listSessionsForHead(head.id),
-          window.chatheads.getSpotifyForLogin(head.label),
+          window.chatheads.getSpotifyForLogin(headLogin),
           // Soft-fail: a 403 (no shared repo) shouldn't break the panel.
-          window.chatheads.fetchQuestionsForLogin(head.label).catch(() => ({ threads: [] })),
+          window.chatheads.fetchQuestionsForLogin(headLogin).catch(() => ({ threads: [] })),
         ]);
         if (cancelled) return;
         setSessions(rows);
         setSpotify(sp);
-        setQuestions(qs.threads);
+        setQuestions({ login: headLogin, threads: qs.threads });
       } catch {
         if (!cancelled) {
           setSessions([]);
-          setQuestions([]);
+          setQuestions({ login: headLogin, threads: [] });
         }
       }
     };
-    if (sessions === null) void load();
+    // Sessions may be preloaded by main via onInfoShow — skip the redundant
+    // refetch in that case. Questions are never preloaded, so any time the
+    // head changes (or first-mount), kick off an immediate load. Without
+    // this, switching heads leaves the previous user's questions on screen
+    // for up to REFRESH_MS until the interval fires.
+    if (sessions === null || questions?.login !== headLogin) void load();
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
       cancelled = true;
@@ -152,10 +164,10 @@ export function App(): JSX.Element {
               collisionFile={head?.collisionAt != null ? (head.collisionFile ?? null) : null}
               collisionLogin={head?.label ?? null}
             />
-            {questions && questions.length > 0 && (
+            {questions && questions.login === head?.label && questions.threads.length > 0 && (
               <>
                 <Divider />
-                <QuestionsSection threads={questions} />
+                <QuestionsSection threads={questions.threads} />
               </>
             )}
           </>

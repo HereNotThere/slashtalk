@@ -83,6 +83,8 @@ export const spotifyPresenceRoutes = (db: Database, redis: RedisBridge) =>
     },
   );
 
+export type PeerLocation = { timezone: string | null; city: string | null };
+
 export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/api", name: "presence-read" })
     .use(jwtAuth)
@@ -115,6 +117,37 @@ export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
       const result: Record<string, SpotifyPresence> = {};
       for (const [login, presence] of entries) {
         if (presence) result[login] = presence;
+      }
+      return result;
+    })
+    .get("/presence/locations", async ({ user }) => {
+      // Same peer set as /presence/peers, but reads persisted timezone+city
+      // off the users table instead of redis.
+      const myRepoIds = db
+        .select({ repoId: userRepos.repoId })
+        .from(userRepos)
+        .where(eq(userRepos.userId, user.id));
+      const peerRows = await db
+        .selectDistinct({ userId: userRepos.userId })
+        .from(userRepos)
+        .where(inArray(userRepos.repoId, myRepoIds));
+
+      const ids = [...new Set([user.id, ...peerRows.map((r) => r.userId)])];
+      if (ids.length === 0) return {} as Record<string, PeerLocation>;
+
+      const rows = await db
+        .select({
+          githubLogin: users.githubLogin,
+          timezone: users.timezone,
+          city: users.city,
+        })
+        .from(users)
+        .where(inArray(users.id, ids));
+
+      const result: Record<string, PeerLocation> = {};
+      for (const r of rows) {
+        if (!r.timezone && !r.city) continue;
+        result[r.githubLogin] = { timezone: r.timezone, city: r.city };
       }
       return result;
     });

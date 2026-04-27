@@ -25,6 +25,7 @@ import type {
   TrackedRepo,
   Unsubscribe,
   UpdateAgentInput,
+  UserLocation,
 } from "../shared/types";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
@@ -178,6 +179,8 @@ const bridge: ChatHeadsBridge = {
       sessions: InfoSession[] | null;
       expandSessionId?: string | null;
       spotify: SpotifyPresence | null;
+      location: UserLocation | null;
+      isSelf: boolean;
     }>("info:show", cb),
   onInfoHide: (cb) => {
     const handler = (): void => cb();

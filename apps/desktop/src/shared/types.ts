@@ -455,6 +455,8 @@ export interface ChatHeadsBridge {
   // Info window (main → info renderer). Sessions are prefetched in main so
   // the renderer can paint in one pass at the correct height. `spotify` is
   // whatever the main-process peerPresence poller last saw for this head.
+  // `location` is the head's persisted timezone+city (null until the user
+  // has reported it). `isSelf` switches the renderer to local-resolve mode.
   onInfoShow: (
     cb: (payload: {
       head: ChatHead;
@@ -462,6 +464,8 @@ export interface ChatHeadsBridge {
       /** Session the caller wants auto-expanded on open (e.g. from a chat card click). */
       expandSessionId?: string | null;
       spotify: SpotifyPresence | null;
+      location: UserLocation | null;
+      isSelf: boolean;
     }) => void,
   ) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;

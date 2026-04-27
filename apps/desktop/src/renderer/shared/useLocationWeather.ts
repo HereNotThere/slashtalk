@@ -134,6 +134,16 @@ async function resolveLocationCached(): Promise<ResolvedLocation | null> {
   return loc;
 }
 
+const peerLocationCache = new Map<string, ResolvedLocation>();
+
+async function resolvePeerCity(city: string): Promise<ResolvedLocation | null> {
+  const hit = peerLocationCache.get(city);
+  if (hit) return hit;
+  const loc = await geocodeCity(city);
+  if (loc) peerLocationCache.set(city, loc);
+  return loc;
+}
+
 function reportLocationToMain(city: string | null): void {
   // Tests import this module without an electron bridge — guard.
   if (typeof window === "undefined" || !window.chatheads?.setUserLocation) return;
@@ -155,14 +165,36 @@ async function fetchWeatherIconCached(lat: number, lon: number): Promise<string 
   return icon;
 }
 
-export function useLocationWeather(): LocationWeather {
+/** When `override.city` is provided we render that peer's location: skip
+ *  local IP/timezone resolution, skip the server-report, and only geocode
+ *  the supplied city to drive the weather icon. */
+export function useLocationWeather(override?: {
+  timezone: string | null;
+  city: string | null;
+}): LocationWeather {
+  const overrideCity = override?.city ?? null;
   const [state, setState] = useState<LocationWeather>({
-    city: cachedLocation?.city ?? null,
-    icon: cachedWeather?.icon ?? null,
+    city: overrideCity ?? cachedLocation?.city ?? null,
+    icon: overrideCity ? null : (cachedWeather?.icon ?? null),
   });
 
   useEffect(() => {
     let cancelled = false;
+
+    if (overrideCity) {
+      setState({ city: overrideCity, icon: null });
+      void resolvePeerCity(overrideCity).then(async (loc) => {
+        if (cancelled || !loc) return;
+        setState((s) => (s.city === loc.city ? s : { ...s, city: loc.city }));
+        const icon = await fetchWeatherIconCached(loc.lat, loc.lon);
+        if (cancelled || !icon) return;
+        setState((s) => (s.icon === icon ? s : { ...s, icon }));
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const run = async (): Promise<void> => {
       const loc = await resolveLocationCached();
       if (cancelled || !loc) return;
@@ -191,7 +223,7 @@ export function useLocationWeather(): LocationWeather {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [overrideCity]);
 
   return state;
 }

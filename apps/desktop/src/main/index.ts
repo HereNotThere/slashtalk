@@ -46,6 +46,7 @@ import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
 import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
+import * as peerLocations from "./peerLocations";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
 import {
   BUBBLE_PAD,
@@ -556,11 +557,16 @@ async function showInfo(
   const cached = sessionCache.get(head.id) ?? null;
   const login = rail.parseUserHeadId(head.id);
   const spotifyPresence = login ? peerPresence.get(login) : null;
+  const peerLocation = login ? peerLocations.get(login) : null;
+  const authState = backend.getAuthState();
+  const isSelf = authState.signedIn && login === authState.user.githubLogin;
   win.webContents.send("info:show", {
     head,
     sessions: cached,
     expandSessionId: expandSessionId ?? null,
     spotify: spotifyPresence,
+    location: peerLocation,
+    isSelf,
   });
 
   // Animate position/size when switching heads on an already-visible window;
@@ -580,11 +586,14 @@ async function showInfo(
       if (selectedHeadId !== head.id) return;
       if (!infoWindow || infoWindow.isDestroyed()) return;
       const refreshedLogin = rail.parseUserHeadId(head.id);
+      const refreshedAuth = backend.getAuthState();
       infoWindow.webContents.send("info:show", {
         head,
         sessions: loaded,
         expandSessionId: expandSessionId ?? null,
         spotify: refreshedLogin ? peerPresence.get(refreshedLogin) : null,
+        location: refreshedLogin ? peerLocations.get(refreshedLogin) : null,
+        isSelf: refreshedAuth.signedIn && refreshedLogin === refreshedAuth.user.githubLogin,
       });
     });
   }
@@ -1608,6 +1617,7 @@ function applySyncForAuth(signedIn: boolean): void {
     void heartbeat.start();
     updateSpotifyRunning();
     void peerPresence.start();
+    void peerLocations.start();
     ws.start();
     for (const target of ["claude-code", "codex"] as const) {
       void installMcp
@@ -1619,6 +1629,7 @@ function applySyncForAuth(signedIn: boolean): void {
     uploader.reset();
     updateSpotifyRunning();
     peerPresence.stop();
+    peerLocations.stop();
     ws.stop();
     for (const target of ["claude-code", "codex"] as const) {
       void installMcp
@@ -1764,10 +1775,13 @@ async function refreshInfoNow(): Promise<void> {
     if (selectedHeadId !== head.id) return;
     if (!infoWindow || infoWindow.isDestroyed()) return;
     const refreshLogin = rail.parseUserHeadId(head.id);
+    const refreshAuth = backend.getAuthState();
     infoWindow.webContents.send("info:show", {
       head,
       sessions,
       spotify: refreshLogin ? peerPresence.get(refreshLogin) : null,
+      location: refreshLogin ? peerLocations.get(refreshLogin) : null,
+      isSelf: refreshAuth.signedIn && refreshLogin === refreshAuth.user.githubLogin,
     });
   } catch (e) {
     console.warn("[ws] refreshInfoNow failed:", e);

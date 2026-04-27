@@ -801,3 +801,9 @@ export function postUserLocation(body: UserLocation): Promise<{ ok: true }> {
     auth: "apiKey",
   });
 }
+
+export function listPeerLocations(): Promise<Record<string, UserLocation>> {
+  return jsonFetch<Record<string, UserLocation>>("/api/presence/locations", {
+    method: "GET",
+  });
+}

@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { PlusIcon } from "@heroicons/react/24/outline";
+import { Button } from "../shared/Button";
 import { AGENT_TEMPLATES, type AgentTemplate } from "../shared/agentTemplates";
-import { CwdPicker, McpServersField, ModeButton } from "../shared/AgentRuntimeFields";
+import { CwdPicker, McpServersField } from "../shared/AgentRuntimeFields";
+import { Toggle } from "../shared/Button";
 import type {
   AgentMode,
   AgentSummary,
@@ -65,39 +68,39 @@ export function AgentsSection({
   };
 
   return (
-    <section ref={sectionRef} className="bg-card rounded-2xl p-4 mt-4">
+    <section ref={sectionRef} className="bg-surface rounded-2xl p-4 mt-4">
       <div className="flex items-center gap-2 mb-3">
         <div>
-          <h2 className="m-0 text-[15px] font-semibold">Agents</h2>
-          <div className="text-[12px] text-subtle">
+          <h2 className="m-0 text-base font-semibold">Agents</h2>
+          <div className="text-sm text-subtle">
             Local Claude Code agents and cloud Managed Agents.
           </div>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setShowKeyForm((v) => !v)}
-          className="ml-auto bg-transparent border-none text-link text-[12px] cursor-pointer hover:text-link-hover"
+          className="ml-auto"
         >
           {configured ? "API key" : "Add API key"}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={!showCreate ? <PlusIcon className="w-4 h-4" /> : undefined}
           onClick={() => {
             setEditingAgentId(null);
             setShowCreate((v) => !v);
           }}
           disabled={!auth.signedIn}
-          className="
-            bg-button border border-border text-fg
-            rounded-lg px-3 py-1.5 text-[12px] font-medium cursor-pointer
-            hover:bg-button-hover disabled:opacity-50 disabled:cursor-not-allowed
-          "
           title={auth.signedIn ? "Create a local or cloud agent" : "Sign in to Slashtalk first"}
         >
-          {showCreate ? "Close" : "+ New agent"}
-        </button>
+          {showCreate ? "Close" : "New agent"}
+        </Button>
       </div>
 
       {!auth.signedIn && (
-        <div className="text-[12px] text-subtle">
+        <div className="text-sm text-subtle">
           Sign in to Slashtalk first. Agents use your slashtalk device key for MCP and team-session
           summaries.
         </div>
@@ -138,7 +141,7 @@ export function AgentsSection({
 
       <div className="flex flex-col gap-1.5 mt-3">
         {agents.length === 0 ? (
-          <div className="text-[12px] text-subtle">
+          <div className="text-sm text-subtle">
             No agents yet. Create a local agent without an API key, or add an Anthropic key to
             enable cloud agents.
           </div>
@@ -159,7 +162,7 @@ export function AgentsSection({
 
       {toast && (
         <div
-          className={`text-[12px] mt-3 leading-snug ${
+          className={`text-sm mt-3 leading-snug ${
             toast.kind === "ok" ? "text-success" : "text-danger"
           }`}
         >
@@ -180,34 +183,26 @@ function AgentRow({
   onRemove: () => void;
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-2.5 px-3 py-2 bg-surface rounded-lg">
-      <span className="w-7 h-7 rounded-full bg-accent/15 text-accent inline-flex items-center justify-center text-[13px] font-semibold shrink-0">
+    <div className="flex items-center gap-2.5 px-3 py-2 bg-surface-alt rounded-lg">
+      <span className="w-7 h-7 rounded-full bg-primary-soft text-primary inline-flex items-center justify-center text-base font-semibold shrink-0">
         {(agent.name[0] ?? "A").toUpperCase()}
       </span>
       <div className="flex-1 min-w-0">
-        <div className="text-[13px] font-medium truncate">{agent.name}</div>
-        <div className="text-[11px] text-subtle truncate">{agent.description || agent.model}</div>
+        <div className="text-base font-medium truncate">{agent.name}</div>
+        <div className="text-xs text-subtle truncate">{agent.description || agent.model}</div>
       </div>
-      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border text-muted">
+      <span className="text-xs uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border text-muted">
         {(agent.mode ?? "cloud") === "local" ? "Local" : "Cloud"}
       </span>
-      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border text-muted">
+      <span className="text-xs uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border text-muted">
         {agent.visibility ?? "private"}
       </span>
-      <button
-        onClick={onEdit}
-        className="bg-transparent border-none text-subtle cursor-pointer hover:text-fg text-[11px]"
-        title="Edit"
-      >
+      <Button variant="ghost" size="sm" onClick={onEdit}>
         Edit
-      </button>
-      <button
-        onClick={onRemove}
-        className="bg-transparent border-none text-subtle cursor-pointer hover:text-fg"
-        title="Remove"
-      >
-        x
-      </button>
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onRemove} aria-label="Remove">
+        ×
+      </Button>
     </div>
   );
 }
@@ -256,8 +251,8 @@ function ApiKeyForm({
   };
 
   return (
-    <div className="bg-surface border border-border rounded-xl p-3 mb-3">
-      <div className="text-[12px] text-subtle mb-2">
+    <div className="bg-surface-alt border border-border rounded-xl p-3 mb-3">
+      <div className="text-sm text-subtle mb-2">
         Paste an Anthropic API key to enable cloud agents. Local agents do not require this.
       </div>
       <div className="flex gap-1.5">
@@ -269,23 +264,26 @@ function ApiKeyForm({
             if (e.key === "Enter") void save();
           }}
           placeholder="sk-ant-..."
-          className="flex-1 bg-bg border border-border rounded-lg px-2 py-1.5 text-[12px] font-mono outline-none focus:border-accent"
+          className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm font-mono outline-none focus:border-primary"
         />
-        <button
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => void save()}
           disabled={busy || !key.trim()}
-          className="bg-fg text-bg rounded-lg px-3 py-1.5 text-[12px] font-medium cursor-pointer disabled:opacity-50"
         >
           {busy ? "Checking..." : "Save"}
-        </button>
+        </Button>
         {configured && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void clear()}
             disabled={busy}
-            className="bg-transparent border-none text-subtle hover:text-danger text-[12px] cursor-pointer"
+            className="text-danger hover:text-danger"
           >
             Remove
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -362,18 +360,19 @@ function CreateAgentForm({
   };
 
   return (
-    <div className="bg-surface border border-border rounded-xl p-3 mb-3 flex flex-col gap-3">
+    <div className="bg-surface-alt border border-border rounded-xl p-3 mb-3 flex flex-col gap-3">
       <div>
-        <div className="text-[10.5px] font-semibold uppercase tracking-wider text-subtle mb-1.5">
+        <div className="text-xs font-semibold uppercase tracking-wider text-subtle mb-1.5">
           Templates
         </div>
         <div className="flex gap-1.5 flex-wrap">
           {AGENT_TEMPLATES.map((template) => (
             <button
               key={template.name}
+              type="button"
               onClick={() => applyTemplate(template)}
               title={template.description}
-              className="text-[11px] px-2 py-0.5 rounded-full bg-button border border-border cursor-pointer hover:bg-button-hover"
+              className="text-xs px-2 py-0.5 rounded-full bg-surface-alt border border-border cursor-pointer hover:bg-surface-alt-hover"
             >
               {template.name}
             </button>
@@ -386,7 +385,7 @@ function CreateAgentForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Spec sync"
-          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-base outline-none focus:border-primary"
         />
       </Field>
       <Field label="Description">
@@ -394,7 +393,7 @@ function CreateAgentForm({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Keeps API spec and handler code aligned"
-          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-base outline-none focus:border-primary"
         />
       </Field>
       <Field label="Prompt">
@@ -403,7 +402,7 @@ function CreateAgentForm({
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Watch for drift between docs/api-spec.md and handlers. Open a small PR when they diverge."
           rows={4}
-          className="w-full px-3 py-2 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent resize-none leading-snug"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-base outline-none focus:border-primary resize-none leading-snug"
         />
       </Field>
       <Field label="Model">
@@ -411,12 +410,12 @@ function CreateAgentForm({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           placeholder={mode === "local" ? DEFAULT_LOCAL_MODEL : DEFAULT_CLOUD_MODEL}
-          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] font-mono outline-none focus:border-accent"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-base font-mono outline-none focus:border-primary"
         />
       </Field>
       <Field label="Runtime">
         <div className="flex gap-1.5">
-          <ModeButton
+          <Toggle
             active={mode === "cloud"}
             onClick={() => setMode("cloud")}
             disabled={!cloudAvailable}
@@ -427,32 +426,32 @@ function CreateAgentForm({
             }
           >
             Cloud
-          </ModeButton>
-          <ModeButton
+          </Toggle>
+          <Toggle
             active={mode === "local"}
             onClick={() => setMode("local")}
             title="Runs in this app on your machine."
           >
             Local
-          </ModeButton>
+          </Toggle>
         </div>
       </Field>
       <Field label="Visibility">
         <div className="flex gap-1.5">
-          <ModeButton
+          <Toggle
             active={visibility === "private"}
             onClick={() => setVisibility("private")}
             title="Sessions stay on your machine."
           >
             Private
-          </ModeButton>
-          <ModeButton
+          </Toggle>
+          <Toggle
             active={visibility === "team"}
             onClick={() => setVisibility("team")}
             title="Teammates see post-session summaries."
           >
             Team
-          </ModeButton>
+          </Toggle>
         </div>
       </Field>
       {mode === "local" ? (
@@ -472,13 +471,15 @@ function CreateAgentForm({
           }
         />
       )}
-      <button
+      <Button
+        variant="primary"
+        size="md"
+        fullWidth
         onClick={() => void submit()}
         disabled={!canSubmit}
-        className="w-full py-2.5 bg-fg text-bg rounded-lg text-[13px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
       >
         {busy ? "Creating..." : "Create agent"}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -541,37 +542,33 @@ function EditAgentForm({
   };
 
   return (
-    <div className="bg-surface border border-border rounded-xl p-3 mb-3 flex flex-col gap-3">
+    <div className="bg-surface-alt border border-border rounded-xl p-3 mb-3 flex flex-col gap-3">
       <div className="flex items-start gap-2">
         <div>
-          <div className="text-[12px] font-semibold">Edit agent</div>
-          <div className="text-[11px] text-subtle">
+          <div className="text-sm font-semibold">Edit agent</div>
+          <div className="text-xs text-subtle">
             {mode === "local"
               ? "Updates apply to the next local run."
               : "Updates are saved to Anthropic Managed Agents."}
           </div>
         </div>
-        <button
-          onClick={onCancel}
-          disabled={busy}
-          className="ml-auto bg-transparent border-none text-subtle hover:text-fg text-[12px] cursor-pointer disabled:opacity-50"
-        >
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy} className="ml-auto">
           Cancel
-        </button>
+        </Button>
       </div>
 
       <Field label="Name">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-base outline-none focus:border-primary"
         />
       </Field>
       <Field label="Description">
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-base outline-none focus:border-primary"
         />
       </Field>
       <Field label="Prompt">
@@ -579,7 +576,7 @@ function EditAgentForm({
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={4}
-          className="w-full px-3 py-2 bg-card border border-border rounded-lg text-[13px] outline-none focus:border-accent resize-none leading-snug"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-base outline-none focus:border-primary resize-none leading-snug"
         />
       </Field>
       <Field label="Model">
@@ -587,25 +584,25 @@ function EditAgentForm({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           placeholder={mode === "local" ? DEFAULT_LOCAL_MODEL : DEFAULT_CLOUD_MODEL}
-          className="w-full px-3 py-1.5 bg-card border border-border rounded-lg text-[13px] font-mono outline-none focus:border-accent"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-base font-mono outline-none focus:border-primary"
         />
       </Field>
       <Field label="Visibility">
         <div className="flex gap-1.5">
-          <ModeButton
+          <Toggle
             active={visibility === "private"}
             onClick={() => setVisibility("private")}
             title="Sessions stay on your machine."
           >
             Private
-          </ModeButton>
-          <ModeButton
+          </Toggle>
+          <Toggle
             active={visibility === "team"}
             onClick={() => setVisibility("team")}
             title="Teammates see post-session summaries."
           >
             Team
-          </ModeButton>
+          </Toggle>
         </div>
       </Field>
       {mode === "local" ? (
@@ -625,13 +622,15 @@ function EditAgentForm({
           }
         />
       )}
-      <button
+      <Button
+        variant="primary"
+        size="md"
+        fullWidth
         onClick={() => void submit()}
         disabled={!canSubmit}
-        className="w-full py-2.5 bg-fg text-bg rounded-lg text-[13px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
       >
         {busy ? "Saving..." : "Save changes"}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -639,9 +638,7 @@ function EditAgentForm({
 function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <div>
-      <div className="text-[10.5px] font-semibold uppercase tracking-wider text-subtle mb-1">
-        {label}
-      </div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-subtle mb-1">{label}</div>
       {children}
     </div>
   );

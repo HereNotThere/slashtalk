@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { PaperAirplaneIcon } from "@heroicons/react/24/outline";
 import type { ChatMessage, SessionCard, SessionState } from "@slashtalk/shared";
 import type { AgentSummary, ChatHead, ResponseOpenPayload } from "../../shared/types";
 import { AgentChat } from "../info/AgentPanel";
-import { SendIcon } from "../shared/icons";
+import { Button } from "../shared/Button";
 
 const CITATION_TOKEN = /\[session:[0-9a-fA-F-]+\]/g;
 const CARDS_VISIBLE = 5;
-
-const SEND_GRADIENT = "var(--gradient-primary)";
 
 function SlashtalkSpinner(): JSX.Element {
   return (
@@ -47,7 +46,7 @@ const DEFAULT_GERUNDS = ["Thinking"];
 const GERUND_CYCLE_MS = 2200;
 
 const MARKDOWN_CLASSES =
-  "break-words text-fg text-[15px] leading-[1.7] tracking-[-0.003em] " +
+  "break-words text-fg text-md leading-relaxed " +
   "[&_p]:my-3 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
   "[&_ul]:my-3 [&_ol]:my-3 [&_ul]:pl-5 [&_ol]:pl-5 [&_ul]:list-disc [&_ol]:list-decimal " +
   "[&_li]:my-1 [&_li]:pl-1 " +
@@ -55,14 +54,14 @@ const MARKDOWN_CLASSES =
   "[&_code]:font-mono [&_code]:text-[0.88em] [&_code]:font-medium " +
   "[&_pre]:bg-code [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:overflow-auto [&_pre]:my-4 " +
   "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:font-normal " +
-  "[&_h1]:text-[20px] [&_h1]:font-semibold [&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:tracking-[-0.01em] " +
-  "[&_h2]:text-[17px] [&_h2]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:tracking-[-0.01em] " +
-  "[&_h3]:text-[15px] [&_h3]:font-semibold [&_h3]:mt-4 [&_h3]:mb-2 " +
+  "[&_h1]:text-xl [&_h1]:font-semibold [&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:tracking-tight " +
+  "[&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:tracking-tight " +
+  "[&_h3]:text-md [&_h3]:font-semibold [&_h3]:mt-4 [&_h3]:mb-2 " +
   "[&_strong]:font-semibold [&_strong]:text-fg " +
   "[&_em]:italic " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-divider [&_blockquote]:pl-4 [&_blockquote]:text-muted [&_blockquote]:my-3 " +
   "[&_hr]:border-divider [&_hr]:my-6 " +
-  "[&_a]:text-link [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-link-hover";
+  "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-primary-hover";
 
 export function App(): JSX.Element {
   const [payload, setPayload] = useState<ResponseOpenPayload | null>(null);
@@ -208,14 +207,7 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
           {messages.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
-                <div
-                  className="
-                    px-[18px] py-[11px] rounded-[20px] max-w-[85%]
-                    bg-user-bubble text-fg
-                    text-[15px] leading-[1.55] tracking-[-0.003em]
-                    whitespace-pre-wrap break-words
-                  "
-                >
+                <div className="px-4 py-3 rounded-2xl max-w-[85%] bg-surface-alt text-fg text-md leading-snug whitespace-pre-wrap break-words">
                   {m.content}
                 </div>
               </div>
@@ -232,32 +224,21 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
           )}
 
           {loading && (
-            <div className="flex items-center gap-2.5 text-[14px]">
+            <div className="flex items-center gap-2.5 text-base">
               <SlashtalkSpinner />
               <span className="shimmer-text italic">{gerunds[gerundIdx] ?? gerunds[0]}...</span>
             </div>
           )}
 
           {error && (
-            <div className="text-[14px] text-red-500 bg-red-500/10 px-3 py-2 rounded-md">
-              {error}
-            </div>
+            <div className="text-sm text-danger bg-danger/10 px-3 py-2 rounded-md">{error}</div>
           )}
         </div>
       </div>
 
       <div className="flex-none">
         <div className="mx-auto w-full max-w-[720px] px-6 pb-6 pt-2">
-          <div
-            className="
-              flex items-center gap-2 p-2 pl-5
-              rounded-full bg-input-surface
-              border border-divider
-              shadow-[0_1px_2px_rgba(0,0,0,0.04)]
-              focus-within:border-subtle
-              transition-colors
-            "
-          >
+          <div className="flex items-center gap-2 p-2 pl-5 rounded-full bg-surface border border-divider focus-within:border-subtle transition-colors">
             <input
               ref={inputRef}
               autoFocus
@@ -271,26 +252,17 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
               }}
               placeholder={loading ? "Waiting for reply..." : "Reply to Slashtalk..."}
               disabled={loading}
-              className="
-                flex-1 min-w-0 bg-transparent border-none outline-none
-                py-2 text-fg text-[15px] leading-[1.5]
-                placeholder:text-subtle disabled:opacity-60
-              "
+              className="flex-1 min-w-0 bg-transparent border-none outline-none py-2 text-fg text-md leading-snug placeholder:text-subtle disabled:opacity-60"
             />
-            <button
+            <Button
+              variant="primary"
+              size="md"
+              round
               onClick={handleFollowUpSend}
               disabled={loading || !followUp.trim()}
-              style={{ background: SEND_GRADIENT }}
-              className="
-                w-9 h-9 rounded-full flex items-center justify-center
-                text-white shadow-[0_2px_6px_rgba(11,183,100,0.35)]
-                hover:brightness-110 transition-[filter,opacity] shrink-0
-                disabled:opacity-40 disabled:cursor-not-allowed
-              "
               aria-label="Send"
-            >
-              <SendIcon />
-            </button>
+              icon={<PaperAirplaneIcon className="w-4 h-4" />}
+            />
           </div>
         </div>
       </div>
@@ -304,12 +276,13 @@ function SessionCardStack({ cards }: { cards: SessionCard[] }): JSX.Element {
   const visible = expanded ? cards : cards.slice(0, CARDS_VISIBLE);
 
   return (
-    <div className="space-y-sm">
+    <div className="space-y-2">
       {visible.map((c) => (
         <SessionCardView key={c.id} card={c} />
       ))}
       {overflow > 0 && !expanded && (
         <button
+          type="button"
           onClick={() => setExpanded(true)}
           className="text-xs text-subtle hover:text-muted underline decoration-dotted underline-offset-2"
         >
@@ -335,6 +308,7 @@ function SessionCardView({ card }: { card: SessionCard }): JSX.Element {
 
   return (
     <button
+      type="button"
       onClick={() =>
         void window.chatheads.openSessionCard({
           sessionId: card.id,
@@ -342,12 +316,12 @@ function SessionCardView({ card }: { card: SessionCard }): JSX.Element {
         })
       }
       aria-label={`Open session details for @${card.user.login}`}
-      className="w-full flex items-start gap-3 px-3 py-2.5 rounded-xl bg-surface hover:bg-surface-hover text-left transition-colors"
+      className="w-full flex items-start gap-3 px-3 py-2.5 rounded-xl bg-surface-alt hover:bg-surface-alt-hover text-left transition-colors"
     >
       <Avatar src={card.user.avatarUrl} fallback={name} />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-medium text-fg truncate">{primary}</span>
+          <span className="text-base font-medium text-fg truncate">{primary}</span>
           <StateDot state={card.state} />
         </div>
         <div className="text-xs text-subtle truncate">{meta}</div>
@@ -360,11 +334,11 @@ function SessionCardView({ card }: { card: SessionCard }): JSX.Element {
 function Avatar({ src, fallback }: { src: string | null; fallback: string }): JSX.Element {
   if (src) {
     return (
-      <img src={src} alt="" className="w-8 h-8 rounded-full shrink-0 bg-surface object-cover" />
+      <img src={src} alt="" className="w-8 h-8 rounded-full shrink-0 bg-surface-alt object-cover" />
     );
   }
   return (
-    <div className="w-8 h-8 rounded-full shrink-0 bg-surface flex items-center justify-center text-xs text-muted">
+    <div className="w-8 h-8 rounded-full shrink-0 bg-surface-alt flex items-center justify-center text-xs text-muted">
       {fallback.slice(0, 1).toUpperCase()}
     </div>
   );

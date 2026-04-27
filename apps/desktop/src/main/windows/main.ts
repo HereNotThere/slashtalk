@@ -11,7 +11,7 @@ function createMainWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
     width: 620,
     height: 640,
-    title: "Slashtalk",
+    title: "Settings",
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

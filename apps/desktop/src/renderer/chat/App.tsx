@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { SearchIcon, SendIcon } from "../shared/icons";
+import { MagnifyingGlassIcon, PaperAirplaneIcon } from "@heroicons/react/24/outline";
+import { Button } from "../shared/Button";
 
 // Frost + rim are painted natively by main (vibrancy + setMacCornerRadius),
 // so this renderer is just transparent content on top of that material.
@@ -7,9 +8,6 @@ export function App(): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
 
-  // Autofocus whenever the window becomes visible. Electron re-mounts only
-  // when hot-reloaded, so we also refocus on window `focus` to cover
-  // show-after-hide cycles (the window is hidden, not destroyed).
   useEffect(() => {
     const focus = (): void => inputRef.current?.focus();
     focus();
@@ -35,50 +33,33 @@ export function App(): JSX.Element {
   };
 
   return (
-    <div className="w-screen h-screen flex items-center gap-md px-md">
-      <button
+    <div className="w-screen h-screen flex items-center gap-3 px-3">
+      <Button
+        variant="ghost"
+        size="lg"
+        round
         onClick={() => void window.chatheads.hideChat()}
-        className="
-          relative w-11.25 h-11.25 rounded-full cursor-pointer shrink-0
-          flex items-center justify-center
-          bg-black/15 text-white
-          outline-1 -outline-offset-1 outline-bubble-outline
-          transition-transform duration-150 ease-out
-          hover:scale-[1.03] hover:bg-black/20
-        "
         aria-label="Close search"
-      >
-        <div className="pointer-events-none scale-125">
-          <SearchIcon />
-        </div>
-      </button>
+        icon={<MagnifyingGlassIcon className="w-5 h-5" />}
+        className="bg-bubble text-fg outline-1 -outline-offset-1 outline-bubble-outline hover:bg-bubble"
+      />
       <input
         ref={inputRef}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder="Ask about what your team has been doing..."
-        className="
-          flex-1 min-w-0 bg-transparent border-none outline-none
-          text-[15px] text-fg placeholder:text-subtle
-        "
+        className="flex-1 min-w-0 bg-transparent border-none outline-none text-md text-fg placeholder:text-subtle"
       />
-      <button
+      <Button
+        variant="primary"
+        size="lg"
+        round
         onClick={handleSend}
         disabled={!value.trim()}
-        className="
-          w-10 h-10 rounded-full flex items-center justify-center shrink-0
-          bg-bg text-fg cursor-pointer
-          transition-[background-color,opacity] duration-150 ease-out
-          hover:bg-button
-          disabled:opacity-30 disabled:cursor-default disabled:hover:bg-bg
-        "
         aria-label="Send"
-      >
-        <span className="-rotate-90">
-          <SendIcon />
-        </span>
-      </button>
+        icon={<PaperAirplaneIcon className="w-5 h-5" />}
+      />
     </div>
   );
 }

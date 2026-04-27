@@ -22,6 +22,10 @@ let restoreFetch: () => void;
 const COMMON_SESSION_ID = "a0000000-0000-0000-0000-000000000001";
 const REPO_A_SESSION_ID = "a0000000-0000-0000-0000-000000000002";
 
+// 30s timeout: this beforeAll runs DROP+CREATE schema, replays every
+// migration, connects to Redis, and starts a full Elysia app. Bun's default
+// (5s) was tipping over on slow CI runners — see the flakes on #119 and
+// #125, both at exactly 5000ms in this same hook.
 beforeAll(async () => {
   restoreFetch = mockGitHubAuth();
   await resetDatabase();
@@ -33,7 +37,7 @@ beforeAll(async () => {
   app.listen(0);
   const port = app.server!.port;
   baseUrl = `http://localhost:${port}`;
-});
+}, 30_000);
 
 afterAll(async () => {
   restoreFetch();

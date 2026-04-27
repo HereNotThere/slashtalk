@@ -21,7 +21,7 @@ export const BUBBLE_PAD = 7;
 const PADDING_X = 12;
 export const PADDING_Y = 16;
 export const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
-const DOCK_EDGE_MARGIN = 6;
+export const DOCK_EDGE_MARGIN = 6;
 
 /** Main-axis length of the overlay rail for `count` chat heads, plus the
  *  two control bubbles (search + agent-create). Cross-axis is OVERLAY_WIDTH. */
@@ -66,10 +66,7 @@ export function availableDockEdges(display: Electron.Display): Set<Edge> {
 
 /** Pick the nearest *allowed* work-area edge to `p`. Edges blocked by the
  *  macOS Dock are dropped — the next-closest allowed edge wins. */
-export function dockFromPoint(
-  p: { x: number; y: number },
-  display: Electron.Display,
-): DockConfig {
+export function dockFromPoint(p: { x: number; y: number }, display: Electron.Display): DockConfig {
   const wa = display.workArea;
   const allowed = availableDockEdges(display);
   const candidates: Array<{ d: number; dock: DockConfig }> = [];

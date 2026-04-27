@@ -56,6 +56,23 @@ import {
   screenIdOf,
 } from "./windows/dock-geometry";
 import {
+  broadcastRailCollapseInactive,
+  broadcastRailPinned,
+  broadcastRailSessionOnlyMode,
+  broadcastShowActivityTimestamps,
+  configureRailState,
+  getRailCollapseInactive,
+  getRailPinned,
+  getRailSessionOnlyMode,
+  getShowActivityTimestamps,
+  getSpotifyShareEnabled,
+  setRailCollapseInactive,
+  setRailPinned,
+  setRailSessionOnlyMode,
+  setShowActivityTimestamps,
+  setSpotifyShareEnabled,
+} from "./windows/rail-state";
+import {
   configureChat,
   hideChat,
   isChatVisible,
@@ -126,45 +143,6 @@ let infoHideGraceTimer: NodeJS.Timeout | null = null;
 let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
-const PINNED_KEY = "railPinned";
-const SESSION_ONLY_KEY = "railSessionOnlyMode";
-const COLLAPSE_INACTIVE_KEY = "railCollapseInactive";
-const SHOW_ACTIVITY_TIMESTAMPS_KEY = "showActivityTimestamps";
-const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
-
-// Pinned (default): rail floats above everything. Unpinned: rail behaves like
-// a normal app window — on top only when Slashtalk is focused.
-function getRailPinned(): boolean {
-  const v = store.get<boolean>(PINNED_KEY);
-  return v === undefined ? true : v;
-}
-
-// Opt-in "show only during active sessions" mode. When on AND the rail is not
-// pinned, the rail stays hidden until the signed-in user has a BUSY/ACTIVE
-// session (or force-opens via the tray), then auto-hides 15 min after the
-// last session ends. Pinned wins; this preference is ignored while pinned.
-function getRailSessionOnlyMode(): boolean {
-  return store.get<boolean>(SESSION_ONLY_KEY) ?? false;
-}
-
-// Opt-in: off by default so the macOS Automation permission dialog only fires
-// when the user explicitly ticks the toggle in the tray popup.
-function getSpotifyShareEnabled(): boolean {
-  return store.get<boolean>(SPOTIFY_SHARE_KEY) ?? false;
-}
-
-// On by default — peers idle past 24h collapse into a hover-expanding stack
-// so the rail stays compact. Users can opt out via the tray to render every
-// teammate inline.
-function getRailCollapseInactive(): boolean {
-  return store.get<boolean>(COLLAPSE_INACTIVE_KEY) ?? true;
-}
-
-// On by default — the "Xm" / "Xh" / "Xd" age pill renders on each chathead.
-// Users can toggle off in the tray to declutter the rail.
-function getShowActivityTimestamps(): boolean {
-  return store.get<boolean>(SHOW_ACTIVITY_TIMESTAMPS_KEY) ?? true;
-}
 
 function updateSpotifyRunning(): void {
   const shouldRun =
@@ -198,29 +176,6 @@ function applyRailPinned(): void {
 
 function appIsFocused(): boolean {
   return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused());
-}
-
-function broadcastToRailTargets<T>(channel: string, payload: T): void {
-  const targets = [overlayWindow, getMainWindow(), getTrayPopup()].filter(
-    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
-  );
-  for (const w of targets) w.webContents.send(channel, payload);
-}
-
-function broadcastRailPinned(): void {
-  broadcastToRailTargets("rail:pinned", getRailPinned());
-}
-
-function broadcastRailSessionOnlyMode(): void {
-  broadcastToRailTargets("rail:sessionOnlyMode", getRailSessionOnlyMode());
-}
-
-function broadcastRailCollapseInactive(): void {
-  broadcastToRailTargets("rail:collapseInactive", getRailCollapseInactive());
-}
-
-function broadcastShowActivityTimestamps(): void {
-  broadcastToRailTargets("rail:showActivityTimestamps", getShowActivityTimestamps());
 }
 
 let overlayWindow: BrowserWindow | null = null;
@@ -716,7 +671,7 @@ ipcMain.handle("rail:getPinned", (): boolean => {
 });
 ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
   console.log(`[pin] ipc setPinned(${pinned})`);
-  store.set(PINNED_KEY, !!pinned);
+  setRailPinned(pinned);
   applyRailPinned();
   resolveRailVisibility();
   broadcastRailPinned();
@@ -724,20 +679,20 @@ ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
 
 ipcMain.handle("rail:getSessionOnlyMode", (): boolean => getRailSessionOnlyMode());
 ipcMain.handle("rail:setSessionOnlyMode", (_e, enabled: boolean): void => {
-  store.set(SESSION_ONLY_KEY, !!enabled);
+  setRailSessionOnlyMode(enabled);
   resolveRailVisibility();
   broadcastRailSessionOnlyMode();
 });
 
 ipcMain.handle("rail:getCollapseInactive", (): boolean => getRailCollapseInactive());
 ipcMain.handle("rail:setCollapseInactive", (_e, enabled: boolean): void => {
-  store.set(COLLAPSE_INACTIVE_KEY, !!enabled);
+  setRailCollapseInactive(enabled);
   broadcastRailCollapseInactive();
 });
 
 ipcMain.handle("rail:getShowActivityTimestamps", (): boolean => getShowActivityTimestamps());
 ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
-  store.set(SHOW_ACTIVITY_TIMESTAMPS_KEY, !!shown);
+  setShowActivityTimestamps(shown);
   broadcastShowActivityTimestamps();
 });
 
@@ -747,7 +702,7 @@ ipcMain.handle("spotify:setShareEnabled", async (_e, enabled: boolean): Promise<
   const next = !!enabled;
   const prev = getSpotifyShareEnabled();
   if (prev === next) return;
-  store.set(SPOTIFY_SHARE_KEY, next);
+  setSpotifyShareEnabled(next);
   broadcastToTrayAndMain("spotify:shareEnabled", next);
   // Turning off while signed in: clear peers immediately so the card
   // disappears in seconds instead of waiting for the 120s Redis TTL.
@@ -1647,6 +1602,11 @@ function debugBackfillTimestamps(): void {
   // No-op; kept for reference.
 }
 
+configureRailState({
+  getOverlay: () => overlayWindow,
+  getMainWindow,
+  getTrayPopup,
+});
 configureChat({
   getOverlay: () => overlayWindow,
   getCurrentDock: currentDock,

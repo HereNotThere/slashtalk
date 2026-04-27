@@ -332,11 +332,6 @@ Drizzle export: `users`.
 | `avatar_url` | `PgText` | — |
 | `display_name` | `PgText` | — |
 | `github_token` | `PgText` | not null |
-| `github_app_user_token` | `PgText` | — |
-| `github_app_refresh_token` | `PgText` | — |
-| `github_app_token_expires_at` | `PgTimestamp` | — |
-| `github_app_refresh_token_expires_at` | `PgTimestamp` | — |
-| `github_app_connected_at` | `PgTimestamp` | — |
 | `credentials_revoked_at` | `PgTimestamp` | — |
 | `created_at` | `PgTimestamp` | has default |
 | `updated_at` | `PgTimestamp` | has default |

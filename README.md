@@ -38,11 +38,6 @@ DATABASE_URL=postgres://slashtalk:slashtalk@localhost:5432/slashtalk
 REDIS_URL=redis://localhost:6379
 GITHUB_CLIENT_ID=<your GitHub OAuth app client ID>
 GITHUB_CLIENT_SECRET=<your GitHub OAuth app client secret>
-# Optional: enables selected-private-repo claims without OAuth `repo` scope
-GITHUB_APP_CLIENT_ID=<your GitHub App client ID>
-GITHUB_APP_CLIENT_SECRET=<your GitHub App client secret>
-GITHUB_APP_ID=<your GitHub App ID>
-GITHUB_APP_SLUG=<your GitHub App slug>
 JWT_SECRET=<any random string>
 ENCRYPTION_KEY=<64-char hex string, e.g. openssl rand -hex 32>
 BASE_URL=http://localhost:10000
@@ -50,8 +45,6 @@ PORT=10000
 ```
 
 To create a GitHub OAuth app, go to **Settings → Developer settings → OAuth Apps → New OAuth App** with callback URL `http://localhost:10000/auth/github/callback`.
-
-For private repo claims, create a GitHub App with repository **Metadata: read-only**, callback URL `http://localhost:10000/auth/github-app/callback`, expiring user authorization tokens enabled, and no webhooks required for local development. `/auth/github-app` runs the GitHub App user-authorization flow; `/auth/github-app?install=1` is the explicit install/configure fallback.
 
 ### 3. Install dependencies
 

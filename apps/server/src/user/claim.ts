@@ -2,14 +2,13 @@
 //
 // CLAUDE.md core-belief #12: "Repo access is verified, not asserted." Every
 // claim does a `GET /repos/:owner/:name` against the user's stored OAuth
-// token (and falls back to the GitHub App user token for private repos when
-// the OAuth scope can't see them) before inserting a `user_repos` row. See
-// docs/SECURITY.md § Repo-claim verification for the full flow.
+// token before inserting a `user_repos` row. See docs/SECURITY.md
+// § Repo-claim verification for the full flow.
 //
 // Owns:
 // - the per-(user, fullName) verification cache (dedup desktop double-clicks)
 // - the per-user claim-attempt rate limit (block enumeration via stolen JWT)
-// - the three-strategy verification pipeline (OAuth, then App user token)
+// - the OAuth verification call
 
 import { Elysia, t } from "elysia";
 import { and, eq } from "drizzle-orm";
@@ -18,20 +17,9 @@ import { repos, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { githubFetch } from "../auth/github-fetch";
 import { revokeAllUserCredentials } from "../auth/sessions";
-import {
-  fetchUserGithubAppToken,
-  githubAppConnectUrlForUser,
-  isGithubAppConfigured,
-} from "../auth/github-app";
-import { config } from "../config";
 import { normalizeFullName } from "../social/github-sync";
 import { TtlCache } from "../util/ttl-cache";
-import {
-  type RawGithubRepo,
-  fetchUserGithubToken,
-  githubHeaders,
-  parseNextUrl,
-} from "./github-helpers";
+import { fetchUserGithubToken, githubHeaders } from "./github-helpers";
 
 // "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
 const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
@@ -98,12 +86,7 @@ type VerifyOutcome =
   | { ok: true; repo: VerifiedRepo }
   | {
       ok: false;
-      kind:
-        | "no_access"
-        | "github_app_required"
-        | "github_grant_revoked"
-        | "token_expired"
-        | "upstream_unavailable";
+      kind: "no_access" | "github_grant_revoked" | "token_expired" | "upstream_unavailable";
     };
 
 /** Ask GitHub, using the user's stored OAuth token, whether they can see
@@ -147,117 +130,6 @@ async function verifyRepoAccess(
       name: raw.name,
       private: raw.private ?? false,
     },
-  };
-}
-
-async function verifyRepoAccessWithGitHubAppUserToken(
-  token: string,
-  owner: string,
-  name: string,
-): Promise<VerifyOutcome> {
-  const normalizedFullName = `${owner}/${name}`.toLowerCase();
-  let url: string | null = "https://api.github.com/user/installations?per_page=100";
-
-  while (url) {
-    const result = await githubFetch(
-      url,
-      { headers: githubAppUserHeaders(token) },
-      "claim /user/installations",
-    );
-    if (!result.ok) {
-      if (result.reason === "unauthorized" || result.reason === "forbidden") {
-        return { ok: false, kind: "github_app_required" };
-      }
-      return { ok: false, kind: "upstream_unavailable" };
-    }
-
-    const installationsBody = (await result.res.json().catch(() => null)) as {
-      installations?: Array<{
-        id?: number;
-        suspended_at?: string | null;
-        app_slug?: string;
-      }>;
-    } | null;
-    const installations =
-      installationsBody?.installations?.filter(
-        (installation) =>
-          typeof installation.id === "number" &&
-          !installation.suspended_at &&
-          (!config.githubAppSlug || installation.app_slug === config.githubAppSlug),
-      ) ?? [];
-
-    for (const installation of installations) {
-      const outcome = await findRepoInGitHubAppInstallation(
-        token,
-        installation.id!,
-        normalizedFullName,
-      );
-      if (outcome.ok) return outcome;
-      if (outcome.kind !== "no_access") return outcome;
-    }
-
-    url = parseNextUrl(result.res.headers.get("link"));
-  }
-
-  return { ok: false, kind: "no_access" };
-}
-
-async function findRepoInGitHubAppInstallation(
-  token: string,
-  installationId: number,
-  normalizedFullName: string,
-): Promise<VerifyOutcome> {
-  let url: string | null =
-    `https://api.github.com/user/installations/${installationId}/repositories?per_page=100`;
-  const logTag = `claim /user/installations/${installationId}/repositories`;
-  while (url) {
-    const result = await githubFetch(url, { headers: githubAppUserHeaders(token) }, logTag);
-    if (!result.ok) {
-      if (result.reason === "not_found") return { ok: false, kind: "no_access" };
-      if (result.reason === "unauthorized" || result.reason === "forbidden") {
-        return { ok: false, kind: "github_app_required" };
-      }
-      return { ok: false, kind: "upstream_unavailable" };
-    }
-
-    const body = (await result.res.json().catch(() => null)) as {
-      repositories?: RawGithubRepo[];
-    } | null;
-    const repositories = body?.repositories ?? [];
-    const match = repositories.find((repo) => repo.full_name?.toLowerCase() === normalizedFullName);
-    if (match) {
-      const repo = verifiedRepoFromRaw(match);
-      if (!repo) {
-        console.warn(`[${logTag}] malformed repository body`);
-        return { ok: false, kind: "upstream_unavailable" };
-      }
-      return { ok: true, repo };
-    }
-    url = parseNextUrl(result.res.headers.get("link"));
-  }
-
-  return { ok: false, kind: "no_access" };
-}
-
-function verifiedRepoFromRaw(raw: RawGithubRepo): VerifiedRepo | null {
-  if (typeof raw.id !== "number" || !raw.full_name || !raw.name || !raw.owner?.login) {
-    return null;
-  }
-  return {
-    githubId: raw.id,
-    fullName: raw.full_name,
-    owner: raw.owner.login,
-    name: raw.name,
-    private: raw.private ?? false,
-  };
-}
-
-function githubAppUserHeaders(token: string): Record<string, string> {
-  return {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    Authorization: `Bearer ${token}`,
-    "User-Agent": "slashtalk",
   };
 }
 
@@ -322,43 +194,13 @@ export const claimRoutes = (db: Database) =>
               message: "Re-sign in to slashtalk.",
             };
           }
-          let outcome = await verifyRepoAccess(token, rawOwner, rawName);
-          let checkedGitHubApp = false;
-          if (!outcome.ok && outcome.kind === "no_access") {
-            const appToken = await fetchUserGithubAppToken(db, user.id);
-            if (appToken.ok) {
-              checkedGitHubApp = true;
-              outcome = await verifyRepoAccessWithGitHubAppUserToken(
-                appToken.token,
-                rawOwner,
-                rawName,
-              );
-            } else if (isGithubAppConfigured()) {
-              outcome = { ok: false, kind: "github_app_required" };
-            }
-          }
+          const outcome = await verifyRepoAccess(token, rawOwner, rawName);
           if (!outcome.ok) {
-            if (outcome.kind === "github_app_required") {
-              set.status = 403;
-              return {
-                error: "no_access",
-                message:
-                  "Private repo access needs the Slashtalk GitHub App. Complete the browser setup, then click Add local repo again.",
-                requiresGithubApp: true,
-                connectUrl: githubAppConnectUrlForUser(user.id),
-              };
-            }
             if (outcome.kind === "no_access") {
-              const message = checkedGitHubApp
-                ? "The Slashtalk GitHub App is not installed on this repo. Open GitHub App settings, include this repository, then try again."
-                : "GitHub doesn't show you have access to this repo.";
               set.status = 403;
               return {
                 error: "no_access",
-                message,
-                connectUrl: checkedGitHubApp
-                  ? githubAppConnectUrlForUser(user.id, { install: true })
-                  : undefined,
+                message: "GitHub doesn't show you have access to this repo.",
               };
             }
             if (outcome.kind === "token_expired") {

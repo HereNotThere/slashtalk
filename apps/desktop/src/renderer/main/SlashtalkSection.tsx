@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { XMarkIcon } from "@heroicons/react/20/solid";
 import { Button } from "../shared/Button";
-import type { BackendAuthState, GithubAppStatus, TrackedRepo } from "../../shared/types";
+import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 
 type Status = { kind: "ok" | "err"; text: string } | null;
-type Busy = null | "signIn" | "repoAccess" | "add" | "globalSignOut";
+type Busy = null | "signIn" | "add" | "globalSignOut";
 
 export function SlashtalkSection(): JSX.Element {
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
   const [tracked, setTracked] = useState<TrackedRepo[]>([]);
-  const [githubApp, setGithubApp] = useState<GithubAppStatus | null>(null);
-  const [repoAccessWatch, setRepoAccessWatch] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [status, setStatus] = useState<Status>(null);
 
@@ -24,65 +22,6 @@ export function SlashtalkSection(): JSX.Element {
     void window.chatheads.backend.listTrackedRepos().then(setTracked);
     return window.chatheads.backend.onTrackedReposChange(setTracked);
   }, []);
-
-  const refreshGithubApp = useCallback(async (): Promise<GithubAppStatus | null> => {
-    if (!auth.signedIn) {
-      setGithubApp(null);
-      return null;
-    }
-    try {
-      const next = await window.chatheads.backend.getGithubAppStatus();
-      setGithubApp(next);
-      return next;
-    } catch {
-      setGithubApp(null);
-      return null;
-    }
-  }, [auth.signedIn]);
-
-  useEffect(() => {
-    void refreshGithubApp();
-  }, [refreshGithubApp]);
-
-  useEffect(() => {
-    if (!repoAccessWatch || !auth.signedIn) return;
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let attempts = 0;
-
-    const poll = async (): Promise<void> => {
-      attempts += 1;
-      const next = await refreshGithubApp();
-      if (cancelled) return;
-
-      if (next?.connected) {
-        setRepoAccessWatch(false);
-        setStatus({
-          kind: "ok",
-          text: "Repo access connected. You can add your local repo now.",
-        });
-        return;
-      }
-
-      if (attempts < 60) {
-        timer = setTimeout(() => void poll(), 2_000);
-        return;
-      }
-
-      setRepoAccessWatch(false);
-      setStatus({
-        kind: "ok",
-        text: "Still waiting for GitHub approval. Finish it in your browser, then use Refresh if needed.",
-      });
-    };
-
-    timer = setTimeout(() => void poll(), 1_000);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [auth.signedIn, refreshGithubApp, repoAccessWatch]);
 
   const withBusy = async (
     kind: Exclude<Busy, null | "globalSignOut">,
@@ -103,32 +42,6 @@ export function SlashtalkSection(): JSX.Element {
     withBusy("signIn", async () => {
       await window.chatheads.backend.signIn();
       return null;
-    });
-
-  const connectRepoAccess = (): Promise<void> =>
-    withBusy("repoAccess", async () => {
-      await window.chatheads.backend.connectGithubApp();
-      setRepoAccessWatch(true);
-      return {
-        kind: "ok",
-        text: "Waiting for GitHub approval...",
-      };
-    });
-
-  const refreshRepoAccess = (): Promise<void> =>
-    withBusy("repoAccess", async () => {
-      const next = await refreshGithubApp();
-      if (next?.connected) {
-        setRepoAccessWatch(false);
-        return {
-          kind: "ok",
-          text: "Repo access connected. You can add your local repo now.",
-        };
-      }
-      return {
-        kind: "ok",
-        text: "Still waiting for GitHub approval.",
-      };
     });
 
   const signOut = async (): Promise<void> => {
@@ -200,12 +113,7 @@ export function SlashtalkSection(): JSX.Element {
       ) : (
         <SignedInBody
           tracked={tracked}
-          githubApp={githubApp}
           adding={busy === "add"}
-          connectingRepoAccess={busy === "repoAccess"}
-          watchingRepoAccess={repoAccessWatch}
-          onConnectRepoAccess={connectRepoAccess}
-          onRefreshRepoAccess={refreshRepoAccess}
           onAdd={addRepo}
           onRemove={removeRepo}
         />
@@ -226,60 +134,31 @@ export function SlashtalkSection(): JSX.Element {
 
 function SignedInBody({
   tracked,
-  githubApp,
   adding,
-  connectingRepoAccess,
-  watchingRepoAccess,
-  onConnectRepoAccess,
-  onRefreshRepoAccess,
   onAdd,
   onRemove,
 }: {
   tracked: TrackedRepo[];
-  githubApp: GithubAppStatus | null;
   adding: boolean;
-  connectingRepoAccess: boolean;
-  watchingRepoAccess: boolean;
-  onConnectRepoAccess: () => void;
-  onRefreshRepoAccess: () => void;
   onAdd: () => void;
   onRemove: (repoId: number) => void;
 }): JSX.Element {
-  const needsRepoAccess = githubApp?.configured && !githubApp.connected;
   return (
     <>
-      {needsRepoAccess ? (
-        <RepoAccessPanel
-          busy={connectingRepoAccess}
-          watching={watchingRepoAccess}
-          onConnect={onConnectRepoAccess}
-          onRefresh={onRefreshRepoAccess}
-        />
-      ) : (
-        <RepoAccessConnected connected={githubApp?.connected === true} />
-      )}
-
       <Button
         variant="secondary"
         size="md"
         icon={<PlusIcon className="w-4 h-4" />}
-        onClick={needsRepoAccess ? onConnectRepoAccess : onAdd}
-        disabled={adding || connectingRepoAccess || watchingRepoAccess}
+        onClick={onAdd}
+        disabled={adding}
       >
-        {needsRepoAccess
-          ? connectingRepoAccess || watchingRepoAccess
-            ? "Waiting for GitHub..."
-            : "Connect repo access"
-          : adding
-            ? "Adding..."
-            : "Add local repo"}
+        {adding ? "Adding..." : "Add local repo"}
       </Button>
 
       {tracked.length === 0 ? (
         <div className="text-sm text-subtle mt-3 leading-snug">
-          {needsRepoAccess
-            ? "Connect repo access once, then pick a folder that's a clone of one of your GitHub repos."
-            : 'No local repos tracked yet. Click "Add local repo" and pick a folder that\'s a clone of one of your GitHub repos.'}
+          No local repos tracked yet. Click &ldquo;Add local repo&rdquo; and pick a folder
+          that&rsquo;s a clone of one of your GitHub repos.
         </div>
       ) : (
         <div className="flex flex-col gap-1.5 mt-3">
@@ -305,80 +184,5 @@ function SignedInBody({
         </div>
       )}
     </>
-  );
-}
-
-function RepoAccessPanel({
-  busy,
-  watching,
-  onConnect,
-  onRefresh,
-}: {
-  busy: boolean;
-  watching: boolean;
-  onConnect: () => void;
-  onRefresh: () => void;
-}): JSX.Element {
-  return (
-    <div className="bg-surface-alt border border-border rounded-xl p-3 mb-3">
-      <div className="flex items-start gap-2.5">
-        <StepBadge value="2" />
-        <div className="min-w-0 flex-1">
-          <div className="text-base font-medium">Connect repo access</div>
-          <div className="text-sm text-subtle leading-snug mt-0.5">
-            Approve the Slashtalk GitHub App once so private repos can be verified without granting
-            broad OAuth repo access.
-          </div>
-          <div className="flex items-center gap-2 mt-2">
-            <Button variant="secondary" size="sm" onClick={onConnect} disabled={busy}>
-              {busy ? "Opening..." : watching ? "Open again" : "Open GitHub"}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onRefresh} disabled={busy}>
-              Refresh
-            </Button>
-          </div>
-          {watching ? (
-            <div className="text-xs text-subtle mt-2">Waiting for GitHub approval...</div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RepoAccessConnected({ connected }: { connected: boolean }): JSX.Element {
-  if (!connected) return <StepBadgeRow value="2" label="Repo access" state="Optional" />;
-  return <StepBadgeRow value="2" label="Repo access" state="Connected" success />;
-}
-
-function StepBadgeRow({
-  value,
-  label,
-  state,
-  success = false,
-}: {
-  value: string;
-  label: string;
-  state: string;
-  success?: boolean;
-}): JSX.Element {
-  return (
-    <div className="flex items-center gap-2 mb-3 text-sm text-subtle">
-      <StepBadge value={value} success={success} />
-      <span>{label}</span>
-      <span className={success ? "text-success" : undefined}>{state}</span>
-    </div>
-  );
-}
-
-function StepBadge({ value, success = false }: { value: string; success?: boolean }): JSX.Element {
-  return (
-    <span
-      className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${
-        success ? "bg-success/15 text-success" : "bg-surface-alt text-subtle"
-      }`}
-    >
-      {success ? "✓" : value}
-    </span>
   );
 }

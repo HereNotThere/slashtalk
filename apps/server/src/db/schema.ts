@@ -25,17 +25,6 @@ export const users = pgTable("users", {
   avatarUrl: text("avatar_url"),
   displayName: text("display_name"),
   githubToken: text("github_token").notNull(), // encrypted at rest
-  githubAppUserToken: text("github_app_user_token"), // encrypted at rest
-  githubAppRefreshToken: text("github_app_refresh_token"), // encrypted at rest
-  githubAppTokenExpiresAt: timestamp("github_app_token_expires_at", {
-    withTimezone: true,
-  }),
-  githubAppRefreshTokenExpiresAt: timestamp("github_app_refresh_token_expires_at", {
-    withTimezone: true,
-  }),
-  githubAppConnectedAt: timestamp("github_app_connected_at", {
-    withTimezone: true,
-  }),
   credentialsRevokedAt: timestamp("credentials_revoked_at", {
     withTimezone: true,
   }),

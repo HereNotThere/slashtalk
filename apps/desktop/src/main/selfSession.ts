@@ -13,7 +13,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import * as chatheadsAuth from "./chatheadsAuth";
-import * as backend from "./backend";
+import { mcpUrl } from "./config";
 
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -27,11 +27,6 @@ let authRejected = false;
 let loggedUnauthorized = false;
 let loggedConnectFailureUrl: string | null = null;
 
-const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as string | undefined;
-
-function mcpUrl(): string {
-  return process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? `${backend.getBaseUrl()}/mcp`;
-}
 
 function isUnauthorized(err: unknown): boolean {
   return (err as { code?: unknown } | null)?.code === 401;

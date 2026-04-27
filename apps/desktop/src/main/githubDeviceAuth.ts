@@ -18,6 +18,7 @@
 import { shell } from "electron";
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
+import { githubClientId, githubScope } from "./config";
 
 export interface GithubCreds {
   accessToken: string;
@@ -41,11 +42,6 @@ export type GithubConnectState =
   | { kind: "error"; message: string };
 
 const CREDS_KEY = "githubCredsEnc";
-const SCOPE = process.env["GITHUB_SCOPE"] ?? "repo read:user read:org";
-
-// Baked in at build time via electron-vite's MAIN_VITE_ prefix. Runtime
-// GITHUB_CLIENT_ID still wins for ad-hoc local testing without rebuilding.
-const BAKED_CLIENT_ID = import.meta.env.MAIN_VITE_GITHUB_CLIENT_ID as string | undefined;
 
 let creds: GithubCreds | null = null;
 let pendingPoll: { abort: () => void } | null = null;
@@ -55,7 +51,7 @@ const changes = createEmitter<GithubConnectState>();
 export const onChange = changes.on;
 
 export function getClientId(): string {
-  return process.env["GITHUB_CLIENT_ID"] ?? BAKED_CLIENT_ID ?? "";
+  return githubClientId();
 }
 
 export function isConfigured(): boolean {
@@ -121,7 +117,7 @@ export async function startConnect(): Promise<GithubPendingConnect> {
       "content-type": "application/json",
       accept: "application/json",
     },
-    body: JSON.stringify({ client_id: getClientId(), scope: SCOPE }),
+    body: JSON.stringify({ client_id: getClientId(), scope: githubScope() }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -190,7 +186,7 @@ function startPolling(deviceCode: string, interval: number): void {
         accessToken: body.access_token,
         refreshToken: body.refresh_token ?? "",
         expiresAt: Date.now() + (body.expires_in ?? 28800) * 1000,
-        scope: body.scope ?? SCOPE,
+        scope: body.scope ?? githubScope(),
         login,
       };
       persist();

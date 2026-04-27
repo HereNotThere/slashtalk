@@ -9,6 +9,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { TrackedRepo } from "../shared/types";
 import * as backend from "./backend";
+import { apiBaseUrl } from "./config";
 import * as store from "./store";
 import { createEmitter } from "./emitter";
 
@@ -249,7 +250,7 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
       if (err.kind === "token_expired") {
         void backend.signOut().catch(() => {});
       } else if (err.kind === "github_app_required") {
-        void shell.openExternal(err.connectUrl ?? `${backend.getBaseUrl()}/auth/github-app`);
+        void shell.openExternal(err.connectUrl ?? `${apiBaseUrl()}/auth/github-app`);
       } else if (err.connectUrl) {
         void shell.openExternal(err.connectUrl);
       }

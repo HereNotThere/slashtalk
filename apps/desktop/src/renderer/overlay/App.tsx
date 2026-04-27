@@ -58,7 +58,10 @@ export function App(): JSX.Element {
   const hoverShowTimer = useRef<number | null>(null);
   const [stackExpanded, setStackExpanded] = useState(false);
   const [infoOpenHeadId, setInfoOpenHeadId] = useState<string | null>(null);
-  const [collapseInactive, setCollapseInactive] = useState(false);
+  // Mirror main's default (`getRailCollapseInactive` returns true unless the
+  // user opted out). Matching here avoids a false→true flip on first paint
+  // when settings load asynchronously, which read as an expand/collapse yoyo.
+  const [collapseInactive, setCollapseInactive] = useState(true);
   const [showActivityTimestamps, setShowActivityTimestamps] = useState(true);
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   // FLIP "previous position" cache, keyed on id. We store the main-axis coord
@@ -295,9 +298,17 @@ export function App(): JSX.Element {
   // The constants here mirror the layout below — keep in sync. Main applies
   // the value with `setBounds(animate=true)` so the window animation runs in
   // parallel with the renderer's margin transition.
+  //
+  // Skip reporting until heads are populated. `useHeads` starts at [] and
+  // resolves async, so a first effect with empty heads would report a tiny
+  // length and shrink the window before the real data arrives — read as a
+  // collapse/expand yoyo on first open. Main closes the overlay outright
+  // when heads are genuinely empty, so this gate is safe.
+  const headsLoaded = heads.length > 0;
   const activeCount = activePeers.length;
   const inactiveCount = inactivePeers.length;
   useEffect(() => {
+    if (!headsLoaded) return;
     const RAIL_OUTER_PAD_PX = 16; // py-lg / px-lg main-axis padding on the rail
     const wrapperCount = 3 + activeCount; // search + self + active + create
     let length = wrapperCount * STACK_WRAPPER_PX;
@@ -308,7 +319,7 @@ export function App(): JSX.Element {
     }
     length += RAIL_OUTER_PAD_PX * 2;
     void window.chatheads.setOverlayLength(length);
-  }, [activeCount, inactiveCount, stackVisuallyExpanded]);
+  }, [headsLoaded, activeCount, inactiveCount, stackVisuallyExpanded]);
 
   // Outer fills the window exactly along the rail's main axis (height for
   // vertical, width for horizontal). Self + chat are shrink-0; the peer list
@@ -442,10 +453,10 @@ function SearchBubble({ open }: { open: boolean }): JSX.Element {
       data-search
       title={open ? "Close search" : "Search your team"}
       className="
-        relative w-[45px] h-[45px] rounded-full cursor-pointer
+        relative w-11.25 h-11.25 rounded-full cursor-pointer
         flex items-center justify-center
         bg-black/15 text-white
-        outline outline-1 -outline-offset-1 outline-bubble-outline
+        outline-1 -outline-offset-1 outline-bubble-outline
         transition-transform duration-150 ease-out
         hover:scale-[1.03] hover:bg-black/20
       "
@@ -462,7 +473,7 @@ function CreateBubble(): JSX.Element {
       data-create
       title="Create an agent"
       className="
-        relative w-[45px] h-[45px] rounded-full cursor-pointer
+        relative w-11.25 h-11.25 rounded-full cursor-pointer
         flex items-center justify-center
         bg-black/15 text-white
         outline-1 -outline-offset-1 outline-bubble-outline
@@ -509,7 +520,7 @@ function Bubble({
         filter: pale ? "saturate(0.5) contrast(0.5)" : undefined,
       }}
       className="
-        relative w-11.25 h-[45px] rounded-full cursor-pointer
+        relative w-11.25 h-11.25 rounded-full cursor-pointer
         flex items-center justify-center text-[28px]
         bg-bubble
         backdrop-blur-[18px] backdrop-saturate-[1.4]
@@ -522,9 +533,7 @@ function Bubble({
             className="absolute inset-0 rounded-full opacity-[0.28] pointer-events-none"
             style={{ background: head.tint }}
           />
-          <span className="relative z-[1] leading-none pointer-events-none">
-            {head.avatar.value}
-          </span>
+          <span className="relative z-1 leading-none pointer-events-none">{head.avatar.value}</span>
         </>
       ) : (
         <img
@@ -536,7 +545,7 @@ function Bubble({
       {!hideAge && head.lastActionAt != null && !head.live && (
         <div
           className="
-            absolute bottom-0 right-0 z-[2]
+            absolute bottom-0 right-0 z-2
             px-1.5 py-0.5 rounded-full
             bg-black/30 backdrop-blur-md backdrop-saturate-[1.4]
             text-white text-[9px] font-light leading-none
@@ -551,8 +560,8 @@ function Bubble({
         <div
           aria-hidden
           className="
-            absolute inset-[-2px] rounded-full
-            border-2 border-accent pointer-events-none z-[3]
+            absolute -inset-0.5 rounded-full
+            border-2 border-accent pointer-events-none z-3
           "
           style={{ animation: "live-ring 1.6s ease-in-out infinite" }}
         />

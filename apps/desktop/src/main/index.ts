@@ -17,6 +17,7 @@ import type {
   ChatHead,
   CreateAgentInput,
   DockConfig,
+  DockOrientation,
   InfoSession,
   McpTarget,
   UpdateAgentInput,
@@ -324,7 +325,11 @@ function ensureOverlay(): BrowserWindow {
   const initialDock: DockConfig = restored
     ? dockFromPoint(restored, display)
     : { orientation: "vertical", side: "end" };
-  const bounds = computeDockBoundsOn(display, initialDock, heads.length);
+  const bounds = computeDockBoundsOn(
+    display,
+    initialDock,
+    effectiveOverlayLength(initialDock.orientation, display),
+  );
 
   overlayWindow = new BrowserWindow({
     width: bounds.width,
@@ -395,18 +400,29 @@ const OVERLAY_SCREEN_MARGIN = 40;
 
 let desiredOverlayLength: number | null = null;
 
+// Renderer-reported length wins when present — it knows about the inactive
+// stack's collapsed/expanded state, which main can't infer from heads alone.
+// Clamped to the work-area axis so the rail can't outgrow the screen.
+//
+// Pre-renderer fallback is the 3-wrapper minimum (search + self + create) so
+// the window opens at its smallest plausible size and grows once the renderer
+// reports the real length. Sizing to `heads.length` instead would briefly
+// render the rail at full-expanded width before the renderer collapsed it,
+// which read as a wide-to-narrow yoyo on first open.
+function effectiveOverlayLength(orientation: DockOrientation, display: Electron.Display): number {
+  const wa = display.workArea;
+  const axisExtent = orientation === "vertical" ? wa.height : wa.width;
+  const maxLength = Math.max(overlayLength(0), axisExtent - OVERLAY_SCREEN_MARGIN * 2);
+  const baseLength = desiredOverlayLength ?? overlayLength(1);
+  return Math.min(baseLength, maxLength);
+}
+
 function resizeOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const display = screen.getDisplayMatching(overlayWindow.getBounds());
   const dock = currentDock();
   const wa = display.workArea;
-  // Main-axis cap — leaves OVERLAY_SCREEN_MARGIN at each end.
-  const axisExtent = dock.orientation === "vertical" ? wa.height : wa.width;
-  const maxLength = Math.max(overlayLength(0), axisExtent - OVERLAY_SCREEN_MARGIN * 2);
-  // Renderer-reported length wins when present — it knows about the inactive
-  // stack's collapsed/expanded state, which main can't infer from heads alone.
-  const baseLength = desiredOverlayLength ?? overlayLength(heads.length);
-  const length = Math.min(baseLength, maxLength);
+  const length = effectiveOverlayLength(dock.orientation, display);
   const size =
     dock.orientation === "vertical"
       ? { width: OVERLAY_WIDTH, height: length }
@@ -845,7 +861,8 @@ function currentDock(): DockConfig {
 }
 
 function computeDockBounds(dock: DockConfig): Electron.Rectangle {
-  return computeDockBoundsOn(overlayDisplay(), dock, heads.length);
+  const display = overlayDisplay();
+  return computeDockBoundsOn(display, dock, effectiveOverlayLength(dock.orientation, display));
 }
 
 function ensureDockPlaceholder(): BrowserWindow {

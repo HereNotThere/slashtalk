@@ -13,6 +13,7 @@
 // - PADDING_Y ↔ `py-lg` on the stack (16px) — main-axis padding on the rail.
 // Drift here = popovers misalign.
 
+import { screen } from "electron";
 import type { DockConfig, DockOrientation } from "../../shared/types";
 
 export const BUBBLE_SIZE = 45;
@@ -47,11 +48,16 @@ type Edge = "left" | "right" | "top" | "bottom";
 
 /** Edges of the display whose work area touches the screen bounds (no macOS
  *  Dock occupying that side). The top edge is always allowed: the menu bar
- *  is thin and DOCK_EDGE_MARGIN already clears it. */
+ *  is thin and DOCK_EDGE_MARGIN already clears it.
+ *
+ *  macOS only renders the system Dock on the primary display (it follows the
+ *  cursor between Spaces, but `workArea` only reflects the reserved gap on
+ *  the primary). On secondary displays every edge is fair game. */
 export function availableDockEdges(display: Electron.Display): Set<Edge> {
+  const edges = new Set<Edge>(["left", "right", "top", "bottom"]);
+  if (display.id !== screen.getPrimaryDisplay().id) return edges;
   const b = display.bounds;
   const wa = display.workArea;
-  const edges = new Set<Edge>(["left", "right", "top", "bottom"]);
   if (wa.x - b.x > 0) edges.delete("left");
   if (b.x + b.width - (wa.x + wa.width) > 0) edges.delete("right");
   if (b.y + b.height - (wa.y + wa.height) > 0) edges.delete("bottom");
@@ -91,15 +97,20 @@ export function dockFromPoint(
   return candidates[0].dock;
 }
 
-/** Anchor the rail of `count` heads at the requested edge of `display`'s
- *  work area, inset by DOCK_EDGE_MARGIN. */
+/** Anchor a rail of the given main-axis `length` at the requested edge of
+ *  `display`'s work area, inset by DOCK_EDGE_MARGIN. The caller computes the
+ *  length so it can respect the renderer-reported size (which knows about
+ *  the inactive-stack collapsed state) instead of just `heads.length`. */
 export function computeDockBoundsOn(
   display: Electron.Display,
   dock: DockConfig,
-  count: number,
+  length: number,
 ): Electron.Rectangle {
   const wa = display.workArea;
-  const { width, height } = overlaySize(count, dock.orientation);
+  const { width, height } =
+    dock.orientation === "vertical"
+      ? { width: OVERLAY_WIDTH, height: length }
+      : { width: length, height: OVERLAY_WIDTH };
   if (dock.orientation === "vertical") {
     const x =
       dock.side === "start" ? wa.x + DOCK_EDGE_MARGIN : wa.x + wa.width - width - DOCK_EDGE_MARGIN;

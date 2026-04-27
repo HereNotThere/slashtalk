@@ -181,7 +181,7 @@ async function runOne(
     );
 
     if (session.repoId) {
-      await publishInsightsUpdate(
+      publishInsightsUpdate(
         redis,
         session.sessionId,
         session.repoId,

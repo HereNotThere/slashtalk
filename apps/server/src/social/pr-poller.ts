@@ -171,7 +171,7 @@ async function fanOut(db: Database, redis: RedisBridge, msg: PrActivityMessage):
     .where(eqLower(repos.fullName, msg.repoFullName))
     .limit(1);
   if (!row) return;
-  await redis.publish(`repo:${row.id}`, msg);
+  void redis.publish(`repo:${row.id}`, msg);
 }
 
 // Case-insensitive full-name match (GitHub treats "Foo/Bar" === "foo/bar").

@@ -40,10 +40,10 @@ async function publishPresence(
     spotify,
   } as const;
 
-  await Promise.all([
-    redis.publish(`user:${userId}`, msg),
-    ...repoRows.map((r) => redis.publish(`repo:${r.repoId}`, msg)),
-  ]);
+  void redis.publish(`user:${userId}`, msg);
+  for (const r of repoRows) {
+    void redis.publish(`repo:${r.repoId}`, msg);
+  }
 }
 
 export const spotifyPresenceRoutes = (db: Database, redis: RedisBridge) =>

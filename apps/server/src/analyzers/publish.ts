@@ -9,14 +9,14 @@ export interface InsightsUpdatedPayload {
   analyzed_at: string;
 }
 
-export async function publishInsightsUpdate(
+export function publishInsightsUpdate(
   redis: RedisBridge,
   sessionId: string,
   repoId: number,
   analyzer: string,
   output: unknown,
   analyzedAt: Date,
-): Promise<void> {
+): void {
   const payload: InsightsUpdatedPayload = {
     type: "session_insights_updated",
     session_id: sessionId,
@@ -25,5 +25,5 @@ export async function publishInsightsUpdate(
     output,
     analyzed_at: analyzedAt.toISOString(),
   };
-  await redis.publish(`repo:${repoId}`, payload);
+  void redis.publish(`repo:${repoId}`, payload);
 }

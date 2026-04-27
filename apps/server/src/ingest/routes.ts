@@ -188,7 +188,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
               repo_id: finalSession.repoId,
               last_ts: finalSession.lastTs?.toISOString(),
             };
-            await redis.publish(`repo:${finalSession.repoId}`, msg);
+            void redis.publish(`repo:${finalSession.repoId}`, msg);
           }
         }
 
@@ -294,7 +294,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
               last_ts: session.lastTs?.toISOString(),
               state: newState,
             };
-            await redis.publish(`repo:${session.repoId}`, msg);
+            void redis.publish(`repo:${session.repoId}`, msg);
           }
         }
 

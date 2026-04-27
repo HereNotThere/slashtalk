@@ -393,7 +393,7 @@ let isDraggingStack = false;
 
 // Dock-to-edge feature. During drag we show a dashed ghost at the nearest dock
 // slot (center-left / center-right); on release the overlay tweens to it.
-const DOCK_EDGE_MARGIN = 24;
+const DOCK_EDGE_MARGIN = 6;
 const DOCK_ANIM_MS = 180;
 let dockPlaceholderWindow: BrowserWindow | null = null;
 // Monotonic counter — each new tween takes the next token; in-flight steps

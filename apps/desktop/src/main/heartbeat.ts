@@ -16,6 +16,9 @@ const CURSOR_PROJECTS_DIR = path.join(os.homedir(), ".cursor", "projects");
 
 const FALLBACK_MS = 15_000;
 const CHANGE_DEBOUNCE_MS = 250;
+// File watchers fire on every JSONL append while a session is live, so without
+// a per-session floor the global 250ms debounce becomes the heartbeat cadence.
+const MIN_PER_SESSION_MS = 10_000;
 const CODEX_LIVE_WINDOW_MS = 10 * 60_000;
 
 interface LiveSession {
@@ -32,6 +35,7 @@ let timer: NodeJS.Timeout | null = null;
 let running = false;
 let pendingTimer: NodeJS.Timeout | null = null;
 let unsubTracked: (() => void) | null = null;
+const lastSentBySession = new Map<string, number>();
 
 function pidAlive(pid: number): boolean {
   try {
@@ -151,16 +155,26 @@ async function enumerateLive(): Promise<LiveSession[]> {
 async function pulse(): Promise<void> {
   if (!running) return;
   const live = await enumerateLive();
+  const now = Date.now();
+  const liveIds = new Set(live.map((s) => s.sessionId));
+  for (const id of lastSentBySession.keys()) {
+    if (!liveIds.has(id)) lastSentBySession.delete(id);
+  }
+  const due = live.filter((s) => {
+    const last = lastSentBySession.get(s.sessionId) ?? 0;
+    return now - last >= MIN_PER_SESSION_MS;
+  });
   await Promise.all(
-    live.map((session) =>
+    due.map((session) =>
       backend
         .sendHeartbeat(session)
-        .then(() =>
+        .then(() => {
+          lastSentBySession.set(session.sessionId, Date.now());
           console.log(
             `[heartbeat] sent ${session.sessionId}` +
               (session.pid ? ` pid=${session.pid}` : ` kind=${session.kind ?? "-"}`),
-          ),
-        )
+          );
+        })
         .catch((err) => console.error("[heartbeat] send failed", session.sessionId, err)),
     ),
   );
@@ -217,4 +231,5 @@ export function stop(): void {
   }
   unsubTracked?.();
   unsubTracked = null;
+  lastSentBySession.clear();
 }

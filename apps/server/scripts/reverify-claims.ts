@@ -19,7 +19,7 @@ import { db } from "../src/db";
 import { repos, userRepos, users } from "../src/db/schema";
 import { decryptGithubToken } from "../src/auth/tokens";
 import { config } from "../src/config";
-import { githubHeaders } from "../src/user/routes";
+import { githubHeaders } from "../src/user/github-helpers";
 
 interface Row {
   userId: number;

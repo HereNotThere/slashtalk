@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { SearchIcon, SendIcon } from "../shared/icons";
 
-// Search input pill. Visually a stretched dock bubble: the BrowserWindow paints
-// the frosted background + rim natively (vibrancy "popover" + setMacCornerRadius
-// in main), so this renderer is just transparent content laid over that frost.
-// Esc, blur (main handles blur), or clicking the leading magnifying glass all
-// dismiss; main re-shows the dock on hide.
+// Frost + rim are painted natively by main (vibrancy + setMacCornerRadius),
+// so this renderer is just transparent content on top of that material.
 export function App(): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");

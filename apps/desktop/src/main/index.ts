@@ -18,7 +18,6 @@ import type {
   ChatHead,
   CreateAgentInput,
   DockConfig,
-  DockOrientation,
   InfoSession,
   McpTarget,
   UpdateAgentInput,
@@ -45,6 +44,17 @@ import type { LocalAgent } from "./agentStore";
 import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
+import {
+  BUBBLE_PAD,
+  BUBBLE_SIZE,
+  OVERLAY_WIDTH,
+  PADDING_Y,
+  computeDockBoundsOn,
+  dockFromPoint,
+  overlayLength,
+  overlaySize,
+  screenIdOf,
+} from "./windows/dock-geometry";
 import { appState, loadRenderer, preloadPath } from "./windows/lib";
 import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
@@ -59,20 +69,6 @@ const mcpProxy = createLocalMcpProxy({
   getProxySecret: getLocalMcpProxySecret,
   remoteMcpUrl: installMcp.remoteMcpUrl,
 });
-
-// Must stay in sync with the overlay renderer's Tailwind classes:
-// BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/SearchBubble/CreateBubble (45px),
-// BUBBLE_PAD ↔ `py-[7px]` (vertical rail) / `px-[7px]` (horizontal rail) on
-//   each bubble's wrapper (7px). Adjacent wrappers touch — no flex gap — so
-//   adjacent paddings sum to a visual 14px stride between bubbles.
-// PADDING_X ↔ `px-md` on the stack (12px) — cross-axis padding on the rail.
-// PADDING_Y ↔ `py-lg` on the stack (16px) — main-axis padding on the rail.
-// Drift here = popovers misalign.
-const BUBBLE_SIZE = 45;
-const BUBBLE_PAD = 7;
-const PADDING_X = 12;
-const PADDING_Y = 16;
-const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
 
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
@@ -382,7 +378,6 @@ let isDraggingStack = false;
 
 // Dock-to-edge feature. During drag we show a dashed ghost at the nearest dock
 // slot (center-left / center-right); on release the overlay tweens to it.
-const DOCK_EDGE_MARGIN = 6;
 const DOCK_ANIM_MS = 180;
 let dockPlaceholderWindow: BrowserWindow | null = null;
 // Monotonic counter — each new tween takes the next token; in-flight steps
@@ -391,35 +386,12 @@ let overlayAnimToken = 0;
 
 // -------- Overlay (bubbles) --------
 
-// Overlay always renders heads plus two control bubbles: search at the leading
-// edge and agent creation at the trailing edge. This is the main-axis length
-// (height for vertical rail, width for horizontal). Cross-axis is always
-// OVERLAY_WIDTH.
-function overlayLength(count: number): number {
-  // Each bubble wrapper is BUBBLE_SIZE + (BUBBLE_PAD * 2) and wrappers touch
-  // (no flex gap). +2 covers the search and create control bubbles.
-  const n = count + 2;
-  return n * (BUBBLE_SIZE + BUBBLE_PAD * 2) + PADDING_Y * 2;
-}
-
-function overlaySize(
-  count: number,
-  orientation: DockOrientation,
-): { width: number; height: number } {
-  const length = overlayLength(count);
-  return orientation === "vertical"
-    ? { width: OVERLAY_WIDTH, height: length }
-    : { width: length, height: OVERLAY_WIDTH };
-}
-
+// Persisted overlay origin — the screen and the relative position within it.
+// Restored on launch so the rail comes back where the user left it.
 interface SavedPosition {
   screenId: string;
   xPercent: number;
   topPercent: number;
-}
-
-function screenIdOf(display: Electron.Display): string {
-  return String(display.id ?? `${display.bounds.x},${display.bounds.y}`);
 }
 
 function restoredOrigin(): { x: number; y: number } | null {
@@ -470,7 +442,7 @@ function ensureOverlay(): BrowserWindow {
   const initialDock: DockConfig = restored
     ? dockFromPoint(restored, display)
     : { orientation: "vertical", side: "end" };
-  const bounds = computeDockBoundsOn(display, initialDock);
+  const bounds = computeDockBoundsOn(display, initialDock, heads.length);
 
   overlayWindow = new BrowserWindow({
     width: bounds.width,
@@ -1128,62 +1100,6 @@ function overlayDisplay(): Electron.Display {
   return screen.getDisplayMatching(overlayWindow.getBounds());
 }
 
-// Which work-area edges are physically usable. A gap between `bounds` and
-// `workArea` on left / right / bottom means the macOS Dock sits on that edge
-// — we block docking there so the rail never lands on top of the system
-// Dock. The top gap is always the menu bar (thin, always present) which the
-// DOCK_EDGE_MARGIN already clears, so we leave top available.
-type Edge = "left" | "right" | "top" | "bottom";
-
-function availableDockEdges(display: Electron.Display): Set<Edge> {
-  const b = display.bounds;
-  const wa = display.workArea;
-  const edges = new Set<Edge>(["left", "right", "top", "bottom"]);
-  if (wa.x - b.x > 0) edges.delete("left");
-  if (b.x + b.width - (wa.x + wa.width) > 0) edges.delete("right");
-  if (b.y + b.height - (wa.y + wa.height) > 0) edges.delete("bottom");
-  return edges;
-}
-
-// Pick the nearest *allowed* work-area edge to the given point. Used during
-// drag (live placeholder) and at rest (current dock classification). When an
-// edge is blocked by the macOS Dock, its candidate is simply dropped — the
-// next-closest allowed edge wins, so dragging toward the blocked side snaps
-// elsewhere instead of overlapping system UI.
-function dockFromPoint(p: { x: number; y: number }, display: Electron.Display): DockConfig {
-  const wa = display.workArea;
-  const allowed = availableDockEdges(display);
-  const candidates: Array<{ d: number; dock: DockConfig }> = [];
-  if (allowed.has("left")) {
-    candidates.push({
-      d: p.x - wa.x,
-      dock: { orientation: "vertical", side: "start" },
-    });
-  }
-  if (allowed.has("right")) {
-    candidates.push({
-      d: wa.x + wa.width - p.x,
-      dock: { orientation: "vertical", side: "end" },
-    });
-  }
-  if (allowed.has("top")) {
-    candidates.push({
-      d: p.y - wa.y,
-      dock: { orientation: "horizontal", side: "start" },
-    });
-  }
-  if (allowed.has("bottom")) {
-    candidates.push({
-      d: wa.y + wa.height - p.y,
-      dock: { orientation: "horizontal", side: "end" },
-    });
-  }
-  // Defensive — shouldn't happen unless the whole display is reserved.
-  if (candidates.length === 0) return { orientation: "vertical", side: "end" };
-  candidates.sort((a, b) => a.d - b.d);
-  return candidates[0].dock;
-}
-
 function currentDock(): DockConfig {
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     return { orientation: "vertical", side: "end" };
@@ -1193,23 +1109,8 @@ function currentDock(): DockConfig {
   return dockFromPoint(center, overlayDisplay());
 }
 
-function computeDockBoundsOn(display: Electron.Display, dock: DockConfig): Electron.Rectangle {
-  const wa = display.workArea;
-  const { width, height } = overlaySize(heads.length, dock.orientation);
-  if (dock.orientation === "vertical") {
-    const x =
-      dock.side === "start" ? wa.x + DOCK_EDGE_MARGIN : wa.x + wa.width - width - DOCK_EDGE_MARGIN;
-    const y = wa.y + Math.floor((wa.height - height) / 2);
-    return { x, y, width, height };
-  }
-  const y =
-    dock.side === "start" ? wa.y + DOCK_EDGE_MARGIN : wa.y + wa.height - height - DOCK_EDGE_MARGIN;
-  const x = wa.x + Math.floor((wa.width - width) / 2);
-  return { x, y, width, height };
-}
-
 function computeDockBounds(dock: DockConfig): Electron.Rectangle {
-  return computeDockBoundsOn(overlayDisplay(), dock);
+  return computeDockBoundsOn(overlayDisplay(), dock, heads.length);
 }
 
 function ensureDockPlaceholder(): BrowserWindow {

@@ -2,9 +2,10 @@ import { Elysia, t } from "elysia";
 import { eq, sql, and, inArray } from "drizzle-orm";
 import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { sessions, events, heartbeats, userRepos } from "../db/schema";
+import { sessions, events, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { toSnapshot, loadInsightsForSessions, sortByStateThenTime } from "./snapshot";
+import { loadAccessibleSession } from "./access";
 
 const SESSION_STATE_VALUES = Object.values(SessionState);
 
@@ -60,32 +61,10 @@ export const sessionRoutes = (db: Database) =>
     .get(
       "/session/:id",
       async ({ params, user, set }) => {
-        const [session] = await db
-          .select()
-          .from(sessions)
-          .where(eq(sessions.sessionId, params.id))
-          .limit(1);
-
+        const session = await loadAccessibleSession(db, params.id, user.id);
         if (!session) {
           set.status = 404;
           return { error: "Session not found" };
-        }
-
-        // Access control: user owns session OR session is in a shared repo
-        if (session.userId !== user.id) {
-          if (!session.repoId) {
-            set.status = 404;
-            return { error: "Session not found" };
-          }
-          const [access] = await db
-            .select()
-            .from(userRepos)
-            .where(and(eq(userRepos.userId, user.id), eq(userRepos.repoId, session.repoId)))
-            .limit(1);
-          if (!access) {
-            set.status = 404;
-            return { error: "Session not found" };
-          }
         }
 
         const [hb] = await db
@@ -104,36 +83,10 @@ export const sessionRoutes = (db: Database) =>
     .get(
       "/session/:id/events",
       async ({ params, query, user, set }) => {
-        // Verify access (own session or shared repo)
-        const [session] = await db
-          .select({
-            sessionId: sessions.sessionId,
-            userId: sessions.userId,
-            repoId: sessions.repoId,
-          })
-          .from(sessions)
-          .where(eq(sessions.sessionId, params.id))
-          .limit(1);
-
+        const session = await loadAccessibleSession(db, params.id, user.id);
         if (!session) {
           set.status = 404;
           return { error: "Session not found" };
-        }
-
-        if (session.userId !== user.id) {
-          if (!session.repoId) {
-            set.status = 404;
-            return { error: "Session not found" };
-          }
-          const [access] = await db
-            .select()
-            .from(userRepos)
-            .where(and(eq(userRepos.userId, user.id), eq(userRepos.repoId, session.repoId)))
-            .limit(1);
-          if (!access) {
-            set.status = 404;
-            return { error: "Session not found" };
-          }
         }
 
         const limit = Math.min(Number(query.limit ?? 50), 100);

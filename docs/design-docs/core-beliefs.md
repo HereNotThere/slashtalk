@@ -100,28 +100,30 @@ A new auth scheme gets its own plugin in `apps/server/src/auth/middleware.ts`, n
 
 ---
 
-## 11. Identity is user OAuth; private repo checks use a narrow GitHub App.
+## 11. Identity is user OAuth; no GitHub App.
 
-**Why.** Requiring an org-admin install for basic identity gates adoption on someone other than the end user. slashtalk's promise is that any signed-in user can start with normal GitHub OAuth and no broad repo scope. Private repos still need GitHub-confirmed visibility, so the narrow exception is a GitHub App user authorization with repository Metadata read-only, installed only on selected repos.
+**Why.** Requiring an admin-installed GitHub App gates adoption on someone other than the end user — exactly the friction the product positioning rejects. slashtalk's promise is that any signed-in user can start with normal GitHub OAuth and no broad repo scope. Private repo _contents_ are never read by the server; cross-user visibility is gated on GitHub org membership instead, which `read:org` already covers.
 
 **How to apply.**
 
 - OAuth scope stays `read:user read:org` ([docs/SECURITY.md § OAuth scope](../SECURITY.md)).
-- Identity, org picker, and public repo checks use the calling user's OAuth App token via [`fetchUserGithubToken`](../../apps/server/src/user/routes.ts).
-- Private repo claim fallback may use the calling user's GitHub App user token via [`fetchUserGithubAppToken`](../../apps/server/src/auth/github-app.ts). Do not request OAuth `repo` scope.
-- Do not use an installation token alone to grant access. A repo claim must represent user visibility, not merely app installation visibility.
+- Identity, org picker, public repo metadata, and the claim gate all use the calling user's OAuth token via [`fetchUserGithubToken`](../../apps/server/src/user/github-helpers.ts).
+- Do not request OAuth `repo` scope. Do not re-introduce a GitHub App without an explicit core-beliefs revision and a SECURITY.md rewrite.
+- The `users.github_app_*` columns persist in the schema as orphan storage from a previous App-fallback iteration; do not write to them.
 
 ---
 
 ## 12. Repo access is verified, not asserted.
 
-**Why.** `user_repos` is the single authorization source for the feed, session, event, and WebSocket channels. A row must represent a user GitHub has confirmed can read the repo — otherwise every downstream check becomes a sieve. A pre-gate bug in [PR #85](https://github.com/HereNotThere/slashtalk/pull/85) let any JWT holder claim any `owner/name` and inherit the real collaborators' visibility.
+**Why.** `user_repos` is the single authorization source for the feed, session, event, and WebSocket channels. A row must represent a stable, GitHub-attested property of the caller — otherwise every downstream check becomes a sieve. A pre-gate bug in [PR #85](https://github.com/HereNotThere/slashtalk/pull/85) let any JWT holder claim any `owner/name` and inherit the real collaborators' visibility.
 
 **How to apply.**
 
-- [`POST /api/me/repos`](../../apps/server/src/user/routes.ts) calls `GET /repos/:owner/:name` with the user's OAuth token and requires `200` before inserting a `user_repos` row. OAuth `404` with no linked GitHub App = fail closed with 403 `no_access` plus a GitHub App `connectUrl`; OAuth `404` with a linked GitHub App retries with the GitHub App user token. GitHub App `404` = fail closed with 403 `no_access` plus an install/configure `connectUrl`. `401/403` = fail closed with 401 `token_expired`. Never fall back to "accept."
-- Never hand-insert `user_repos` rows from migrations, seed scripts, or other routes; go through the same gate (or run [`scripts/reverify-claims.ts`](../../apps/server/scripts/reverify-claims.ts) afterward to catch drift).
-- A per-user rate limit on the claim endpoint stops brute-force repo enumeration with a stolen JWT.
+- [`POST /api/me/repos`](../../apps/server/src/user/claim.ts) accepts a claim iff (a) the repo's `owner` is in the caller's active org memberships from `GET /user/memberships/orgs?state=active` (case-insensitive), or (b) `owner === user.githubLogin`. Anything else is `403 no_access`. Never fall back to "accept."
+- The org-membership check fails closed: `401` triggers the global credentials cascade and returns `401 token_expired`; `403`, 5xx, or network failure returns `502 upstream_unavailable` without invalidating the session.
+- Org membership is verified, not GitHub repo-level ACL. This is a deliberate trust-model choice; see [docs/SECURITY.md § Repo-claim verification](../SECURITY.md) for the trust-boundary disclosure.
+- Never hand-insert `user_repos` rows from migrations, seed scripts, or other routes; go through the same gate (or run [`scripts/reclassify-by-org.ts`](../../apps/server/scripts/reclassify-by-org.ts) afterward to catch drift).
+- A per-user rate limit on the claim endpoint is a generic abuse guard.
 
 ---
 

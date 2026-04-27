@@ -4,45 +4,52 @@ Threat model, secret handling, and credential storage for slashtalk.
 
 ## OAuth scope
 
-`GET /auth/github` requests **`read:user read:org` only** — no `repo` scope. Private repo verification is handled by a narrow GitHub App user authorization, not by broad OAuth scopes. Consequences:
+`GET /auth/github` requests **`read:user read:org` only** — no `repo` scope, no GitHub App. Private repo _contents_ are never read by the server; access is gated entirely on the caller's GitHub org membership.
 
-- We **cannot** read repo contents server-side. The OAuth App token covers identity/org listing and public repo checks. The GitHub App requests repository **Metadata: read-only** and is used when a private repo claim needs installation-scoped verification.
-- Repos are **claimed** on demand: the desktop app reads a local clone's `.git/config`, extracts `owner/name`, and POSTs `/api/me/repos { fullName }`. The server first verifies with the user's stored OAuth token, then falls back to the GitHub App user token when GitHub returns 404 — see § Repo-claim verification.
-- `repos.github_id` is populated from that verification response. Legacy rows predating the claim-gate may be null; a backfill via [`scripts/reverify-claims.ts`](../apps/server/scripts/reverify-claims.ts) closes that gap.
+- We cannot read repo contents server-side. The OAuth token covers identity, org listing, and public-repo metadata.
+- Repos are **claimed** on demand: the desktop reads a local clone's `.git/config`, extracts `owner/name`, and POSTs `/api/me/repos { fullName }`. The server gates the claim on org membership or personal-namespace match — see § Repo-claim verification.
+- `repos.github_id` is nullable; pre-gate rows may have it set, post-gate rows generally don't (no GitHub `/repos/:owner/:name` call is made under the new gate).
 - Historical `syncUserRepos` / `POST /api/me/sync-repos` have been removed.
 
 ## Repo-claim verification
 
-`POST /api/me/repos` is the single gate between a desktop-initiated repo claim and any cross-user data access. Downstream routes (`/api/feed*`, `/api/session/:id`, `/api/session/:id/events`, WS `repo:<id>` subscriptions) all authorize reads via a `user_repos` row, so an unverified claim would let any JWT holder read another user's sessions. The server therefore confirms the caller can see the repo on GitHub before creating the `user_repos` row.
+`POST /api/me/repos` is the single gate between a desktop-initiated repo claim and any cross-user data access. Downstream routes (`/api/feed*`, `/api/session/:id`, `/api/session/:id/events`, WS `repo:<id>` subscriptions) all authorize reads via a `user_repos` row, so an unverified claim would let any JWT holder read another user's sessions. The server therefore confirms a stable property of the caller before creating the row.
 
-- The handler decrypts `users.github_token` via `fetchUserGithubToken` and calls `GET https://api.github.com/repos/:owner/:name`.
-- If the OAuth App token returns `404` and the user has linked the GitHub App, the handler uses `users.github_app_user_token` to list the user's accessible app installations and installation repositories, then matches the requested `owner/name`. This token is scoped by the GitHub App installation and only requests repository metadata.
-- `200` → accept. Persist `repos.github_id`, canonical `repos.owner`/`repos.name`, and `repos.private` from the response body.
-- OAuth `404` without a linked GitHub App → reject with **403 `no_access`** plus `requiresGithubApp: true` and a user-bound `connectUrl` so the desktop can open `/auth/github-app`. That route starts the GitHub App web authorization flow, verifies the authorizing GitHub account matches the Slashtalk user, and stores the GitHub App user token from the callback. The explicit install/configure fallback is `/auth/github-app?install=1`; this keeps already-installed apps from dead-ending on GitHub's installation settings page without returning an OAuth `code`.
-- No matching repository after GitHub App verification → reject with **403 `no_access`**. The caller does not have visibility on GitHub or the app installation does not include that repo; when the GitHub App path was used, the response includes a user-bound `/auth/github-app?install=1` connect URL as a configure fallback.
-- `401` / `403` from GitHub → reject with **401 `token_expired`**. The desktop surfaces a re-sign-in prompt and calls `backend.signOut()`.
-- Fetch errors or 5xx from GitHub → reject with **502 `upstream_unavailable`**. The desktop shows a retry hint.
-- A per-user **30-claims-per-hour rate limit** guards against brute-force repo-name enumeration with a stolen JWT.
-- A 60-second (userId, fullName) cache dedups retries (desktop double-clicks) without re-hitting GitHub.
+The gate accepts a claim iff:
 
-The claim endpoint responds with structured `{ error, message }` JSON on every non-2xx outcome so the desktop can branch on `error` and display `message` verbatim.
+1. The repo's owner is in the caller's **active GitHub org memberships**, fetched from `GET https://api.github.com/user/memberships/orgs?state=active` with the user's stored OAuth token. Match is case-insensitive on org login. **OR**
+2. `owner === user.githubLogin` (personal namespace). This branch short-circuits before any GitHub call — the caller's own login is trusted from the JWT, which was minted from a verified `/auth/github/callback`.
 
-The `/v1/devices/:id/repos` endpoint relies transitively on this gate: it only accepts `repoId`s the caller already tracks in `user_repos`, so there is no path that inserts a device-level registration for a repo the user hasn't verified-claimed.
+Anything else is rejected with **403 `no_access`** and the message: _"GitHub doesn't show this repo in your orgs. If your org restricts OAuth apps, an admin may need to approve slashtalk."_ Org-level OAuth-app restrictions are a real failure mode here — an org with third-party-OAuth restrictions silently disappears from `/user/memberships/orgs` until an org owner approves the slashtalk OAuth app at `https://github.com/organizations/<org>/settings/oauth_application_policy`.
 
-A one-shot maintenance script — [`scripts/reverify-claims.ts`](../apps/server/scripts/reverify-claims.ts) — re-verifies every pre-existing `user_repos` row against GitHub and deletes rows where the stored token no longer has access. Run once before deploying the gated claim endpoint, and again any time we suspect pre-gate leaks may have been persisted.
+Other failure modes:
+
+- `401` from `/user/memberships/orgs` → token revoked. Run the global credentials cascade (`revokeAllUserCredentials`) and respond **401 `token_expired`**. Desktop surfaces a re-sign-in prompt and calls `backend.signOut()`.
+- `403` (rate limit / abuse) or 5xx or network failure → **502 `upstream_unavailable`**. Desktop shows a retry hint. We do not invalidate the session for transient upstream failures.
+- A per-user **30-claims-per-hour rate limit** is a generic abuse guard.
+- A 60-second per-user org-memberships cache dedups retries and keeps GitHub-call volume low under repeated claim attempts.
+
+The claim endpoint responds with structured `{ error, message }` JSON on every non-2xx outcome.
+
+The `/v1/devices/:id/repos` endpoint relies transitively on this gate: it only accepts `repoId`s the caller already tracks in `user_repos`, so there is no path that inserts a device-level registration for a repo the user hasn't claimed.
+
+**Trust-model note.** Org membership — not GitHub's per-repo ACL — is the cross-user trust boundary. Any active member of `acme` can claim any `acme/*` repo and inherit cross-user visibility on other slashtalk users' sessions for that repo, even repos GitHub itself wouldn't grant them read access to. This matches the trust posture of Slack, Linear, Notion, etc. **If your team uses GitHub repo-level permissions to enforce information barriers (M&A, legal, compliance, security incident response), do not adopt slashtalk for those repos.** We have no in-product mitigation for intra-org leakage today; it is not enforced at the GitHub API layer.
+
+A one-shot maintenance script — [`scripts/reclassify-by-org.ts`](../apps/server/scripts/reclassify-by-org.ts) — re-evaluates every existing `user_repos` row against the new gate and deletes rows that no longer pass (typically: claims of public repos owned by orgs the user isn't a member of, made under the previous per-repo verification model). Run once after deploying the new gate.
+
+**Re-verification on org-membership changes is deferred.** A user removed from an org keeps their stale `user_repos` rows until manually cleaned up. A future change should re-run the gate on each session refresh and revoke rows whose org membership has lapsed.
 
 See also core-beliefs [#11](design-docs/core-beliefs.md#11-identity-is-user-oauth-no-github-app), [#12](design-docs/core-beliefs.md#12-repo-access-is-verified-not-asserted), [#13](design-docs/core-beliefs.md#13-user_repos-is-the-only-authorization-for-cross-user-reads).
 
 ## Token storage and hashing
 
-| Artifact                              | At rest                                                                                                                                                                                                | Returned to caller                                                            |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| GitHub OAuth access token             | AES-256-GCM ciphertext in `users.github_token`, keyed by `ENCRYPTION_KEY` (format: `hex(iv):hex(ciphertext)` — WebCrypto appends the auth tag to the ciphertext; see `apps/server/src/auth/tokens.ts`) | Never. Used server-side for PR polling only.                                  |
-| GitHub App user access/refresh tokens | AES-256-GCM ciphertext in `users.github_app_user_token` and `users.github_app_refresh_token`, keyed by `ENCRYPTION_KEY`                                                                                | Never. Used server-side for private repo metadata verification only.          |
-| Refresh token                         | SHA-256 hash in `refresh_tokens.token_hash`                                                                                                                                                            | Plaintext exactly once, at issuance, as an httpOnly cookie.                   |
-| API key                               | SHA-256 hash in `api_keys.key_hash`                                                                                                                                                                    | Plaintext exactly once, at `/v1/auth/exchange` response.                      |
-| Setup token                           | SHA-256 hash in `setup_tokens.token`… (stored hashed)                                                                                                                                                  | Plaintext exactly once, to the desktop app during the loopback-port callback. |
-| MCP OAuth token                       | SHA-256 hashes in `oauth_tokens.access_token_hash` and `oauth_tokens.refresh_token_hash`                                                                                                               | Plaintext exactly once, at `/oauth/token` issuance or refresh rotation.       |
+| Artifact                  | At rest                                                                                                                                                                                                | Returned to caller                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| GitHub OAuth access token | AES-256-GCM ciphertext in `users.github_token`, keyed by `ENCRYPTION_KEY` (format: `hex(iv):hex(ciphertext)` — WebCrypto appends the auth tag to the ciphertext; see `apps/server/src/auth/tokens.ts`) | Never. Used server-side for org-membership checks and the GitHub orgs proxy.  |
+| Refresh token             | SHA-256 hash in `refresh_tokens.token_hash`                                                                                                                                                            | Plaintext exactly once, at issuance, as an httpOnly cookie.                   |
+| API key                   | SHA-256 hash in `api_keys.key_hash`                                                                                                                                                                    | Plaintext exactly once, at `/v1/auth/exchange` response.                      |
+| Setup token               | SHA-256 hash in `setup_tokens.token`… (stored hashed)                                                                                                                                                  | Plaintext exactly once, to the desktop app during the loopback-port callback. |
+| MCP OAuth token           | SHA-256 hashes in `oauth_tokens.access_token_hash` and `oauth_tokens.refresh_token_hash`                                                                                                               | Plaintext exactly once, at `/oauth/token` issuance or refresh rotation.       |
 
 **Rule.** Raw tokens, hashes, and encryption keys are never logged, returned in error responses, or serialized into Redis messages.
 
@@ -123,7 +130,6 @@ Required at boot (or `apps/server/src/config.ts` throws):
 
 - `DATABASE_URL`, `REDIS_URL`
 - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
-- Optional for private repo claims: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`
 - `JWT_SECRET` (≥32 chars)
 - `ENCRYPTION_KEY` (64-char hex; `openssl rand -hex 32`)
 - `BASE_URL`

@@ -1,51 +1,34 @@
 // Repo-claim verification + the /api/me/repos resource.
 //
-// CLAUDE.md core-belief #12: "Repo access is verified, not asserted." Every
-// claim does a `GET /repos/:owner/:name` against the user's stored OAuth
-// token (and falls back to the GitHub App user token for private repos when
-// the OAuth scope can't see them) before inserting a `user_repos` row. See
-// docs/SECURITY.md § Repo-claim verification for the full flow.
+// CLAUDE.md core-belief #12: "Repo access is verified, not asserted." A claim
+// is accepted only when the caller is an active GitHub member of the repo's
+// owning org, or when the repo is in the caller's own personal namespace
+// (`owner === user.githubLogin`). No `GET /repos/:owner/:name` call, no
+// GitHub App fallback. See docs/SECURITY.md § Repo-claim verification.
 //
 // Owns:
-// - the per-(user, fullName) verification cache (dedup desktop double-clicks)
 // - the per-user claim-attempt rate limit (block enumeration via stolen JWT)
-// - the three-strategy verification pipeline (OAuth, then App user token)
+// - the gate logic for POST /api/me/repos
+//
+// The org-membership lookup itself (with its own 60s TTL cache) lives in
+// `github-helpers.ts::fetchUserOrgMemberships` so the orgs proxy and the
+// claim path can share invalidation if we ever add it.
 
 import { Elysia, t } from "elysia";
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../db";
 import { repos, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { githubFetch } from "../auth/github-fetch";
-import { revokeAllUserCredentials } from "../auth/sessions";
-import {
-  fetchUserGithubAppToken,
-  githubAppConnectUrlForUser,
-  isGithubAppConfigured,
-} from "../auth/github-app";
-import { config } from "../config";
 import { normalizeFullName } from "../social/github-sync";
-import { TtlCache } from "../util/ttl-cache";
-import {
-  type RawGithubRepo,
-  fetchUserGithubToken,
-  githubHeaders,
-  parseNextUrl,
-} from "./github-helpers";
+import { __clearOrgMembershipsCache, fetchUserOrgMemberships } from "./github-helpers";
 
 // "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
 const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 
-// Claim-verification cache: dedups a repeated `GET /repos/:owner/:name` for
-// the same (user, fullName) pair (desktop double-clicks, retry-on-failure).
-// Keyed by `${userId}:${fullName-lower}`.
-const CLAIM_VERIFY_TTL_MS = 60_000;
-const claimVerifyCache = new TtlCache<string, VerifiedRepo>(CLAIM_VERIFY_TTL_MS);
-
-// Per-user rate-limit for `POST /api/me/repos`. Blocks an adversary with a
-// stolen JWT from enumerating private repos by brute-forcing fullNames.
-// Token-bucket, in-memory only (sufficient for single-node deploy; revisit
-// if we go multi-node before shipping a durable store).
+// Per-user rate-limit for `POST /api/me/repos`. Generic abuse guard; under the
+// org-or-self gate, an attacker with a stolen JWT can only claim repos in the
+// legitimate user's orgs (no enumeration surface), but the limit still bounds
+// CPU + DB writes per session.
 const CLAIM_RATE_WINDOW_MS = 60 * 60 * 1000;
 const CLAIM_RATE_MAX = 30;
 const claimRateBuckets = new Map<number, number[]>();
@@ -63,7 +46,7 @@ function sweepClaimRateBuckets(now: number): void {
 
 /** Test-only: reset claim caches + rate-bucket state. */
 export function __clearClaimCaches(): void {
-  claimVerifyCache.clear();
+  __clearOrgMembershipsCache();
   claimRateBuckets.clear();
 }
 
@@ -86,179 +69,27 @@ function recordClaimAttempt(userId: number): boolean {
   return true;
 }
 
-interface VerifiedRepo {
-  githubId: number;
-  fullName: string; // GitHub's canonical casing
-  owner: string;
-  name: string;
-  private: boolean;
-}
-
 type VerifyOutcome =
-  | { ok: true; repo: VerifiedRepo }
-  | {
-      ok: false;
-      kind:
-        | "no_access"
-        | "github_app_required"
-        | "github_grant_revoked"
-        | "token_expired"
-        | "upstream_unavailable";
-    };
+  | { ok: true }
+  | { ok: false; kind: "no_access" | "token_expired" | "upstream_unavailable" };
 
-/** Ask GitHub, using the user's stored OAuth token, whether they can see
- *  `owner/name`. 200 = yes (canonical repo data returned); 404 = no (fail
- *  closed); 401/403 = token bad (caller should re-auth); fetch/5xx errors
- *  = upstream unavailable (retry later). Never falls back to "accept." */
-async function verifyRepoAccess(
-  token: string,
+/** The claim gate. Accepts iff `owner` is the caller's own GitHub login
+ *  (personal namespace, no GitHub call) OR appears in the caller's active
+ *  org memberships from `/user/memberships/orgs?state=active`. */
+async function verifyOrgOrSelf(
+  db: Database,
+  userId: number,
+  userLogin: string,
   owner: string,
-  name: string,
 ): Promise<VerifyOutcome> {
-  const path = `/repos/${owner}/${name}`;
-  const result = await githubFetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
-    { headers: githubHeaders(token) },
-    `claim ${path}`,
-  );
-  if (!result.ok) {
-    if (result.reason === "not_found") return { ok: false, kind: "no_access" };
-    if (result.reason === "unauthorized") return { ok: false, kind: "github_grant_revoked" };
-    if (result.reason === "forbidden") return { ok: false, kind: "token_expired" };
-    return { ok: false, kind: "upstream_unavailable" };
+  if (owner.toLowerCase() === userLogin.toLowerCase()) {
+    return { ok: true };
   }
-  const raw = (await result.res.json().catch(() => null)) as {
-    id?: number;
-    full_name?: string;
-    name?: string;
-    owner?: { login?: string };
-    private?: boolean;
-  } | null;
-  if (!raw || typeof raw.id !== "number" || !raw.full_name || !raw.name || !raw.owner?.login) {
-    console.warn(`[claim ${path}] malformed body`);
-    return { ok: false, kind: "upstream_unavailable" };
-  }
-  return {
-    ok: true,
-    repo: {
-      githubId: raw.id,
-      fullName: raw.full_name,
-      owner: raw.owner.login,
-      name: raw.name,
-      private: raw.private ?? false,
-    },
-  };
-}
-
-async function verifyRepoAccessWithGitHubAppUserToken(
-  token: string,
-  owner: string,
-  name: string,
-): Promise<VerifyOutcome> {
-  const normalizedFullName = `${owner}/${name}`.toLowerCase();
-  let url: string | null = "https://api.github.com/user/installations?per_page=100";
-
-  while (url) {
-    const result = await githubFetch(
-      url,
-      { headers: githubAppUserHeaders(token) },
-      "claim /user/installations",
-    );
-    if (!result.ok) {
-      if (result.reason === "unauthorized" || result.reason === "forbidden") {
-        return { ok: false, kind: "github_app_required" };
-      }
-      return { ok: false, kind: "upstream_unavailable" };
-    }
-
-    const installationsBody = (await result.res.json().catch(() => null)) as {
-      installations?: Array<{
-        id?: number;
-        suspended_at?: string | null;
-        app_slug?: string;
-      }>;
-    } | null;
-    const installations =
-      installationsBody?.installations?.filter(
-        (installation) =>
-          typeof installation.id === "number" &&
-          !installation.suspended_at &&
-          (!config.githubAppSlug || installation.app_slug === config.githubAppSlug),
-      ) ?? [];
-
-    for (const installation of installations) {
-      const outcome = await findRepoInGitHubAppInstallation(
-        token,
-        installation.id!,
-        normalizedFullName,
-      );
-      if (outcome.ok) return outcome;
-      if (outcome.kind !== "no_access") return outcome;
-    }
-
-    url = parseNextUrl(result.res.headers.get("link"));
-  }
-
+  const result = await fetchUserOrgMemberships(db, userId);
+  if (!result.ok) return { ok: false, kind: result.kind };
+  const ownerLower = owner.toLowerCase();
+  if (result.orgs.includes(ownerLower)) return { ok: true };
   return { ok: false, kind: "no_access" };
-}
-
-async function findRepoInGitHubAppInstallation(
-  token: string,
-  installationId: number,
-  normalizedFullName: string,
-): Promise<VerifyOutcome> {
-  let url: string | null =
-    `https://api.github.com/user/installations/${installationId}/repositories?per_page=100`;
-  const logTag = `claim /user/installations/${installationId}/repositories`;
-  while (url) {
-    const result = await githubFetch(url, { headers: githubAppUserHeaders(token) }, logTag);
-    if (!result.ok) {
-      if (result.reason === "not_found") return { ok: false, kind: "no_access" };
-      if (result.reason === "unauthorized" || result.reason === "forbidden") {
-        return { ok: false, kind: "github_app_required" };
-      }
-      return { ok: false, kind: "upstream_unavailable" };
-    }
-
-    const body = (await result.res.json().catch(() => null)) as {
-      repositories?: RawGithubRepo[];
-    } | null;
-    const repositories = body?.repositories ?? [];
-    const match = repositories.find((repo) => repo.full_name?.toLowerCase() === normalizedFullName);
-    if (match) {
-      const repo = verifiedRepoFromRaw(match);
-      if (!repo) {
-        console.warn(`[${logTag}] malformed repository body`);
-        return { ok: false, kind: "upstream_unavailable" };
-      }
-      return { ok: true, repo };
-    }
-    url = parseNextUrl(result.res.headers.get("link"));
-  }
-
-  return { ok: false, kind: "no_access" };
-}
-
-function verifiedRepoFromRaw(raw: RawGithubRepo): VerifiedRepo | null {
-  if (typeof raw.id !== "number" || !raw.full_name || !raw.name || !raw.owner?.login) {
-    return null;
-  }
-  return {
-    githubId: raw.id,
-    fullName: raw.full_name,
-    owner: raw.owner.login,
-    name: raw.name,
-    private: raw.private ?? false,
-  };
-}
-
-function githubAppUserHeaders(token: string): Record<string, string> {
-  return {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    Authorization: `Bearer ${token}`,
-    "User-Agent": "slashtalk",
-  };
 }
 
 export const claimRoutes = (db: Database) =>
@@ -283,7 +114,7 @@ export const claimRoutes = (db: Database) =>
     })
 
     // POST /api/me/repos — claim a repo by "owner/name". See
-    // docs/SECURITY.md § Repo-claim verification and core-beliefs §§ 11-13.
+    // docs/SECURITY.md § Repo-claim verification and core-beliefs §§ 11–12.
     .post(
       "/repos",
       async ({ user, body, set }) => {
@@ -304,112 +135,53 @@ export const claimRoutes = (db: Database) =>
           };
         }
 
-        const normalizedFullName = normalizeFullName(raw);
         const [rawOwner, rawName] = raw.split("/");
+        const outcome = await verifyOrgOrSelf(db, user.id, user.githubLogin, rawOwner);
 
-        // Cache lookup: a desktop double-click or retry shouldn't double-hit
-        // GitHub. Keyed by (userId, lowercased fullName) — GitHub's repo
-        // namespace is case-insensitive. Stale entries are dropped on access.
-        const cacheKey = `${user.id}:${normalizedFullName}`;
-        let verified: VerifiedRepo | null = claimVerifyCache.get(cacheKey) ?? null;
-
-        if (!verified) {
-          const token = await fetchUserGithubToken(db, user.id);
-          if (!token) {
+        if (!outcome.ok) {
+          if (outcome.kind === "no_access") {
+            set.status = 403;
+            return {
+              error: "no_access",
+              message:
+                "GitHub doesn't show this repo in your orgs. If your org restricts OAuth apps, an admin may need to approve slashtalk.",
+            };
+          }
+          if (outcome.kind === "token_expired") {
             set.status = 401;
             return {
               error: "token_expired",
               message: "Re-sign in to slashtalk.",
             };
           }
-          let outcome = await verifyRepoAccess(token, rawOwner, rawName);
-          let checkedGitHubApp = false;
-          if (!outcome.ok && outcome.kind === "no_access") {
-            const appToken = await fetchUserGithubAppToken(db, user.id);
-            if (appToken.ok) {
-              checkedGitHubApp = true;
-              outcome = await verifyRepoAccessWithGitHubAppUserToken(
-                appToken.token,
-                rawOwner,
-                rawName,
-              );
-            } else if (isGithubAppConfigured()) {
-              outcome = { ok: false, kind: "github_app_required" };
-            }
-          }
-          if (!outcome.ok) {
-            if (outcome.kind === "github_app_required") {
-              set.status = 403;
-              return {
-                error: "no_access",
-                message:
-                  "Private repo access needs the Slashtalk GitHub App. Complete the browser setup, then click Add local repo again.",
-                requiresGithubApp: true,
-                connectUrl: githubAppConnectUrlForUser(user.id),
-              };
-            }
-            if (outcome.kind === "no_access") {
-              const message = checkedGitHubApp
-                ? "The Slashtalk GitHub App is not installed on this repo. Open GitHub App settings, include this repository, then try again."
-                : "GitHub doesn't show you have access to this repo.";
-              set.status = 403;
-              return {
-                error: "no_access",
-                message,
-                connectUrl: checkedGitHubApp
-                  ? githubAppConnectUrlForUser(user.id, { install: true })
-                  : undefined,
-              };
-            }
-            if (outcome.kind === "token_expired") {
-              set.status = 401;
-              return {
-                error: "token_expired",
-                message: "Re-sign in to slashtalk.",
-              };
-            }
-            if (outcome.kind === "github_grant_revoked") {
-              await revokeAllUserCredentials(db, user.id, "github_grant_revoked");
-              set.status = 401;
-              return {
-                error: "token_expired",
-                message: "Re-sign in to slashtalk.",
-              };
-            }
-            set.status = 502;
-            return {
-              error: "upstream_unavailable",
-              message: "Couldn't reach GitHub. Try again.",
-            };
-          }
-          verified = outcome.repo;
-          claimVerifyCache.set(cacheKey, verified);
+          set.status = 502;
+          return {
+            error: "upstream_unavailable",
+            message: "Couldn't reach GitHub. Try again.",
+          };
         }
 
-        // Use GitHub's canonical casing / numeric id for DB storage. The
-        // `repos.fullName` unique constraint is case-sensitive at the SQL
-        // level, so we normalize to lowercase to keep dedupe consistent with
-        // the rest of the codebase (normalizeFullName everywhere).
-        const canonicalFullName = normalizeFullName(verified.fullName);
-        const [repo] = await db
+        // No `GET /repos/:owner/:name` call, so we don't have GitHub's
+        // canonical metadata for new claims. Use lowercased fullName for
+        // dedupe (case-insensitive on GitHub) and preserve user-input
+        // owner/name casing on insert. On re-claim, leave the existing row
+        // as-is — otherwise two collaborators with different casing
+        // (`Vercel/Next.js` vs `vercel/next.js`) thrash the displayed
+        // metadata on every claim. First-claim-wins is good enough.
+        const canonicalFullName = normalizeFullName(raw);
+        await db
           .insert(repos)
           .values({
             fullName: canonicalFullName,
-            owner: verified.owner,
-            name: verified.name,
-            private: verified.private,
-            githubId: verified.githubId,
+            owner: rawOwner,
+            name: rawName,
           })
-          .onConflictDoUpdate({
-            target: repos.fullName,
-            set: {
-              owner: verified.owner,
-              name: verified.name,
-              private: verified.private,
-              githubId: verified.githubId,
-            },
-          })
-          .returning();
+          .onConflictDoNothing({ target: repos.fullName });
+        const [repo] = await db
+          .select()
+          .from(repos)
+          .where(eq(repos.fullName, canonicalFullName))
+          .limit(1);
 
         await db
           .insert(userRepos)

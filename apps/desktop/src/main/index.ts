@@ -56,6 +56,11 @@ import {
   screenIdOf,
 } from "./windows/dock-geometry";
 import { appState, loadRenderer, preloadPath } from "./windows/lib";
+import {
+  bumpActivity,
+  configureRailVisibility,
+  resolveRailVisibility,
+} from "./windows/rail-visibility";
 import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
 import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
@@ -122,11 +127,6 @@ const COLLAPSE_INACTIVE_KEY = "railCollapseInactive";
 const SHOW_ACTIVITY_TIMESTAMPS_KEY = "showActivityTimestamps";
 const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
 
-// 15-min grace window after the user's last active session ends (or after they
-// force-open via the tray). Inside the window the rail stays visible; outside
-// it auto-hides in session-only mode.
-const SESSION_GRACE_MS = 15 * 60 * 1000;
-
 // Pinned (default): rail floats above everything. Unpinned: rail behaves like
 // a normal app window — on top only when Slashtalk is focused.
 function getRailPinned(): boolean {
@@ -189,55 +189,6 @@ function applyRailPinned(): void {
   else startHoverPolling();
   const native = debugMacWindowState(overlayWindow);
   console.log(`[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`);
-}
-
-// ---------- Session-only rail visibility ----------
-//
-// When session-only mode is on and the rail is not pinned, the rail hides
-// until the signed-in user has an active session (or they force-open via the
-// tray). A single 15-minute grace timer keeps the rail visible briefly after
-// the last session ends, so short breaks don't thrash show/hide.
-
-let graceTimer: NodeJS.Timeout | null = null;
-let lastActivityTs = 0;
-
-function cancelGraceTimer(): void {
-  if (graceTimer) {
-    clearTimeout(graceTimer);
-    graceTimer = null;
-  }
-}
-
-function scheduleGraceHide(): void {
-  cancelGraceTimer();
-  const remaining = Math.max(0, SESSION_GRACE_MS - (Date.now() - lastActivityTs));
-  graceTimer = setTimeout(() => {
-    graceTimer = null;
-    resolveRailVisibility();
-  }, remaining);
-}
-
-function resolveRailVisibility(): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-
-  const pinned = getRailPinned();
-  const sessionOnly = getRailSessionOnlyMode();
-  const selfLive = rail.isSelfLive();
-
-  let visible: boolean;
-  if (pinned || !sessionOnly || selfLive) {
-    visible = true;
-  } else {
-    visible = Date.now() - lastActivityTs < SESSION_GRACE_MS;
-  }
-
-  if (visible && !overlayWindow.isVisible()) overlayWindow.show();
-  else if (!visible && overlayWindow.isVisible()) overlayWindow.hide();
-
-  // Only arm the grace timer while in the session-only grace window (visible
-  // but no live session). Any other state cancels it.
-  if (visible && sessionOnly && !pinned && !selfLive) scheduleGraceHide();
-  else cancelGraceTimer();
 }
 
 function appIsFocused(): boolean {
@@ -1031,7 +982,7 @@ rail.onChange((next) => {
   debugBackfillTimestamps();
   // Keep the grace timestamp current while the user is working, so "15 min
   // after the last session ended" measures from the most recent live poll.
-  if (rail.isSelfLive()) lastActivityTs = Date.now();
+  if (rail.isSelfLive()) bumpActivity();
   if (heads.length === 0) {
     overlayWindow?.close();
     overlayWindow = null;
@@ -1916,6 +1867,12 @@ function debugBackfillTimestamps(): void {
 }
 
 configureResponse({ onClose: hideChat });
+configureRailVisibility({
+  getOverlay: () => overlayWindow,
+  isRailPinned: getRailPinned,
+  isSessionOnlyMode: getRailSessionOnlyMode,
+  isSelfLive: () => rail.isSelfLive(),
+});
 
 app.whenReady().then(async () => {
   // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
@@ -1939,7 +1896,7 @@ app.whenReady().then(async () => {
   // it while pinned or with session-only off.
   createTray({
     onClick: (bounds) => {
-      lastActivityTs = Date.now();
+      bumpActivity();
       toggleTrayPopup(bounds);
       resolveRailVisibility();
     },

@@ -11,9 +11,28 @@
 // rectangle. We also flip the NSWindow to opaque=NO + clearColor so those
 // pixels composite as transparent. `transparent: false` stays in Electron
 // options because flipping it there disables vibrancy entirely.
+//
+// Version gate: on macOS < 15 the WindowServer still composites a faint
+// rectangular outline around the NSWindow's frame even after setOpaque:NO +
+// clearColor, leaving a visible 1px box around the rounded pill. We bail out
+// on those versions and let the rail render as a plain vibrancy rectangle
+// instead — no rounded corners, no rim, but no leaking outline either.
 
 import type { BrowserWindow } from "electron";
 import koffi from "koffi";
+
+// macOS 15 (Sequoia) is the floor where the setOpaque:NO + clearColor trick
+// reliably hides the underlying NSWindow rectangle. Below this we skip the
+// reshape entirely and accept a plain rectangular frame.
+const MIN_MACOS_MAJOR_FOR_ROUND = 15;
+
+export function supportsRoundedWindowFrame(): boolean {
+  if (process.platform !== "darwin") return false;
+  // process.getSystemVersion() returns the marketing version on macOS, e.g.
+  // "14.7.3" or "15.1". Fall back to no-rounding if the string is unparseable.
+  const major = parseInt(process.getSystemVersion().split(".")[0] ?? "", 10);
+  return Number.isFinite(major) && major >= MIN_MACOS_MAJOR_FOR_ROUND;
+}
 
 // Lazy so importing the module on non-darwin is free.
 interface Bindings {
@@ -94,6 +113,7 @@ export interface MacBorder {
 }
 
 export function setMacCornerRadius(win: BrowserWindow, radius: number, border?: MacBorder): void {
+  if (!supportsRoundedWindowFrame()) return;
   const b = load();
   if (!b) return;
 

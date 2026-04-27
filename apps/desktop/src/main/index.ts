@@ -60,6 +60,7 @@ import {
   startHoverPolling,
   stopHoverPolling,
 } from "./windows/hover-polling";
+import { animateOverlayTo, cancelOverlayAnimation } from "./windows/overlay-animation";
 import { appState, loadRenderer, preloadPath } from "./windows/lib";
 import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
@@ -316,9 +317,6 @@ let isDraggingStack = false;
 // slot (center-left / center-right); on release the overlay tweens to it.
 const DOCK_ANIM_MS = 180;
 let dockPlaceholderWindow: BrowserWindow | null = null;
-// Monotonic counter — each new tween takes the next token; in-flight steps
-// bail when they see a newer token, so a re-drag mid-slide cancels cleanly.
-let overlayAnimToken = 0;
 
 // -------- Overlay (bubbles) --------
 
@@ -1107,37 +1105,10 @@ function hideDockPlaceholder(): void {
   if (dockPlaceholderWindow.isVisible()) dockPlaceholderWindow.hide();
 }
 
-function animateOverlayTo(target: Electron.Rectangle, duration: number, onDone?: () => void): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayAnimToken += 1;
-  const token = overlayAnimToken;
-  const start = overlayWindow.getBounds();
-  const t0 = Date.now();
-  const ease = (t: number): number => 1 - Math.pow(1 - t, 3); // easeOutCubic
-  const step = (): void => {
-    if (token !== overlayAnimToken || !overlayWindow || overlayWindow.isDestroyed()) {
-      return;
-    }
-    const t = Math.min(1, (Date.now() - t0) / duration);
-    const e = ease(t);
-    overlayWindow.setBounds({
-      x: Math.round(start.x + (target.x - start.x) * e),
-      y: Math.round(start.y + (target.y - start.y) * e),
-      width: Math.round(start.width + (target.width - start.width) * e),
-      height: Math.round(start.height + (target.height - start.height) * e),
-    });
-    repositionInfoIfVisible();
-    repositionChatIfVisible();
-    if (t < 1) setTimeout(step, 16);
-    else onDone?.();
-  };
-  step();
-}
-
 ipcMain.handle("drag:start", (): void => {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   // A new drag cancels any in-flight dock tween.
-  overlayAnimToken += 1;
+  cancelOverlayAnimation();
 
   const cursor = screen.getCursorScreenPoint();
   const win = overlayWindow.getBounds();
@@ -1179,9 +1150,15 @@ ipcMain.handle("drag:end", (): void => {
   sendChatConfig();
   // Keep isDraggingStack on through the slide so bubble hovers under the
   // moving window don't pop the info card mid-tween.
-  animateOverlayTo(target, DOCK_ANIM_MS, () => {
-    isDraggingStack = false;
-    saveOverlayPosition();
+  animateOverlayTo(overlayWindow, target, DOCK_ANIM_MS, {
+    onTick: () => {
+      repositionInfoIfVisible();
+      repositionChatIfVisible();
+    },
+    onDone: () => {
+      isDraggingStack = false;
+      saveOverlayPosition();
+    },
   });
 });
 

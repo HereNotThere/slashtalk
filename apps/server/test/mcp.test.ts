@@ -4,11 +4,20 @@ import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { config } from "../src/config";
 import { db } from "../src/db";
-import { oauthAuthorizationCodes, oauthTokens } from "../src/db/schema";
+import {
+  oauthAuthorizationCodes,
+  oauthTokens,
+  repos,
+  sessionInsights,
+  sessions,
+  userRepos,
+  users,
+} from "../src/db/schema";
 import { hashToken } from "../src/auth/tokens";
 import { mcpRoutes } from "../src/mcp/routes";
 import { mcpOAuthRoutes } from "../src/oauth/mcp";
 import { RedisBridge } from "../src/ws/redis-bridge";
+import { SUMMARY_ANALYZER } from "../src/analyzers/names";
 import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
 
 let redis: RedisBridge;
@@ -18,6 +27,10 @@ let restoreFetch: () => void;
 let aliceApiKey: string;
 let bobApiKey: string;
 let aliceCookie: string;
+let aliceId: number;
+let bobId: number;
+
+const BOB_SESSION = "c0000000-0000-0000-0000-000000000002";
 
 beforeAll(async () => {
   restoreFetch = mockGitHubAuth();
@@ -63,6 +76,48 @@ beforeAll(async () => {
   });
   const { apiKey: bobKey } = (await bobExchangeRes.json()) as { apiKey: string };
   bobApiKey = bobKey;
+
+  const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice")).limit(1);
+  const [bob] = await db.select().from(users).where(eq(users.githubLogin, "bob")).limit(1);
+  aliceId = alice.id;
+  bobId = bob.id;
+
+  const [repo] = await db
+    .insert(repos)
+    .values({
+      githubId: 12_001,
+      fullName: "team/slashtalk",
+      owner: "team",
+      name: "slashtalk",
+    })
+    .returning();
+
+  await db.insert(userRepos).values([
+    { userId: aliceId, repoId: repo.id, permission: "push" },
+    { userId: bobId, repoId: repo.id, permission: "push" },
+  ]);
+
+  await db.insert(sessions).values({
+    sessionId: BOB_SESSION,
+    userId: bobId,
+    source: "claude",
+    project: "slashtalk",
+    repoId: repo.id,
+    firstTs: new Date(Date.now() - 30 * 60 * 1000),
+    lastTs: new Date(Date.now() - 5 * 60 * 1000),
+  });
+
+  await db.insert(sessionInsights).values({
+    sessionId: BOB_SESSION,
+    analyzerName: SUMMARY_ANALYZER,
+    analyzerVersion: 1,
+    model: "claude-haiku-4-5-20251001",
+    inputLineSeq: 0,
+    output: {
+      title: "Reviewing MCP team summary",
+      description: "Bob is reviewing the MCP team-summary tool path",
+    },
+  });
 });
 
 afterAll(async () => {
@@ -190,11 +245,10 @@ describe("root /mcp", () => {
     });
     expect(listTools.status).toBe(200);
     const listToolsBody = await mcpJson(listTools);
-    expect(listToolsBody).toMatchObject({
-      jsonrpc: "2.0",
-      id: 2,
-      result: { tools: [] },
-    });
+    expect(listToolsBody.jsonrpc).toBe("2.0");
+    expect(listToolsBody.id).toBe(2);
+    const toolNames = listToolsBody.result.tools.map((t: { name: string }) => t.name).sort();
+    expect(toolNames).toEqual(["get_session", "get_team_activity"]);
     expect(listToolsBody.error).toBeUndefined();
 
     const listResources = await mcpSessionRequest({
@@ -247,6 +301,60 @@ describe("root /mcp", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list" }),
     });
     expect(stale.status).toBe(404);
+  });
+
+  it("exposes team activity MCP tools backed by the caller's repo graph", async () => {
+    const init = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify(initializeRequest()),
+    });
+    const sessionId = init.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+
+    const activity = await mcpSessionRequest({
+      apiKey: aliceApiKey,
+      sessionId: sessionId!,
+      id: 30,
+      method: "tools/call",
+      params: {
+        name: "get_team_activity",
+        arguments: { sinceHours: 24, login: "bob" },
+      },
+    });
+    const activityText = activity.result.content[0].text;
+    const activityBody = JSON.parse(activityText) as {
+      teammates: Array<{ login: string; sessions: Array<{ id: string; title: string | null }> }>;
+    };
+    expect(activityBody.teammates.map((t) => t.login)).toEqual(["bob"]);
+    expect(activityBody.teammates[0].sessions[0]).toMatchObject({
+      id: BOB_SESSION,
+      title: "Reviewing MCP team summary",
+    });
+
+    const detail = await mcpSessionRequest({
+      apiKey: aliceApiKey,
+      sessionId: sessionId!,
+      id: 31,
+      method: "tools/call",
+      params: {
+        name: "get_session",
+        arguments: { sessionId: BOB_SESSION },
+      },
+    });
+    const detailText = detail.result.content[0].text;
+    const detailBody = JSON.parse(detailText) as {
+      id: string;
+      user: { login: string };
+      repo: string | null;
+    };
+    expect(detailBody.id).toBe(BOB_SESSION);
+    expect(detailBody.user.login).toBe("bob");
+    expect(detailBody.repo).toBe("team/slashtalk");
   });
 
   it("does not let another user reuse an existing MCP session id", async () => {
@@ -973,11 +1081,13 @@ async function mcpSessionRequest({
   sessionId,
   id,
   method,
+  params,
 }: {
   apiKey: string;
   sessionId: string;
   id: number;
   method: string;
+  params?: Record<string, unknown>;
 }) {
   const res = await fetch(`${baseUrl}/mcp`, {
     method: "POST",
@@ -987,7 +1097,12 @@ async function mcpSessionRequest({
       Accept: "application/json, text/event-stream",
       "mcp-session-id": sessionId,
     },
-    body: JSON.stringify({ jsonrpc: "2.0", id, method }),
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      method,
+      ...(params ? { params } : {}),
+    }),
   });
   expect(res.status).toBe(200);
   return mcpJson(res);

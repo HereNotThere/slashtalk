@@ -44,7 +44,6 @@ Every workspace under `apps/*` and `packages/*` has its own `AGENTS.md`. The sha
 
 - **`apps/server/AGENTS.md`** — recipe-heavy ("Adding a route plugin", "Adding an LLM analyzer", "Adding a database column or table"). Server is where most agent work happens, so the recipes carry their weight.
 - **`apps/desktop/AGENTS.md`** — design-system-heavy. Tailwind tokens, theming, packaging quirks. Recipes are thinner because window/IPC additions are rarer.
-- **`apps/mcp/AGENTS.md`** — transitional. Documents the consolidation into `apps/server` and warns against deepening divergence.
 - **`packages/shared/AGENTS.md`** — constraint-heavy. "No build, no `dist/`, source-only." Negative space matters more than recipes.
 
 This shape variance is **intentional**. Each workspace's AGENTS.md reflects the kind of work that happens there. Don't standardize on a single skeleton — that would be cargo-cult.

@@ -24,6 +24,7 @@ export const mcpRoutes = (options: McpRouteOptions = {}) => {
   const pool = new McpSessionPool({
     name: "slashtalk",
     version: "0.0.1",
+    db,
     presence,
     maxSessionsPerUser:
       options.maxConcurrentSessionsPerUser ?? config.mcpMaxConcurrentSessionsPerUser,
@@ -59,6 +60,7 @@ export const mcpRoutes = (options: McpRouteOptions = {}) => {
 
       return pool.handleRequest(request, {
         userId: auth.user.githubLogin,
+        userDbId: auth.user.id,
         profile: {
           ...(auth.user.displayName ? { name: auth.user.displayName } : {}),
           ...(auth.user.avatarUrl ? { avatar: auth.user.avatarUrl } : {}),

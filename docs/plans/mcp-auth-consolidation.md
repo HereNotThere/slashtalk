@@ -1,6 +1,6 @@
 ---
 task: mcp-auth-consolidation
-status: active
+status: completed
 created: 2026-04-25
 approved_by: user
 approved_at: 2026-04-25
@@ -10,7 +10,7 @@ approved_at: 2026-04-25
 
 ## Agent-native audit
 
-- **Can run the app locally:** yes. `README.md` documents local Postgres, Redis, `apps/server`, `apps/mcp`, and `apps/desktop`.
+- **Can run the app locally:** yes. `README.md` documents local Postgres, Redis, `apps/server`, and `apps/desktop`; MCP now runs through the server-owned `/mcp` route.
 - **Can run tests/typechecks/linters:** yes, with caveat. Server tests require Postgres/Redis; desktop typecheck currently has an existing `InfoSession.source` mismatch.
 - **Can create branches, commits, PRs, and read PR comments:** yes. Git is available and the GitHub connector is installed.
 - **Can view logs:** local logs yes through terminal. Production logs are not available from the current tools; this is a deployment-readiness gap.

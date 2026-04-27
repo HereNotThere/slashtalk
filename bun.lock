@@ -51,21 +51,6 @@
         "vite": "^5.4.9",
       },
     },
-    "apps/mcp": {
-      "name": "@slashtalk/mcp",
-      "version": "0.0.1",
-      "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.29.0",
-        "@slashtalk/shared": "workspace:*",
-        "zod": "^4",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-      },
-      "peerDependencies": {
-        "typescript": "^5",
-      },
-    },
     "apps/server": {
       "name": "@slashtalk/server",
       "version": "0.0.1",
@@ -366,8 +351,6 @@
     "@sindresorhus/is": ["@sindresorhus/is@4.6.0", "", {}, "sha512-t09vSN3MdfsyCHoFcTRCH/iUtG7OJ0CsjzB8cjAmKc/va/kIgeDI/TxsigdncE/4be734m0cvIYwNaV4i2XqAw=="],
 
     "@slashtalk/electron": ["@slashtalk/electron@workspace:apps/desktop"],
-
-    "@slashtalk/mcp": ["@slashtalk/mcp@workspace:apps/mcp"],
 
     "@slashtalk/server": ["@slashtalk/server@workspace:apps/server"],
 

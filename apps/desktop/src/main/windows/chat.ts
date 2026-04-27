@@ -1,9 +1,7 @@
-// Search input pill.
-//
-// A frosted, theme-adaptive pill that takes the dock's lane while it's open
-// — the dock and the pill are mutually exclusive. The BrowserWindow paints
-// the frost and rim natively (vibrancy "popover" + setMacCornerRadius); the
-// renderer is just transparent content laid over that material.
+// Search input pill. Mutually exclusive with the dock — takes the dock's
+// lane while open. Frost + rim are painted natively (vibrancy "popover" +
+// setMacCornerRadius) because CSS backdrop-filter is a no-op on non-vibrancy
+// Electron windows.
 
 import { BrowserWindow, nativeTheme, screen } from "electron";
 import type { DockConfig } from "../../shared/types";
@@ -34,6 +32,11 @@ export function configureChat(d: ChatDeps): void {
   deps = d;
 }
 
+// Module-level listener: re-applied to whichever chatWindow exists when the
+// system theme flips. Registered once so re-creating the window doesn't leak
+// listeners.
+nativeTheme.on("updated", () => applyChatRim());
+
 export function isChatVisible(): boolean {
   return !!chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible();
 }
@@ -54,10 +57,8 @@ function ensureChatWindow(): BrowserWindow {
     width: CHAT_WIDTH,
     height: CHAT_HEIGHT,
     frame: false,
-    // `transparent: false` + `vibrancy: "popover"` matches the dock's frost
-    // approach but theme-adaptive (bright in light mode, dark in dark mode).
-    // CSS backdrop-filter is a no-op on non-vibrancy Electron windows, so we
-    // lean on NSVisualEffectView and clip it to a pill via setMacCornerRadius.
+    // `popover` is theme-adaptive (bright in light, dark in dark) — unlike
+    // the dock's `hud` which is always dark.
     transparent: false,
     backgroundColor: "#00000000",
     alwaysOnTop: true,
@@ -78,7 +79,6 @@ function ensureChatWindow(): BrowserWindow {
   chatWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   applyChatRim();
-  nativeTheme.on("updated", applyChatRim);
 
   loadRenderer(chatWindow, "chat");
 
@@ -96,9 +96,8 @@ function positionChat(): void {
   const overlay = deps.getOverlay();
   if (!overlay || overlay.isDestroyed()) return;
 
-  // The dock is hidden while chat is up, so the pill takes its lane: same
-  // edge anchor + same DOCK_EDGE_MARGIN, but centered along the dock's main
-  // axis instead of tracking the (possibly nudged) dock position.
+  // Center on the work area's main axis rather than the dock's window
+  // bounds, so a user-nudged dock position doesn't off-center the pill.
   const display = screen.getDisplayMatching(overlay.getBounds());
   const wa = display.workArea;
   const dock = deps.getCurrentDock();
@@ -133,8 +132,6 @@ function positionChat(): void {
 
 export function showChat(): void {
   if (!deps) throw new Error("configureChat must be called before showChat");
-  // Mutually exclusive with the dock — hide it first so the pill replaces it
-  // visually. resolveRailVisibility() restores the dock on hide.
   const overlay = deps.getOverlay();
   if (overlay && !overlay.isDestroyed() && overlay.isVisible()) {
     overlay.hide();
@@ -151,8 +148,7 @@ export function hideChat(): void {
     chatWindow.hide();
   }
   deps?.onVisibilityChange(false);
-  // Restore the dock per the current rules (pinned / session-only) — it might
-  // legitimately stay hidden if session-only mode says so.
+  // Re-evaluate so session-only mode can keep the dock hidden if it should.
   deps?.resolveRailVisibility();
 }
 

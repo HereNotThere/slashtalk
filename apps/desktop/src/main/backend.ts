@@ -24,13 +24,7 @@ import type {
   SpotifyPresence,
   SyncStateEntry,
 } from "@slashtalk/shared";
-import type {
-  BackendAuthState,
-  BackendUser,
-  GithubAppStatus,
-  RepoSummary,
-  TeammateSummary,
-} from "../shared/types";
+import type { BackendAuthState, BackendUser, RepoSummary, TeammateSummary } from "../shared/types";
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 import { apiBaseUrl } from "./config";
@@ -385,20 +379,6 @@ export async function signOutEverywhere(): Promise<void> {
   }
 }
 
-export async function getGithubAppStatus(): Promise<GithubAppStatus> {
-  return jsonFetch<GithubAppStatus>("/api/me/github-app/status", {
-    method: "GET",
-  });
-}
-
-export async function connectGithubApp(): Promise<void> {
-  const status = await getGithubAppStatus();
-  if (!status.configured) {
-    throw new Error("Private repo access is not configured for this Slashtalk server.");
-  }
-  await shell.openExternal(status.connectUrl);
-}
-
 // ---------- HTTP ----------
 
 type Auth =
@@ -585,7 +565,6 @@ export class ClaimRepoError extends Error {
   constructor(
     public readonly kind:
       | "no_access"
-      | "github_app_required"
       | "token_expired"
       | "rate_limited"
       | "invalid_full_name"
@@ -593,7 +572,6 @@ export class ClaimRepoError extends Error {
       | "unknown",
     message: string,
     public readonly status: number,
-    public readonly connectUrl?: string,
   ) {
     super(message);
     this.name = "ClaimRepoError";
@@ -605,7 +583,6 @@ type ClaimRepoErrorKind = ClaimRepoError["kind"];
 function isClaimRepoErrorKind(value: unknown): value is ClaimRepoErrorKind {
   return (
     value === "no_access" ||
-    value === "github_app_required" ||
     value === "token_expired" ||
     value === "rate_limited" ||
     value === "invalid_full_name" ||
@@ -628,12 +605,7 @@ export async function claimRepo(fullName: string): Promise<RepoSummary> {
     if (err instanceof HttpError) {
       const parsed = parseClaimError(err.body);
       const kind = isClaimRepoErrorKind(parsed?.error) ? parsed.error : "unknown";
-      throw new ClaimRepoError(
-        kind,
-        parsed?.message ?? `Claim failed (${err.status})`,
-        err.status,
-        parsed?.connectUrl,
-      );
+      throw new ClaimRepoError(kind, parsed?.message ?? `Claim failed (${err.status})`, err.status);
     }
     throw err;
   }
@@ -642,7 +614,6 @@ export async function claimRepo(fullName: string): Promise<RepoSummary> {
 interface ClaimErrorBody {
   error?: string;
   message?: string;
-  connectUrl?: string;
 }
 
 function parseClaimError(body: string): ClaimErrorBody | null {

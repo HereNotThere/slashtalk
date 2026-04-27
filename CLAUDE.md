@@ -18,8 +18,8 @@ Violating one of these causes a visible regression or data loss. Tier 3 of the h
 8. **Latest Claude model IDs only:** `claude-haiku-4-5-20251001`, `claude-sonnet-4-6`, `claude-opus-4-7`. Update pricing in [`apps/server/src/analyzers/llm.ts`](apps/server/src/analyzers/llm.ts) when adding.
 9. **Run tests after server changes.** From `apps/server/`: `bun run typecheck && bun run test`. Fast (seconds). CI runs the same on every push — don't push a red typecheck.
 10. **Refresh [`docs/generated/db-schema.md`](docs/generated/db-schema.md) when schema changes.** `bun run gen:db-schema` in `apps/server/`. CI will check.
-11. **Identity is user OAuth, not a GitHub App.** Every GitHub API call uses the calling user's decrypted token. No installation flow, no org-admin dependency. Detail: [`core-beliefs #11`](docs/design-docs/core-beliefs.md#11-identity-is-user-oauth-no-github-app).
-12. **Repo access is verified, not asserted.** `POST /api/me/repos` calls `GET /repos/:owner/:name` with the user's token and requires `200` before inserting a `user_repos` row. Detail: [`core-beliefs #12`](docs/design-docs/core-beliefs.md#12-repo-access-is-verified-not-asserted).
+11. **Identity is user OAuth; no GitHub App.** Every GitHub API call uses the calling user's decrypted token. No installation flow, no org-admin dependency. OAuth scope stays `read:user read:org`. Detail: [`core-beliefs #11`](docs/design-docs/core-beliefs.md#11-identity-is-user-oauth-no-github-app).
+12. **Repo claims gate on org membership or personal namespace.** `POST /api/me/repos` accepts iff `owner` is in the caller's active orgs (`GET /user/memberships/orgs?state=active`) or `owner === user.githubLogin`. Else `403 no_access`. Detail: [`core-beliefs #12`](docs/design-docs/core-beliefs.md#12-repo-access-is-verified-not-asserted).
 13. **`user_repos` is the only authorization for cross-user reads.** Feed, sessions, events, WS channels all gate on it. Any new cross-user surface must go through the same check. Detail: [`core-beliefs #13`](docs/design-docs/core-beliefs.md#13-user_repos-is-the-only-authorization-for-cross-user-reads).
 
 ## Where to go next

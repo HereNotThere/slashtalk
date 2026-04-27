@@ -170,10 +170,10 @@ export const oauthTokens = pgTable(
 
 export const repos = pgTable("repos", {
   id: serial("id").primaryKey(),
-  // githubId is populated at claim time from `GET /repos/:owner/:name` once
-  // the user's OAuth token confirms access (see apps/server/src/user/routes.ts
-  // ::verifyRepoAccess). May be null for legacy rows predating the claim-gate;
-  // a backfill via scripts/reverify-claims.ts fills those on next sign-in.
+  // githubId is nullable. Pre-2026-04 rows may have it set (populated when the
+  // claim path called `GET /repos/:owner/:name`). Post-2026-04 rows generally
+  // don't — the org-membership claim gate (see apps/server/src/user/claim.ts)
+  // doesn't make that GitHub call, so canonical metadata isn't fetched.
   githubId: bigint("github_id", { mode: "number" }).unique(),
   fullName: text("full_name").unique().notNull(),
   owner: text("owner").notNull(),

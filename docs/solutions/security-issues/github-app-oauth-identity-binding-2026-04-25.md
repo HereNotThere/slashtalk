@@ -3,6 +3,7 @@ title: GitHub App OAuth grants must be bound to the Slashtalk user
 date: 2026-04-25
 category: security-issues
 module: GitHub App OAuth and private repo claims
+status: superseded
 problem_type: security_issue
 component: authentication
 symptoms:
@@ -14,6 +15,8 @@ resolution_type: code_fix
 severity: high
 tags: [github-app, oauth, desktop-auth, repo-claims, token-refresh]
 ---
+
+> **Superseded** by [`docs/plans/org-membership-claim-gate.md`](../../plans/org-membership-claim-gate.md) (2026-04-27). The GitHub App was removed entirely; repo claims now gate on org membership or personal namespace via OAuth alone. This document is kept as a historical record of the previous identity-binding bug and its fix.
 
 # GitHub App OAuth grants must be bound to the Slashtalk user
 

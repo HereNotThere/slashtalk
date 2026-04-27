@@ -14,12 +14,6 @@ import {
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { authAudit } from "../auth/audit";
-import {
-  githubAppConnectionStatus,
-  githubAppConnectUrl,
-  githubAppConnectUrlForUser,
-  githubAppInstallUrl,
-} from "../auth/github-app";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
 import { __clearOrgsCaches } from "./orgs";
@@ -76,17 +70,6 @@ export const userRoutes = (db: Database) =>
       },
       { params: t.Object({ id: t.String() }) },
     )
-
-    // GET /api/me/github-app/status — whether this user has linked the
-    // narrow GitHub App repo-access grant used for private repo claims.
-    .get("/github-app/status", async ({ user }) => {
-      const status = await githubAppConnectionStatus(db, user.id);
-      return {
-        ...status,
-        installUrl: status.configured ? githubAppInstallUrl() : null,
-        connectUrl: status.configured ? githubAppConnectUrlForUser(user.id) : githubAppConnectUrl(),
-      };
-    })
 
     // POST /api/me/setup-token — generate a new setup token
     .post("/setup-token", async ({ user }) => {

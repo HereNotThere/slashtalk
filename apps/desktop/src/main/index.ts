@@ -48,13 +48,7 @@ import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
 import { appState, loadRenderer, preloadPath } from "./windows/lib";
 import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
-import {
-  configureTray,
-  createTray,
-  getTrayPopup,
-  hideTrayPopup,
-  toggleTrayPopup,
-} from "./windows/tray";
+import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
 
 installMcp.configureInstaller({
   localProxySecret: getLocalMcpProxySecret,
@@ -1960,17 +1954,6 @@ function debugBackfillTimestamps(): void {
 }
 
 configureResponse({ onClose: hideChat });
-// In session-only mode the tray click is the user's escape hatch: it
-// force-shows the rail and resets the 15-min grace timer. Outside that mode
-// the lastActivityTs bump is inert — resolveRailVisibility ignores it while
-// pinned or with session-only off.
-configureTray({
-  onClick: (bounds) => {
-    lastActivityTs = Date.now();
-    toggleTrayPopup(bounds);
-    resolveRailVisibility();
-  },
-});
 
 app.whenReady().then(async () => {
   // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
@@ -1988,7 +1971,17 @@ app.whenReady().then(async () => {
   githubAuth.restore();
   localRepos.restore();
   void mcpProxy.start().catch((err) => console.warn("[localMcpProxy] start failed:", err));
-  createTray();
+  // In session-only mode the tray click is the user's escape hatch: it
+  // force-shows the rail and resets the 15-min grace timer. Outside that
+  // mode the lastActivityTs bump is inert — resolveRailVisibility ignores
+  // it while pinned or with session-only off.
+  createTray({
+    onClick: (bounds) => {
+      lastActivityTs = Date.now();
+      toggleTrayPopup(bounds);
+      resolveRailVisibility();
+    },
+  });
   rail.start();
   selfSession.start();
   applySyncForAuth(backend.getAuthState().signedIn);

@@ -7,14 +7,9 @@ const TRAY_POPUP_INITIAL_HEIGHT = 80;
 
 let tray: Tray | null = null;
 let trayPopup: BrowserWindow | null = null;
-let onClick: ((bounds: Electron.Rectangle) => void) | null = null;
 
 export function getTrayPopup(): BrowserWindow | null {
   return trayPopup;
-}
-
-export function configureTray(opts: { onClick: (bounds: Electron.Rectangle) => void }): void {
-  onClick = opts.onClick;
 }
 
 function ensureTrayPopup(): BrowserWindow {
@@ -80,7 +75,7 @@ export function hideTrayPopup(): void {
   if (trayPopup && !trayPopup.isDestroyed() && trayPopup.isVisible()) trayPopup.hide();
 }
 
-export function createTray(): void {
+export function createTray(opts: { onClick: (bounds: Electron.Rectangle) => void }): void {
   // resources/ lives at apps/desktop/resources/, alongside out/. __dirname is
   // out/main at runtime in both dev and packaged builds.
   const iconPath = path.join(__dirname, "../../resources/trayTemplate.png");
@@ -92,7 +87,7 @@ export function createTray(): void {
   tray = new Tray(icon);
   tray.setToolTip("ChatHeads");
   const fire = (_e: Electron.KeyboardEvent, bounds: Electron.Rectangle): void => {
-    onClick?.(bounds);
+    opts.onClick(bounds);
   };
   tray.on("click", fire);
   tray.on("right-click", fire);

@@ -349,8 +349,65 @@ function SessionRow({
           )}
         </div>
       </button>
+      {/* Anchor rendered as a sibling of the toggle button so we don't nest
+          interactive elements (browsers auto-correct / drop the inner one). */}
+      {session.pr && (
+        <div className="px-4 -mt-1 pb-3">
+          <PrLink pr={session.pr} />
+        </div>
+      )}
       {expanded && <ExpandedSession session={session} />}
     </div>
+  );
+}
+
+const PR_STATE_COLOR: Record<
+  NonNullable<InfoSession["pr"]>["state"],
+  string
+> = {
+  open: "text-success",
+  merged: "text-info",
+  closed: "text-danger",
+};
+
+function PrLink({
+  pr,
+}: {
+  pr: NonNullable<InfoSession["pr"]>;
+}): JSX.Element {
+  return (
+    <a
+      href={pr.url}
+      target="_blank"
+      rel="noreferrer noopener"
+      onClick={(e) => e.stopPropagation()}
+      className="flex items-center gap-1.5 text-[11.5px] hover:underline min-w-0"
+      title={pr.title}
+    >
+      <PrIcon className={`shrink-0 ${PR_STATE_COLOR[pr.state]}`} />
+      <span className={`${PR_STATE_COLOR[pr.state]} font-medium shrink-0`}>
+        PR #{pr.number}
+      </span>
+      <span className="text-muted truncate min-w-0">{pr.title}</span>
+      {pr.state !== "open" && (
+        <span className="text-subtle shrink-0">· {pr.state}</span>
+      )}
+    </a>
+  );
+}
+
+function PrIcon({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" />
+    </svg>
   );
 }
 

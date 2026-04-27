@@ -2,7 +2,7 @@
 
 > Auto-generated from [`apps/server/src/db/schema.ts`](../../apps/server/src/db/schema.ts). Do not edit by hand. Regenerate with `bun run gen:db-schema` from `apps/server/`.
 
-Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `oauth_authorization_codes`, `oauth_clients`, `oauth_tokens`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
+Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `oauth_authorization_codes`, `oauth_clients`, `oauth_tokens`, `pull_requests`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
 
 ## `agent_sessions`
 
@@ -192,6 +192,26 @@ Drizzle export: `oauthTokens`.
 - `oauth_tokens_refresh_token_hash_key` (unique index) on `(refresh_token_hash)`
 - `oauth_tokens_user_id_idx` (index) on `(user_id)`
 - `oauth_tokens_client_id_idx` (index) on `(client_id)`
+
+## `pull_requests`
+
+Drizzle export: `pullRequests`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `repo_id` | `PgInteger` | not null |
+| `number` | `PgInteger` | not null |
+| `head_ref` | `PgText` | not null |
+| `title` | `PgText` | not null |
+| `url` | `PgText` | not null |
+| `state` | `PgText` | not null |
+| `author_login` | `PgText` | not null |
+| `updated_at` | `PgTimestamp` | has default |
+
+**Primary key:** `(repo_id, number)`
+
+**Indexes:**
+- `pull_requests_repo_head_ref_idx` (index) on `(repo_id, head_ref)`
 
 ## `refresh_tokens`
 

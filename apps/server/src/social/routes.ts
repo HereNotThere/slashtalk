@@ -3,7 +3,12 @@ import { eq, sql, and, gt, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import { toSnapshot, sortByStateThenTime, loadInsightsForSessions } from "../sessions/snapshot";
+import {
+  toSnapshot,
+  sortByStateThenTime,
+  loadInsightsForSessions,
+  loadPrsForSessions,
+} from "../sessions/snapshot";
 import { HEARTBEAT_FRESH_S } from "../sessions/state";
 import { normalizeFullName } from "./github-sync";
 
@@ -97,11 +102,24 @@ export const socialRoutes = (db: Database) =>
         const repoMap = new Map(repoRows.map((r) => [r.id, r]));
 
         const insightsMap = await loadInsightsForSessions(db, sessionIds);
+        const prMap = await loadPrsForSessions(
+          db,
+          sessionRows.map((r) => ({
+            sessionId: r.sessionId,
+            repoId: r.repoId,
+            branch: r.branch,
+          })),
+        );
 
         // Build augmented snapshots
         let snapshots = sessionRows.map((s) => {
           const hb = hbMap.get(s.sessionId) ?? null;
-          const snapshot = toSnapshot(s, hb, insightsMap.get(s.sessionId) ?? null);
+          const snapshot = toSnapshot(
+            s,
+            hb,
+            insightsMap.get(s.sessionId) ?? null,
+            prMap.get(s.sessionId) ?? null,
+          );
           const u = userMap.get(s.userId);
           const r = s.repoId ? repoMap.get(s.repoId) : null;
           return {

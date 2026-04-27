@@ -63,6 +63,17 @@ export interface RecentEvent {
   summary: string;
 }
 
+/** PR linked to a session via (repo_id, branch). Populated only when the
+ *  pr-poller has seen a PR whose head ref matches the session's branch on the
+ *  session's repo — absence means "not known", not "no PR". */
+export interface SessionPr {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  authorLogin: string;
+}
+
 /** A user prompt captured at ingest — what the developer asked for. */
 export interface RecentPrompt {
   ts: string;
@@ -106,6 +117,7 @@ export interface SessionSnapshot {
   toolUseNames: [string, number][];
   recent: RecentEvent[];
   recentPrompts: RecentPrompt[];
+  pr: SessionPr | null;
 }
 
 /** Feed-augmented session snapshot (includes social graph fields) */

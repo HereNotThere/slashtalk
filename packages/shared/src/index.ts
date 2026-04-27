@@ -312,10 +312,50 @@ export type ChatMessage = ChatUserMessage | ChatAssistantMessage;
 
 export interface ChatAskRequest {
   messages: ChatMessage[];
+  /** Stable ID grouping all turns of one conversation. Server generates one
+   *  on the first turn and echoes it back; clients pass it on follow-ups so
+   *  history shows them as a single thread. */
+  threadId?: string;
 }
 
 export interface ChatAskResponse {
   message: ChatAssistantMessage;
+  /** The thread this turn was persisted under (always set on success — even
+   *  for first turns, where it was generated server-side). */
+  threadId: string;
+}
+
+/** One persisted user→assistant exchange, surfaced in history views. */
+export interface ChatHistoryTurn {
+  id: string;
+  turnIndex: number;
+  prompt: string;
+  /** Assistant content with [session:...] citation tokens preserved. */
+  answer: string;
+  citations: ChatCitation[];
+  createdAt: string;
+}
+
+/** A conversation grouped from chat_messages rows. Cards are hydrated from
+ *  citations across all turns in the thread, deduped by sessionId, and
+ *  scoped to the viewer's user_repos like everywhere else. */
+export interface ChatThread {
+  threadId: string;
+  asker: {
+    login: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+  /** First user prompt — used as the thread title. */
+  title: string;
+  turns: ChatHistoryTurn[];
+  cards: SessionCard[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatHistoryResponse {
+  threads: ChatThread[];
 }
 
 /** Standard API response wrapper */

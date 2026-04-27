@@ -5,10 +5,11 @@ import type {
   ToolResultBlockParam,
   ToolUseBlock,
 } from "@anthropic-ai/sdk/resources/messages";
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { ChatAssistantMessage, ChatCitation, ChatMessage } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { repos, userRepos } from "../db/schema";
+import { chatMessages, repos, userRepos } from "../db/schema";
 import { config } from "../config";
 import { MODELS } from "../models";
 import { buildChatTools, type ChatToolDefinition } from "./tools";
@@ -61,9 +62,17 @@ export interface RunChatParams {
   db: Database;
   user: ChatCaller;
   messages: ChatMessage[];
+  /** If provided, persisted turns extend this thread; otherwise a new one is
+   *  created. The resolved id is returned so the route can echo it back. */
+  threadId?: string;
 }
 
-export async function runChatAgent(params: RunChatParams): Promise<ChatAssistantMessage> {
+export interface RunChatResult {
+  message: ChatAssistantMessage;
+  threadId: string;
+}
+
+export async function runChatAgent(params: RunChatParams): Promise<RunChatResult> {
   const { db, user } = params;
 
   const visibleRepos = await db
@@ -135,12 +144,51 @@ export async function runChatAgent(params: RunChatParams): Promise<ChatAssistant
     visibleRepos.map((r) => r.id),
   );
 
+  const threadId = params.threadId ?? randomUUID();
+  const lastUserPrompt = lastUserPromptOf(params.messages);
+  // Persist the turn so it shows up in history. Soft-fail: a DB hiccup must
+  // not break the user's chat.
+  if (lastUserPrompt !== null) {
+    const turnIndex = priorAssistantTurns(params.messages);
+    try {
+      await db.insert(chatMessages).values({
+        threadId,
+        userId: user.id,
+        turnIndex,
+        prompt: lastUserPrompt,
+        answer: finalText,
+        citations,
+      });
+    } catch (err) {
+      console.error("[chat] failed to persist chat turn:", err);
+    }
+  }
+
   return {
-    role: "assistant",
-    content: finalText,
-    citations,
-    cards,
+    message: {
+      role: "assistant",
+      content: finalText,
+      citations,
+      cards,
+    },
+    threadId,
   };
+}
+
+function lastUserPromptOf(messages: ChatMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "user") return m.content;
+  }
+  return null;
+}
+
+function priorAssistantTurns(messages: ChatMessage[]): number {
+  // Turn index = number of assistant messages already in the history. A fresh
+  // conversation has zero, the first follow-up has one, etc.
+  let n = 0;
+  for (const m of messages) if (m.role === "assistant") n++;
+  return n;
 }
 
 function buildContextBlock(user: ChatCaller, repoFullNames: string[]): string {

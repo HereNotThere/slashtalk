@@ -16,6 +16,7 @@ import type { AddressInfo } from "node:net";
 import type {
   ChatAskRequest,
   ChatAskResponse,
+  ChatHistoryResponse,
   ChatMessage,
   FeedSessionSnapshot,
   FeedUser,
@@ -716,11 +717,24 @@ export function fetchSyncState(): Promise<Record<string, SyncStateEntry>> {
 
 // ---------- Chat ----------
 
-export async function askChat(messages: ChatMessage[]): Promise<ChatAskResponse> {
-  const body: ChatAskRequest = { messages };
+export async function askChat(
+  messages: ChatMessage[],
+  threadId?: string,
+): Promise<ChatAskResponse> {
+  const body: ChatAskRequest = { messages, threadId };
   return jsonFetch<ChatAskResponse>("/api/chat/ask", {
     method: "POST",
     body,
+  });
+}
+
+export async function fetchChatHistory(): Promise<ChatHistoryResponse> {
+  return jsonFetch<ChatHistoryResponse>("/api/chat/history", { method: "GET" });
+}
+
+export async function fetchQuestionsForLogin(login: string): Promise<ChatHistoryResponse> {
+  return jsonFetch<ChatHistoryResponse>(`/api/users/${encodeURIComponent(login)}/questions`, {
+    method: "GET",
   });
 }
 

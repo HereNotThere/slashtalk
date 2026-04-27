@@ -2,7 +2,7 @@
 
 > Auto-generated from [`apps/server/src/db/schema.ts`](../../apps/server/src/db/schema.ts). Do not edit by hand. Regenerate with `bun run gen:db-schema` from `apps/server/`.
 
-Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `oauth_authorization_codes`, `oauth_clients`, `oauth_tokens`, `pull_requests`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
+Tables: `agent_sessions`, `api_keys`, `chat_messages`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `oauth_authorization_codes`, `oauth_clients`, `oauth_tokens`, `pull_requests`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
 
 ## `agent_sessions`
 
@@ -41,6 +41,25 @@ Drizzle export: `apiKeys`.
 | `key_hash` | `PgText` | not null |
 | `last_used_at` | `PgTimestamp` | — |
 | `created_at` | `PgTimestamp` | has default |
+
+## `chat_messages`
+
+Drizzle export: `chatMessages`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `PgUUID` | pk, not null, has default |
+| `thread_id` | `PgUUID` | not null |
+| `user_id` | `PgInteger` | not null |
+| `turn_index` | `PgInteger` | not null |
+| `prompt` | `PgText` | not null |
+| `answer` | `PgText` | not null |
+| `citations` | `PgJsonb` | not null, has default |
+| `created_at` | `PgTimestamp` | has default |
+
+**Indexes:**
+- `chat_messages_user_created_idx` (index) on `(user_id, created_at)`
+- `chat_messages_thread_idx` (index) on `(thread_id, turn_index)`
 
 ## `device_excluded_repos`
 

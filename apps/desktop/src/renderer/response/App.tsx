@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { PaperAirplaneIcon } from "@heroicons/react/24/outline";
+import { ClockIcon, PaperAirplaneIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import type {
   ChatAssistantMessage,
   ChatMessage,
+  ChatThread,
   SessionCard,
   SessionState,
 } from "@slashtalk/shared";
@@ -104,7 +105,32 @@ export function App(): JSX.Element {
     return <AgentResponse payload={payload} />;
   }
 
-  return <MessageResponse message={payload?.kind === "message" ? payload.message : null} />;
+  return <MessageResponse seed={payload ?? null} />;
+}
+
+type MessageSeed =
+  | { kind: "message"; message: string }
+  | { kind: "thread"; thread: ChatThread }
+  | null;
+
+function rehydrateMessagesFromThread(thread: ChatThread): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const turn of thread.turns) {
+    out.push({ role: "user", content: turn.prompt });
+    out.push({
+      role: "assistant",
+      content: turn.answer,
+      citations: turn.citations,
+      // Attach cards only on the final assistant turn — they're aggregated
+      // across the whole thread, so duplicating per-turn would double-render.
+      cards: undefined,
+    });
+  }
+  if (out.length > 0 && thread.cards.length > 0) {
+    const last = out[out.length - 1];
+    if (last.role === "assistant") last.cards = thread.cards;
+  }
+  return out;
 }
 
 function AgentResponse({
@@ -157,14 +183,16 @@ function AgentResponse({
   );
 }
 
-function MessageResponse({ message }: { message: string | null }): JSX.Element {
+function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [threadId, setThreadId] = useState<string | undefined>(undefined);
   const [followUp, setFollowUp] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gerunds, setGerunds] = useState<string[]>(DEFAULT_GERUNDS);
   const [gerundIdx, setGerundIdx] = useState(0);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -193,20 +221,32 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
   }, [loading, gerunds]);
 
   useEffect(() => {
-    if (!message) return;
-    const initial: ChatMessage[] = [{ role: "user", content: message }];
-    setMessages(initial);
-    setFollowUp("");
+    if (!seed) return;
     setError(null);
-    void ask(initial, message);
+    setFollowUp("");
+    setHistoryOpen(false);
+    if (seed.kind === "message") {
+      const initial: ChatMessage[] = [{ role: "user", content: seed.message }];
+      setMessages(initial);
+      setThreadId(undefined);
+      void ask(initial, seed.message, undefined);
+    } else {
+      // Reopen a saved thread — rehydrate without re-asking.
+      setMessages(rehydrateMessagesFromThread(seed.thread));
+      setThreadId(seed.thread.threadId);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message]);
+  }, [seed]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
 
-  async function ask(history: ChatMessage[], prompt: string): Promise<void> {
+  async function ask(
+    history: ChatMessage[],
+    prompt: string,
+    currentThreadId: string | undefined,
+  ): Promise<void> {
     if (loading) return;
     setLoading(true);
     setError(null);
@@ -222,8 +262,9 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
       })
       .catch(() => {});
     try {
-      const res = await window.chatheads.askChat(history);
+      const res = await window.chatheads.askChat(history, currentThreadId);
       setMessages((prev) => [...prev, res.message]);
+      setThreadId(res.threadId);
     } catch (err) {
       setError((err as Error).message || "Something went wrong");
     } finally {
@@ -238,11 +279,36 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
     const next: ChatMessage[] = [...messages, { role: "user", content: trimmed }];
     setMessages(next);
     setFollowUp("");
-    void ask(next, trimmed);
+    void ask(next, trimmed, threadId);
+  }
+
+  function loadThread(thread: ChatThread): void {
+    setMessages(rehydrateMessagesFromThread(thread));
+    setThreadId(thread.threadId);
+    setError(null);
+    setHistoryOpen(false);
   }
 
   return (
-    <div className="flex flex-col h-screen bg-bg">
+    <div className="flex flex-col h-screen bg-bg relative">
+      <div className="flex-none flex items-center justify-end px-3 py-2 border-b border-divider">
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((v) => !v)}
+          aria-label={historyOpen ? "Close history" : "Open history"}
+          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-subtle hover:text-fg hover:bg-surface-alt-hover transition-colors"
+        >
+          <ClockIcon className="w-4 h-4" />
+          <span>History</span>
+        </button>
+      </div>
+      {historyOpen && (
+        <HistoryDrawer
+          activeThreadId={threadId}
+          onPick={loadThread}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
       <div ref={scrollRef} className="flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-[720px] px-6 py-8 space-y-7">
           {messages.map((m, i) =>
@@ -445,4 +511,79 @@ function relativeTime(iso: string): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+function HistoryDrawer({
+  activeThreadId,
+  onPick,
+  onClose,
+}: {
+  activeThreadId: string | undefined;
+  onPick: (thread: ChatThread) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const [threads, setThreads] = useState<ChatThread[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.chatheads
+      .fetchChatHistory()
+      .then((res) => {
+        if (!cancelled) setThreads(res.threads);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError((err as Error).message ?? "Failed to load history");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="absolute inset-x-0 top-[37px] bottom-0 z-10 bg-bg border-t border-divider flex flex-col">
+      <div className="flex-none flex items-center justify-between px-4 py-2 border-b border-divider">
+        <span className="text-sm font-medium text-fg">Recent questions</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close history"
+          className="p-1 rounded-md text-subtle hover:text-fg hover:bg-surface-alt-hover transition-colors"
+        >
+          <XMarkIcon className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto px-2 py-2">
+        {threads === null && !error && (
+          <div className="px-3 py-2 text-xs text-subtle">Loading…</div>
+        )}
+        {error && <div className="px-3 py-2 text-xs text-danger">{error}</div>}
+        {threads && threads.length === 0 && (
+          <div className="px-3 py-2 text-xs text-subtle">
+            No questions yet. Anything you ask shows up here.
+          </div>
+        )}
+        {threads?.map((t) => {
+          const isActive = t.threadId === activeThreadId;
+          const turnCount = t.turns.length;
+          return (
+            <button
+              key={t.threadId}
+              type="button"
+              onClick={() => onPick(t)}
+              className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
+                isActive ? "bg-surface-alt" : "hover:bg-surface-alt-hover"
+              }`}
+            >
+              <div className="text-sm text-fg line-clamp-2">{t.title}</div>
+              <div className="text-xs text-subtle mt-0.5">
+                {relativeTime(t.updatedAt)}
+                {turnCount > 1 ? ` · ${turnCount} turns` : ""}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }

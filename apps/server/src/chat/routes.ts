@@ -3,6 +3,7 @@ import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
 import { runChatAgent } from "./runner";
 import { generateGerunds } from "./gerund";
+import { loadChatHistory } from "./history";
 
 const MAX_MESSAGES = 20;
 const MAX_CONTENT_CHARS = 8000;
@@ -37,7 +38,7 @@ export const chatRoutes = (db: Database) =>
         }
 
         try {
-          const message = await runChatAgent({
+          const result = await runChatAgent({
             db,
             user: {
               id: user.id,
@@ -45,8 +46,9 @@ export const chatRoutes = (db: Database) =>
               displayName: user.displayName,
             },
             messages,
+            threadId: body.threadId,
           });
-          return { message };
+          return { message: result.message, threadId: result.threadId };
         } catch (err) {
           console.error("[chat] /api/chat/ask failed:", err);
           set.status = 500;
@@ -55,6 +57,7 @@ export const chatRoutes = (db: Database) =>
       },
       {
         body: t.Object({
+          threadId: t.Optional(t.String()),
           messages: t.Array(
             t.Union([
               t.Object({
@@ -78,6 +81,24 @@ export const chatRoutes = (db: Database) =>
         }),
       },
     )
+    .get("/history", async ({ user, set }) => {
+      try {
+        const threads = await loadChatHistory(db, {
+          viewerId: user.id,
+          authorId: user.id,
+          asker: {
+            login: user.githubLogin,
+            displayName: user.displayName,
+            avatarUrl: user.avatarUrl ?? null,
+          },
+        });
+        return { threads };
+      } catch (err) {
+        console.error("[chat] /api/chat/history failed:", err);
+        set.status = 500;
+        return { error: "history request failed" };
+      }
+    })
     .post(
       "/gerund",
       async ({ body, set }) => {

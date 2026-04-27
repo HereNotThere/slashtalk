@@ -277,7 +277,8 @@ export interface McpInstallStatus {
 
 export type ResponseOpenPayload =
   | { kind: "message"; message: string }
-  | { kind: "agent"; agentId: string; sessionId: string };
+  | { kind: "agent"; agentId: string; sessionId: string }
+  | { kind: "thread"; thread: import("@slashtalk/shared").ChatThread };
 
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
@@ -413,10 +414,27 @@ export interface ChatHeadsBridge {
   openResponse: (message: string) => Promise<void>;
   onResponseOpen: (cb: (payload: ResponseOpenPayload) => void) => Unsubscribe;
 
-  // Ask the backend chat endpoint. Client owns the full history.
+  // Ask the backend chat endpoint. Client owns the full history. Pass the
+  // threadId returned from a previous turn to keep follow-ups on one thread.
   askChat: (
     messages: import("@slashtalk/shared").ChatMessage[],
+    threadId?: string,
   ) => Promise<import("@slashtalk/shared").ChatAskResponse>;
+
+  // Caller's persisted Q&A threads, newest-first. Cards are pre-hydrated and
+  // already gated by the caller's user_repos.
+  fetchChatHistory: () => Promise<import("@slashtalk/shared").ChatHistoryResponse>;
+
+  // Threads asked by the named user, gated by the peer-visibility rules
+  // (asker shares ≥1 repo with caller; cited threads keep only viewer-visible
+  // citations). Used by the per-user info window.
+  fetchQuestionsForLogin: (
+    login: string,
+  ) => Promise<import("@slashtalk/shared").ChatHistoryResponse>;
+
+  // Open a saved thread back up in the response window — used by the
+  // "Recent questions" panel and the in-window history drawer.
+  openThread: (thread: import("@slashtalk/shared").ChatThread) => Promise<void>;
 
   /** Open the info popover for the session owner represented by a chat card. */
   openSessionCard: (payload: { sessionId: string; login: string }) => Promise<void>;

@@ -20,6 +20,7 @@ import type {
   DockOrientation,
   InfoSession,
   McpTarget,
+  ResponseOpenPayload,
   UpdateAgentInput,
 } from "../shared/types";
 import * as store from "./store";
@@ -887,6 +888,13 @@ ipcMain.handle("response:open", (_e, message: string): void => {
 });
 
 ipcMain.handle(
+  "response:openThread",
+  (_e, thread: Extract<ResponseOpenPayload, { kind: "thread" }>["thread"]): void => {
+    showResponse({ kind: "thread", thread });
+  },
+);
+
+ipcMain.handle(
   "chat:openSessionCard",
   (_e, payload: { sessionId: string; login: string }): void => {
     const headId = rail.userHeadId(payload.login);
@@ -895,8 +903,19 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle("chat:ask", (_e, messages: Parameters<typeof backend.askChat>[0]) =>
-  backend.askChat(messages),
+ipcMain.handle(
+  "chat:ask",
+  (
+    _e,
+    messages: Parameters<typeof backend.askChat>[0],
+    threadId?: Parameters<typeof backend.askChat>[1],
+  ) => backend.askChat(messages, threadId),
+);
+
+ipcMain.handle("chat:history", () => backend.fetchChatHistory());
+
+ipcMain.handle("chat:questionsForLogin", (_e, login: string) =>
+  backend.fetchQuestionsForLogin(login),
 );
 
 ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));

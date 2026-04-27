@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../shared/Button";
 import { SlashtalkLogo } from "../shared/icons";
 import { SlashtalkSection } from "./SlashtalkSection";
+import { RecentQuestionsSection } from "./RecentQuestionsSection";
 // AgentsSection hidden for now — re-import alongside its render below to restore.
 import type { BackendAuthState } from "../../shared/types";
 
@@ -55,6 +56,7 @@ export function App(): JSX.Element {
       </header>
 
       <SlashtalkSection />
+      <RecentQuestionsSection />
     </>
   );
 }

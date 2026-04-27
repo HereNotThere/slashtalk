@@ -1,8 +1,14 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
-import { FolderIcon } from "@heroicons/react/24/outline";
+import { ChatBubbleLeftIcon, FolderIcon } from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
-import type { EventSource, RecentPrompt, SpotifyPresence, TokenUsage } from "@slashtalk/shared";
+import type {
+  ChatThread,
+  EventSource,
+  RecentPrompt,
+  SpotifyPresence,
+  TokenUsage,
+} from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
@@ -15,6 +21,7 @@ const REFRESH_MS = 15_000;
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
+  const [questions, setQuestions] = useState<ChatThread[] | null>(null);
   const [visible, setVisible] = useState(false);
   const [expandRequest, setExpandRequest] = useState<{
     id: string;
@@ -76,20 +83,27 @@ export function App(): JSX.Element {
     if (!head) return;
     if (head.kind === "agent") {
       setSessions([]);
+      setQuestions([]);
       return;
     }
     let cancelled = false;
     const load = async (): Promise<void> => {
       try {
-        const [rows, sp] = await Promise.all([
+        const [rows, sp, qs] = await Promise.all([
           window.chatheads.listSessionsForHead(head.id),
           window.chatheads.getSpotifyForLogin(head.label),
+          // Soft-fail: a 403 (no shared repo) shouldn't break the panel.
+          window.chatheads.fetchQuestionsForLogin(head.label).catch(() => ({ threads: [] })),
         ]);
         if (cancelled) return;
         setSessions(rows);
         setSpotify(sp);
+        setQuestions(qs.threads);
       } catch {
-        if (!cancelled) setSessions([]);
+        if (!cancelled) {
+          setSessions([]);
+          setQuestions([]);
+        }
       }
     };
     if (sessions === null) void load();
@@ -137,6 +151,12 @@ export function App(): JSX.Element {
               collisionFile={head?.collisionAt != null ? (head.collisionFile ?? null) : null}
               collisionLogin={head?.label ?? null}
             />
+            {questions && questions.length > 0 && (
+              <>
+                <Divider />
+                <QuestionsSection threads={questions} />
+              </>
+            )}
           </>
         )}
       </div>
@@ -313,6 +333,73 @@ function SessionsSection({
       )}
     </div>
   );
+}
+
+const DEFAULT_QUESTIONS_LIMIT = 5;
+
+function QuestionsSection({ threads }: { threads: ChatThread[] }): JSX.Element {
+  const [showAll, setShowAll] = useState(false);
+  const visible =
+    showAll || threads.length <= DEFAULT_QUESTIONS_LIMIT
+      ? threads
+      : threads.slice(0, DEFAULT_QUESTIONS_LIMIT);
+  const hasMore = threads.length > DEFAULT_QUESTIONS_LIMIT;
+  return (
+    <div>
+      <div className="px-4 pt-3 pb-2">
+        <SubHeader>Asked Slashtalk</SubHeader>
+      </div>
+      {visible.map((t) => (
+        <QuestionRow key={t.threadId} thread={t} />
+      ))}
+      {hasMore && (
+        <>
+          <div className="mx-4 h-px bg-divider" />
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="w-full px-4 py-3 text-center text-sm font-medium text-muted hover:text-fg hover:bg-surface-alt/60 transition-colors cursor-pointer"
+          >
+            {showAll ? "Show less" : `Show all (${threads.length})`}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function QuestionRow({ thread }: { thread: ChatThread }): JSX.Element {
+  const open = (): void => {
+    void window.chatheads.openThread(thread);
+  };
+  const turnSuffix = thread.turns.length > 1 ? ` · ${thread.turns.length} turns` : "";
+  return (
+    <button
+      type="button"
+      onClick={open}
+      className="w-full text-left px-4 py-3 hover:bg-surface-alt/60 transition-colors flex items-start gap-2.5"
+    >
+      <ChatBubbleLeftIcon className="w-4 h-4 mt-0.5 shrink-0 text-subtle" aria-hidden />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-fg line-clamp-2">{thread.title}</div>
+        <div className="text-xs text-subtle mt-0.5">
+          {relativeTime(thread.updatedAt)}
+          {turnSuffix}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.max(0, Math.floor(diff / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 function SessionList({

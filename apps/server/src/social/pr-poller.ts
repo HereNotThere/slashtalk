@@ -205,13 +205,21 @@ export async function backfillOpenPrs(
     }
   }
 
-  const seenRepo = new Set<number>();
+  // Group claimed-user IDs per repo so we can fall through to the next user
+  // when one's token is missing. Without this, the first row's user wins the
+  // repo even if their token failed to decrypt — and every other user with
+  // access to the same repo is silently skipped.
+  const usersByRepo = new Map<number, { fullName: string; userIds: number[] }>();
   for (const r of repoRows) {
-    if (seenRepo.has(r.id)) continue;
-    seenRepo.add(r.id);
-    const token = tokenByUserId.get(r.userId);
+    const existing = usersByRepo.get(r.id);
+    if (existing) existing.userIds.push(r.userId);
+    else usersByRepo.set(r.id, { fullName: r.fullName, userIds: [r.userId] });
+  }
+
+  for (const [repoId, { fullName, userIds: claimants }] of usersByRepo) {
+    const token = claimants.map((id) => tokenByUserId.get(id)).find((t): t is string => !!t);
     if (!token) continue;
-    await backfillRepo(db, redis, r.id, r.fullName, token);
+    await backfillRepo(db, redis, repoId, fullName, token);
     await sleep(PER_USER_DELAY_MS);
   }
 }

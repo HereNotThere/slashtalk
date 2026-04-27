@@ -14,6 +14,10 @@ interface RailVisibilityDeps {
   isRailPinned: () => boolean;
   isSessionOnlyMode: () => boolean;
   isSelfLive: () => boolean;
+  /** Chat input pill is mutually exclusive with the dock — when it's up,
+   *  resolveRailVisibility leaves the dock hidden regardless of the other
+   *  rules so a session-event tick doesn't pop it on top of the pill. */
+  isChatVisible: () => boolean;
 }
 
 let deps: RailVisibilityDeps | null = null;
@@ -35,6 +39,12 @@ export function resolveRailVisibility(): void {
   if (!deps) return;
   const overlay = deps.getOverlay();
   if (!overlay || overlay.isDestroyed()) return;
+
+  if (deps.isChatVisible()) {
+    if (overlay.isVisible()) overlay.hide();
+    cancelGraceTimer();
+    return;
+  }
 
   const pinned = deps.isRailPinned();
   const sessionOnly = deps.isSessionOnlyMode();

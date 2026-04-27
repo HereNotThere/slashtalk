@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initTheme } from "../shared/theme";
+import "../shared/fonts";
 import "./styles.css";
 
 initTheme();

@@ -17,235 +17,42 @@ import { processEvents } from "./aggregator";
 import { matchSessionRepo } from "../social/github-sync";
 import { classifySessionState } from "../sessions/state";
 import { detectCollisions } from "../correlate/file-index";
+import { config } from "../config";
+import { makeSemaphore } from "../util/semaphore";
 
 function topFilesKeys(field: unknown): string[] {
   if (!field || typeof field !== "object") return [];
   return Object.keys(field as Record<string, number>);
 }
 
-interface ParsedLine {
-  lineSeq: number;
-  event: unknown;
-}
-
-/**
- * Parse an NDJSON chunk into numbered lines starting at `fromLineSeq`. Every
- * `\n`-delimited line consumes one seq; blank and malformed lines are dropped
- * but still consume their seq so client and server stay aligned on retries.
- */
-function parseChunk(
-  text: string,
-  fromLineSeq: number,
-): { parsed: ParsedLine[]; nextLineSeq: number } {
-  if (text.length === 0) return { parsed: [], nextLineSeq: fromLineSeq };
-
-  const rawLines = text.split("\n");
-  if (rawLines[rawLines.length - 1] === "") rawLines.pop();
-
-  const parsed: ParsedLine[] = [];
-  for (let i = 0; i < rawLines.length; i++) {
-    const line = rawLines[i];
-    if (line.trim().length === 0) continue;
-    try {
-      parsed.push({ lineSeq: fromLineSeq + i, event: JSON.parse(line) });
-    } catch {
-      // intentional: don't fail the batch on a mid-flush partial line
-    }
-  }
-  return { parsed, nextLineSeq: fromLineSeq + rawLines.length };
-}
+const ingestGate = makeSemaphore(config.ingestConcurrency);
 
 export const ingestRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/v1", name: "ingest" })
     .use(apiKeyAuth)
-    .onParse({ as: "local" }, async ({ request, contentType }) => {
-      if (contentType === "application/x-ndjson" || contentType === "text/plain") {
-        return await request.text();
-      }
-    })
 
-    // POST /v1/ingest — upload NDJSON event chunk
+    // POST /v1/ingest — upload NDJSON event chunk.
+    //
+    // The body is consumed as a stream so a large `fromLineSeq=0` resync never
+    // sits as a single in-memory string. Lines are batched into ~200-row
+    // inserts; `lastSafeAdvance` only moves on a successful batch flush so a
+    // mid-stream failure returns a `serverLineSeq` the client can safely retry
+    // from (idempotent via the `(session_id, line_seq)` unique key).
     .post(
       "/ingest",
-      async ({ body, query, user, device }): Promise<IngestResponse> => {
-        const source: EventSource = query.source ?? "claude";
-        // onParse above returns the chunk as a string already.
-        const text = body as string;
-        const fromLineSeq = Number(query.fromLineSeq);
-        const { parsed, nextLineSeq } = parseChunk(text, fromLineSeq);
-
-        if (nextLineSeq === fromLineSeq) {
-          return {
-            acceptedEvents: 0,
-            duplicateEvents: 0,
-            serverLineSeq: fromLineSeq,
-          };
+      async ({ request, query, user, device }): Promise<IngestResponse> => {
+        const release = await ingestGate();
+        try {
+          return await handleIngest(db, redis, request, query, user, device);
+        } finally {
+          release();
         }
-
-        let acceptedEvents = 0;
-        let duplicateEvents = 0;
-        const acceptedPayloads: unknown[] = [];
-
-        // Ensure the parent session row exists before inserting child events.
-        // Some callers upload a brand-new session without a prior session upsert.
-        await db
-          .insert(sessions)
-          .values({
-            sessionId: query.session,
-            userId: user.id,
-            deviceId: device?.id ?? null,
-            source,
-            project: query.project,
-            serverLineSeq: nextLineSeq,
-            prefixHash: query.prefixHash ?? null,
-          })
-          .onConflictDoUpdate({
-            target: sessions.sessionId,
-            set: {
-              serverLineSeq: nextLineSeq,
-              prefixHash: query.prefixHash ?? undefined,
-            },
-          });
-
-        if (parsed.length > 0) {
-          const rows = parsed.map(({ lineSeq, event }) => {
-            const n = classifyEvent(source, event);
-            return {
-              sessionId: query.session,
-              lineSeq,
-              userId: user.id,
-              project: query.project,
-              source,
-              ts: n.ts,
-              rawType: n.rawType,
-              kind: n.kind,
-              turnId: n.turnId,
-              callId: n.callId,
-              eventId: n.eventId,
-              parentId: n.parentId,
-              payload: event,
-            };
-          });
-
-          const inserted = await db
-            .insert(events)
-            .values(rows)
-            .onConflictDoNothing({
-              target: [events.sessionId, events.lineSeq],
-            })
-            .returning({ lineSeq: events.lineSeq });
-          acceptedEvents = inserted.length;
-          duplicateEvents = rows.length - acceptedEvents;
-
-          // Correlate returned line_seqs back to the raw payloads so the
-          // aggregator only sees events that actually inserted.
-          const acceptedSet = new Set(inserted.map((r) => r.lineSeq));
-          for (const { lineSeq, event } of parsed) {
-            if (acceptedSet.has(lineSeq)) acceptedPayloads.push(event);
-          }
-        }
-
-        // Keys carried out of the inner block so the publish block below can
-        // feed cross-session collision detection without a second select.
-        let priorFiles: string[] = [];
-        let currentFiles: string[] = [];
-
-        if (acceptedPayloads.length > 0) {
-          const [currentSession] = await db
-            .select()
-            .from(sessions)
-            .where(eq(sessions.sessionId, query.session))
-            .limit(1);
-
-          if (currentSession) {
-            priorFiles = [
-              ...topFilesKeys(currentSession.topFilesEdited),
-              ...topFilesKeys(currentSession.topFilesWritten),
-            ];
-            const updates = processEvents(source, currentSession, acceptedPayloads);
-            currentFiles = [
-              ...Object.keys(updates.topFilesEdited),
-              ...Object.keys(updates.topFilesWritten),
-            ];
-            await db.update(sessions).set(updates).where(eq(sessions.sessionId, query.session));
-
-            // Retry while repo_id unresolved; fall back to the session's
-            // stored cwd so strategy 3 (project-slug) can fire even when no
-            // event has ever carried a cwd. The `isNull(repoId)` guard in the
-            // WHERE makes this a compare-and-set: concurrent ingest calls for
-            // the same session can both reach this branch with stale snapshots,
-            // but only the first writer's value sticks.
-            if (!currentSession.repoId) {
-              const cwd = updates.cwd ?? currentSession.cwd ?? null;
-              const repoId = await matchSessionRepo(db, user.id, cwd, query.project, device?.id);
-              if (repoId) {
-                await db
-                  .update(sessions)
-                  .set({ repoId })
-                  .where(and(eq(sessions.sessionId, query.session), isNull(sessions.repoId)));
-              }
-            }
-          }
-        }
-
-        if (acceptedEvents > 0) {
-          const [finalSession] = await db
-            .select({
-              repoId: sessions.repoId,
-              lastTs: sessions.lastTs,
-            })
-            .from(sessions)
-            .where(eq(sessions.sessionId, query.session))
-            .limit(1);
-
-          // Only publish when we've resolved a repo — clients dedupe by
-          // receiving exactly once via `repo:<id>`. The session owner's own
-          // cache is already invalidated locally by `uploader.onIngested`,
-          // so we don't need a user-channel echo.
-          if (finalSession?.repoId) {
-            const msg: SessionUpdatedMessage = {
-              type: "session_updated",
-              session_id: query.session,
-              user_id: user.id,
-              github_login: user.githubLogin,
-              repo_id: finalSession.repoId,
-              last_ts: finalSession.lastTs?.toISOString(),
-            };
-            void redis.publish(`repo:${finalSession.repoId}`, msg);
-
-            const collisions = detectCollisions({
-              repoId: finalSession.repoId,
-              sessionId: query.session,
-              userId: user.id,
-              githubLogin: user.githubLogin,
-              currentFiles,
-              priorFiles,
-            });
-            for (const c of collisions) {
-              const cmsg: CollisionDetectedMessage = {
-                type: "collision_detected",
-                repo_id: finalSession.repoId,
-                file_path: c.filePath,
-                ts: new Date().toISOString(),
-                trigger: {
-                  sessionId: query.session,
-                  userId: user.id,
-                  githubLogin: user.githubLogin,
-                },
-                others: c.others,
-              };
-              void redis.publish(`repo:${finalSession.repoId}`, cmsg);
-            }
-          }
-        }
-
-        return {
-          acceptedEvents,
-          duplicateEvents,
-          serverLineSeq: nextLineSeq,
-        };
       },
       {
+        // Skip Elysia's default JSON parser — we read `request.body` as a
+        // stream inside the handler. Returning the raw Request leaves the
+        // body untouched.
+        parse: "none",
         query: t.Object({
           project: t.String(),
           session: t.String(),
@@ -358,3 +165,265 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
         }),
       },
     );
+
+interface IngestQuery {
+  project: string;
+  session: string;
+  fromLineSeq: string;
+  prefixHash?: string;
+  source?: EventSource;
+}
+
+interface AuthedUser {
+  id: number;
+  githubLogin: string;
+}
+
+interface AuthedDevice {
+  id: number;
+}
+
+async function handleIngest(
+  db: Database,
+  redis: RedisBridge,
+  request: Request,
+  query: IngestQuery,
+  user: AuthedUser,
+  device: AuthedDevice | null | undefined,
+): Promise<IngestResponse> {
+  const source: EventSource = query.source ?? "claude";
+  const fromLineSeq = Number(query.fromLineSeq);
+
+  // Ensure the parent session row exists so the events FK is satisfied.
+  // Use onConflictDoNothing so we don't clobber serverLineSeq mid-stream;
+  // the final value is written once at the end.
+  await db
+    .insert(sessions)
+    .values({
+      sessionId: query.session,
+      userId: user.id,
+      deviceId: device?.id ?? null,
+      source,
+      project: query.project,
+      serverLineSeq: fromLineSeq,
+      prefixHash: query.prefixHash ?? null,
+    })
+    .onConflictDoNothing({ target: sessions.sessionId });
+
+  const body = request.body;
+  if (!body) {
+    return { acceptedEvents: 0, duplicateEvents: 0, serverLineSeq: fromLineSeq };
+  }
+
+  let currentLineSeq = fromLineSeq;
+  let lastSafeAdvance = fromLineSeq;
+  let acceptedEvents = 0;
+  let attemptedRows = 0;
+  const acceptedPayloads: unknown[] = [];
+
+  const BATCH_SIZE = config.ingestBatchSize;
+  let batch: Array<{ lineSeq: number; event: unknown }> = [];
+
+  const flushBatch = async (): Promise<void> => {
+    if (batch.length === 0) {
+      lastSafeAdvance = currentLineSeq;
+      return;
+    }
+    const rows = batch.map(({ lineSeq, event }) => {
+      const n = classifyEvent(source, event);
+      return {
+        sessionId: query.session,
+        lineSeq,
+        userId: user.id,
+        project: query.project,
+        source,
+        ts: n.ts,
+        rawType: n.rawType,
+        kind: n.kind,
+        turnId: n.turnId,
+        callId: n.callId,
+        eventId: n.eventId,
+        parentId: n.parentId,
+        payload: event,
+      };
+    });
+    const inserted = await db
+      .insert(events)
+      .values(rows)
+      .onConflictDoNothing({ target: [events.sessionId, events.lineSeq] })
+      .returning({ lineSeq: events.lineSeq });
+    acceptedEvents += inserted.length;
+    const acceptedSet = new Set(inserted.map((r) => r.lineSeq));
+    for (const { lineSeq, event } of batch) {
+      if (acceptedSet.has(lineSeq)) acceptedPayloads.push(event);
+    }
+    batch = [];
+    lastSafeAdvance = currentLineSeq;
+  };
+
+  const consumeLine = (line: string): void => {
+    if (line.trim().length > 0) {
+      try {
+        batch.push({ lineSeq: currentLineSeq, event: JSON.parse(line) });
+        attemptedRows++;
+      } catch {
+        // Mid-flush partial JSON: drop the line but still consume its seq so
+        // client and server stay aligned on retries.
+      }
+    }
+    currentLineSeq++;
+  };
+
+  let totalLines = 0;
+  try {
+    const decoder = new TextDecoder();
+    let pending = "";
+    for await (const chunk of body as ReadableStream<Uint8Array>) {
+      pending += decoder.decode(chunk, { stream: true });
+      let nl: number;
+      while ((nl = pending.indexOf("\n")) !== -1) {
+        const line = pending.slice(0, nl);
+        pending = pending.slice(nl + 1);
+        totalLines++;
+        consumeLine(line);
+        if (batch.length >= BATCH_SIZE) await flushBatch();
+      }
+    }
+    pending += decoder.decode();
+    if (pending.length > 0) {
+      totalLines++;
+      consumeLine(pending);
+    }
+    await flushBatch();
+  } catch (err) {
+    // Stream interrupted or batch insert failed. Return the seq through the
+    // last successful batch — client retries from there, dedup handles overlap.
+    console.warn(
+      `[ingest] stream aborted for session=${query.session} at seq=${currentLineSeq} (safe=${lastSafeAdvance}):`,
+      (err as Error).message,
+    );
+    return {
+      acceptedEvents,
+      duplicateEvents: Math.max(0, attemptedRows - acceptedEvents),
+      serverLineSeq: lastSafeAdvance,
+    };
+  }
+
+  if (totalLines === 0) {
+    return { acceptedEvents: 0, duplicateEvents: 0, serverLineSeq: fromLineSeq };
+  }
+
+  let priorFiles: string[] = [];
+  let currentFiles: string[] = [];
+
+  if (acceptedPayloads.length > 0) {
+    const [currentSession] = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.sessionId, query.session))
+      .limit(1);
+
+    if (currentSession) {
+      priorFiles = [
+        ...topFilesKeys(currentSession.topFilesEdited),
+        ...topFilesKeys(currentSession.topFilesWritten),
+      ];
+      const updates = processEvents(source, currentSession, acceptedPayloads);
+      currentFiles = [
+        ...Object.keys(updates.topFilesEdited),
+        ...Object.keys(updates.topFilesWritten),
+      ];
+      await db
+        .update(sessions)
+        .set({
+          ...updates,
+          serverLineSeq: currentLineSeq,
+          prefixHash: query.prefixHash ?? undefined,
+        })
+        .where(eq(sessions.sessionId, query.session));
+
+      // Retry while repo_id unresolved; fall back to the session's stored cwd
+      // so strategy 3 (project-slug) can fire even when no event has ever
+      // carried a cwd. The `isNull(repoId)` guard makes this a compare-and-set:
+      // concurrent ingests for the same session can both reach this branch
+      // with stale snapshots, but only the first writer's value sticks.
+      if (!currentSession.repoId) {
+        const cwd = updates.cwd ?? currentSession.cwd ?? null;
+        const repoId = await matchSessionRepo(db, user.id, cwd, query.project, device?.id);
+        if (repoId) {
+          await db
+            .update(sessions)
+            .set({ repoId })
+            .where(and(eq(sessions.sessionId, query.session), isNull(sessions.repoId)));
+        }
+      }
+    }
+  } else {
+    // No accepted events but the stream produced lines (all dups or blanks) —
+    // still advance the seq so the client doesn't keep retrying the chunk.
+    await db
+      .update(sessions)
+      .set({
+        serverLineSeq: currentLineSeq,
+        prefixHash: query.prefixHash ?? undefined,
+      })
+      .where(eq(sessions.sessionId, query.session));
+  }
+
+  if (acceptedEvents > 0) {
+    const [finalSession] = await db
+      .select({
+        repoId: sessions.repoId,
+        lastTs: sessions.lastTs,
+      })
+      .from(sessions)
+      .where(eq(sessions.sessionId, query.session))
+      .limit(1);
+
+    // Only publish when we've resolved a repo — clients dedupe by receiving
+    // exactly once via `repo:<id>`. The session owner's own cache is already
+    // invalidated locally by `uploader.onIngested`, so we don't need a
+    // user-channel echo.
+    if (finalSession?.repoId) {
+      const msg: SessionUpdatedMessage = {
+        type: "session_updated",
+        session_id: query.session,
+        user_id: user.id,
+        github_login: user.githubLogin,
+        repo_id: finalSession.repoId,
+        last_ts: finalSession.lastTs?.toISOString(),
+      };
+      void redis.publish(`repo:${finalSession.repoId}`, msg);
+
+      const collisions = detectCollisions({
+        repoId: finalSession.repoId,
+        sessionId: query.session,
+        userId: user.id,
+        githubLogin: user.githubLogin,
+        currentFiles,
+        priorFiles,
+      });
+      for (const c of collisions) {
+        const cmsg: CollisionDetectedMessage = {
+          type: "collision_detected",
+          repo_id: finalSession.repoId,
+          file_path: c.filePath,
+          ts: new Date().toISOString(),
+          trigger: {
+            sessionId: query.session,
+            userId: user.id,
+            githubLogin: user.githubLogin,
+          },
+          others: c.others,
+        };
+        void redis.publish(`repo:${finalSession.repoId}`, cmsg);
+      }
+    }
+  }
+
+  return {
+    acceptedEvents,
+    duplicateEvents: attemptedRows - acceptedEvents,
+    serverLineSeq: currentLineSeq,
+  };
+}

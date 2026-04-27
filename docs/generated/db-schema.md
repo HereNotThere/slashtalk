@@ -284,6 +284,7 @@ Drizzle export: `sessions`.
 | `tool_use_names` | `PgJsonb` | has default |
 | `queued` | `PgJsonb` | has default |
 | `recent_events` | `PgJsonb` | has default |
+| `recent_prompts` | `PgJsonb` | has default |
 | `server_line_seq` | `PgBigInt53` | has default |
 | `prefix_hash` | `PgText` | — |
 

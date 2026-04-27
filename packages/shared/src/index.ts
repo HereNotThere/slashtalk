@@ -63,6 +63,12 @@ export interface RecentEvent {
   summary: string;
 }
 
+/** A user prompt captured at ingest — what the developer asked for. */
+export interface RecentPrompt {
+  ts: string;
+  text: string;
+}
+
 /** Full session snapshot — shared between server API and desktop client */
 export interface SessionSnapshot {
   id: string;
@@ -99,6 +105,7 @@ export interface SessionSnapshot {
   topFilesWritten: [string, number][];
   toolUseNames: [string, number][];
   recent: RecentEvent[];
+  recentPrompts: RecentPrompt[];
 }
 
 /** Feed-augmented session snapshot (includes social graph fields) */

@@ -1,13 +1,5 @@
+import type { SessionInsightsUpdatedMessage } from "@slashtalk/shared";
 import type { RedisBridge } from "../ws/redis-bridge";
-
-export interface InsightsUpdatedPayload {
-  type: "session_insights_updated";
-  session_id: string;
-  repo_id: number;
-  analyzer: string;
-  output: unknown;
-  analyzed_at: string;
-}
 
 export function publishInsightsUpdate(
   redis: RedisBridge,
@@ -17,7 +9,7 @@ export function publishInsightsUpdate(
   output: unknown,
   analyzedAt: Date,
 ): void {
-  const payload: InsightsUpdatedPayload = {
+  const payload: SessionInsightsUpdatedMessage = {
     type: "session_insights_updated",
     session_id: sessionId,
     repo_id: repoId,

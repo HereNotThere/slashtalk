@@ -16,16 +16,11 @@ import WebSocket from "ws";
 import * as backend from "./backend";
 import { apiBaseUrl } from "./config";
 import { createEmitter } from "./emitter";
-import type { PrActivityMessage, SessionUpdatedMessage } from "@slashtalk/shared";
-
-export interface SessionInsightsUpdatedMessage {
-  type: "session_insights_updated";
-  session_id: string;
-  repo_id: number;
-  analyzer: string;
-  output: unknown;
-  analyzed_at: string;
-}
+import type {
+  PrActivityMessage,
+  SessionInsightsUpdatedMessage,
+  SessionUpdatedMessage,
+} from "@slashtalk/shared";
 
 type ServerMessage =
   | PrActivityMessage

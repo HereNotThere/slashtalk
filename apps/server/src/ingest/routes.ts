@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   SOURCES,
   type EventSource,
@@ -151,7 +151,10 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
 
             // Retry while repo_id unresolved; fall back to the session's
             // stored cwd so strategy 3 (project-slug) can fire even when no
-            // event has ever carried a cwd.
+            // event has ever carried a cwd. The `isNull(repoId)` guard in the
+            // WHERE makes this a compare-and-set: concurrent ingest calls for
+            // the same session can both reach this branch with stale snapshots,
+            // but only the first writer's value sticks.
             if (!currentSession.repoId) {
               const cwd = updates.cwd ?? currentSession.cwd ?? null;
               const repoId = await matchSessionRepo(db, user.id, cwd, query.project, device?.id);
@@ -159,7 +162,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
                 await db
                   .update(sessions)
                   .set({ repoId })
-                  .where(eq(sessions.sessionId, query.session));
+                  .where(and(eq(sessions.sessionId, query.session), isNull(sessions.repoId)));
               }
             }
           }

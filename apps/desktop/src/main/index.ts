@@ -1495,7 +1495,13 @@ ipcMain.handle(
       };
 
       if (isLocalAgent(row)) {
-        void localAgent.sendMessage(streamSessionId, text, row, handleEvent);
+        void localAgent.sendMessage(
+          streamSessionId,
+          text,
+          row,
+          handleEvent,
+          () => emitSessionsChange(agentId),
+        );
       } else {
         void anthropic.sendMessage(streamSessionId, text, handleEvent);
       }

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { CloseIcon } from "../shared/icons";
+import { Markdown } from "../shared/Markdown";
 import type {
   AgentMsg,
   ManagedAgentSessionRow,
@@ -215,23 +217,25 @@ function AgentSessions({
     <div className="flex flex-col min-h-[190px] max-h-[560px]">
       <AgentHeader head={head} agent={agent} />
       <Divider />
-      <div className="flex-1 overflow-y-auto px-lg py-md">
+      <div className="flex-1 overflow-y-auto">
         {sorted.length === 0 && pastSessions.length === 0 ? (
-          <div className="text-subtle text-[12px]">
+          <div className="px-lg py-md text-subtle text-[12px]">
             No conversations yet. Send a message below to start one.
           </div>
         ) : (
-          <div className="space-y-2">
-            {sorted.map((session) => (
-              <SessionButton
-                key={session.id}
-                session={session}
-                onOpen={() => onOpenSession(session.id)}
-                onRemove={() => void window.chatheads.agents.removeSession(agentId, session.id)}
-              />
+          <>
+            {sorted.map((session, i) => (
+              <Fragment key={session.id}>
+                {i > 0 && <div className="mx-lg h-px bg-divider" />}
+                <SessionButton
+                  session={session}
+                  onOpen={() => onOpenSession(session.id)}
+                  onRemove={() => void window.chatheads.agents.removeSession(agentId, session.id)}
+                />
+              </Fragment>
             ))}
             {pastSessions.length > 0 && (
-              <div className="pt-1">
+              <div className="px-lg py-md">
                 <div className="text-[10px] uppercase tracking-wider text-subtle mb-1">
                   Past team summaries
                 </div>
@@ -242,7 +246,7 @@ function AgentSessions({
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
       <Divider />
@@ -285,35 +289,39 @@ function SessionButton({
     <div className="group relative">
       <button
         onClick={onOpen}
-        className="w-full text-left bg-surface hover:bg-surface-hover rounded-xl px-3 py-2 pr-10 flex items-start gap-2 cursor-pointer"
+        className="w-full text-left px-lg py-md pr-12 hover:bg-surface/60 transition-colors cursor-pointer"
       >
-        <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-medium truncate">
+        <div className="min-w-0">
+          <div className="text-[14px] font-medium text-fg truncate">
             {session.title ?? "New conversation"}
           </div>
-          <div className="text-[11px] text-subtle mt-0.5 flex items-center gap-1.5">
-            <span>{fmtAgo(Date.now() - session.createdAt)} ago</span>
+          <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-subtle min-w-0">
+            <span className="shrink-0">{fmtAgo(Date.now() - session.createdAt)} ago</span>
             {tokens > 0 && (
               <>
-                <span>·</span>
-                <span>{fmtTokens(tokens)} tokens</span>
+                <span className="shrink-0">·</span>
+                <span className="shrink-0">{fmtTokens(tokens)} tokens</span>
               </>
             )}
           </div>
         </div>
-        <span className="text-subtle text-[12px] mt-0.5" aria-hidden>
-          ›
-        </span>
       </button>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-subtle text-[14px] leading-none opacity-100 group-hover:opacity-0 transition-opacity"
+      >
+        ›
+      </span>
       <button
         onClick={(event) => {
           event.stopPropagation();
           onRemove();
         }}
         title="Remove conversation"
-        className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center text-subtle hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+        aria-label="Remove conversation"
+        className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center text-subtle hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
       >
-        x
+        <CloseIcon />
       </button>
     </div>
   );
@@ -561,8 +569,8 @@ function MsgRow({ msg }: { msg: AgentMsg }): JSX.Element {
 function AssistantBlockView({ block }: { block: AssistantBlock }): JSX.Element {
   if (block.kind === "text") {
     return (
-      <div className="bg-surface rounded-2xl rounded-bl-sm px-3 py-2 whitespace-pre-wrap leading-snug">
-        {block.text}
+      <div className="bg-surface rounded-2xl rounded-bl-sm px-3 py-2">
+        <Markdown>{block.text}</Markdown>
       </div>
     );
   }

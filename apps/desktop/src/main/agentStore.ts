@@ -19,6 +19,11 @@ export interface LocalSession {
   /** Sum of model-request usage across this session. Populated either by
    *  streaming (span.model_request_end events) or a one-time backfill scan. */
   tokens?: SessionTokens;
+  /** Local agents only. The Claude Agent SDK assigns its own session_id on
+   *  the first turn; we capture and persist it so subsequent sends can
+   *  `resume` the same SDK session across app restarts. Cloud sessions reuse
+   *  `id` directly and don't set this. */
+  sdkSessionId?: string;
 }
 
 export interface LocalAgent {
@@ -132,6 +137,24 @@ export function setSessionTitle(agentId: string, sessionId: string, title: strin
   const next = load().map((a) => {
     if (a.id !== agentId) return a;
     const sessions = a.sessions.map((s) => (s.id === sessionId ? { ...s, title } : s));
+    return { ...a, sessions };
+  });
+  save(next);
+}
+
+/** Persists the SDK-assigned session id for a local session so we can
+ *  resume the same SDK conversation after an app restart. No-op if the
+ *  session no longer exists. */
+export function setSessionSdkId(
+  agentId: string,
+  sessionId: string,
+  sdkSessionId: string,
+): void {
+  const next = load().map((a) => {
+    if (a.id !== agentId) return a;
+    const sessions = a.sessions.map((s) =>
+      s.id === sessionId ? { ...s, sdkSessionId } : s,
+    );
     return { ...a, sessions };
   });
   save(next);

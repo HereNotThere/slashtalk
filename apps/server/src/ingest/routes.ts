@@ -35,9 +35,11 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
     //
     // The body is consumed as a stream so a large `fromLineSeq=0` resync never
     // sits as a single in-memory string. Lines are batched into ~200-row
-    // inserts; `lastSafeAdvance` only moves on a successful batch flush so a
-    // mid-stream failure returns a `serverLineSeq` the client can safely retry
-    // from (idempotent via the `(session_id, line_seq)` unique key).
+    // inserts. On any stream/insert error the handler throws (Elysia returns
+    // 5xx); the client retries the same chunk and the unique `(session_id,
+    // line_seq)` key dedups any batches that already committed. The
+    // post-stream aggregate fold reads back from Postgres so rows orphaned by
+    // an earlier failed retry are still picked up exactly once.
     .post(
       "/ingest",
       async ({ request, query, user, device }): Promise<IngestResponse> => {

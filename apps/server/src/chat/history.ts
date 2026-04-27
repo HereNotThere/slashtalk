@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { ChatHistoryTurn, ChatThread } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { chatMessages, users } from "../db/schema";
+import { chatMessages } from "../db/schema";
 import { loadSessionCards } from "./cards";
 
 const MAX_THREADS_DEFAULT = 50;
@@ -106,22 +106,4 @@ export async function loadChatHistory(
     });
   }
   return out;
-}
-
-export async function loadAskerInfo(db: Database, userId: number): Promise<AskerInfo | null> {
-  const [row] = await db
-    .select({
-      login: users.githubLogin,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!row) return null;
-  return {
-    login: row.login,
-    displayName: row.displayName,
-    avatarUrl: row.avatarUrl,
-  };
 }

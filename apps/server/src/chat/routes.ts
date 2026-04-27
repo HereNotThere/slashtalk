@@ -8,6 +8,11 @@ import { loadChatHistory } from "./history";
 const MAX_MESSAGES = 20;
 const MAX_CONTENT_CHARS = 8000;
 const MAX_GERUND_PROMPT_CHARS = 2000;
+// chat_messages.thread_id is a Postgres uuid; sending a non-UUID here would
+// otherwise pass body validation and then fail the soft-fail DB insert
+// silently, dropping the turn from history.
+const UUID_PATTERN =
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 
 export const chatRoutes = (db: Database) =>
   new Elysia({ name: "chat", prefix: "/api/chat" })
@@ -57,7 +62,7 @@ export const chatRoutes = (db: Database) =>
       },
       {
         body: t.Object({
-          threadId: t.Optional(t.String()),
+          threadId: t.Optional(t.String({ pattern: UUID_PATTERN })),
           messages: t.Array(
             t.Union([
               t.Object({

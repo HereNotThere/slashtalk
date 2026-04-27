@@ -204,6 +204,22 @@ describe("POST /api/chat/ask — request validation", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a non-UUID threadId before reaching the runner", async () => {
+    // Without this guard, the runner attempts to insert into chat_messages
+    // with thread_id="not-a-uuid", which fails the uuid type check; the
+    // soft-fail catches it and the user sees a normal response — but the
+    // turn never gets persisted. Force a 400 instead.
+    const res = await fetch(`${baseUrl}/api/chat/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: aliceCookie },
+      body: JSON.stringify({
+        threadId: "not-a-uuid",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+    expect(res.status).toBe(422);
+  });
+
   it("rejects too many messages", async () => {
     const many = Array.from({ length: 25 }, (_, i) => ({
       role: i % 2 === 0 ? ("user" as const) : ("assistant" as const),

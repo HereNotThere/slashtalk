@@ -15,6 +15,7 @@ import type {
   GithubConnectState,
   GithubPendingConnect,
   InfoSession,
+  InfoShowPayload,
   McpInstallStatus,
   McpInstallOptions,
   McpPresenceDetail,
@@ -25,7 +26,6 @@ import type {
   TrackedRepo,
   Unsubscribe,
   UpdateAgentInput,
-  UserLocation,
 } from "../shared/types";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
@@ -173,15 +173,7 @@ const bridge: ChatHeadsBridge = {
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 
-  onInfoShow: (cb) =>
-    subscribe<{
-      head: ChatHead;
-      sessions: InfoSession[] | null;
-      expandSessionId?: string | null;
-      spotify: SpotifyPresence | null;
-      location: UserLocation | null;
-      isSelf: boolean;
-    }>("info:show", cb),
+  onInfoShow: (cb) => subscribe<InfoShowPayload>("info:show", cb),
   onInfoHide: (cb) => {
     const handler = (): void => cb();
     ipcRenderer.on("info:hide", handler);

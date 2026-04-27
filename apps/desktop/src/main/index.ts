@@ -556,17 +556,13 @@ async function showInfo(
   // handles the `null` cases by loading on its own effect.
   const cached = sessionCache.get(head.id) ?? null;
   const login = rail.parseUserHeadId(head.id);
-  const spotifyPresence = login ? peerPresence.get(login) : null;
-  const peerLocation = login ? peerLocations.get(login) : null;
-  const authState = backend.getAuthState();
-  const isSelf = authState.signedIn && login === authState.user.githubLogin;
   win.webContents.send("info:show", {
     head,
     sessions: cached,
     expandSessionId: expandSessionId ?? null,
-    spotify: spotifyPresence,
-    location: peerLocation,
-    isSelf,
+    spotify: login ? peerPresence.get(login) : null,
+    location: login ? peerLocations.get(login) : null,
+    isSelf: backend.isSelf(login),
   });
 
   // Animate position/size when switching heads on an already-visible window;
@@ -586,14 +582,13 @@ async function showInfo(
       if (selectedHeadId !== head.id) return;
       if (!infoWindow || infoWindow.isDestroyed()) return;
       const refreshedLogin = rail.parseUserHeadId(head.id);
-      const refreshedAuth = backend.getAuthState();
       infoWindow.webContents.send("info:show", {
         head,
         sessions: loaded,
         expandSessionId: expandSessionId ?? null,
         spotify: refreshedLogin ? peerPresence.get(refreshedLogin) : null,
         location: refreshedLogin ? peerLocations.get(refreshedLogin) : null,
-        isSelf: refreshedAuth.signedIn && refreshedLogin === refreshedAuth.user.githubLogin,
+        isSelf: backend.isSelf(refreshedLogin),
       });
     });
   }
@@ -1775,13 +1770,12 @@ async function refreshInfoNow(): Promise<void> {
     if (selectedHeadId !== head.id) return;
     if (!infoWindow || infoWindow.isDestroyed()) return;
     const refreshLogin = rail.parseUserHeadId(head.id);
-    const refreshAuth = backend.getAuthState();
     infoWindow.webContents.send("info:show", {
       head,
       sessions,
       spotify: refreshLogin ? peerPresence.get(refreshLogin) : null,
       location: refreshLogin ? peerLocations.get(refreshLogin) : null,
-      isSelf: refreshAuth.signedIn && refreshLogin === refreshAuth.user.githubLogin,
+      isSelf: backend.isSelf(refreshLogin),
     });
   } catch (e) {
     console.warn("[ws] refreshInfoNow failed:", e);

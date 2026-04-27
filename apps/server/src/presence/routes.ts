@@ -83,24 +83,25 @@ export const spotifyPresenceRoutes = (db: Database, redis: RedisBridge) =>
     },
   );
 
-export type PeerLocation = { timezone: string | null; city: string | null };
+// Peer set = every user who shares ≥1 claimed repo with me. Self is always
+// included so the caller can render its own card without a second fetch.
+async function getPeerUserIds(db: Database, userId: number): Promise<number[]> {
+  const myRepoIds = db
+    .select({ repoId: userRepos.repoId })
+    .from(userRepos)
+    .where(eq(userRepos.userId, userId));
+  const peerRows = await db
+    .selectDistinct({ userId: userRepos.userId })
+    .from(userRepos)
+    .where(inArray(userRepos.repoId, myRepoIds));
+  return [...new Set([userId, ...peerRows.map((r) => r.userId)])];
+}
 
 export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/api", name: "presence-read" })
     .use(jwtAuth)
     .get("/presence/peers", async ({ user }) => {
-      // Peers = every user who shares ≥1 claimed repo with me. Include self
-      // so the caller can also render its own card without a second fetch.
-      const myRepoIds = db
-        .select({ repoId: userRepos.repoId })
-        .from(userRepos)
-        .where(eq(userRepos.userId, user.id));
-      const peerRows = await db
-        .selectDistinct({ userId: userRepos.userId })
-        .from(userRepos)
-        .where(inArray(userRepos.repoId, myRepoIds));
-
-      const ids = [...new Set([user.id, ...peerRows.map((r) => r.userId)])];
+      const ids = await getPeerUserIds(db, user.id);
       if (ids.length === 0) return {} as Record<string, SpotifyPresence>;
 
       const userRows = await db
@@ -121,19 +122,10 @@ export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
       return result;
     })
     .get("/presence/locations", async ({ user }) => {
-      // Same peer set as /presence/peers, but reads persisted timezone+city
-      // off the users table instead of redis.
-      const myRepoIds = db
-        .select({ repoId: userRepos.repoId })
-        .from(userRepos)
-        .where(eq(userRepos.userId, user.id));
-      const peerRows = await db
-        .selectDistinct({ userId: userRepos.userId })
-        .from(userRepos)
-        .where(inArray(userRepos.repoId, myRepoIds));
-
-      const ids = [...new Set([user.id, ...peerRows.map((r) => r.userId)])];
-      if (ids.length === 0) return {} as Record<string, PeerLocation>;
+      // Reads persisted timezone+city off the users table (no redis).
+      const ids = await getPeerUserIds(db, user.id);
+      type Loc = { timezone: string | null; city: string | null };
+      if (ids.length === 0) return {} as Record<string, Loc>;
 
       const rows = await db
         .select({
@@ -144,7 +136,7 @@ export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
         .from(users)
         .where(inArray(users.id, ids));
 
-      const result: Record<string, PeerLocation> = {};
+      const result: Record<string, Loc> = {};
       for (const r of rows) {
         if (!r.timezone && !r.city) continue;
         result[r.githubLogin] = { timezone: r.timezone, city: r.city };

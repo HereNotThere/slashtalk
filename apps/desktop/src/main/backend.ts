@@ -57,6 +57,10 @@ export function getAuthState(): BackendAuthState {
   return { signedIn: true, user: creds.user };
 }
 
+export function isSelf(login: string | null): boolean {
+  return !!login && creds?.user.githubLogin === login;
+}
+
 /** Current JWT — used by the WS client to authenticate the upgrade. May rotate
  *  on refresh, so callers should re-read on reconnect rather than caching. */
 export function getJwt(): string | null {

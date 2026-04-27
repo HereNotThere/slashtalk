@@ -216,7 +216,6 @@ async function handleIngest(
   }
 
   let currentLineSeq = fromLineSeq;
-  let lastSafeAdvance = fromLineSeq;
   let acceptedEvents = 0;
   let attemptedRows = 0;
   const acceptedPayloads: unknown[] = [];
@@ -225,10 +224,7 @@ async function handleIngest(
   let batch: Array<{ lineSeq: number; event: unknown }> = [];
 
   const flushBatch = async (): Promise<void> => {
-    if (batch.length === 0) {
-      lastSafeAdvance = currentLineSeq;
-      return;
-    }
+    if (batch.length === 0) return;
     const rows = batch.map(({ lineSeq, event }) => {
       const n = classifyEvent(source, event);
       return {
@@ -258,7 +254,6 @@ async function handleIngest(
       if (acceptedSet.has(lineSeq)) acceptedPayloads.push(event);
     }
     batch = [];
-    lastSafeAdvance = currentLineSeq;
   };
 
   const consumeLine = (line: string): void => {
@@ -274,40 +269,33 @@ async function handleIngest(
     currentLineSeq++;
   };
 
+  // We don't try to "save" partial progress on stream/insert errors. The
+  // desktop uploader advances `byteOffset` by the bytes it sent and trusts
+  // the returned `serverLineSeq` as a line counter — so returning a partial
+  // seq on a 200 response would skip the unflushed lines on the next read
+  // and permanently desync line_seq from file content. Let errors propagate
+  // (Elysia returns 5xx); the client retries the same chunk and the unique
+  // (session_id, line_seq) key dedups any batches that already committed.
   let totalLines = 0;
-  try {
-    const decoder = new TextDecoder();
-    let pending = "";
-    for await (const chunk of body as ReadableStream<Uint8Array>) {
-      pending += decoder.decode(chunk, { stream: true });
-      let nl: number;
-      while ((nl = pending.indexOf("\n")) !== -1) {
-        const line = pending.slice(0, nl);
-        pending = pending.slice(nl + 1);
-        totalLines++;
-        consumeLine(line);
-        if (batch.length >= BATCH_SIZE) await flushBatch();
-      }
-    }
-    pending += decoder.decode();
-    if (pending.length > 0) {
+  const decoder = new TextDecoder();
+  let pending = "";
+  for await (const chunk of body as ReadableStream<Uint8Array>) {
+    pending += decoder.decode(chunk, { stream: true });
+    let nl: number;
+    while ((nl = pending.indexOf("\n")) !== -1) {
+      const line = pending.slice(0, nl);
+      pending = pending.slice(nl + 1);
       totalLines++;
-      consumeLine(pending);
+      consumeLine(line);
+      if (batch.length >= BATCH_SIZE) await flushBatch();
     }
-    await flushBatch();
-  } catch (err) {
-    // Stream interrupted or batch insert failed. Return the seq through the
-    // last successful batch — client retries from there, dedup handles overlap.
-    console.warn(
-      `[ingest] stream aborted for session=${query.session} at seq=${currentLineSeq} (safe=${lastSafeAdvance}):`,
-      (err as Error).message,
-    );
-    return {
-      acceptedEvents,
-      duplicateEvents: Math.max(0, attemptedRows - acceptedEvents),
-      serverLineSeq: lastSafeAdvance,
-    };
   }
+  pending += decoder.decode();
+  if (pending.length > 0) {
+    totalLines++;
+    consumeLine(pending);
+  }
+  await flushBatch();
 
   if (totalLines === 0) {
     return { acceptedEvents: 0, duplicateEvents: 0, serverLineSeq: fromLineSeq };

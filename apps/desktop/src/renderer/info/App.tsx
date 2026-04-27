@@ -104,7 +104,7 @@ export function App(): JSX.Element {
       ref={rootRef}
       onMouseEnter={() => void window.chatheads.infoHoverEnter()}
       onMouseLeave={() => void window.chatheads.infoHoverLeave()}
-      className="bg-surface-2 rounded-3xl h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out"
+      className="bg-surface-2 h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out"
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? "translateX(0)" : "translateX(-4px)",
@@ -361,20 +361,13 @@ function SessionRow({
   );
 }
 
-const PR_STATE_COLOR: Record<
-  NonNullable<InfoSession["pr"]>["state"],
-  string
-> = {
+const PR_STATE_COLOR: Record<NonNullable<InfoSession["pr"]>["state"], string> = {
   open: "text-success",
   merged: "text-info",
   closed: "text-danger",
 };
 
-function PrLink({
-  pr,
-}: {
-  pr: NonNullable<InfoSession["pr"]>;
-}): JSX.Element {
+function PrLink({ pr }: { pr: NonNullable<InfoSession["pr"]> }): JSX.Element {
   return (
     <a
       href={pr.url}
@@ -385,13 +378,9 @@ function PrLink({
       title={pr.title}
     >
       <PrIcon className={`shrink-0 ${PR_STATE_COLOR[pr.state]}`} />
-      <span className={`${PR_STATE_COLOR[pr.state]} font-medium shrink-0`}>
-        PR #{pr.number}
-      </span>
+      <span className={`${PR_STATE_COLOR[pr.state]} font-medium shrink-0`}>PR #{pr.number}</span>
       <span className="text-muted truncate min-w-0">{pr.title}</span>
-      {pr.state !== "open" && (
-        <span className="text-subtle shrink-0">· {pr.state}</span>
-      )}
+      {pr.state !== "open" && <span className="text-subtle shrink-0">· {pr.state}</span>}
     </a>
   );
 }

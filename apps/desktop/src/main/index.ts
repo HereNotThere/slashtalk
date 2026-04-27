@@ -108,6 +108,11 @@ const mcpProxy = createLocalMcpProxy({
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
 const INFO_GAP = 8; // distance from the pill's outer edge to the info window
+// Match Tailwind `rounded-3xl` (1.5rem) — the renderer used to apply the same
+// radius in CSS, but vibrancy is a sibling NSView so only native clipping
+// catches the popover material at the corners. Gated to macOS 15+ inside
+// setMacCornerRadius; older versions fall back to a plain rectangle.
+const INFO_RADIUS = 24;
 
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
@@ -438,6 +443,8 @@ function ensureInfoWindow(): BrowserWindow {
 
   infoWindow.setAlwaysOnTop(true, "floating");
   infoWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  setMacCornerRadius(infoWindow, INFO_RADIUS);
 
   loadRenderer(infoWindow, "info");
 

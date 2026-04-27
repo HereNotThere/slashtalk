@@ -3,8 +3,8 @@ import { callStructured } from "./llm";
 import { ROLLING_SUMMARY_ANALYZER } from "./names";
 import type { events } from "../db/schema";
 import { compactEvent, isNarrativeEvent } from "./event-compact";
+import { MODELS } from "../models";
 
-const MODEL = "claude-haiku-4-5-20251001";
 const VERSION = "1";
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const LINE_SEQ_DELTA = 50;
@@ -75,7 +75,7 @@ function buildPrompt(
 export const rollingSummaryAnalyzer: Analyzer<RollingSummaryOutput> = {
   name: ROLLING_SUMMARY_ANALYZER,
   version: VERSION,
-  model: MODEL,
+  model: MODELS.haiku,
 
   async shouldRun(ctx) {
     const s = ctx.session;
@@ -100,7 +100,7 @@ export const rollingSummaryAnalyzer: Analyzer<RollingSummaryOutput> = {
     const prior = (ctx.existingInsight?.output as RollingSummaryOutput | undefined) ?? null;
     const prompt = buildPrompt(ctx, recent, prior);
     const result = await callStructured<RollingSummaryOutput>({
-      model: MODEL,
+      model: MODELS.haiku,
       system: SYSTEM,
       prompt,
       toolName: "emit_rolling_summary",

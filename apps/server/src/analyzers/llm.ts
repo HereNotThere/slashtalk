@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config";
+import { PRICING, type ModelId } from "../models";
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -12,15 +13,8 @@ function client(): Anthropic {
   return _client;
 }
 
-// Per-million-token USD pricing. Cache-write is computed as base × 1.25 (5m TTL).
-const PRICING: Record<string, { in: number; out: number; cacheRead: number }> = {
-  "claude-haiku-4-5-20251001": { in: 1, out: 5, cacheRead: 0.1 },
-  "claude-sonnet-4-6": { in: 3, out: 15, cacheRead: 0.3 },
-  "claude-opus-4-7": { in: 15, out: 75, cacheRead: 1.5 },
-};
-
 export interface StructuredCallParams {
-  model: string;
+  model: ModelId;
   system: string;
   prompt: string;
   toolName: string;
@@ -74,7 +68,7 @@ export async function callStructured<T>(
   const tokensCacheRead = usage.cache_read_input_tokens ?? 0;
   const tokensCacheWrite = usage.cache_creation_input_tokens ?? 0;
 
-  const pricing = PRICING[params.model] ?? { in: 1, out: 5, cacheRead: 0.1 };
+  const pricing = PRICING[params.model];
   const costUsd =
     (tokensIn * pricing.in) / 1_000_000 +
     (tokensOut * pricing.out) / 1_000_000 +

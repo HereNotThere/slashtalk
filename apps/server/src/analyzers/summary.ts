@@ -3,8 +3,8 @@ import { callStructured } from "./llm";
 import { SUMMARY_ANALYZER } from "./names";
 import type { events } from "../db/schema";
 import { compactEvent, isNarrativeEvent } from "./event-compact";
+import { MODELS } from "../models";
 
-const MODEL = "claude-haiku-4-5-20251001";
 const VERSION = "2";
 const LINE_SEQ_REFRESH_DELTA = 50;
 const REFRESH_MIN_MS = 10 * 60 * 1000;
@@ -84,7 +84,7 @@ function buildPrompt(
 export const summaryAnalyzer: Analyzer<SummaryOutput> = {
   name: SUMMARY_ANALYZER,
   version: VERSION,
-  model: MODEL,
+  model: MODELS.haiku,
 
   async shouldRun(ctx) {
     const s = ctx.session;
@@ -110,7 +110,7 @@ export const summaryAnalyzer: Analyzer<SummaryOutput> = {
     const prior = (ctx.existingInsight?.output as SummaryOutput | undefined) ?? null;
     const prompt = buildPrompt(ctx, recent, prior);
     const result = await callStructured<SummaryOutput>({
-      model: MODEL,
+      model: MODELS.haiku,
       system: SYSTEM,
       prompt,
       toolName: "emit_summary",

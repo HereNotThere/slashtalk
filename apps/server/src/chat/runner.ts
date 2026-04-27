@@ -10,6 +10,7 @@ import type { ChatAssistantMessage, ChatCitation, ChatMessage } from "@slashtalk
 import type { Database } from "../db";
 import { repos, userRepos } from "../db/schema";
 import { config } from "../config";
+import { MODELS } from "../models";
 import { buildChatTools, type ChatToolDefinition } from "./tools";
 import { loadSessionCards, MAX_CARDS_PER_MESSAGE } from "./cards";
 
@@ -32,7 +33,6 @@ Citations: whenever you reference a session, append [session:<id>] after the sen
 
 Tone: concise, factual, no preamble. Do not say "I'll call the tool" — just call it and answer. If the tools return no data, say so plainly. When referring to the caller, use second person ("you are…") rather than their login.`;
 
-const MODEL = "claude-sonnet-4-6";
 const MAX_ITERATIONS = 8;
 const MAX_TOKENS = 4096;
 // Round the injected timestamp to this bucket so the caller-context cache
@@ -104,7 +104,7 @@ export async function runChatAgent(params: RunChatParams): Promise<ChatAssistant
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const resp = await client().messages.create({
-      model: MODEL,
+      model: MODELS.sonnet,
       max_tokens: MAX_TOKENS,
       system,
       tools: toolDefs,

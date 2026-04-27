@@ -195,6 +195,13 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
   const [historyOpen, setHistoryOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Monotonic token used to ignore stale ask() resolutions. Bumped whenever
+  // the conversation context changes underneath an in-flight request — the
+  // seed effect (new payload from main) and loadThread (user picked a saved
+  // thread from history). Without this, a user picking a thread while a
+  // response is loading would see the in-flight answer appended to the new
+  // thread and the new thread's id overwritten by the abandoned one.
+  const askTokenRef = useRef(0);
 
   async function handleCopyAssistantMessage(m: ChatAssistantMessage, idx: number): Promise<void> {
     try {
@@ -222,9 +229,13 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
 
   useEffect(() => {
     if (!seed) return;
+    // Invalidate any in-flight ask from the previous seed so its eventual
+    // response doesn't clobber the new conversation.
+    askTokenRef.current++;
     setError(null);
     setFollowUp("");
     setHistoryOpen(false);
+    setLoading(false);
     if (seed.kind === "message") {
       const initial: ChatMessage[] = [{ role: "user", content: seed.message }];
       setMessages(initial);
@@ -248,6 +259,7 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     currentThreadId: string | undefined,
   ): Promise<void> {
     if (loading) return;
+    const myToken = ++askTokenRef.current;
     setLoading(true);
     setError(null);
     setGerunds(DEFAULT_GERUNDS);
@@ -263,13 +275,19 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
       .catch(() => {});
     try {
       const res = await window.chatheads.askChat(history, currentThreadId);
+      // The conversation context may have changed mid-flight (user picked
+      // a thread from history, or a new seed arrived). Drop the answer if
+      // so — it was still persisted server-side, so the user can find it
+      // in their history list later.
+      if (askTokenRef.current !== myToken) return;
       setMessages((prev) => [...prev, res.message]);
       setThreadId(res.threadId);
     } catch (err) {
+      if (askTokenRef.current !== myToken) return;
       setError((err as Error).message || "Something went wrong");
     } finally {
       void gerundPromise;
-      setLoading(false);
+      if (askTokenRef.current === myToken) setLoading(false);
     }
   }
 
@@ -283,9 +301,12 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
   }
 
   function loadThread(thread: ChatThread): void {
+    // Invalidate any in-flight ask before swapping context — see askTokenRef.
+    askTokenRef.current++;
     setMessages(rehydrateMessagesFromThread(thread));
     setThreadId(thread.threadId);
     setError(null);
+    setLoading(false);
     setHistoryOpen(false);
   }
 

@@ -90,6 +90,7 @@ interface SessionUpdates {
   toolUseNames: Record<string, number>;
   queued: Array<{ prompt: string; ts: string; mode: string | null }>;
   recentEvents: Array<{ ts: string; type: string; summary: string }>;
+  recentPrompts: Array<{ ts: string; text: string }>;
 }
 
 interface CurrentSession {
@@ -122,6 +123,7 @@ interface CurrentSession {
   toolUseNames: unknown;
   queued: unknown;
   recentEvents: unknown;
+  recentPrompts: unknown;
 }
 
 function isObj(v: unknown): v is JsonObj {
@@ -203,6 +205,7 @@ function initState(current: CurrentSession): SessionUpdates {
     },
     queued: [...((current.queued as SessionUpdates["queued"]) ?? [])],
     recentEvents: [...((current.recentEvents as SessionUpdates["recentEvents"]) ?? [])],
+    recentPrompts: [...((current.recentPrompts as SessionUpdates["recentPrompts"]) ?? [])],
   };
 }
 
@@ -210,6 +213,17 @@ function pushRecent(state: SessionUpdates, ts: string, type: string, summary: st
   state.recentEvents.push({ ts, type, summary });
   if (state.recentEvents.length > 20) {
     state.recentEvents = state.recentEvents.slice(-20);
+  }
+}
+
+function recordUserPrompt(state: SessionUpdates, ts: string, text: string): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  state.title ??= truncate(trimmed.split("\n")[0] ?? trimmed, 80);
+  state.lastUserPrompt = truncate(trimmed, 800);
+  state.recentPrompts.push({ ts, text: truncate(trimmed, 280) });
+  if (state.recentPrompts.length > 10) {
+    state.recentPrompts = state.recentPrompts.slice(-10);
   }
 }
 
@@ -373,10 +387,7 @@ function processClaudeEvents(current: CurrentSession, newEvents: unknown[]): Ses
 
       if (isRealClaudeUserMessage(event)) {
         const promptText = extractClaudeUserPromptText(event);
-        if (promptText) {
-          state.title ??= truncate(promptText.split("\n")[0] ?? promptText, 80);
-          state.lastUserPrompt = truncate(promptText, 800);
-        }
+        if (promptText) recordUserPrompt(state, event.timestamp, promptText);
         state.inTurn = true;
         state.currentTurnId = null;
         state.lastBoundaryTs = ts;
@@ -521,10 +532,7 @@ function processCursorEvents(current: CurrentSession, newEvents: unknown[]): Ses
     if (event.role === "user") {
       state.userMsgs++;
       const promptText = extractCursorText(event);
-      if (promptText) {
-        state.title ??= truncate(promptText.split("\n")[0] ?? promptText, 80);
-        state.lastUserPrompt = truncate(promptText, 800);
-      }
+      if (promptText) recordUserPrompt(state, event.timestamp, promptText);
       state.lastBoundaryTs = ts;
       continue;
     }
@@ -689,10 +697,7 @@ function processCodexEvents(current: CurrentSession, newEvents: unknown[]): Sess
       if (payloadType === "user_message") {
         const message = asString(payload.message);
         state.userMsgs++;
-        if (message) {
-          state.title ??= truncate(message.split("\n")[0] ?? message, 80);
-          state.lastUserPrompt = truncate(message, 800);
-        }
+        if (message) recordUserPrompt(state, timestamp, message);
         state.inTurn = true;
         state.lastBoundaryTs = ts;
         continue;

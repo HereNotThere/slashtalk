@@ -5,7 +5,7 @@ import type { events } from "../db/schema";
 import { compactEvent, isNarrativeEvent } from "./event-compact";
 import { MODELS } from "../models";
 
-const VERSION = "2";
+const VERSION = "3";
 const LINE_SEQ_REFRESH_DELTA = 50;
 const REFRESH_MIN_MS = 10 * 60 * 1000;
 const MIN_EVENTS_FOR_FIRST_SUMMARY = 3;
@@ -20,27 +20,36 @@ const SCHEMA = {
   properties: {
     title: {
       type: "string",
-      description: "5-8 word label for this session in sentence case, no ending period.",
+      description:
+        "5-8 word label naming the session's overall goal (the feature, fix, or refactor) in sentence case, no ending period.",
     },
     description: {
       type: "string",
-      description: "1-2 sentences describing the intent and current approach of the session.",
+      description:
+        "1-2 sentences describing what the developer set out to accomplish in this session and how they're approaching it.",
     },
   },
   required: ["title", "description"],
 };
 
-const SYSTEM = `You label live coding sessions so teammates can see what each session is about.
+const SYSTEM = `You label a coding session by its overall *goal* — what the developer set out to accomplish — so a teammate glancing at the card understands the point of the work, not the most recent keystroke.
 
-Given session metadata (recent prompts, files being edited, tools used, recent events), emit a concise title and a 1-2 sentence description. Be specific to the technical work, not generic.
+Given session metadata (user prompts, files edited, tools used, recent events), emit a concise title and a 1-2 sentence description focused on the *substantive* feature, fix, or refactor at the heart of the session. Be specific to the technical work, not generic.
 
 Good examples:
 - title: "Refactoring Redis pub/sub for soft-fail"
 - title: "Debugging WebSocket reconnect backoff"
+- title: "Adding self-bubble timestamps to chat UI"
 
 Avoid vague labels like "Coding session" or "Software development session".
 
-The session evolves. Bias toward what's happening *now*: the most recent prompts and recent events outrank earlier activity. If a prior title is given, only keep it when the recent work is still about the same thing — otherwise pivot to reflect the current task. Don't stay anchored to the first prompt (e.g. "merging main") when the user has moved on.`;
+What is *not* the goal — treat these as coda, never as the title:
+- merging main, fast-forwarding commits, deleting branches
+- running tests, type-checks, dev servers
+- waiting, idling, or "awaiting next task"
+- post-merge cleanup, branch hygiene
+
+If the only signals you have are coda activity, infer the goal from the work that *led* to the merge — the user prompts that originally drove the session, the files that were actually edited, the prior title if one exists. The prior title is usually right; only replace it when the user has clearly pivoted to a *new substantive task*, not when they've finished one and moved into wrap-up.`;
 
 function buildPrompt(
   ctx: AnalyzerContext,
@@ -51,7 +60,7 @@ function buildPrompt(
   const parts: string[] = [];
   if (prior) {
     parts.push(
-      `prior title: ${prior.title}\nprior description: ${prior.description}\n(keep only if current work matches; otherwise pivot)`,
+      `prior title: ${prior.title}\nprior description: ${prior.description}\n(keep unless the developer has clearly moved on to a new substantive task — coda activity like merging or running tests is not a pivot)`,
     );
   }
   parts.push(`project: ${s.project}`);

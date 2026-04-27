@@ -41,6 +41,7 @@ interface SessionRow {
   toolUseNames: unknown;
   queued: unknown;
   recentEvents: unknown;
+  recentPrompts: unknown;
 }
 
 interface HeartbeatRow {
@@ -141,6 +142,8 @@ export function buildSnapshot(
     ? rawHighlights.filter((h): h is string => typeof h === "string")
     : null;
 
+  const recentEvents = (session.recentEvents ?? []) as RecentEventEntry[];
+
   return {
     id: session.sessionId,
     source: session.source,
@@ -175,12 +178,41 @@ export function buildSnapshot(
     topFilesEdited: mapToSortedPairs(session.topFilesEdited, 5),
     topFilesWritten: mapToSortedPairs(session.topFilesWritten, 5),
     toolUseNames: mapToSortedPairs(session.toolUseNames, 10),
-    recent: (session.recentEvents ?? []) as Array<{
-      ts: string;
-      type: string;
-      summary: string;
-    }>,
+    recent: recentEvents,
+    recentPrompts: deriveRecentPrompts(session.recentPrompts, recentEvents, session.lastUserPrompt),
   };
+}
+
+type RecentEventEntry = { ts: string; type: string; summary: string };
+type RecentPromptEntry = { ts: string; text: string };
+
+const PROMPT_PLACEHOLDERS = new Set(["(user message)", "(assistant)"]);
+
+// Sessions that pre-date the dedicated `recent_prompts` column read as []. Fall
+// back to the user-message slice of the older mixed-event ring buffer so the
+// "Latest activity" panel isn't empty until a new prompt lands. New ingests
+// populate `recentPrompts` directly and bypass this fallback.
+function deriveRecentPrompts(
+  stored: unknown,
+  recent: RecentEventEntry[],
+  lastUserPrompt: string | null,
+): RecentPromptEntry[] {
+  if (Array.isArray(stored) && stored.length > 0) {
+    return stored as RecentPromptEntry[];
+  }
+  const fromRecent = recent
+    .filter((e) => (e.type === "user" || e.type === "user_message") && e.summary)
+    .filter((e) => !PROMPT_PLACEHOLDERS.has(e.summary))
+    .map((e) => ({ ts: e.ts, text: e.summary }));
+  if (fromRecent.length > 0) return fromRecent;
+  if (lastUserPrompt) {
+    const ts =
+      recent.length > 0
+        ? (recent.at(-1)?.ts ?? new Date().toISOString())
+        : new Date().toISOString();
+    return [{ ts, text: lastUserPrompt }];
+  }
+  return [];
 }
 
 /**

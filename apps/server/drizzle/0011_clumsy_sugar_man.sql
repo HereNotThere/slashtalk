@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "recent_prompts" jsonb DEFAULT '[]'::jsonb;

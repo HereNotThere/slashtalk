@@ -11,13 +11,7 @@ import {
 } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
-import {
-  resetDatabase,
-  mockGitHubAuth,
-  getCookie,
-  makeEvent,
-  makeNdjson,
-} from "./helpers";
+import { resetDatabase, mockGitHubAuth, getCookie, makeEvent, makeNdjson } from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -28,6 +22,10 @@ let restoreFetch: () => void;
 const COMMON_SESSION_ID = "a0000000-0000-0000-0000-000000000001";
 const REPO_A_SESSION_ID = "a0000000-0000-0000-0000-000000000002";
 
+// 30s timeout: this beforeAll runs DROP+CREATE schema, replays every
+// migration, connects to Redis, and starts a full Elysia app. Bun's default
+// (5s) was tipping over on slow CI runners — see the flakes on #119 and
+// #125, both at exactly 5000ms in this same hook.
 beforeAll(async () => {
   restoreFetch = mockGitHubAuth();
   await resetDatabase();
@@ -39,7 +37,7 @@ beforeAll(async () => {
   app.listen(0);
   const port = app.server!.port;
   baseUrl = `http://localhost:${port}`;
-});
+}, 30_000);
 
 afterAll(async () => {
   restoreFetch();
@@ -60,9 +58,7 @@ describe("social feed integration", () => {
 
   it("authenticates two users via mock GitHub OAuth", async () => {
     // Alice logs in
-    const aliceRes = await fetch(
-      `${baseUrl}/auth/github/callback?code=alice_code`,
-    );
+    const aliceRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
     expect(aliceRes.status).toBe(200);
     aliceCookie = getCookie(aliceRes, "session")!;
     expect(aliceCookie).toBeTruthy();
@@ -74,14 +70,8 @@ describe("social feed integration", () => {
     expect(bobCookie).toBeTruthy();
 
     // Verify users exist
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "alice"));
-    const [bob] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "bob"));
+    const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
+    const [bob] = await db.select().from(users).where(eq(users.githubLogin, "bob"));
     expect(alice).toBeTruthy();
     expect(bob).toBeTruthy();
     aliceUserId = alice.id;
@@ -188,29 +178,26 @@ describe("social feed integration", () => {
   });
 
   it("stores device repo selections by GitHub full name and clears them on empty updates", async () => {
-    const setReposRes = await fetch(
-      `${baseUrl}/v1/devices/${aliceDeviceId}/repos`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${aliceApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          repoPaths: [
-            {
-              fullName: "shared-org/repo-common",
-              localPath: "/Users/alice/src/repo-common",
-            },
-            {
-              fullName: "missing-org/repo-missing",
-              localPath: "/Users/alice/src/repo-missing",
-            },
-          ],
-          excludedRepos: ["alice-org/repo-a"],
-        }),
+    const setReposRes = await fetch(`${baseUrl}/v1/devices/${aliceDeviceId}/repos`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({
+        repoPaths: [
+          {
+            fullName: "shared-org/repo-common",
+            localPath: "/Users/alice/src/repo-common",
+          },
+          {
+            fullName: "missing-org/repo-missing",
+            localPath: "/Users/alice/src/repo-missing",
+          },
+        ],
+        excludedRepos: ["alice-org/repo-a"],
+      }),
+    });
     expect(setReposRes.status).toBe(200);
     expect(await setReposRes.json()).toEqual({
       ok: true,
@@ -242,17 +229,14 @@ describe("social feed integration", () => {
       },
     ]);
 
-    const clearReposRes = await fetch(
-      `${baseUrl}/v1/devices/${aliceDeviceId}/repos`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${aliceApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ repoPaths: [], excludedRepos: [] }),
+    const clearReposRes = await fetch(`${baseUrl}/v1/devices/${aliceDeviceId}/repos`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({ repoPaths: [], excludedRepos: [] }),
+    });
     expect(clearReposRes.status).toBe(200);
     expect(await clearReposRes.json()).toEqual({
       ok: true,
@@ -293,10 +277,9 @@ describe("social feed integration", () => {
       }),
     });
 
-    const getRes = await fetch(
-      `${baseUrl}/v1/devices/${aliceDeviceId}/repos`,
-      { headers: { Authorization: `Bearer ${aliceApiKey}` } },
-    );
+    const getRes = await fetch(`${baseUrl}/v1/devices/${aliceDeviceId}/repos`, {
+      headers: { Authorization: `Bearer ${aliceApiKey}` },
+    });
     expect(getRes.status).toBe(200);
     const paths = (await getRes.json()) as Array<{
       repoId: number;
@@ -330,25 +313,25 @@ describe("social feed integration", () => {
       }),
     });
     expect(exchangeRes.status).toBe(200);
-    const { apiKey: newApiKey, deviceId: newDeviceId } =
-      (await exchangeRes.json()) as { apiKey: string; deviceId: number };
+    const { apiKey: newApiKey, deviceId: newDeviceId } = (await exchangeRes.json()) as {
+      apiKey: string;
+      deviceId: number;
+    };
     expect(newDeviceId).toBe(aliceDeviceId);
     expect(newApiKey).not.toBe(aliceApiKey);
 
     // Paths registered before the re-exchange should still be readable.
-    const getRes = await fetch(
-      `${baseUrl}/v1/devices/${newDeviceId}/repos`,
-      { headers: { Authorization: `Bearer ${newApiKey}` } },
-    );
+    const getRes = await fetch(`${baseUrl}/v1/devices/${newDeviceId}/repos`, {
+      headers: { Authorization: `Bearer ${newApiKey}` },
+    });
     expect(getRes.status).toBe(200);
     const paths = (await getRes.json()) as Array<unknown>;
     expect(paths.length).toBeGreaterThan(0);
 
     // The old API key is revoked.
-    const oldKeyRes = await fetch(
-      `${baseUrl}/v1/devices/${newDeviceId}/repos`,
-      { headers: { Authorization: `Bearer ${aliceApiKey}` } },
-    );
+    const oldKeyRes = await fetch(`${baseUrl}/v1/devices/${newDeviceId}/repos`, {
+      headers: { Authorization: `Bearer ${aliceApiKey}` },
+    });
     expect(oldKeyRes.status).toBe(401);
 
     aliceApiKey = newApiKey;

@@ -95,9 +95,7 @@ function safeStringify(value: unknown): string {
   try {
     const s = JSON.stringify(value);
     if (!s) return "";
-    return s.length > MAX_TOOL_INPUT_CHARS
-      ? s.slice(0, MAX_TOOL_INPUT_CHARS) + "…"
-      : s;
+    return s.length > MAX_TOOL_INPUT_CHARS ? s.slice(0, MAX_TOOL_INPUT_CHARS) + "…" : s;
   } catch {
     return "";
   }

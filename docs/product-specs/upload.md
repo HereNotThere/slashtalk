@@ -74,11 +74,11 @@ flag that flips **on** at every real user prompt or queued command, and
 flips **off** only when it sees `stop_reason == "end_turn"` on an assistant
 message. State buckets in `snapshot()`:
 
-- `busy`   — pid alive and `in_turn` is True (covers silent thinking)
+- `busy` — pid alive and `in_turn` is True (covers silent thinking)
 - `active` — pid alive, last event within `BUSY_WINDOW_S` (10s)
-- `idle`   — pid alive, no recent event
+- `idle` — pid alive, no recent event
 - `recent` — pid gone but file mtime within `RUN_WINDOW_S` (1h)
-- `ended`  — everything else
+- `ended` — everything else
 
 ### Queued-command handling
 
@@ -160,6 +160,7 @@ Common top-level fields:
   messages.
 
 `type == "user"`:
+
 - `message.content` is either a string or an array of content blocks.
 - In array form, blocks have `type` in `{"text", "tool_result"}`.
 - A `tool_result` has `tool_use_id` (matches an earlier `tool_use.id`)
@@ -168,12 +169,13 @@ Common top-level fields:
   — exclude from "real user prompt" tracking.
 
 `type == "assistant"`:
+
 - `message.model`: e.g. `claude-opus-4-7`, `claude-sonnet-4-6`.
 - `message.stop_reason`: e.g. `"end_turn"`, `"tool_use"`. `end_turn` is
   the signal that the model finished its turn.
 - `message.usage`: `{input_tokens, output_tokens, cache_read_input_tokens,
-  cache_creation_input_tokens, cache_creation: {ephemeral_5m_input_tokens,
-  ephemeral_1h_input_tokens}}`. Prefer the detailed `cache_creation`
+cache_creation_input_tokens, cache_creation: {ephemeral_5m_input_tokens,
+ephemeral_1h_input_tokens}}`. Prefer the detailed `cache_creation`
   object; fall back to the flat `cache_creation_input_tokens` as
   5-minute-cache writes when the detailed object is absent.
 - `message.content`: array of blocks with `type` in
@@ -183,6 +185,7 @@ Common top-level fields:
   `input.subagent_type`), `WebFetch`, `WebSearch`.
 
 `type == "attachment"`:
+
 - `attachment.type == "queued_command"` is the one that matters:
   `{prompt, commandMode}` — a user message typed while the model was
   still working. Skip prompts starting with `<task-notification`.
@@ -207,9 +210,11 @@ polls (or fs-notifies) `~/.claude/projects/*/*.jsonl` and uploads new
 bytes. **The server is append-only and dedups by event UUID.**
 
 Client state lives in a sidecar JSON (e.g. `~/.claude/sync-state.json`):
+
 ```
 { "<sessionId>": { "offset": <bytes>, "size": <bytes>, "mtime": <float>, "prefixHash": "<hex>" } }
 ```
+
 `prefixHash` is sha256 of the first 4 KiB of the file — used to detect
 the (very rare) case where a file was replaced/truncated. If the prefix
 hash changes, the client re-uploads from offset 0.
@@ -223,15 +228,10 @@ hash changes, the client re-uploads from offset 0.
      protocol — device identity is derived from the authenticated
      credential, not from a client-supplied header.
    - Body: `Content-Type: application/x-ndjson` — raw JSONL bytes.
-   - Server behavior:
-     - Split on `\n`; ignore blank lines; parse each as JSON.
-     - For each event, upsert by `uuid` with `ON CONFLICT DO NOTHING`.
-     - Update derived per-session aggregates (see next section) from
-       newly-inserted events only — never replay on duplicates.
-     - Return `{ "acceptedBytes": <int>, "acceptedEvents": <int>,
-       "duplicateEvents": <int>, "serverOffset": <int> }`.
-     - `serverOffset` = highest `fromOffset + len(body)` seen for this
-       session. The client uses it to resume after crashes.
+   - Server behavior: - Split on `\n`; ignore blank lines; parse each as JSON. - For each event, upsert by `uuid` with `ON CONFLICT DO NOTHING`. - Update derived per-session aggregates (see next section) from
+     newly-inserted events only — never replay on duplicates. - Return `{ "acceptedBytes": <int>, "acceptedEvents": <int>,
+"duplicateEvents": <int>, "serverOffset": <int> }`. - `serverOffset` = highest `fromOffset + len(body)` seen for this
+     session. The client uses it to resume after crashes.
    - Partial-line safety: the client only sends up to the last complete
      `\n`, so the server never needs to buffer cross-request tails.
 
@@ -249,6 +249,7 @@ backend without changes.
 - `GET /api/session/<id>` — one full snapshot.
 
 Snapshot JSON shape (all fields, from `SessionState.snapshot`):
+
 ```
 {
   "id":              "<sessionId>",
@@ -296,7 +297,7 @@ per-session:
 
 - `in_turn: bool` — flip **true** on any real user message (non-meta,
   not a `<local-command…>`/`<command…>` string) or on any `attachment:
-  queued_command`. Flip **false** only when you observe an assistant
+queued_command`. Flip **false** only when you observe an assistant
   event with `message.stop_reason == "end_turn"`.
 - `last_boundary_ts: ISO8601 string` — timestamp of the most recent
   turn boundary (= the events that flip `in_turn`).
@@ -309,15 +310,16 @@ In a hosted backend there is no `pid_alive` check — the client must tell
 you whether the CLI is still attached. Add one more ingest endpoint:
 
 3. `POST /v1/heartbeat` with `{user, sessionId, pid, kind, cwd, version,
-   startedAt}` every ~5 s while the CLI is alive; absence for >30 s
+startedAt}` every ~5 s while the CLI is alive; absence for >30 s
    means the CLI is no longer live.
 
 State classification at snapshot time:
-- `busy`   — heartbeat fresh **and** `in_turn` is true.
+
+- `busy` — heartbeat fresh **and** `in_turn` is true.
 - `active` — heartbeat fresh **and** last event within 10 s.
-- `idle`   — heartbeat fresh, no recent event.
+- `idle` — heartbeat fresh, no recent event.
 - `recent` — heartbeat stale, last event within 1 h.
-- `ended`  — otherwise.
+- `ended` — otherwise.
 
 ## Queued-command handling (also non-obvious)
 

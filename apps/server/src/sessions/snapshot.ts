@@ -5,16 +5,14 @@
 
 import { inArray, or, and, eq, sql } from "drizzle-orm";
 import { classifySessionState } from "./state";
-import type { SessionPr, SessionState } from "@slashtalk/shared";
+import type { EventSource, SessionPr, SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { pullRequests, sessionInsights } from "../db/schema";
-import {
-  SUMMARY_ANALYZER,
-  ROLLING_SUMMARY_ANALYZER,
-} from "../analyzers/names";
+import { SUMMARY_ANALYZER, ROLLING_SUMMARY_ANALYZER } from "../analyzers/names";
 
 interface SessionRow {
   sessionId: string;
+  source: EventSource;
   project: string;
   title: string | null;
   model: string | null;
@@ -72,7 +70,7 @@ export function toSnapshot(
   heartbeat: HeartbeatRow | null,
   insights?: SessionInsightsForSnapshot | null,
   pr?: SessionPr | null,
-  now?: Date
+  now?: Date,
 ) {
   const currentTime = now ?? new Date();
   const state = classifySessionState({
@@ -91,19 +89,15 @@ export function buildSnapshot(
   state: SessionState,
   insights?: SessionInsightsForSnapshot | null,
   pr?: SessionPr | null,
-  now?: Date
+  now?: Date,
 ) {
   const currentTime = now ?? new Date();
   const lastTs = session.lastTs;
   const firstTs = session.firstTs;
 
-  const idleS = lastTs
-    ? Math.floor((currentTime.getTime() - lastTs.getTime()) / 1000)
-    : null;
+  const idleS = lastTs ? Math.floor((currentTime.getTime() - lastTs.getTime()) / 1000) : null;
   const durationS =
-    firstTs && lastTs
-      ? Math.floor((lastTs.getTime() - firstTs.getTime()) / 1000)
-      : null;
+    firstTs && lastTs ? Math.floor((lastTs.getTime() - firstTs.getTime()) / 1000) : null;
 
   const tokens = {
     in: session.tokensIn ?? 0,
@@ -117,10 +111,7 @@ export function buildSnapshot(
   const cacheHitRate = totalInput > 0 ? tokens.cacheRead / totalInput : null;
 
   const durationMin = durationS ? durationS / 60 : null;
-  const burnPerMin =
-    durationMin && durationMin > 0
-      ? Math.round(tokens.out / durationMin)
-      : null;
+  const burnPerMin = durationMin && durationMin > 0 ? Math.round(tokens.out / durationMin) : null;
 
   // Outstanding tools → currentTool
   const outstanding = (session.outstandingTools ?? {}) as Record<
@@ -128,8 +119,7 @@ export function buildSnapshot(
     { name: string; desc: string | null; started: number }
   >;
   const toolEntries = Object.values(outstanding);
-  const currentTool =
-    toolEntries.length > 0 ? toolEntries[toolEntries.length - 1] : null;
+  const currentTool = toolEntries.length > 0 ? toolEntries[toolEntries.length - 1] : null;
 
   // Filter queued by last_boundary_ts
   const allQueued = (session.queued ?? []) as Array<{
@@ -138,9 +128,7 @@ export function buildSnapshot(
     mode: string | null;
   }>;
   const boundaryTs = session.lastBoundaryTs;
-  const queued = boundaryTs
-    ? allQueued.filter((q) => new Date(q.ts) > boundaryTs)
-    : allQueued;
+  const queued = boundaryTs ? allQueued.filter((q) => new Date(q.ts) > boundaryTs) : allQueued;
 
   // LLM-derived overrides — prefer summary.title when present so the UI
   // doesn't fall back to lastUserPrompt. Leave heuristic title in place as a
@@ -157,6 +145,7 @@ export function buildSnapshot(
 
   return {
     id: session.sessionId,
+    source: session.source,
     project: session.project,
     title: summaryTitle ?? session.title,
     description: summaryDescription,
@@ -225,8 +214,7 @@ export async function loadInsightsForSessions(
     if (row.analyzerName === SUMMARY_ANALYZER) {
       slot.summary = row.output as SessionInsightsForSnapshot["summary"];
     } else if (row.analyzerName === ROLLING_SUMMARY_ANALYZER) {
-      slot.rollingSummary =
-        row.output as SessionInsightsForSnapshot["rollingSummary"];
+      slot.rollingSummary = row.output as SessionInsightsForSnapshot["rollingSummary"];
     }
     result.set(row.sessionId, slot);
   }
@@ -301,22 +289,19 @@ export async function loadPrsForSessions(
   return result;
 }
 
-/** State priority for feed ordering */
-const STATE_ORDER: Record<string, number> = {
-  busy: 0,
-  active: 1,
-  idle: 2,
-  recent: 3,
-  ended: 4,
-};
+// Two tiers only: currently live (busy/active) on top, everything else below.
+// Within each tier we sort by lastTs desc, so an idle-for-a-day session can't
+// outrank a just-paused one purely on state priority — idle means the
+// developer has moved on.
+const LIVE_STATES = new Set(["busy", "active"]);
 
 export function sortByStateThenTime<T extends { state: string; lastTs: string | null }>(
-  items: T[]
+  items: T[],
 ): T[] {
   return items.sort((a, b) => {
-    const sa = STATE_ORDER[a.state] ?? 5;
-    const sb = STATE_ORDER[b.state] ?? 5;
-    if (sa !== sb) return sa - sb;
+    const la = LIVE_STATES.has(a.state) ? 0 : 1;
+    const lb = LIVE_STATES.has(b.state) ? 0 : 1;
+    if (la !== lb) return la - lb;
     const ta = a.lastTs ? new Date(a.lastTs).getTime() : 0;
     const tb = b.lastTs ? new Date(b.lastTs).getTime() : 0;
     return tb - ta;

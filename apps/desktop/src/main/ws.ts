@@ -14,20 +14,13 @@
 
 import WebSocket from "ws";
 import * as backend from "./backend";
+import { apiBaseUrl } from "./config";
 import { createEmitter } from "./emitter";
 import type {
   PrActivityMessage,
+  SessionInsightsUpdatedMessage,
   SessionUpdatedMessage,
 } from "@slashtalk/shared";
-
-export interface SessionInsightsUpdatedMessage {
-  type: "session_insights_updated";
-  session_id: string;
-  repo_id: number;
-  analyzer: string;
-  output: unknown;
-  analyzed_at: string;
-}
 
 type ServerMessage =
   | PrActivityMessage
@@ -109,8 +102,7 @@ function open(): void {
   });
 
   ws.addEventListener("message", (event) => {
-    const data =
-      typeof event.data === "string" ? event.data : event.data?.toString?.();
+    const data = typeof event.data === "string" ? event.data : event.data?.toString?.();
     if (!data) return;
     let msg: ServerMessage;
     try {
@@ -141,10 +133,10 @@ function open(): void {
 }
 
 function wsUrl(jwt: string): string {
-  const base = backend.getBaseUrl();
+  const base = apiBaseUrl();
   const url = new URL(base);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = (url.pathname.replace(/\/$/, "") + "/ws") || "/ws";
+  url.pathname = url.pathname.replace(/\/$/, "") + "/ws" || "/ws";
   url.searchParams.set("token", jwt);
   return url.toString();
 }

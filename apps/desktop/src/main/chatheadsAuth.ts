@@ -11,10 +11,7 @@
 // Rename in a later pass; functionality is already right.
 
 import * as backend from "./backend";
-import type {
-  BackendAuthState,
-  ChatHeadsAuthState,
-} from "../shared/types";
+import type { BackendAuthState, ChatHeadsAuthState } from "../shared/types";
 import { createEmitter } from "./emitter";
 
 const changes = createEmitter<ChatHeadsAuthState>();
@@ -45,6 +42,7 @@ export async function signIn(): Promise<void> {
 }
 
 export function cancelSignIn(_reason?: string): void {
+  void _reason;
   backend.cancelSignIn();
 }
 

@@ -21,16 +21,13 @@ import {
   type PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
 import os from "node:os";
+import * as path from "node:path";
 import * as agentStore from "./agentStore";
 import * as localTranscripts from "./localTranscripts";
 import type { AgentStreamEvent } from "./anthropic";
-import type {
-  AgentHistoryPage,
-  AgentMsg,
-  AssistantBlock,
-  CreateAgentInput,
-} from "../shared/types";
+import type { AgentHistoryPage, AgentMsg, AssistantBlock, CreateAgentInput } from "../shared/types";
 
 const LOCAL_AGENT_PREFIX = "local:";
 const LOCAL_SESSION_PREFIX = "local-sess:";
@@ -65,7 +62,6 @@ export function createAgent(input: CreateAgentInput): CreatedLocalAgent {
 
 export function archiveSession(sessionId: string): void {
   localTranscripts.clear(sessionId);
-  sdkSessionByLocal.delete(sessionId);
 }
 
 export function loadSessionMessages(
@@ -74,24 +70,57 @@ export function loadSessionMessages(
   // transcripts are stored in full, so there's only ever one page.
   _cursor?: string | null,
 ): AgentHistoryPage {
+  void _cursor;
   return { msgs: localTranscripts.load(sessionId), nextCursor: null };
 }
 
-// Map from our local session id → SDK-assigned session_id. Populated on the
-// first send; used as `resume` on subsequent sends so the SDK rehydrates the
-// conversation from its on-disk transcript. In-memory only — if the app
-// restarts, the mapping is lost and the next send starts a fresh SDK session.
-// The visible transcript survives restarts via localTranscripts.
-const sdkSessionByLocal = new Map<string, string>();
+/** Mirrors the Claude Agent SDK's project-dir encoding for `~/.claude/projects/<dir>`.
+ *  Replaces every non-alphanumeric character with '-'. Confirmed against the
+ *  SDK at `@anthropic-ai/claude-agent-sdk` by inspecting the bundled regex. */
+function sdkProjectDir(cwd: string): string {
+  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
+}
+
+function sdkTranscriptExists(cwd: string, sdkSessionId: string): boolean {
+  const file = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    sdkProjectDir(cwd),
+    `${sdkSessionId}.jsonl`,
+  );
+  return fs.existsSync(file);
+}
 
 export async function sendMessage(
   sessionId: string,
   text: string,
   agent: agentStore.LocalAgent,
   onEvent: (e: AgentStreamEvent) => void,
+  onSessionUnavailable?: () => void,
 ): Promise<void> {
   const cwd = agent.cwd ?? os.homedir();
-  const resume = sdkSessionByLocal.get(sessionId);
+  const persistedSdkId = agent.sessions.find((s) => s.id === sessionId)
+    ?.sdkSessionId;
+
+  // If we have a saved SDK session id but its on-disk transcript is gone
+  // (Claude Code pruned it, the cwd was renamed, or the user wiped
+  // ~/.claude/projects), the session is no longer continuable. Archive it
+  // rather than silently starting a fresh SDK session that the user would
+  // mistake for a resumed one.
+  if (persistedSdkId && !sdkTranscriptExists(cwd, persistedSdkId)) {
+    archiveSession(sessionId);
+    agentStore.removeSession(agent.id, sessionId);
+    onSessionUnavailable?.();
+    onEvent({
+      kind: "error",
+      message:
+        "This session is no longer available — its underlying transcript was deleted. Start a new session to continue.",
+    });
+    return;
+  }
+
+  const resume = persistedSdkId;
 
   // Append user message to transcript up front so it persists even if the
   // stream fails mid-response.
@@ -114,20 +143,25 @@ export async function sendMessage(
     systemPrompt: agent.systemPrompt,
     permissionMode: "bypassPermissions" as PermissionMode,
     allowDangerouslySkipPermissions: true,
-    // Keep the agent self-contained — don't pull in the user's
-    // ~/.claude/settings.json, plugins, or global MCP servers for the MVP.
-    settingSources: [],
+    // Load the user's ~/.claude/settings.json so local agents inherit the same
+    // MCP servers (and hooks) the terminal `claude` uses. Project/local scopes
+    // are intentionally omitted: 'project' would pull CLAUDE.md and behave
+    // differently per cwd, and 'local' is per-checkout state we don't want
+    // leaking into agent runs.
+    settingSources: ["user"],
     ...(resume ? { resume } : {}),
   };
 
   try {
     const q = query({ prompt: text, options });
 
+    let captured = persistedSdkId;
     for await (const msg of q) {
-      // Cache the SDK's session id the first time we see it so resume works
-      // on the next turn.
-      if (!sdkSessionByLocal.has(sessionId) && msg.session_id) {
-        sdkSessionByLocal.set(sessionId, msg.session_id);
+      // Persist the SDK's session id the first time we see it so resume works
+      // on the next turn — including across app restarts.
+      if (!captured && msg.session_id) {
+        captured = msg.session_id;
+        agentStore.setSessionSdkId(agent.id, sessionId, msg.session_id);
       }
 
       for (const e of normalizeSdkMessage(msg)) {

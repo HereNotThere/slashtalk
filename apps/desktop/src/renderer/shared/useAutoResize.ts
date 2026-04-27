@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 
 /**
  * Asks the main process to size the BrowserWindow to the renderer's content.
@@ -16,8 +16,7 @@ export function useAutoResize(ref?: RefObject<HTMLElement | null>): void {
   const lastSent = useRef(0);
   const pending = useRef<number | null>(null);
 
-  const getEl = (): HTMLElement | null =>
-    ref?.current ?? document.getElementById('root');
+  const getEl = (): HTMLElement | null => ref?.current ?? document.getElementById("root");
 
   const flush = useRef<() => void>(() => {});
   flush.current = (): void => {

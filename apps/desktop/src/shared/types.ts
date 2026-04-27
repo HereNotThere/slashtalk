@@ -2,27 +2,26 @@
 // Any IPC contract lives here, so changes are caught by the compiler on both sides.
 
 import type {
-  AgentSessionRow,
+  ManagedAgentSessionRow,
   FeedSessionSnapshot,
   SessionSnapshot,
+  SpotifyPresence,
 } from "@slashtalk/shared";
 
 // Re-export for convenience: renderers import from this module, not from
 // @slashtalk/shared directly.
-export type { AgentSessionRow };
+export type { ManagedAgentSessionRow, SpotifyPresence };
 
 // Sessions surfaced to the info window: own sessions (SessionSnapshot) and
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
 export type InfoSession = SessionSnapshot | FeedSessionSnapshot;
 
-export type Avatar =
-  | { type: 'emoji'; value: string }
-  | { type: 'remote'; value: string };
+export type Avatar = { type: "emoji"; value: string } | { type: "remote"; value: string };
 
 export interface ChatHead {
   id: string;
   /** Picks the info-popover layout and routes session fetches. */
-  kind: "user" | "repo" | "agent";
+  kind: "user" | "agent";
   label: string;
   tint: string;
   avatar: Avatar;
@@ -32,15 +31,14 @@ export interface ChatHead {
   /** Epoch ms when this teammate's most recent PR opened/merged event landed.
    *  Renderer treats it as transient (animates while it's < a few seconds old). */
   prActivityAt?: number;
-  /** True when this user currently has at least one active MCP session. Renders
-   *  a green presence dot on the bubble. */
+  /** True when this user has at least one BUSY/ACTIVE session in the latest
+   *  feed poll — i.e. they're "working now". Renders a pulsing blue ring around
+   *  the bubble on the rail and suppresses the "last session" timestamp badge
+   *  so the live state reads cleanly. */
   live?: boolean;
   /** Set when the agent streamed new content while its info panel was not
    *  open. Cleared when the user opens the panel. Agent heads only. */
   unread?: boolean;
-  /** Only set when kind === "repo". */
-  repoId?: number;
-  repoFullName?: string;
 }
 
 export type Unsubscribe = () => void;
@@ -55,10 +53,6 @@ export interface DockConfig {
   side: DockSide;
 }
 
-// Chat pill layout hint. `anchor` = which end of the pill the search-icon
-// circle sits at so it overlaps the chat bubble on the rail.
-export type ChatAnchor = "left" | "right";
-
 // slashtalk backend types
 export interface BackendUser {
   githubLogin: string;
@@ -66,9 +60,7 @@ export interface BackendUser {
   displayName: string | null;
 }
 
-export type BackendAuthState =
-  | { signedIn: false }
-  | { signedIn: true; user: BackendUser };
+export type BackendAuthState = { signedIn: false } | { signedIn: true; user: BackendUser };
 
 // Signed-in identity for the MCP/agents shim. Token stays main-side.
 export interface ChatHeadsUser {
@@ -77,9 +69,7 @@ export interface ChatHeadsUser {
   avatar: string;
 }
 
-export type ChatHeadsAuthState =
-  | { signedIn: false }
-  | { signedIn: true; user: ChatHeadsUser };
+export type ChatHeadsAuthState = { signedIn: false } | { signedIn: true; user: ChatHeadsUser };
 
 export interface RepoSummary {
   repoId: number;
@@ -140,18 +130,20 @@ export interface McpPresenceDetail {
   sessions: McpSessionInfo[];
 }
 
-export type AgentMode = 'cloud' | 'local';
-export type AgentVisibility = 'private' | 'team';
+export type AgentMode = "cloud" | "local";
+export type AgentVisibility = "private" | "team";
 
 export interface AgentSummary {
   id: string;
   name: string;
   description?: string;
+  systemPrompt: string;
   model: string;
   createdAt: number;
   mode?: AgentMode;
   cwd?: string;
   visibility?: AgentVisibility;
+  mcpServers?: McpServerInput[];
 }
 
 export interface SessionUsage {
@@ -179,10 +171,10 @@ export interface GithubPendingConnect {
 }
 
 export type GithubConnectState =
-  | { kind: 'disconnected' }
-  | { kind: 'connecting'; pending: GithubPendingConnect }
-  | { kind: 'connected'; login?: string; scope: string }
-  | { kind: 'error'; message: string };
+  | { kind: "disconnected" }
+  | { kind: "connecting"; pending: GithubPendingConnect }
+  | { kind: "connected"; login?: string; scope: string }
+  | { kind: "error"; message: string };
 
 export interface CreateAgentInput {
   name: string;
@@ -195,11 +187,21 @@ export interface CreateAgentInput {
   visibility?: AgentVisibility;
 }
 
+export interface UpdateAgentInput {
+  name: string;
+  description?: string;
+  systemPrompt: string;
+  model?: string;
+  mcpServers?: McpServerInput[];
+  cwd?: string;
+  visibility?: AgentVisibility;
+}
+
 export type AgentStreamEvent =
-  | { kind: 'text'; agentId: string; text: string }
-  | { kind: 'thinking'; agentId: string }
+  | { kind: "text"; agentId: string; text: string }
+  | { kind: "thinking"; agentId: string }
   | {
-      kind: 'tool_use';
+      kind: "tool_use";
       agentId: string;
       id: string;
       name: string;
@@ -207,39 +209,39 @@ export type AgentStreamEvent =
       input?: unknown;
     }
   | {
-      kind: 'tool_result';
+      kind: "tool_result";
       agentId: string;
       toolUseId: string;
       isError?: boolean;
       summary?: string;
     }
-  | { kind: 'phase'; agentId: string; label: string | null }
+  | { kind: "phase"; agentId: string; label: string | null }
   | {
-      kind: 'usage';
+      kind: "usage";
       agentId: string;
       input: number;
       output: number;
     }
-  | { kind: 'done'; agentId: string; stopReason?: string }
-  | { kind: 'error'; agentId: string; message: string };
+  | { kind: "done"; agentId: string; stopReason?: string }
+  | { kind: "error"; agentId: string; message: string };
 
 export type AssistantBlock =
-  | { kind: 'text'; text: string }
-  | { kind: 'thinking' }
+  | { kind: "text"; text: string }
+  | { kind: "thinking" }
   | {
-      kind: 'tool_use';
+      kind: "tool_use";
       id: string;
       name: string;
       server?: string;
       input?: unknown;
-      status: 'running' | 'ok' | 'error';
+      status: "running" | "ok" | "error";
       resultSummary?: string;
     };
 
 export type AgentMsg =
-  | { role: 'user'; text: string }
+  | { role: "user"; text: string }
   | {
-      role: 'assistant';
+      role: "assistant";
       blocks: AssistantBlock[];
       phase?: string | null;
       done: boolean;
@@ -250,7 +252,12 @@ export interface AgentHistoryPage {
   nextCursor: string | null;
 }
 
-export type McpTarget = 'claude-code';
+export type McpTarget = "claude-code" | "codex";
+export type McpInstallMode = "local-proxy" | "legacy-bearer";
+
+export interface McpInstallOptions {
+  mode?: McpInstallMode;
+}
 
 export interface McpTargetState {
   installed: boolean;
@@ -259,6 +266,14 @@ export interface McpTargetState {
 
 export interface McpInstallStatus {
   claudeCode: McpTargetState;
+  codex: McpTargetState;
+}
+
+export interface GithubAppStatus {
+  configured: boolean;
+  connected: boolean;
+  installUrl: string | null;
+  connectUrl: string;
 }
 
 export type ResponseOpenPayload =
@@ -280,7 +295,7 @@ export interface ChatHeadsBridge {
 
   // MCP install into external AI clients.
   mcp: {
-    install: (target: McpTarget) => Promise<McpTargetState>;
+    install: (target: McpTarget, options?: McpInstallOptions) => Promise<McpTargetState>;
     uninstall: (target: McpTarget) => Promise<McpTargetState>;
     status: () => Promise<McpInstallStatus>;
     url: () => Promise<string>;
@@ -305,6 +320,7 @@ export interface ChatHeadsBridge {
     onConfiguredChange: (cb: (configured: boolean) => void) => Unsubscribe;
     list: () => Promise<AgentSummary[]>;
     create: (input: CreateAgentInput) => Promise<AgentSummary>;
+    update: (id: string, input: UpdateAgentInput) => Promise<AgentSummary>;
     remove: (id: string) => Promise<void>;
     send: (agentId: string, text: string, sessionId?: string | null) => Promise<void>;
     history: (
@@ -329,10 +345,40 @@ export interface ChatHeadsBridge {
   list: () => Promise<ChatHead[]>;
   onUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
 
-  // Project heads — GitHub repos the user has claimed. Rendered below the
-  // teammate rail in the overlay; ignored by other windows.
-  listProjects: () => Promise<ChatHead[]>;
-  onProjectsUpdate: (cb: (heads: ChatHead[]) => void) => Unsubscribe;
+  // Rail pin toggle. Pinned = always on top (default). Unpinned = rail acts
+  // like a normal app window, on top only when Slashtalk is focused.
+  // sessionOnlyMode: when on AND unpinned, the rail stays hidden until the
+  // user has an active Claude Code session (or force-opens via the tray),
+  // then auto-hides 15 min after the last session ends.
+  rail: {
+    getPinned: () => Promise<boolean>;
+    setPinned: (pinned: boolean) => Promise<void>;
+    onPinnedChange: (cb: (pinned: boolean) => void) => Unsubscribe;
+    getSessionOnlyMode: () => Promise<boolean>;
+    setSessionOnlyMode: (enabled: boolean) => Promise<void>;
+    onSessionOnlyModeChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+    /** When on, peers idle past the inactivity threshold collapse into a
+     *  hover-expanding stack at the bottom of the rail. Off by default so
+     *  long-tail teams aren't hidden until the user opts in. */
+    getCollapseInactive: () => Promise<boolean>;
+    setCollapseInactive: (enabled: boolean) => Promise<void>;
+    onCollapseInactiveChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+    /** When on, each chathead renders an "Xm/Xh/Xd" activity timestamp badge.
+     *  Default on; tray toggle clears the badges to declutter the rail. */
+    getShowActivityTimestamps: () => Promise<boolean>;
+    setShowActivityTimestamps: (shown: boolean) => Promise<void>;
+    onShowActivityTimestampsChange: (cb: (shown: boolean) => void) => Unsubscribe;
+  };
+
+  // Opt-in toggle for broadcasting the user's Spotify "Now Playing" to peers.
+  // Off by default — flipping on triggers the macOS Automation permission
+  // dialog. Non-macOS clients see isSupported = false.
+  spotifyShare: {
+    isSupported: () => Promise<boolean>;
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => Promise<void>;
+    onEnabledChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+  };
 
   // Info box (overlay → main). Show/hide are driven by hover; the rail keeps
   // the leave timer and asks main to hide after the user leaves the bubble
@@ -340,25 +386,29 @@ export interface ChatHeadsBridge {
   // panel itself hold the window open while the cursor is over it.
   // Both axes of the bubble's screen-space top-left are reported so main can
   // align the popover against whichever axis matches the current dock.
-  showInfo: (
-    headId: string,
-    bubbleScreen?: { x: number; y: number },
-  ) => Promise<void>;
+  showInfo: (headId: string, bubbleScreen?: { x: number; y: number }) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
+  /** Overlay subscribes so the inactive-peer stack can stay expanded while the
+   *  info card is open even if the cursor leaves the rail. */
+  onInfoState: (cb: (state: { visible: boolean; headId: string | null }) => void) => Unsubscribe;
+  /** Renderer reports the rail's desired main-axis length (px) so main can
+   *  size the BrowserWindow to the actual content — including the collapsed
+   *  vs. expanded state of the inactive-peer stack. */
+  setOverlayLength: (length: number) => Promise<void>;
 
   // Chat input (overlay ↔ main, chat renderer → main)
   toggleChat: () => Promise<void>;
   hideChat: () => Promise<void>;
   /** Overlay subscribes so it can hide the chat bubble while the pill is open. */
   onChatState: (cb: (state: { visible: boolean }) => void) => Unsubscribe;
-  /** Chat renderer subscribes so it can mirror layout based on rail side. */
-  onChatConfig: (
-    cb: (cfg: { anchor: ChatAnchor }) => void,
-  ) => Unsubscribe;
   /** Overlay renderer subscribes to learn the current dock so it can swap
    *  flex direction / scroll axis / FLIP tracking. */
   onOverlayConfig: (cb: (cfg: DockConfig) => void) => Unsubscribe;
+
+  // Agent creation affordance (overlay → main window).
+  openAgentCreator: () => Promise<void>;
+  onOpenAgentCreator: (cb: () => void) => Unsubscribe;
 
   // Response window (chat/agent pop-out → main → response)
   openResponse: (message: string) => Promise<void>;
@@ -369,23 +419,45 @@ export interface ChatHeadsBridge {
     messages: import("@slashtalk/shared").ChatMessage[],
   ) => Promise<import("@slashtalk/shared").ChatAskResponse>;
 
+  /** Open the info popover for the session owner represented by a chat card. */
+  openSessionCard: (payload: { sessionId: string; login: string }) => Promise<void>;
+
+  // LLM-picked "thinking state" phrases for the loading indicator, describing
+  // what the assistant is actually doing for this specific prompt. The UI
+  // cycles through them. Server guarantees a non-empty array.
+  fetchChatGerunds: (prompt: string) => Promise<string[]>;
+
   // Drag (overlay → main)
   dragStart: () => Promise<void>;
   dragEnd: () => Promise<void>;
 
   // Info window (main → info renderer). Sessions are prefetched in main so
-  // the renderer can paint in one pass at the correct height.
+  // the renderer can paint in one pass at the correct height. `spotify` is
+  // whatever the main-process peerPresence poller last saw for this head.
   onInfoShow: (
-    cb: (payload: { head: ChatHead; sessions: InfoSession[] | null }) => void,
+    cb: (payload: {
+      head: ChatHead;
+      sessions: InfoSession[] | null;
+      /** Session the caller wants auto-expanded on open (e.g. from a chat card click). */
+      expandSessionId?: string | null;
+      spotify: SpotifyPresence | null;
+    }) => void,
   ) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
+  /** Pushed from main when the currently-shown head's Spotify presence
+   *  changes between polls. Scoped to the visible head already. */
+  onInfoPresence: (
+    cb: (payload: { login: string; spotify: SpotifyPresence | null }) => void,
+  ) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
-  // Fetch sessions for a given chat head (user: own or a peer's; repo: all
-  // sessions on that repo across peers + self).
+  // Fetch sessions for a given chat head (self or a peer).
   listSessionsForHead: (headId: string) => Promise<InfoSession[]>;
   preloadSessions: (headId: string) => Promise<void>;
-  listAgentSessionsForAgent: (agentId: string) => Promise<AgentSessionRow[]>;
+  listAgentSessionsForAgent: (agentId: string) => Promise<ManagedAgentSessionRow[]>;
+
+  /** Latest cached Spotify presence for `login` from the main-process poller. */
+  getSpotifyForLogin: (login: string) => Promise<SpotifyPresence | null>;
 
   // Tray popup actions
   openMain: () => Promise<void>;
@@ -405,9 +477,10 @@ export interface ChatHeadsBridge {
     signIn: () => Promise<void>;
     cancelSignIn: () => Promise<void>;
     signOut: () => Promise<void>;
+    signOutEverywhere: () => Promise<void>;
     onAuthState: (cb: (state: BackendAuthState) => void) => Unsubscribe;
-
-    listRepos: () => Promise<RepoSummary[]>;
+    getGithubAppStatus: () => Promise<GithubAppStatus>;
+    connectGithubApp: () => Promise<void>;
 
     listTrackedRepos: () => Promise<TrackedRepo[]>;
     /** Opens a folder picker, claims + tracks. Resolves `null` if cancelled;
@@ -415,6 +488,16 @@ export interface ChatHeadsBridge {
     addLocalRepo: () => Promise<TrackedRepo | null>;
     removeLocalRepo: (repoId: number) => Promise<TrackedRepo[]>;
     onTrackedReposChange: (cb: (repos: TrackedRepo[]) => void) => Unsubscribe;
+  };
+
+  // Tray-popup local-repo picker. Selection is a per-device filter on top of
+  // the tracked-repo list — it only drives which peers appear on the chathead
+  // rail (peers without a session in any selected repo drop off). Adding a
+  // new tracked repo auto-selects it; removing one drops it from the set.
+  trackedRepos: {
+    selection: () => Promise<number[]>;
+    toggle: (repoId: number) => Promise<number[]>;
+    onSelectionChange: (cb: (selected: number[]) => void) => Unsubscribe;
   };
 
   debug: {

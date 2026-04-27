@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { XMarkIcon, ArrowUpRightIcon, ChevronLeftIcon } from "@heroicons/react/20/solid";
+import { Button } from "../shared/Button";
+import { Markdown } from "../shared/Markdown";
 import type {
   AgentMsg,
-  AgentSessionRow,
+  ManagedAgentSessionRow,
   AgentSessionSummary,
   AgentStreamEvent,
   AgentSummary,
@@ -30,11 +33,7 @@ export function AgentPanel({ head }: { head: ChatHead }): JSX.Element {
   }, [agentId]);
 
   if (!agentId) {
-    return (
-      <div className="px-lg py-md text-[12px] text-subtle">
-        Agent not found.
-      </div>
-    );
+    return <div className="px-4 py-3 text-sm text-subtle">Agent not found.</div>;
   }
 
   const openSession = async (id: string): Promise<void> => {
@@ -106,51 +105,52 @@ function AgentHeader({
   onClose?: () => void;
 }): JSX.Element {
   return (
-    <div className="px-lg pt-lg pb-md flex items-start gap-md">
+    <div className="px-4 pt-4 pb-3 flex items-start gap-3">
       {onBack && (
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
+          round
           onClick={onBack}
+          aria-label="Back to conversations"
           title="Back to conversations"
-          className="w-8 h-8 rounded-full flex items-center justify-center bg-surface hover:bg-surface-hover text-fg cursor-pointer shrink-0 mt-0.5"
-        >
-          ‹
-        </button>
+          icon={<ChevronLeftIcon className="w-4 h-4" />}
+          className="mt-0.5"
+        />
       )}
-      <div className="w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[22px] font-semibold shrink-0">
+      <div className="w-12 h-12 rounded-full bg-primary-soft text-primary flex items-center justify-center text-xl font-semibold shrink-0">
         {(head.label[0] ?? "A").toUpperCase()}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <div className="text-[17px] font-bold truncate flex-1 min-w-0">
-            {head.label}
-          </div>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-card border border-border text-muted">
+          <div className="text-lg font-bold truncate flex-1 min-w-0">{head.label}</div>
+          <span className="text-xs uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-surface border border-border text-muted">
             {(agent?.mode ?? "cloud") === "local" ? "Local" : "Cloud"}
           </span>
           {onPopOut && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              round
               onClick={onPopOut}
-              className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
               aria-label="Open expanded agent chat"
               title="Open expanded chat"
-            >
-              ↗
-            </button>
+              icon={<ArrowUpRightIcon className="w-4 h-4" />}
+            />
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
+            round
             onClick={onClose}
-            className="w-6 h-6 rounded-full bg-surface flex items-center justify-center text-muted text-[11px] leading-none shrink-0 hover:opacity-60 transition-opacity cursor-pointer"
             aria-label="Close"
-          >
-            x
-          </button>
+            icon={<XMarkIcon className="w-4 h-4" />}
+          />
         </div>
         {agent?.description && (
-          <div className="text-[12px] text-muted mt-0.5 truncate">
-            {agent.description}
-          </div>
+          <div className="text-sm text-muted mt-0.5 truncate">{agent.description}</div>
         )}
-        <div className="text-[11px] text-subtle mt-0.5 flex items-center gap-1 min-w-0">
+        <div className="text-xs text-subtle mt-0.5 flex items-center gap-1 min-w-0">
           <span className="font-mono truncate">
             {(agent?.mode ?? "cloud") === "local"
               ? prettyCwd(agent?.cwd)
@@ -182,7 +182,7 @@ function AgentSessions({
   onStartSession: (text: string) => void;
 }): JSX.Element {
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
-  const [pastSessions, setPastSessions] = useState<AgentSessionRow[]>([]);
+  const [pastSessions, setPastSessions] = useState<ManagedAgentSessionRow[]>([]);
   const [input, setInput] = useState("");
 
   useEffect(() => {
@@ -196,7 +196,7 @@ function AgentSessions({
     const refetch = (): void => {
       void window.chatheads
         .listAgentSessionsForAgent(agentId)
-        .then((rows) => setPastSessions(rows.filter((row) => row.ended_at)));
+        .then((rows) => setPastSessions(rows.filter((row) => row.endedAt)));
     };
     refetch();
     const timer = setInterval(refetch, 15_000);
@@ -223,40 +223,40 @@ function AgentSessions({
     <div className="flex flex-col min-h-[190px] max-h-[560px]">
       <AgentHeader head={head} agent={agent} />
       <Divider />
-      <div className="flex-1 overflow-y-auto px-lg py-md">
+      <div className="flex-1 overflow-y-auto">
         {sorted.length === 0 && pastSessions.length === 0 ? (
-          <div className="text-subtle text-[12px]">
+          <div className="px-4 py-3 text-subtle text-sm">
             No conversations yet. Send a message below to start one.
           </div>
         ) : (
-          <div className="space-y-2">
-            {sorted.map((session) => (
-              <SessionButton
-                key={session.id}
-                session={session}
-                onOpen={() => onOpenSession(session.id)}
-                onRemove={() =>
-                  void window.chatheads.agents.removeSession(agentId, session.id)
-                }
-              />
+          <>
+            {sorted.map((session, i) => (
+              <Fragment key={session.id}>
+                {i > 0 && <div className="mx-4 h-px bg-divider" />}
+                <SessionButton
+                  session={session}
+                  onOpen={() => onOpenSession(session.id)}
+                  onRemove={() => void window.chatheads.agents.removeSession(agentId, session.id)}
+                />
+              </Fragment>
             ))}
             {pastSessions.length > 0 && (
-              <div className="pt-1">
-                <div className="text-[10px] uppercase tracking-wider text-subtle mb-1">
+              <div className="px-4 py-3">
+                <div className="text-xs uppercase tracking-wider text-subtle mb-1">
                   Past team summaries
                 </div>
                 <div className="space-y-1">
                   {pastSessions.map((row) => (
-                    <PastSummary key={row.session_id} row={row} />
+                    <PastSummary key={row.sessionId} row={row} />
                   ))}
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
       <Divider />
-      <div className="px-lg py-md flex items-center gap-2">
+      <div className="px-4 py-3 flex items-center gap-2">
         <input
           value={input}
           onChange={(event) => setInput(event.target.value)}
@@ -267,15 +267,11 @@ function AgentSessions({
             }
           }}
           placeholder={`Talk to ${head.label}...`}
-          className="flex-1 bg-bg border border-border rounded-full px-3 py-1.5 text-[13px] outline-none focus:border-accent"
+          className="flex-1 bg-bg border border-border rounded-full px-3 py-1.5 text-base outline-none focus:border-primary"
         />
-        <button
-          onClick={submit}
-          disabled={!input.trim()}
-          className="bg-fg text-bg rounded-full px-3 py-1.5 text-xs font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+        <Button variant="primary" size="sm" onClick={submit} disabled={!input.trim()}>
           Send
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -294,57 +290,59 @@ function SessionButton({
   return (
     <div className="group relative">
       <button
+        type="button"
         onClick={onOpen}
-        className="w-full text-left bg-surface hover:bg-surface-hover rounded-xl px-3 py-2 pr-10 flex items-start gap-2 cursor-pointer"
+        className="w-full text-left px-4 py-3 pr-12 hover:bg-surface-alt/60 transition-colors cursor-pointer"
       >
-        <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-medium truncate">
+        <div className="min-w-0">
+          <div className="text-base font-medium text-fg truncate">
             {session.title ?? "New conversation"}
           </div>
-          <div className="text-[11px] text-subtle mt-0.5 flex items-center gap-1.5">
-            <span>{fmtAgo(Date.now() - session.createdAt)} ago</span>
+          <div className="mt-1 flex items-center gap-1.5 text-xs text-subtle min-w-0">
+            <span className="shrink-0">{fmtAgo(Date.now() - session.createdAt)} ago</span>
             {tokens > 0 && (
               <>
-                <span>·</span>
-                <span>{fmtTokens(tokens)} tokens</span>
+                <span className="shrink-0">·</span>
+                <span className="shrink-0">{fmtTokens(tokens)} tokens</span>
               </>
             )}
           </div>
         </div>
-        <span className="text-subtle text-[12px] mt-0.5" aria-hidden>
-          ›
-        </span>
       </button>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-subtle text-base leading-none opacity-100 group-hover:opacity-0 transition-opacity"
+      >
+        ›
+      </span>
       <button
+        type="button"
         onClick={(event) => {
           event.stopPropagation();
           onRemove();
         }}
         title="Remove conversation"
-        className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center text-subtle hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+        aria-label="Remove conversation"
+        className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center text-subtle hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
       >
-        x
+        <XMarkIcon className="w-4 h-4" />
       </button>
     </div>
   );
 }
 
-function PastSummary({ row }: { row: AgentSessionRow }): JSX.Element {
+function PastSummary({ row }: { row: ManagedAgentSessionRow }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <button
       type="button"
       onClick={() => setOpen((value) => !value)}
-      className="w-full text-left bg-surface rounded-xl px-3 py-2 hover:bg-surface-hover"
+      className="w-full text-left bg-surface-alt rounded-xl px-3 py-2 hover:bg-surface-alt-hover"
     >
-      <div className="text-[12px] font-medium truncate">
-        {row.name ?? "Archived session"}
-      </div>
-      <div className="text-[11px] text-subtle">
-        {new Date(row.last_activity).toLocaleString()}
-      </div>
+      <div className="text-sm font-medium truncate">{row.name ?? "Archived session"}</div>
+      <div className="text-xs text-subtle">{new Date(row.lastActivity).toLocaleString()}</div>
       {open && (
-        <div className="mt-2 text-[12px] text-muted whitespace-pre-wrap leading-snug">
+        <div className="mt-2 text-sm text-muted whitespace-pre-wrap leading-snug">
           {row.summary ?? "No summary captured."}
         </div>
       )}
@@ -447,11 +445,7 @@ export function AgentChat({
 
   const loadOlder = async (): Promise<void> => {
     if (!nextCursor) return;
-    const page = await window.chatheads.agents.history(
-      agentId,
-      sessionId,
-      nextCursor,
-    );
+    const page = await window.chatheads.agents.history(agentId, sessionId, nextCursor);
     setMsgs((prev) => [...page.msgs, ...prev]);
     setNextCursor(page.nextCursor);
   };
@@ -497,7 +491,11 @@ export function AgentChat({
   };
 
   return (
-    <div className={fullHeight ? "flex flex-col h-screen" : "flex flex-col min-h-[240px] max-h-[620px]"}>
+    <div
+      className={
+        fullHeight ? "flex flex-col h-screen" : "flex flex-col min-h-[240px] max-h-[620px]"
+      }
+    >
       <AgentHeader
         head={head}
         agent={agent}
@@ -515,18 +513,18 @@ export function AgentChat({
         onScroll={(event) => {
           if (event.currentTarget.scrollTop < 80) void loadOlder();
         }}
-        className="flex-1 overflow-y-auto px-lg py-md space-y-3 text-[13px]"
+        className="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-base"
       >
         {loading ? (
-          <div className="text-subtle text-[12px]">Loading conversation...</div>
+          <div className="text-subtle text-sm">Loading conversation...</div>
         ) : msgs.length === 0 ? (
-          <div className="text-subtle text-[12px]">No messages yet.</div>
+          <div className="text-subtle text-sm">No messages yet.</div>
         ) : (
           msgs.map((msg, index) => <MsgRow key={index} msg={msg} />)
         )}
       </div>
       <Divider />
-      <div className="px-lg py-md flex items-center gap-2">
+      <div className="px-4 py-3 flex items-center gap-2">
         <input
           value={input}
           disabled={!sessionId}
@@ -538,15 +536,16 @@ export function AgentChat({
             }
           }}
           placeholder={sessionId ? `Message ${head.label}...` : "Starting..."}
-          className="flex-1 bg-bg border border-border rounded-full px-3 py-1.5 text-[13px] outline-none focus:border-accent disabled:opacity-60"
+          className="flex-1 bg-bg border border-border rounded-full px-3 py-1.5 text-base outline-none focus:border-primary disabled:opacity-60"
         />
-        <button
+        <Button
+          variant="primary"
+          size="sm"
           onClick={submit}
           disabled={!input.trim() || busy || !sessionId}
-          className="bg-fg text-bg rounded-full px-3 py-1.5 text-xs font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {busy ? "..." : "Send"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -555,7 +554,7 @@ export function AgentChat({
 function MsgRow({ msg }: { msg: AgentMsg }): JSX.Element {
   if (msg.role === "user") {
     return (
-      <div className="ml-auto max-w-[85%] bg-fg text-bg rounded-2xl rounded-br-sm px-3 py-2 whitespace-pre-wrap">
+      <div className="ml-auto max-w-[85%] bg-primary text-primary-fg rounded-2xl rounded-br-sm px-3 py-2 whitespace-pre-wrap">
         {msg.text}
       </div>
     );
@@ -566,9 +565,7 @@ function MsgRow({ msg }: { msg: AgentMsg }): JSX.Element {
         {msg.blocks.map((block, index) => (
           <AssistantBlockView key={index} block={block} />
         ))}
-        {msg.phase && (
-          <div className="text-[11px] text-subtle italic">{msg.phase}</div>
-        )}
+        {msg.phase && <div className="text-xs text-subtle italic">{msg.phase}</div>}
       </div>
     </div>
   );
@@ -577,24 +574,22 @@ function MsgRow({ msg }: { msg: AgentMsg }): JSX.Element {
 function AssistantBlockView({ block }: { block: AssistantBlock }): JSX.Element {
   if (block.kind === "text") {
     return (
-      <div className="bg-surface rounded-2xl rounded-bl-sm px-3 py-2 whitespace-pre-wrap leading-snug">
-        {block.text}
+      <div className="bg-surface-alt rounded-2xl rounded-bl-sm px-3 py-2">
+        <Markdown>{block.text}</Markdown>
       </div>
     );
   }
   if (block.kind === "thinking") {
-    return <div className="text-[12px] text-subtle italic">Thinking...</div>;
+    return <div className="text-sm text-subtle italic">Thinking...</div>;
   }
   return (
-    <div className="bg-surface border border-border rounded-xl px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wider text-subtle">
+    <div className="bg-surface-alt border border-border rounded-xl px-3 py-2">
+      <div className="text-xs uppercase tracking-wider text-subtle">
         Tool · {block.server ? `${block.server}/` : ""}
         {block.name} · {block.status}
       </div>
       {block.resultSummary && (
-        <div className="mt-1 text-[12px] text-muted whitespace-pre-wrap">
-          {block.resultSummary}
-        </div>
+        <div className="mt-1 text-sm text-muted whitespace-pre-wrap">{block.resultSummary}</div>
       )}
     </div>
   );
@@ -660,7 +655,7 @@ function applyEvent(prev: AgentMsg[], event: AgentStreamEvent): AgentMsg[] {
 }
 
 function Divider(): JSX.Element {
-  return <div className="mx-lg h-px bg-divider" />;
+  return <div className="mx-4 h-px bg-divider" />;
 }
 
 function fmtTokens(n: number): string {

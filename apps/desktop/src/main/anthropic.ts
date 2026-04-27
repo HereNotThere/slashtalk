@@ -17,19 +17,13 @@ import * as chatheadsAuth from "./chatheadsAuth";
 import * as githubAuth from "./githubDeviceAuth";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 import { createEmitter } from "./emitter";
-import type {
-  AgentHistoryPage,
-  AgentMsg,
-  AssistantBlock,
-  McpServerInput,
-} from "../shared/types";
+import { anthropicApiKeyFromEnv, mcpUrl } from "./config";
+import type { AgentHistoryPage, AgentMsg, AssistantBlock, McpServerInput } from "../shared/types";
 
 const ENV_KEY = "anthropic.environmentId";
 const VAULT_KEY = "anthropic.vaultId";
 const API_KEY_STORE_KEY = "anthropic.apiKeyEnc";
 
-const SLASHTALK_MCP_URL =
-  process.env["SLASHTALK_MCP_URL"] ?? "http://localhost:3000/mcp";
 const SLASHTALK_MCP_NAME = "slashtalk-mcp";
 
 const GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/";
@@ -49,7 +43,7 @@ export function restore(): void {
 }
 
 function apiKey(): string | null {
-  return storedApiKey ?? process.env["ANTHROPIC_API_KEY"] ?? null;
+  return storedApiKey ?? anthropicApiKeyFromEnv();
 }
 
 export function isConfigured(): boolean {
@@ -92,9 +86,7 @@ function client(): Anthropic {
   if (cachedClient) return cachedClient;
   const key = apiKey();
   if (!key) {
-    throw new Error(
-      "Anthropic API key is not set; configure one in the Agents panel.",
-    );
+    throw new Error("Anthropic API key is not set; configure one in the Agents panel.");
   }
   cachedClient = new Anthropic({ apiKey: key });
   return cachedClient;
@@ -153,10 +145,7 @@ async function ensureVault(): Promise<string | null> {
 }
 
 async function ensureAllCredentials(vaultId: string): Promise<void> {
-  await Promise.allSettled([
-    ensureSlashtalkCredential(vaultId),
-    ensureGithubCredential(vaultId),
-  ]);
+  await Promise.allSettled([ensureSlashtalkCredential(vaultId), ensureGithubCredential(vaultId)]);
 }
 
 async function ensureSlashtalkCredential(vaultId: string): Promise<void> {
@@ -175,7 +164,7 @@ async function ensureSlashtalkCredential(vaultId: string): Promise<void> {
     display_name: "Slashtalk MCP",
     auth: {
       type: "static_bearer",
-      mcp_server_url: SLASHTALK_MCP_URL,
+      mcp_server_url: mcpUrl(),
       token,
     },
   });
@@ -236,6 +225,67 @@ export interface CreatedAgent {
 }
 
 export async function createAgent(input: CreateAgentInput): Promise<CreatedAgent> {
+  const config = await buildAgentConfig(input);
+
+  const agent = await client().beta.agents.create({
+    name: input.name,
+    description: input.description,
+    model: config.model,
+    system: input.systemPrompt,
+    // Pre-built toolset: bash, read, write, edit, glob, grep, web_fetch, web_search.
+    tools: config.tools,
+    // Anthropic-managed skills: xlsx lets the agent read/write spreadsheets
+    // and handles PDFs/PowerPoint. Loaded lazily when the agent deems it
+    // relevant; doesn't cost tokens when unused.
+    skills: config.skills,
+    ...(config.mcpServers.length > 0 ? { mcp_servers: config.mcpServers } : {}),
+  });
+
+  return {
+    id: agent.id,
+    name: agent.name,
+    description: agent.description ?? undefined,
+    systemPrompt: input.systemPrompt,
+    model: config.model,
+  };
+}
+
+export async function updateAgent(agentId: string, input: CreateAgentInput): Promise<CreatedAgent> {
+  const current = await client().beta.agents.retrieve(agentId);
+  const config = await buildAgentConfig(input);
+  const agent = await client().beta.agents.update(agentId, {
+    version: current.version,
+    name: input.name,
+    description: input.description ?? null,
+    model: config.model,
+    system: input.systemPrompt,
+    tools: config.tools,
+    skills: config.skills,
+    mcp_servers: config.mcpServers,
+  });
+
+  return {
+    id: agent.id,
+    name: agent.name,
+    description: agent.description ?? undefined,
+    systemPrompt: agent.system ?? input.systemPrompt,
+    model: typeof agent.model === "string" ? agent.model : agent.model.id,
+  };
+}
+
+async function buildAgentConfig(input: CreateAgentInput): Promise<{
+  model: string;
+  mcpServers: Array<{ type: "url"; name: string; url: string }>;
+  tools: Array<
+    | { type: "agent_toolset_20260401" }
+    | {
+        type: "mcp_toolset";
+        mcp_server_name: string;
+        default_config: { permission_policy: { type: "always_allow" } };
+      }
+  >;
+  skills: Array<{ type: "anthropic"; skill_id: "xlsx" }>;
+}> {
   const vaultId = await ensureVault();
   const model = input.model ?? "claude-haiku-4-5";
 
@@ -247,7 +297,7 @@ export async function createAgent(input: CreateAgentInput): Promise<CreatedAgent
       ? [
           {
             name: SLASHTALK_MCP_NAME,
-            url: SLASHTALK_MCP_URL,
+            url: mcpUrl(),
           },
         ]
       : []),
@@ -260,37 +310,19 @@ export async function createAgent(input: CreateAgentInput): Promise<CreatedAgent
     url: s.url,
   }));
 
-  const mcpToolsets = servers.map(
-    (s) =>
-      ({
-        type: "mcp_toolset",
-        mcp_server_name: s.name,
-        default_config: {
-          permission_policy: { type: "always_allow" },
-        },
-      }) as const,
-  );
-
-  const agent = await client().beta.agents.create({
-    name: input.name,
-    description: input.description,
-    model,
-    system: input.systemPrompt,
-    // Pre-built toolset: bash, read, write, edit, glob, grep, web_fetch, web_search.
-    tools: [{ type: "agent_toolset_20260401" }, ...mcpToolsets],
-    // Anthropic-managed skills: xlsx lets the agent read/write spreadsheets
-    // and handles PDFs/PowerPoint. Loaded lazily when the agent deems it
-    // relevant; doesn't cost tokens when unused.
-    skills: [{ type: "anthropic", skill_id: "xlsx" }],
-    ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-  });
+  const mcpToolsets = servers.map((s) => ({
+    type: "mcp_toolset" as const,
+    mcp_server_name: s.name,
+    default_config: {
+      permission_policy: { type: "always_allow" as const },
+    },
+  }));
 
   return {
-    id: agent.id,
-    name: agent.name,
-    description: agent.description ?? undefined,
-    systemPrompt: input.systemPrompt,
     model,
+    mcpServers,
+    tools: [{ type: "agent_toolset_20260401" }, ...mcpToolsets],
+    skills: [{ type: "anthropic", skill_id: "xlsx" }],
   };
 }
 
@@ -318,18 +350,16 @@ export interface RemoteSession {
 
 /** Paginated listing of every session this API key has for an agent. Returns
  *  both active and archived — caller filters as needed. */
-export async function listAgentSessions(
-  agentId: string,
-): Promise<RemoteSession[]> {
+export async function listAgentSessions(agentId: string): Promise<RemoteSession[]> {
   const out: RemoteSession[] = [];
-  for await (const s of (client().beta.sessions.list({
+  for await (const s of client().beta.sessions.list({
     agent_id: agentId,
   }) as unknown as AsyncIterable<{
     id: string;
     created_at: string;
     title: string | null;
     archived_at: string | null;
-  }>)) {
+  }>) {
     out.push({
       id: s.id,
       createdAt: new Date(s.created_at).getTime(),
@@ -340,10 +370,7 @@ export async function listAgentSessions(
   return out;
 }
 
-export async function updateSessionTitle(
-  sessionId: string,
-  title: string,
-): Promise<void> {
+export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   await client().beta.sessions.update(sessionId, { title });
 }
 
@@ -441,7 +468,10 @@ export async function sumSessionUsage(
       params as never,
     )) as unknown as { data: unknown[]; next_page: string | null };
     for (const event of resp.data) {
-      const e = event as { type?: string; model_usage?: { input_tokens?: number; output_tokens?: number } };
+      const e = event as {
+        type?: string;
+        model_usage?: { input_tokens?: number; output_tokens?: number };
+      };
       if (e.type === "span.model_request_end" && e.model_usage) {
         input += e.model_usage.input_tokens ?? 0;
         output += e.model_usage.output_tokens ?? 0;
@@ -520,13 +550,8 @@ function reconstructMessages(events: unknown[]): AgentMsg[] {
       if (!block) continue;
       const isError = Boolean((e as { is_error?: boolean }).is_error);
       block.status = isError ? "error" : "ok";
-      block.resultSummary = summarizeResult(
-        (e as { content?: unknown[] }).content,
-      );
-    } else if (
-      e.type === "session.status_idle" ||
-      e.type === "session.status_terminated"
-    ) {
+      block.resultSummary = summarizeResult((e as { content?: unknown[] }).content);
+    } else if (e.type === "session.status_idle" || e.type === "session.status_terminated") {
       const tail = lastAssistant();
       if (tail) tail.done = true;
     }
@@ -610,9 +635,7 @@ export async function sendMessage(
             ? ((e as { mcp_tool_use_id?: string }).mcp_tool_use_id ?? "")
             : ((e as { tool_use_id?: string }).tool_use_id ?? "");
         const isError = Boolean((e as { is_error?: boolean }).is_error);
-        const summary = summarizeResult(
-          (e as { content?: unknown[] }).content,
-        );
+        const summary = summarizeResult((e as { content?: unknown[] }).content);
         onEvent({ kind: "tool_result", toolUseId, isError, summary });
       } else if (e.type === "span.model_request_start") {
         onEvent({ kind: "phase", label: "Thinking…" });

@@ -1,8 +1,6 @@
 import {
   app,
   BrowserWindow,
-  Tray,
-  nativeImage,
   nativeTheme,
   ipcMain,
   screen,
@@ -11,20 +9,18 @@ import {
   dialog,
   globalShortcut,
 } from "electron";
-import path from "node:path";
 import type {
   AgentHistoryPage,
   AgentSessionSummary,
   AgentStreamEvent,
   AgentSummary,
-  ChatAnchor,
   ChatHead,
   CreateAgentInput,
   DockConfig,
   DockOrientation,
   InfoSession,
   McpTarget,
-  ResponseOpenPayload,
+  UpdateAgentInput,
 } from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
@@ -36,6 +32,8 @@ import * as ws from "./ws";
 import * as installMcp from "./installMcp";
 import * as chatheadsAuth from "./chatheadsAuth";
 import * as selfSession from "./selfSession";
+import { createLocalMcpProxy } from "./localMcpProxy";
+import { getLocalMcpProxySecret } from "./localMcpProxySecret";
 import * as anthropic from "./anthropic";
 import * as localAgent from "./localAgent";
 import * as agentStore from "./agentStore";
@@ -43,37 +41,73 @@ import * as agentIngest from "./agentIngest";
 import * as summarize from "./summarize";
 import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
-import { setMacCornerRadius } from "./macCorners";
+import * as spotify from "./spotify";
+import * as peerPresence from "./peerPresence";
+import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
+import {
+  BUBBLE_PAD,
+  BUBBLE_SIZE,
+  OVERLAY_WIDTH,
+  PADDING_Y,
+  computeDockBoundsOn,
+  dockFromPoint,
+  overlayLength,
+  overlaySize,
+  screenIdOf,
+} from "./windows/dock-geometry";
+import {
+  broadcastRailCollapseInactive,
+  broadcastRailPinned,
+  broadcastRailSessionOnlyMode,
+  broadcastShowActivityTimestamps,
+  configureRailState,
+  getRailCollapseInactive,
+  getRailPinned,
+  getRailSessionOnlyMode,
+  getShowActivityTimestamps,
+  getSpotifyShareEnabled,
+  setRailCollapseInactive,
+  setRailPinned,
+  setRailSessionOnlyMode,
+  setShowActivityTimestamps,
+  setSpotifyShareEnabled,
+} from "./windows/rail-state";
+import {
+  configureChat,
+  hideChat,
+  isChatVisible,
+  repositionChatIfVisible,
+  toggleChat,
+} from "./windows/chat";
+import {
+  configureHoverPolling,
+  startHoverPolling,
+  stopHoverPolling,
+} from "./windows/hover-polling";
+import { animateOverlayTo, cancelOverlayAnimation } from "./windows/overlay-animation";
+import { appState, loadRenderer, preloadPath } from "./windows/lib";
+import {
+  bumpActivity,
+  configureRailVisibility,
+  resolveRailVisibility,
+} from "./windows/rail-visibility";
+import { getMainWindow, showMainWindow } from "./windows/main";
+import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
+import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
 
-// Must stay in sync with the overlay renderer's Tailwind classes:
-// BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/ChatBubble (45px),
-// SPACING ↔ `gap-[14px]` on the stack (14px),
-// PADDING_X ↔ `px-md` on the stack (12px),
-// PADDING_Y ↔ `py-lg` on the stack (16px). Drift here = popovers misalign.
-const BUBBLE_SIZE = 45;
-const SPACING = 14;
-const PADDING_X = 12;
-const PADDING_Y = 16;
-const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
+installMcp.configureInstaller({
+  localProxySecret: getLocalMcpProxySecret,
+});
 
-// Extra vertical space the separator between peers and projects occupies.
-// Counts as one extra SPACING row (14px) — matches the other gaps visually.
-const SEPARATOR_EXTRA = SPACING;
+const mcpProxy = createLocalMcpProxy({
+  getToken: backend.getApiKey,
+  getProxySecret: getLocalMcpProxySecret,
+  remoteMcpUrl: installMcp.remoteMcpUrl,
+});
 
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
 const INFO_GAP = 8; // distance from the pill's outer edge to the info window
-
-const CHAT_WIDTH = 560;
-const CHAT_HEIGHT = 80; // transparent window; pill + breathing room for CSS shadow
-// Distance from the chat window's left edge to the center of the leading icon
-// circle inside the pill — container p-sm (8) + inner pl-2 (8) + half icon (20).
-// Used to align the pill's icon over the chat bubble's position. Keep in sync
-// with the pill layout in renderer/chat/App.tsx.
-const CHAT_ICON_OFFSET = 36;
-
-const TRAY_POPUP_WIDTH = 320;
-const TRAY_POPUP_INITIAL_HEIGHT = 80;
 
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
@@ -110,16 +144,44 @@ let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
 
-let mainWindow: BrowserWindow | null = null;
+function updateSpotifyRunning(): void {
+  const shouldRun =
+    backend.getAuthState().signedIn && getSpotifyShareEnabled() && process.platform === "darwin";
+  if (shouldRun) void spotify.start();
+  else spotify.stop();
+}
+
+function applyRailPinned(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const pinned = getRailPinned();
+  console.log(`[pin] applyRailPinned: target=${pinned} focused=${appIsFocused()}`);
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Rail floats when pinned always, or when unpinned-and-focused. Otherwise
+  // drops to normal so it sits behind frontmost app windows.
+  const shouldFloat = pinned || appIsFocused();
+  overlayWindow.setAlwaysOnTop(shouldFloat, "floating");
+  if (shouldFloat) overlayWindow.moveTop();
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
+  // Cursor polling runs in unpinned mode so the rail pops to floating when
+  // the cursor approaches it while Slashtalk is blurred — otherwise hover
+  // never fires cross-app.
+  if (pinned) stopHoverPolling();
+  else startHoverPolling();
+  const native = debugMacWindowState(overlayWindow);
+  console.log(`[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`);
+}
+
+function appIsFocused(): boolean {
+  return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused());
+}
+
 let overlayWindow: BrowserWindow | null = null;
 let infoWindow: BrowserWindow | null = null;
-let chatWindow: BrowserWindow | null = null;
-let responseWindow: BrowserWindow | null = null;
-let tray: Tray | null = null;
-let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
-let projects: ChatHead[] = [];
 let selectedHeadId: string | null = null;
 const sessionCache = new Map<string, InfoSession[]>();
 
@@ -128,11 +190,13 @@ function toAgentSummary(a: LocalAgent): AgentSummary {
     id: a.id,
     name: a.name,
     description: a.description,
+    systemPrompt: a.systemPrompt,
     model: a.model,
     createdAt: a.createdAt,
     mode: a.mode ?? "cloud",
     cwd: a.cwd,
     visibility: a.visibility ?? "private",
+    mcpServers: a.mcpServers,
   };
 }
 
@@ -142,12 +206,8 @@ function isLocalAgent(a: { mode?: "cloud" | "local" }): boolean {
 
 const streamingAgents = new Set<string>();
 
-function allHeads(): ChatHead[] {
-  return [...heads, ...projects];
-}
-
 function findHead(id: string): ChatHead | undefined {
-  return allHeads().find((h) => h.id === id);
+  return heads.find((h) => h.id === id);
 }
 
 let dragOffset: { dx: number; dy: number } | null = null;
@@ -159,80 +219,17 @@ let isDraggingStack = false;
 
 // Dock-to-edge feature. During drag we show a dashed ghost at the nearest dock
 // slot (center-left / center-right); on release the overlay tweens to it.
-const DOCK_EDGE_MARGIN = 24;
 const DOCK_ANIM_MS = 180;
 let dockPlaceholderWindow: BrowserWindow | null = null;
-// Monotonic counter — each new tween takes the next token; in-flight steps
-// bail when they see a newer token, so a re-drag mid-slide cancels cleanly.
-let overlayAnimToken = 0;
-
-// electron-vite sets ELECTRON_RENDERER_URL in dev mode (pointing at the Vite
-// dev server) so we can reuse the same BrowserWindow code for dev + packaged.
-function loadRenderer(
-  win: BrowserWindow,
-  entry: "main" | "overlay" | "info" | "chat" | "response" | "statusbar",
-): void {
-  const devServer = process.env["ELECTRON_RENDERER_URL"];
-  if (!app.isPackaged && devServer) {
-    void win.loadURL(`${devServer}/${entry}/index.html`);
-  } else {
-    void win.loadFile(path.join(__dirname, `../renderer/${entry}/index.html`));
-  }
-}
-
-// Preload is built as CJS (.cjs) by electron.vite.config.ts — see note there.
-const preloadPath = path.join(__dirname, "../preload/index.cjs");
-
-// -------- Main (config) window --------
-
-function createMainWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 620,
-    height: 640,
-    title: "Slashtalk",
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-  loadRenderer(mainWindow, "main");
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
-}
 
 // -------- Overlay (bubbles) --------
 
-// Overlay always renders heads plus the chat bubble at the end of the rail, so
-// add 1. This is the main-axis length (height for vertical rail, width for
-// horizontal). Cross-axis is always OVERLAY_WIDTH. When there are any project
-// heads we reserve one extra SPACING row for the divider between peers and
-// projects.
-function overlayLength(count: number, projectCount = 0): number {
-  const n = count + projectCount + 1;
-  const sep = projectCount > 0 ? SEPARATOR_EXTRA : 0;
-  return n * BUBBLE_SIZE + Math.max(n - 1, 0) * SPACING + sep + PADDING_Y * 2;
-}
-
-function overlaySize(
-  count: number,
-  projectCount: number,
-  orientation: DockOrientation,
-): { width: number; height: number } {
-  const length = overlayLength(count, projectCount);
-  return orientation === "vertical"
-    ? { width: OVERLAY_WIDTH, height: length }
-    : { width: length, height: OVERLAY_WIDTH };
-}
-
+// Persisted overlay origin — the screen and the relative position within it.
+// Restored on launch so the rail comes back where the user left it.
 interface SavedPosition {
   screenId: string;
   xPercent: number;
   topPercent: number;
-}
-
-function screenIdOf(display: Electron.Display): string {
-  return String(display.id ?? `${display.bounds.x},${display.bounds.y}`);
 }
 
 function restoredOrigin(): { x: number; y: number } | null {
@@ -283,7 +280,11 @@ function ensureOverlay(): BrowserWindow {
   const initialDock: DockConfig = restored
     ? dockFromPoint(restored, display)
     : { orientation: "vertical", side: "end" };
-  const bounds = computeDockBoundsOn(display, initialDock);
+  const bounds = computeDockBoundsOn(
+    display,
+    initialDock,
+    effectiveOverlayLength(initialDock.orientation, display),
+  );
 
   overlayWindow = new BrowserWindow({
     width: bounds.width,
@@ -303,11 +304,14 @@ function ensureOverlay(): BrowserWindow {
     // macOS recomputes against the pill mask instead of the original
     // rectangle.
     hasShadow: true,
-    alwaysOnTop: true,
+    alwaysOnTop: getRailPinned(),
     resizable: false,
     movable: false, // we drive drag manually via IPC + setPosition
     skipTaskbar: true,
     backgroundColor: "#00000000",
+    // Start hidden so session-only mode can keep us that way without a flash
+    // on first poll. resolveRailVisibility() below decides the initial state.
+    show: false,
     // Real macOS frost. CSS backdrop-filter is a no-op on non-vibrancy Electron
     // windows, so the rail uses NSVisualEffectView as its single background.
     // Vibrancy is a sibling NSView of the webContents, so CSS can't clip it —
@@ -322,8 +326,8 @@ function ensureOverlay(): BrowserWindow {
     },
   });
 
-  overlayWindow.setAlwaysOnTop(true, "floating");
-  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  applyRailPinned();
+  resolveRailVisibility();
 
   // Pill ends — half the window width gives perfect semicircle caps at top
   // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
@@ -349,22 +353,31 @@ function ensureOverlay(): BrowserWindow {
 
 const OVERLAY_SCREEN_MARGIN = 40;
 
+let desiredOverlayLength: number | null = null;
+
+// Renderer-reported length wins when present — it knows about the inactive
+// stack's collapsed/expanded state, which main can't infer from heads alone.
+// Clamped to the work-area axis so the rail can't outgrow the screen.
+//
+// Pre-renderer fallback is the 3-wrapper minimum (search + self + create) so
+// the window opens at its smallest plausible size and grows once the renderer
+// reports the real length. Sizing to `heads.length` instead would briefly
+// render the rail at full-expanded width before the renderer collapsed it,
+// which read as a wide-to-narrow yoyo on first open.
+function effectiveOverlayLength(orientation: DockOrientation, display: Electron.Display): number {
+  const wa = display.workArea;
+  const axisExtent = orientation === "vertical" ? wa.height : wa.width;
+  const maxLength = Math.max(overlayLength(0), axisExtent - OVERLAY_SCREEN_MARGIN * 2);
+  const baseLength = desiredOverlayLength ?? overlayLength(1);
+  return Math.min(baseLength, maxLength);
+}
+
 function resizeOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const display = screen.getDisplayMatching(overlayWindow.getBounds());
   const dock = currentDock();
   const wa = display.workArea;
-  // Main-axis cap — leaves OVERLAY_SCREEN_MARGIN at each end.
-  const axisExtent =
-    dock.orientation === "vertical" ? wa.height : wa.width;
-  const maxLength = Math.max(
-    overlayLength(0),
-    axisExtent - OVERLAY_SCREEN_MARGIN * 2,
-  );
-  const length = Math.min(
-    overlayLength(heads.length, projects.length),
-    maxLength,
-  );
+  const length = effectiveOverlayLength(dock.orientation, display);
   const size =
     dock.orientation === "vertical"
       ? { width: OVERLAY_WIDTH, height: length }
@@ -372,14 +385,11 @@ function resizeOverlay(): void {
   const bounds = overlayWindow.getBounds();
   // Keep the rail inside the work area after a size change so the chat bubble
   // never clips past the edge.
-  const axisPos =
-    dock.orientation === "vertical" ? bounds.y : bounds.x;
-  const axisMin =
-    (dock.orientation === "vertical" ? wa.y : wa.x) + OVERLAY_SCREEN_MARGIN;
+  const axisPos = dock.orientation === "vertical" ? bounds.y : bounds.x;
+  const axisMin = (dock.orientation === "vertical" ? wa.y : wa.x) + OVERLAY_SCREEN_MARGIN;
   const axisMax =
-    (dock.orientation === "vertical"
-      ? wa.y + wa.height - length
-      : wa.x + wa.width - length) - OVERLAY_SCREEN_MARGIN;
+    (dock.orientation === "vertical" ? wa.y + wa.height - length : wa.x + wa.width - length) -
+    OVERLAY_SCREEN_MARGIN;
   const clamped = Math.max(axisMin, Math.min(axisPos, axisMax));
   const nextBounds =
     dock.orientation === "vertical"
@@ -397,17 +407,10 @@ function resizeOverlay(): void {
 }
 
 function broadcastHeads(): void {
-  const targets = [overlayWindow, mainWindow, trayPopup].filter(
+  const targets = [overlayWindow, getMainWindow(), getTrayPopup()].filter(
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
   for (const w of targets) w.webContents.send("heads:update", heads);
-}
-
-function broadcastProjects(): void {
-  // Only the overlay renders projects. Keep statusbar/main windows on the
-  // user-head list so "Active teammates" doesn't start listing repos.
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("projects:update", projects);
 }
 
 // -------- Info box --------
@@ -447,10 +450,7 @@ function ensureInfoWindow(): BrowserWindow {
   return infoWindow;
 }
 
-function positionInfo(
-  headId: string,
-  bubbleScreen?: { x: number; y: number },
-): void {
+function positionInfo(headId: string, bubbleScreen?: { x: number; y: number }): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
@@ -460,33 +460,23 @@ function positionInfo(
   const dock = currentDock();
 
   // Fallback coord when the renderer didn't report a bubble rect (e.g.
-  // repositions during drag/slide). Derived from the head's position in the
-  // combined (peers + projects) list, plus the separator row if it falls on
-  // or past the divider.
-  const cell = BUBBLE_SIZE + SPACING;
-  const combined = allHeads();
-  const idx = combined.findIndex((h) => h.id === headId);
-  const peersBeforeProjects = heads.length;
-  const crossesSep = idx >= peersBeforeProjects && projects.length > 0;
-  const fallbackAxisOffset =
-    PADDING_Y +
-    Math.max(0, idx) * cell +
-    (crossesSep ? SEPARATOR_EXTRA : 0);
+  // repositions during drag/slide). Derived from the head's position on the
+  // rail. Each wrapper is `cell` long; the bubble inside sits BUBBLE_PAD past
+  // the wrapper top.
+  const cell = BUBBLE_SIZE + BUBBLE_PAD * 2;
+  const idx = heads.findIndex((h) => h.id === headId);
+  const fallbackAxisOffset = PADDING_Y + BUBBLE_PAD + Math.max(0, idx) * cell;
 
   if (dock.orientation === "vertical") {
     const infoX =
       dock.side === "start"
         ? stackBounds.x + stackBounds.width + INFO_GAP
         : stackBounds.x - INFO_GAP - INFO_WIDTH;
-    const avatarTopY =
-      bubbleScreen?.y ?? stackBounds.y + fallbackAxisOffset;
+    const avatarTopY = bubbleScreen?.y ?? stackBounds.y + fallbackAxisOffset;
     const desiredY = Math.round(avatarTopY - 16);
     const bottomLimit = screenFrame.y + screenFrame.height - 32;
     const maxY = bottomLimit - infoCurrentHeight;
-    const infoY = Math.max(
-      screenFrame.y + 8,
-      Math.min(desiredY, maxY),
-    );
+    const infoY = Math.max(screenFrame.y + 8, Math.min(desiredY, maxY));
     infoWindow.setBounds({
       x: Math.round(infoX),
       y: infoY,
@@ -502,8 +492,7 @@ function positionInfo(
     dock.side === "start"
       ? stackBounds.y + stackBounds.height + INFO_GAP
       : stackBounds.y - INFO_GAP - infoCurrentHeight;
-  const avatarLeftX =
-    bubbleScreen?.x ?? stackBounds.x + fallbackAxisOffset;
+  const avatarLeftX = bubbleScreen?.x ?? stackBounds.x + fallbackAxisOffset;
   const desiredX = Math.round(avatarLeftX - 16);
   const rightLimit = screenFrame.x + screenFrame.width - 8;
   const maxX = rightLimit - INFO_WIDTH;
@@ -519,6 +508,7 @@ function positionInfo(
 async function showInfo(
   headId: string,
   bubbleScreen?: { x: number; y: number },
+  expandSessionId?: string,
 ): Promise<void> {
   if (isDraggingStack) return;
   const head = findHead(headId);
@@ -543,6 +533,7 @@ async function showInfo(
     });
     // A newer show/hide may have fired while we awaited load.
     if (selectedHeadId !== head.id) return;
+    if (win.isDestroyed()) return;
   }
 
   // Size the window using the cached height for this head (if we've rendered
@@ -550,16 +541,24 @@ async function showInfo(
   const cachedHeight = infoHeightByHead.get(head.id);
   if (cachedHeight) infoCurrentHeight = cachedHeight;
 
-  // Send cached sessions immediately if we have them; renderer handles the
-  // `null` case by loading on its own effect.
+  // Send cached sessions + current Spotify presence immediately; renderer
+  // handles the `null` cases by loading on its own effect.
   const cached = sessionCache.get(head.id) ?? null;
-  win.webContents.send("info:show", { head, sessions: cached });
+  const login = rail.parseUserHeadId(head.id);
+  const spotifyPresence = login ? peerPresence.get(login) : null;
+  win.webContents.send("info:show", {
+    head,
+    sessions: cached,
+    expandSessionId: expandSessionId ?? null,
+    spotify: spotifyPresence,
+  });
 
   // Animate position/size when switching heads on an already-visible window;
   // land-in-place on first appearance.
   const firstShow = !win.isVisible();
   positionInfo(head.id, bubbleScreen);
   if (firstShow) win.showInactive();
+  broadcastInfoState(true, head.id);
 
   // Cache miss: fetch in the background and push the result to the renderer.
   // The renderer's load-effect is keyed on head.id, so a re-hover of the same
@@ -570,7 +569,13 @@ async function showInfo(
     void fetchSessionsForHead(head.id).then((loaded) => {
       if (selectedHeadId !== head.id) return;
       if (!infoWindow || infoWindow.isDestroyed()) return;
-      infoWindow.webContents.send("info:show", { head, sessions: loaded });
+      const refreshedLogin = rail.parseUserHeadId(head.id);
+      infoWindow.webContents.send("info:show", {
+        head,
+        sessions: loaded,
+        expandSessionId: expandSessionId ?? null,
+        spotify: refreshedLogin ? peerPresence.get(refreshedLogin) : null,
+      });
     });
   }
 }
@@ -597,6 +602,7 @@ function cancelHideInfo(): void {
 
 function hideInfoNow(): void {
   selectedHeadId = null;
+  broadcastInfoState(false, null);
   if (infoWindow && !infoWindow.isDestroyed()) {
     infoWindow.webContents.send("info:hide");
     // Defer the actual NSWindow hide until the renderer's fade-out completes
@@ -604,11 +610,7 @@ function hideInfoNow(): void {
     if (infoHideFadeTimer) clearTimeout(infoHideFadeTimer);
     infoHideFadeTimer = setTimeout(() => {
       infoHideFadeTimer = null;
-      if (
-        infoWindow &&
-        !infoWindow.isDestroyed() &&
-        selectedHeadId === null
-      ) {
+      if (infoWindow && !infoWindow.isDestroyed() && selectedHeadId === null) {
         infoWindow.hide();
       }
     }, INFO_FADE_OUT_MS);
@@ -621,135 +623,18 @@ function repositionInfoIfVisible(): void {
   positionInfo(selectedHeadId);
 }
 
-// -------- Chat input popover --------
-//
-// Transparent window anchored on the chat bubble (the last cell in the rail).
-// The chat renderer paints its own pill + shadow; we just size + position the
-// frame.
+// -------- Overlay-renderer notifications --------
 
-let lastSentChatAnchor: ChatAnchor | null = null;
 let lastSentDock: DockConfig | null = null;
-
-function ensureChatWindow(): BrowserWindow {
-  if (chatWindow && !chatWindow.isDestroyed()) return chatWindow;
-
-  chatWindow = new BrowserWindow({
-    width: CHAT_WIDTH,
-    height: CHAT_HEIGHT,
-    frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    alwaysOnTop: true,
-    resizable: false,
-    movable: false,
-    skipTaskbar: true,
-    show: false,
-    hasShadow: false,
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-
-  chatWindow.setAlwaysOnTop(true, "floating");
-  chatWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-  loadRenderer(chatWindow, "chat");
-
-  // On every (re)load, the renderer's anchor state resets to its default.
-  // Clear the dedup so the current anchor is re-sent even if it matches the
-  // last value main observed.
-  chatWindow.webContents.on("did-finish-load", () => {
-    lastSentChatAnchor = null;
-    sendChatConfig();
-  });
-
-  chatWindow.on("blur", () => hideChat());
-  chatWindow.on("closed", () => {
-    chatWindow = null;
-    lastSentChatAnchor = null;
-  });
-
-  return chatWindow;
-}
-
-// Which end of the pill the leading search-icon circle sits at. Always chosen
-// so the icon overlaps the chat bubble on the rail, whichever edge the rail is
-// docked against. For vertical+start (left rail) the pill extends rightward
-// from the bubble (icon on left). For vertical+end, horizontal+start, and
-// horizontal+end the chat bubble is at the rail's "end" (bottom / right), so
-// the pill extends inward with the icon on its right.
-function chatAnchorFromDock(dock: DockConfig): ChatAnchor {
-  return dock.orientation === "vertical" && dock.side === "start"
-    ? "left"
-    : "right";
-}
-
-function positionChat(): void {
-  if (!chatWindow || chatWindow.isDestroyed()) return;
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-
-  const stackBounds = overlayWindow.getBounds();
-  const dock = currentDock();
-  const anchor = chatAnchorFromDock(dock);
-
-  if (dock.orientation === "vertical") {
-    // Chat bubble pinned to the bottom of the overlay (flex-none in the
-    // renderer). Anchor from window bounds so this works whether content
-    // fits or the peer list is scrolling under a height cap.
-    const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
-    const bubbleCenterY =
-      stackBounds.y + stackBounds.height - PADDING_Y - BUBBLE_SIZE / 2;
-    const chatX =
-      anchor === "left"
-        ? bubbleCenterX - CHAT_ICON_OFFSET
-        : bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
-    const chatY = Math.round(bubbleCenterY - CHAT_HEIGHT / 2);
-    chatWindow.setBounds({
-      x: Math.round(chatX),
-      y: chatY,
-      width: CHAT_WIDTH,
-      height: CHAT_HEIGHT,
-    });
-    return;
-  }
-
-  // Horizontal rail: chat bubble pinned to the right end of the row. Pill
-  // lives on the inner side of the rail (below for top, above for bottom),
-  // extending leftward from the bubble.
-  const bubbleCenterX =
-    stackBounds.x + stackBounds.width - PADDING_Y - BUBBLE_SIZE / 2;
-  const chatX = bubbleCenterX - (CHAT_WIDTH - CHAT_ICON_OFFSET);
-  const chatY =
-    dock.side === "start"
-      ? stackBounds.y + stackBounds.height + INFO_GAP
-      : stackBounds.y - INFO_GAP - CHAT_HEIGHT;
-  chatWindow.setBounds({
-    x: Math.round(chatX),
-    y: Math.round(chatY),
-    width: CHAT_WIDTH,
-    height: CHAT_HEIGHT,
-  });
-}
 
 function broadcastChatVisible(visible: boolean): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   overlayWindow.webContents.send("chat:state", { visible });
 }
 
-function sendChatConfig(): void {
-  if (!chatWindow || chatWindow.isDestroyed()) return;
-  const anchor = chatAnchorFromDock(currentDock());
-  if (anchor === lastSentChatAnchor) return;
-  lastSentChatAnchor = anchor;
-  const send = (): void => {
-    chatWindow?.webContents.send("chat:config", { anchor });
-  };
-  if (chatWindow.webContents.isLoading()) {
-    chatWindow.webContents.once("did-finish-load", send);
-  } else {
-    send();
-  }
+function broadcastInfoState(visible: boolean, headId: string | null): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send("info:state", { visible, headId });
 }
 
 // Tell the overlay renderer which dock it's in so it can pick flex direction,
@@ -767,7 +652,8 @@ function sendOverlayConfig(): void {
   }
   lastSentDock = dock;
   const send = (): void => {
-    overlayWindow?.webContents.send("overlay:config", dock);
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    overlayWindow.webContents.send("overlay:config", dock);
   };
   if (overlayWindow.webContents.isLoading()) {
     overlayWindow.webContents.once("did-finish-load", send);
@@ -776,179 +662,67 @@ function sendOverlayConfig(): void {
   }
 }
 
-function showChat(): void {
-  const win = ensureChatWindow();
-  sendChatConfig();
-  positionChat();
-  win.show();
-  win.focus();
-  broadcastChatVisible(true);
-}
-
-function hideChat(): void {
-  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
-    chatWindow.hide();
-  }
-  broadcastChatVisible(false);
-}
-
-function toggleChat(): void {
-  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
-    hideChat();
-  } else {
-    showChat();
-  }
-}
-
-function repositionChatIfVisible(): void {
-  if (!chatWindow || chatWindow.isDestroyed() || !chatWindow.isVisible()) return;
-  // Anchor may flip if the rail crossed the screen midline during a drag.
-  sendChatConfig();
-  positionChat();
-}
-
-// -------- Response window --------
-
-function ensureResponseWindow(): BrowserWindow {
-  if (responseWindow && !responseWindow.isDestroyed()) return responseWindow;
-
-  responseWindow = new BrowserWindow({
-    width: 460,
-    height: 600,
-    minWidth: 400,
-    minHeight: 300,
-    frame: true,
-    transparent: false,
-    alwaysOnTop: true,
-    show: false,
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-
-  responseWindow.setAlwaysOnTop(true, "floating");
-  responseWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-  loadRenderer(responseWindow, "response");
-
-  responseWindow.on("closed", () => {
-    responseWindow = null;
-    hideChat();
-  });
-
-  return responseWindow;
-}
-
-function showResponse(payload: ResponseOpenPayload): void {
-  const win = ensureResponseWindow();
-  const send = (): void => {
-    win.webContents.send("response:open", payload);
-  };
-  if (win.webContents.isLoading()) {
-    win.webContents.once("did-finish-load", send);
-  } else {
-    send();
-  }
-  win.show();
-  win.focus();
-}
-
-// -------- Tray + popup --------
-
-function ensureTrayPopup(): BrowserWindow {
-  if (trayPopup && !trayPopup.isDestroyed()) return trayPopup;
-
-  trayPopup = new BrowserWindow({
-    width: TRAY_POPUP_WIDTH,
-    height: TRAY_POPUP_INITIAL_HEIGHT,
-    frame: false,
-    resizable: false,
-    movable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    show: false,
-    hasShadow: true,
-    vibrancy: "popover",
-    visualEffectState: "active",
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-
-  trayPopup.setAlwaysOnTop(true, "pop-up-menu");
-  trayPopup.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  loadRenderer(trayPopup, "statusbar");
-
-  trayPopup.on("blur", () => hideTrayPopup());
-  trayPopup.on("closed", () => {
-    trayPopup = null;
-  });
-
-  return trayPopup;
-}
-
-function positionTrayPopup(trayBounds: Electron.Rectangle): void {
-  const win = ensureTrayPopup();
-  const display = screen.getDisplayMatching(trayBounds);
-  const screenFrame = display.workArea;
-
-  const x = Math.round(
-    trayBounds.x + trayBounds.width / 2 - TRAY_POPUP_WIDTH / 2,
-  );
-  const y = Math.round(trayBounds.y + trayBounds.height + 6);
-
-  const clampedX = Math.max(
-    screenFrame.x + 4,
-    Math.min(x, screenFrame.x + screenFrame.width - TRAY_POPUP_WIDTH - 4),
-  );
-  win.setPosition(clampedX, y);
-}
-
-function toggleTrayPopup(bounds: Electron.Rectangle): void {
-  const win = ensureTrayPopup();
-  if (win.isVisible()) {
-    hideTrayPopup();
-  } else {
-    positionTrayPopup(bounds);
-    win.show();
-    win.focus();
-  }
-}
-
-function hideTrayPopup(): void {
-  if (trayPopup && !trayPopup.isDestroyed() && trayPopup.isVisible())
-    trayPopup.hide();
-}
-
-function createTray(): void {
-  // resources/ lives at apps/desktop/resources/, alongside out/. __dirname is
-  // out/main at runtime in both dev and packaged builds.
-  const iconPath = path.join(__dirname, "../../resources/trayTemplate.png");
-  const icon = nativeImage.createFromPath(iconPath);
-  // Template image: macOS auto-tints to match menu bar (dark/light, focused).
-  // Only the alpha channel is used — gray values are ignored.
-  icon.setTemplateImage(true);
-
-  tray = new Tray(icon);
-  tray.setToolTip("ChatHeads");
-  tray.on("click", (_e, bounds) => toggleTrayPopup(bounds));
-  tray.on("right-click", (_e, bounds) => toggleTrayPopup(bounds));
-}
-
 // -------- IPC --------
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
-ipcMain.handle("projects:list", (): ChatHead[] => projects);
+
+ipcMain.handle("rail:getPinned", (): boolean => {
+  const v = getRailPinned();
+  console.log(`[pin] ipc getPinned → ${v}`);
+  return v;
+});
+ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
+  console.log(`[pin] ipc setPinned(${pinned})`);
+  setRailPinned(pinned);
+  applyRailPinned();
+  resolveRailVisibility();
+  broadcastRailPinned();
+});
+
+ipcMain.handle("rail:getSessionOnlyMode", (): boolean => getRailSessionOnlyMode());
+ipcMain.handle("rail:setSessionOnlyMode", (_e, enabled: boolean): void => {
+  setRailSessionOnlyMode(enabled);
+  resolveRailVisibility();
+  broadcastRailSessionOnlyMode();
+});
+
+ipcMain.handle("rail:getCollapseInactive", (): boolean => getRailCollapseInactive());
+ipcMain.handle("rail:setCollapseInactive", (_e, enabled: boolean): void => {
+  setRailCollapseInactive(enabled);
+  broadcastRailCollapseInactive();
+});
+
+ipcMain.handle("rail:getShowActivityTimestamps", (): boolean => getShowActivityTimestamps());
+ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
+  setShowActivityTimestamps(shown);
+  broadcastShowActivityTimestamps();
+});
+
+ipcMain.handle("spotify:isSupported", (): boolean => process.platform === "darwin");
+ipcMain.handle("spotify:getShareEnabled", (): boolean => getSpotifyShareEnabled());
+ipcMain.handle("spotify:setShareEnabled", async (_e, enabled: boolean): Promise<void> => {
+  const next = !!enabled;
+  const prev = getSpotifyShareEnabled();
+  if (prev === next) return;
+  setSpotifyShareEnabled(next);
+  broadcastToTrayAndMain("spotify:shareEnabled", next);
+  // Turning off while signed in: clear peers immediately so the card
+  // disappears in seconds instead of waiting for the 120s Redis TTL.
+  if (prev && !next && backend.getAuthState().signedIn) {
+    try {
+      await backend.postSpotifyPresence(null);
+    } catch (err) {
+      console.warn("[spotify] clear on disable failed", err);
+    }
+  }
+  updateSpotifyRunning();
+});
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
 ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
 ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());
 ipcMain.handle("debug:addFakeTeammate", () => rail.debugAddFakeTeammate());
-ipcMain.handle("debug:removeFakeTeammate", () =>
-  rail.debugRemoveFakeTeammate(),
-);
+ipcMain.handle("debug:removeFakeTeammate", () => rail.debugRemoveFakeTeammate());
 ipcMain.handle("debug:replayEnterAnimation", () => replayEnterAnimation());
 
 function replayEnterAnimation(): void {
@@ -963,12 +737,16 @@ rail.onChange((next) => {
     hideInfoNow();
   }
   debugBackfillTimestamps();
-  if (heads.length === 0 && projects.length === 0) {
+  // Keep the grace timestamp current while the user is working, so "15 min
+  // after the last session ended" measures from the most recent live poll.
+  if (rail.isSelfLive()) bumpActivity();
+  if (heads.length === 0) {
     overlayWindow?.close();
     overlayWindow = null;
   } else {
     ensureOverlay();
     resizeOverlay();
+    resolveRailVisibility();
     repositionInfoIfVisible();
     repositionChatIfVisible();
   }
@@ -977,26 +755,6 @@ rail.onChange((next) => {
     if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
   }
   broadcastHeads();
-});
-
-rail.onProjectsChange((next) => {
-  projects = next;
-  if (selectedHeadId && !findHead(selectedHeadId)) {
-    hideInfoNow();
-  }
-  if (heads.length === 0 && projects.length === 0) {
-    overlayWindow?.close();
-    overlayWindow = null;
-  } else if (overlayWindow && !overlayWindow.isDestroyed()) {
-    resizeOverlay();
-    repositionInfoIfVisible();
-    repositionChatIfVisible();
-  }
-  // Pre-warm session cache for repo heads too so hover is instant.
-  for (const h of projects) {
-    if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
-  }
-  broadcastProjects();
 });
 
 ipcMain.handle(
@@ -1011,6 +769,14 @@ ipcMain.handle("info:hide", (): void => scheduleHideInfo());
 ipcMain.handle("info:hoverEnter", (): void => cancelHideInfo());
 ipcMain.handle("info:hoverLeave", (): void => scheduleHideInfo());
 
+ipcMain.handle("overlay:setLength", (_e, length: number): void => {
+  if (typeof length !== "number" || !Number.isFinite(length) || length <= 0) return;
+  const next = Math.round(length);
+  if (next === desiredOverlayLength) return;
+  desiredOverlayLength = next;
+  resizeOverlay();
+});
+
 ipcMain.handle("chat:toggle", (): void => toggleChat());
 ipcMain.handle("chat:hide", (): void => hideChat());
 
@@ -1019,10 +785,19 @@ ipcMain.handle("response:open", (_e, message: string): void => {
 });
 
 ipcMain.handle(
-  "chat:ask",
-  (_e, messages: Parameters<typeof backend.askChat>[0]) =>
-    backend.askChat(messages),
+  "chat:openSessionCard",
+  (_e, payload: { sessionId: string; login: string }): void => {
+    const headId = rail.userHeadId(payload.login);
+    if (!findHead(headId)) return;
+    void showInfo(headId, undefined, payload.sessionId);
+  },
 );
+
+ipcMain.handle("chat:ask", (_e, messages: Parameters<typeof backend.askChat>[0]) =>
+  backend.askChat(messages),
+);
+
+ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));
 
 // -------- Dock to edge (drag → release → snap) --------
 
@@ -1031,65 +806,6 @@ function overlayDisplay(): Electron.Display {
     return screen.getPrimaryDisplay();
   }
   return screen.getDisplayMatching(overlayWindow.getBounds());
-}
-
-// Which work-area edges are physically usable. A gap between `bounds` and
-// `workArea` on left / right / bottom means the macOS Dock sits on that edge
-// — we block docking there so the rail never lands on top of the system
-// Dock. The top gap is always the menu bar (thin, always present) which the
-// DOCK_EDGE_MARGIN already clears, so we leave top available.
-type Edge = "left" | "right" | "top" | "bottom";
-
-function availableDockEdges(display: Electron.Display): Set<Edge> {
-  const b = display.bounds;
-  const wa = display.workArea;
-  const edges = new Set<Edge>(["left", "right", "top", "bottom"]);
-  if (wa.x - b.x > 0) edges.delete("left");
-  if (b.x + b.width - (wa.x + wa.width) > 0) edges.delete("right");
-  if (b.y + b.height - (wa.y + wa.height) > 0) edges.delete("bottom");
-  return edges;
-}
-
-// Pick the nearest *allowed* work-area edge to the given point. Used during
-// drag (live placeholder) and at rest (current dock classification). When an
-// edge is blocked by the macOS Dock, its candidate is simply dropped — the
-// next-closest allowed edge wins, so dragging toward the blocked side snaps
-// elsewhere instead of overlapping system UI.
-function dockFromPoint(
-  p: { x: number; y: number },
-  display: Electron.Display,
-): DockConfig {
-  const wa = display.workArea;
-  const allowed = availableDockEdges(display);
-  const candidates: Array<{ d: number; dock: DockConfig }> = [];
-  if (allowed.has("left")) {
-    candidates.push({
-      d: p.x - wa.x,
-      dock: { orientation: "vertical", side: "start" },
-    });
-  }
-  if (allowed.has("right")) {
-    candidates.push({
-      d: wa.x + wa.width - p.x,
-      dock: { orientation: "vertical", side: "end" },
-    });
-  }
-  if (allowed.has("top")) {
-    candidates.push({
-      d: p.y - wa.y,
-      dock: { orientation: "horizontal", side: "start" },
-    });
-  }
-  if (allowed.has("bottom")) {
-    candidates.push({
-      d: wa.y + wa.height - p.y,
-      dock: { orientation: "horizontal", side: "end" },
-    });
-  }
-  // Defensive — shouldn't happen unless the whole display is reserved.
-  if (candidates.length === 0) return { orientation: "vertical", side: "end" };
-  candidates.sort((a, b) => a.d - b.d);
-  return candidates[0].dock;
 }
 
 function currentDock(): DockConfig {
@@ -1101,34 +817,9 @@ function currentDock(): DockConfig {
   return dockFromPoint(center, overlayDisplay());
 }
 
-function computeDockBoundsOn(
-  display: Electron.Display,
-  dock: DockConfig,
-): Electron.Rectangle {
-  const wa = display.workArea;
-  const { width, height } = overlaySize(
-    heads.length,
-    projects.length,
-    dock.orientation,
-  );
-  if (dock.orientation === "vertical") {
-    const x =
-      dock.side === "start"
-        ? wa.x + DOCK_EDGE_MARGIN
-        : wa.x + wa.width - width - DOCK_EDGE_MARGIN;
-    const y = wa.y + Math.floor((wa.height - height) / 2);
-    return { x, y, width, height };
-  }
-  const y =
-    dock.side === "start"
-      ? wa.y + DOCK_EDGE_MARGIN
-      : wa.y + wa.height - height - DOCK_EDGE_MARGIN;
-  const x = wa.x + Math.floor((wa.width - width) / 2);
-  return { x, y, width, height };
-}
-
 function computeDockBounds(dock: DockConfig): Electron.Rectangle {
-  return computeDockBoundsOn(overlayDisplay(), dock);
+  const display = overlayDisplay();
+  return computeDockBoundsOn(display, dock, effectiveOverlayLength(dock.orientation, display));
 }
 
 function ensureDockPlaceholder(): BrowserWindow {
@@ -1148,7 +839,7 @@ function ensureDockPlaceholder(): BrowserWindow {
       background:rgba(255,255,255,0.05);
     }
   </style></head><body><div class="pill"></div></body></html>`;
-  const initialSize = overlaySize(heads.length, projects.length, "vertical");
+  const initialSize = overlaySize(heads.length, "vertical");
   dockPlaceholderWindow = new BrowserWindow({
     width: initialSize.width,
     height: initialSize.height,
@@ -1171,9 +862,7 @@ function ensureDockPlaceholder(): BrowserWindow {
     visibleOnFullScreen: true,
   });
   dockPlaceholderWindow.setIgnoreMouseEvents(true);
-  void dockPlaceholderWindow.loadURL(
-    "data:text/html;charset=utf-8," + encodeURIComponent(html),
-  );
+  void dockPlaceholderWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
   dockPlaceholderWindow.on("closed", () => {
     dockPlaceholderWindow = null;
   });
@@ -1191,45 +880,10 @@ function hideDockPlaceholder(): void {
   if (dockPlaceholderWindow.isVisible()) dockPlaceholderWindow.hide();
 }
 
-function animateOverlayTo(
-  target: Electron.Rectangle,
-  duration: number,
-  onDone?: () => void,
-): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayAnimToken += 1;
-  const token = overlayAnimToken;
-  const start = overlayWindow.getBounds();
-  const t0 = Date.now();
-  const ease = (t: number): number => 1 - Math.pow(1 - t, 3); // easeOutCubic
-  const step = (): void => {
-    if (
-      token !== overlayAnimToken ||
-      !overlayWindow ||
-      overlayWindow.isDestroyed()
-    ) {
-      return;
-    }
-    const t = Math.min(1, (Date.now() - t0) / duration);
-    const e = ease(t);
-    overlayWindow.setBounds({
-      x: Math.round(start.x + (target.x - start.x) * e),
-      y: Math.round(start.y + (target.y - start.y) * e),
-      width: Math.round(start.width + (target.width - start.width) * e),
-      height: Math.round(start.height + (target.height - start.height) * e),
-    });
-    repositionInfoIfVisible();
-    repositionChatIfVisible();
-    if (t < 1) setTimeout(step, 16);
-    else onDone?.();
-  };
-  step();
-}
-
 ipcMain.handle("drag:start", (): void => {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   // A new drag cancels any in-flight dock tween.
-  overlayAnimToken += 1;
+  cancelOverlayAnimation();
 
   const cursor = screen.getCursorScreenPoint();
   const win = overlayWindow.getBounds();
@@ -1268,29 +922,42 @@ ipcMain.handle("drag:end", (): void => {
   // size via its resize event during the animation, but with the right flex
   // orientation already in place.
   sendOverlayConfig();
-  sendChatConfig();
   // Keep isDraggingStack on through the slide so bubble hovers under the
   // moving window don't pop the info card mid-tween.
-  animateOverlayTo(target, DOCK_ANIM_MS, () => {
-    isDraggingStack = false;
-    saveOverlayPosition();
+  animateOverlayTo(overlayWindow, target, DOCK_ANIM_MS, {
+    onTick: () => {
+      repositionInfoIfVisible();
+      repositionChatIfVisible();
+    },
+    onDone: () => {
+      isDraggingStack = false;
+      saveOverlayPosition();
+    },
   });
 });
 
 ipcMain.handle("app:openMain", (): void => {
-  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  else {
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  showMainWindow();
   hideTrayPopup();
+});
+
+ipcMain.handle("app:openAgentCreator", (): void => {
+  const win = showMainWindow();
+  hideTrayPopup();
+  if (win.isDestroyed()) return;
+  const send = (): void => {
+    if (!win.isDestroyed()) win.webContents.send("agents:openCreator");
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once("did-finish-load", send);
+  } else {
+    send();
+  }
 });
 
 ipcMain.handle("app:quit", (): void => app.quit());
 
-ipcMain.handle("clipboard:writeText", (_e, text: string): void =>
-  clipboard.writeText(text ?? ""),
-);
+ipcMain.handle("clipboard:writeText", (_e, text: string): void => clipboard.writeText(text ?? ""));
 ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
 });
@@ -1313,12 +980,8 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
   if (!win || win.isDestroyed()) return;
   let maxForWin = RESIZE_MAX;
   if (win === infoWindow) {
-    const { height: screenH } = screen.getDisplayMatching(win.getBounds())
-      .workAreaSize;
-    maxForWin = Math.min(
-      INFO_MAX_ABSOLUTE,
-      Math.floor(screenH * INFO_MAX_SCREEN_FRACTION),
-    );
+    const { height: screenH } = screen.getDisplayMatching(win.getBounds()).workAreaSize;
+    maxForWin = Math.min(INFO_MAX_ABSOLUTE, Math.floor(screenH * INFO_MAX_SCREEN_FRACTION));
   }
   const h = Math.max(RESIZE_MIN, Math.min(maxForWin, Math.round(height)));
 
@@ -1338,7 +1001,7 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
       const b = win.getBounds();
       win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
     }
-  } else if (win === trayPopup) {
+  } else if (win === getTrayPopup()) {
     const b = win.getBounds();
     if (h === b.height) return;
     // Tray popup is anchored at top — height grows downward.
@@ -1367,19 +1030,6 @@ async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
     }
   }
 
-  const repoId = rail.parseRepoHeadId(headId);
-  if (repoId != null) {
-    const head = projects.find((h) => h.id === headId);
-    if (!head?.repoFullName) return [];
-    try {
-      const sessions = await backend.listFeedSessionsForRepo(head.repoFullName);
-      sessionCache.set(headId, sessions);
-      return sessions;
-    } catch {
-      return [];
-    }
-  }
-
   return [];
 }
 
@@ -1392,22 +1042,21 @@ ipcMain.handle("sessions:preload", async (_e, headId: string): Promise<void> => 
   void fetchSessionsForHead(headId);
 });
 
-ipcMain.handle(
-  "agentSessions:forAgent",
-  async (_e, agentId: string) => agentIngest.listForAgent(agentId),
+ipcMain.handle("agentSessions:forAgent", async (_e, agentId: string) =>
+  agentIngest.listForAgent(agentId),
 );
 
-ipcMain.handle("mcp:install", (_e, target: McpTarget) =>
-  installMcp.install(target, chatheadsAuth.getToken()),
+ipcMain.handle("mcp:install", (_e, target: McpTarget, options?: unknown) =>
+  installMcp.install(target, options as Parameters<typeof installMcp.install>[1]),
 );
-ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) =>
-  installMcp.uninstall(target),
-);
+ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) => installMcp.uninstall(target));
 ipcMain.handle("mcp:status", () => installMcp.status());
 ipcMain.handle("mcp:url", () => installMcp.mcpUrl());
-ipcMain.handle("mcp:detailForHead", (_e, _headId: string) =>
-  Promise.resolve(null),
-);
+ipcMain.handle("mcp:detailForHead", (_e, _headId: string) => {
+  void _e;
+  void _headId;
+  return Promise.resolve(null);
+});
 
 ipcMain.handle("github:isConfigured", () => githubAuth.isConfigured());
 ipcMain.handle("github:getState", () => githubAuth.getState());
@@ -1421,35 +1070,10 @@ ipcMain.handle("agents:setApiKey", async (_e, key: string): Promise<void> => {
 });
 ipcMain.handle("agents:clearApiKey", () => anthropic.clearApiKey());
 ipcMain.handle("agents:list", () => agentStore.list().map(toAgentSummary));
-ipcMain.handle(
-  "agents:create",
-  async (_e, input: CreateAgentInput): Promise<AgentSummary> => {
-    const visibility = input.visibility ?? "private";
-    if (input.mode === "local") {
-      const created = localAgent.createAgent(input);
-      const row: LocalAgent = {
-        id: created.id,
-        name: created.name,
-        description: created.description,
-        systemPrompt: created.systemPrompt,
-        model: created.model,
-        createdAt: Date.now(),
-        sessions: [],
-        mode: "local",
-        cwd: created.cwd,
-        visibility,
-      };
-      agentStore.add(row);
-      return toAgentSummary(row);
-    }
-
-    const created = await anthropic.createAgent({
-      name: input.name,
-      description: input.description,
-      systemPrompt: input.systemPrompt,
-      model: input.model,
-      mcpServers: input.mcpServers,
-    });
+ipcMain.handle("agents:create", async (_e, input: CreateAgentInput): Promise<AgentSummary> => {
+  const visibility = input.visibility ?? "private";
+  if (input.mode === "local") {
+    const created = localAgent.createAgent(input);
     const row: LocalAgent = {
       id: created.id,
       name: created.name,
@@ -1458,10 +1082,81 @@ ipcMain.handle(
       model: created.model,
       createdAt: Date.now(),
       sessions: [],
-      mode: "cloud",
+      mode: "local",
+      cwd: created.cwd,
       visibility,
+      mcpServers: [],
     };
     agentStore.add(row);
+    return toAgentSummary(row);
+  }
+
+  const created = await anthropic.createAgent({
+    name: input.name,
+    description: input.description,
+    systemPrompt: input.systemPrompt,
+    model: input.model,
+    mcpServers: input.mcpServers,
+  });
+  const row: LocalAgent = {
+    id: created.id,
+    name: created.name,
+    description: created.description,
+    systemPrompt: created.systemPrompt,
+    model: created.model,
+    createdAt: Date.now(),
+    sessions: [],
+    mode: "cloud",
+    visibility,
+    mcpServers: input.mcpServers ?? [],
+  };
+  agentStore.add(row);
+  return toAgentSummary(row);
+});
+ipcMain.handle(
+  "agents:update",
+  async (_e, id: string, input: UpdateAgentInput): Promise<AgentSummary> => {
+    const existing = agentStore.get(id);
+    if (!existing) throw new Error("Unknown agent");
+
+    const name = input.name.trim();
+    const systemPrompt = input.systemPrompt.trim();
+    if (!name) throw new Error("Agent name is required.");
+    if (!systemPrompt) throw new Error("Agent prompt is required.");
+
+    const patch = {
+      name,
+      description: input.description?.trim() || undefined,
+      systemPrompt,
+      model: input.model?.trim() || existing.model,
+      cwd: isLocalAgent(existing) ? input.cwd?.trim() || undefined : existing.cwd,
+      visibility: input.visibility ?? existing.visibility ?? "private",
+      mcpServers: isLocalAgent(existing)
+        ? existing.mcpServers
+        : (input.mcpServers ?? existing.mcpServers ?? []),
+    };
+
+    if (!isLocalAgent(existing)) {
+      const updated = await anthropic.updateAgent(id, {
+        name: patch.name,
+        description: patch.description,
+        systemPrompt: patch.systemPrompt,
+        model: patch.model,
+        mcpServers: patch.mcpServers,
+      });
+      const row = agentStore.update(id, {
+        ...patch,
+        name: updated.name,
+        description: updated.description,
+        systemPrompt: updated.systemPrompt,
+        model: updated.model,
+      });
+      if (!row) throw new Error("Unknown agent");
+      return toAgentSummary(row);
+    }
+
+    const row = agentStore.update(id, patch);
+    if (!row) throw new Error("Unknown agent");
     return toAgentSummary(row);
   },
 );
@@ -1503,12 +1198,7 @@ ipcMain.handle(
 );
 ipcMain.handle(
   "agents:send",
-  async (
-    _e,
-    agentId: string,
-    text: string,
-    requestedSessionId?: string | null,
-  ) => {
+  async (_e, agentId: string, text: string, requestedSessionId?: string | null) => {
     const row = agentStore.get(agentId);
     if (!row) throw new Error("Unknown agent");
     streamingAgents.add(agentId);
@@ -1556,7 +1246,9 @@ ipcMain.handle(
       };
 
       if (isLocalAgent(row)) {
-        void localAgent.sendMessage(streamSessionId, text, row, handleEvent);
+        void localAgent.sendMessage(streamSessionId, text, row, handleEvent, () =>
+          emitSessionsChange(agentId),
+        );
       } else {
         void anthropic.sendMessage(streamSessionId, text, handleEvent);
       }
@@ -1566,14 +1258,11 @@ ipcMain.handle(
     }
   },
 );
-ipcMain.handle(
-  "agents:listSessions",
-  (_e, agentId: string): AgentSessionSummary[] => {
-    const row = agentStore.get(agentId);
-    if (row && !isLocalAgent(row)) void refreshSessionsFromServer(agentId);
-    return row?.sessions ?? [];
-  },
-);
+ipcMain.handle("agents:listSessions", (_e, agentId: string): AgentSessionSummary[] => {
+  const row = agentStore.get(agentId);
+  if (row && !isLocalAgent(row)) void refreshSessionsFromServer(agentId);
+  return row?.sessions ?? [];
+});
 
 const pendingArchive = new Set<string>();
 const PENDING_ARCHIVE_TTL_MS = 30_000;
@@ -1581,9 +1270,7 @@ const PENDING_ARCHIVE_TTL_MS = 30_000;
 async function refreshSessionsFromServer(agentId: string): Promise<void> {
   try {
     const server = await anthropic.listAgentSessions(agentId);
-    const active = server.filter(
-      (s) => s.archivedAt == null && !pendingArchive.has(s.id),
-    );
+    const active = server.filter((s) => s.archivedAt == null && !pendingArchive.has(s.id));
     agentStore.reconcileSessions(
       agentId,
       active.map((s) => ({
@@ -1598,13 +1285,10 @@ async function refreshSessionsFromServer(agentId: string): Promise<void> {
   }
 }
 
-ipcMain.handle(
-  "agents:popOut",
-  (_e, agentId: string, sessionId: string): void => {
-    agentStore.setActiveSession(agentId, sessionId);
-    showResponse({ kind: "agent", agentId, sessionId });
-  },
-);
+ipcMain.handle("agents:popOut", (_e, agentId: string, sessionId: string): void => {
+  agentStore.setActiveSession(agentId, sessionId);
+  showResponse({ kind: "agent", agentId, sessionId });
+});
 
 ipcMain.handle(
   "agents:removeSession",
@@ -1621,8 +1305,7 @@ ipcMain.handle(
     setTimeout(() => pendingArchive.delete(sessionId), PENDING_ARCHIVE_TTL_MS);
 
     const isTeamCloud = !!row && (row.visibility ?? "private") === "team";
-    const startedAtMs =
-      row?.sessions.find((s) => s.id === sessionId)?.createdAt ?? Date.now();
+    const startedAtMs = row?.sessions.find((s) => s.id === sessionId)?.createdAt ?? Date.now();
     const agentSnapshot = row;
 
     agentStore.removeSession(agentId, sessionId);
@@ -1647,22 +1330,22 @@ async function finalizeTeamSession(
 ): Promise<void> {
   const endedAt = new Date().toISOString();
   const base = {
-    agent_id: agent.id,
-    session_id: sessionId,
+    agentId: agent.id,
+    sessionId,
     mode: "cloud" as const,
     visibility: "team" as const,
     name: agent.name,
-    started_at: new Date(startedAtMs).toISOString(),
-    ended_at: endedAt,
-    last_activity: endedAt,
+    startedAt: new Date(startedAtMs).toISOString(),
+    endedAt,
+    lastActivity: endedAt,
   };
   try {
     const { summary, model } = await summarize.summarizeCloudSession(sessionId);
     await agentIngest.upsertSession({
       ...base,
       summary,
-      summary_model: model,
-      summary_ts: new Date().toISOString(),
+      summaryModel: model,
+      summaryTs: new Date().toISOString(),
     });
   } catch (err) {
     console.warn("[summarize] failed:", err);
@@ -1670,29 +1353,23 @@ async function finalizeTeamSession(
   }
 }
 
-ipcMain.handle(
-  "agents:newSession",
-  async (_e, agentId: string): Promise<AgentSessionSummary> => {
-    const row = agentStore.get(agentId);
-    if (!row) throw new Error("Unknown agent");
-    const id = isLocalAgent(row)
-      ? localAgent.localSessionId()
-      : (await anthropic.startSession(agentId)).sessionId;
-    const session: AgentSessionSummary = { id, createdAt: Date.now() };
-    agentStore.addSession(agentId, session);
-    agentIngest.upsertSessionStart(row, id, session.createdAt);
-    emitSessionsChange(agentId);
-    return session;
-  },
-);
+ipcMain.handle("agents:newSession", async (_e, agentId: string): Promise<AgentSessionSummary> => {
+  const row = agentStore.get(agentId);
+  if (!row) throw new Error("Unknown agent");
+  const id = isLocalAgent(row)
+    ? localAgent.localSessionId()
+    : (await anthropic.startSession(agentId)).sessionId;
+  const session: AgentSessionSummary = { id, createdAt: Date.now() };
+  agentStore.addSession(agentId, session);
+  agentIngest.upsertSessionStart(row, id, session.createdAt);
+  emitSessionsChange(agentId);
+  return session;
+});
 
-ipcMain.handle(
-  "agents:selectSession",
-  (_e, agentId: string, sessionId: string): void => {
-    agentStore.setActiveSession(agentId, sessionId);
-    emitSessionsChange(agentId);
-  },
-);
+ipcMain.handle("agents:selectSession", (_e, agentId: string, sessionId: string): void => {
+  agentStore.setActiveSession(agentId, sessionId);
+  emitSessionsChange(agentId);
+});
 
 ipcMain.handle(
   "agents:ensureSessionUsage",
@@ -1725,19 +1402,20 @@ function emitSessionsChange(agentId: string): void {
 }
 
 ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
-ipcMain.handle("chatheads:signIn", async () => {
-  await chatheadsAuth.signIn();
-  try {
-    await installMcp.install("claude-code", chatheadsAuth.getToken());
-  } catch (err) {
-    console.warn("auto-install after sign-in failed:", err);
-  }
-});
+ipcMain.handle("chatheads:signIn", () => chatheadsAuth.signIn());
 ipcMain.handle("chatheads:cancelSignIn", () => chatheadsAuth.cancelSignIn());
-ipcMain.handle("chatheads:signOut", async () => {
-  await chatheadsAuth.signOut();
-  await installMcp.uninstall("claude-code");
+ipcMain.handle("chatheads:signOut", () => chatheadsAuth.signOut());
+
+// Push a presence update into the info window only while it's showing the
+// head whose login just changed. Fallback poll lives in the renderer.
+peerPresence.onChange(({ login, presence }) => {
+  if (!infoWindow || infoWindow.isDestroyed() || !selectedHeadId) return;
+  const shownLogin = rail.parseUserHeadId(selectedHeadId);
+  if (shownLogin !== login) return;
+  infoWindow.webContents.send("info:presence", { login, spotify: presence });
 });
+
+ipcMain.handle("spotify:forLogin", (_e, login: string) => peerPresence.get(login));
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
@@ -1747,16 +1425,36 @@ ipcMain.handle("backend:signOut", async () => {
   await backend.signOut();
   localRepos.clearOnSignOut();
 });
+ipcMain.handle("backend:signOutEverywhere", async () => {
+  await backend.signOutEverywhere();
+  localRepos.clearOnSignOut();
+});
+ipcMain.handle("backend:getGithubAppStatus", () => backend.getGithubAppStatus());
+ipcMain.handle("backend:connectGithubApp", () => backend.connectGithubApp());
 
 function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
     void uploader.start();
     void heartbeat.start();
+    updateSpotifyRunning();
+    void peerPresence.start();
     ws.start();
+    for (const target of ["claude-code", "codex"] as const) {
+      void installMcp
+        .install(target)
+        .catch((err) => console.warn(`installMcp.install ${target} failed:`, err));
+    }
   } else {
     heartbeat.stop();
     uploader.reset();
+    updateSpotifyRunning();
+    peerPresence.stop();
     ws.stop();
+    for (const target of ["claude-code", "codex"] as const) {
+      void installMcp
+        .uninstall(target)
+        .catch((err) => console.warn(`installMcp.uninstall ${target} failed:`, err));
+    }
   }
 }
 
@@ -1791,11 +1489,6 @@ ws.onSessionUpdated((msg) => {
   // hover. scheduleInfoRefresh then coalesces any UI refresh for the
   // currently-selected head across bursty events.
   sessionCache.delete(rail.userHeadId(msg.github_login));
-  // Also invalidate the repo-head cache — a session update changes what the
-  // project popover should render too.
-  if (msg.repo_id != null) {
-    sessionCache.delete(rail.repoHeadId(msg.repo_id));
-  }
   rail.refreshSoon();
   scheduleInfoRefresh(msg.session_id);
   broadcastToMain("ws:sessionUpdated", msg);
@@ -1838,27 +1531,47 @@ async function refreshInfoNow(): Promise<void> {
     const sessions = await fetchSessionsForHead(head.id);
     if (selectedHeadId !== head.id) return;
     if (!infoWindow || infoWindow.isDestroyed()) return;
-    infoWindow.webContents.send("info:show", { head, sessions });
+    const refreshLogin = rail.parseUserHeadId(head.id);
+    infoWindow.webContents.send("info:show", {
+      head,
+      sessions,
+      spotify: refreshLogin ? peerPresence.get(refreshLogin) : null,
+    });
   } catch (e) {
     console.warn("[ws] refreshInfoNow failed:", e);
   }
 }
-ipcMain.handle("backend:listRepos", () => backend.listRepos());
-
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());
 ipcMain.handle("backend:addLocalRepo", () => localRepos.addLocalRepo());
 ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>
   localRepos.removeLocalRepo(repoId),
 );
 
+// -------- Tray repo-picker (tracked local repos) --------
+
+ipcMain.handle("trackedRepos:selection", () => [...localRepos.selectedRepoIds()]);
+ipcMain.handle("trackedRepos:toggle", (_e, repoId: number) => [
+  ...localRepos.toggleSelected(repoId),
+]);
+
 function broadcastToMain(channel: string, payload: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
+  const win = getMainWindow();
+  if (win && !win.isDestroyed()) {
+    win.webContents.send(channel, payload);
+  }
+}
+
+// Tray popup (statusbar renderer) is the primary consumer of orgs:* /
+// repos:* push channels. We still broadcast to main so any future settings
+// UI on the main window stays in sync without extra plumbing.
+function broadcastToTrayAndMain(channel: string, payload: unknown): void {
+  for (const w of [getMainWindow(), getTrayPopup()]) {
+    if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
   }
 }
 
 function agentConsumerWindows(): BrowserWindow[] {
-  return [mainWindow, infoWindow, responseWindow].filter(
+  return [getMainWindow(), infoWindow, getResponseWindow()].filter(
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
 }
@@ -1870,15 +1583,19 @@ function broadcastAgentEvent(event: AgentStreamEvent): void {
 }
 
 backend.onChange((state) => broadcastToMain("backend:authState", state));
-localRepos.onChange((repos) => broadcastToMain("backend:trackedRepos", repos));
+// Tray popup shows sign-in state too — mirror to it so the CTA flips live.
+backend.onChange((state) => {
+  const popup = getTrayPopup();
+  if (popup && !popup.isDestroyed()) popup.webContents.send("backend:authState", state);
+});
+localRepos.onChange((repos) => broadcastToTrayAndMain("backend:trackedRepos", repos));
+localRepos.onSelectionChange((ids) =>
+  broadcastToTrayAndMain("trackedRepos:selectionChange", [...ids]),
+);
 chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
 githubAuth.onChange((state) => broadcastToMain("github:state", state));
-anthropic.onConfiguredChange((configured) =>
-  broadcastToMain("agents:configured", configured),
-);
-agentStore.onChange((agents) =>
-  broadcastToMain("agents:listChange", agents.map(toAgentSummary)),
-);
+anthropic.onConfiguredChange((configured) => broadcastToMain("agents:configured", configured));
+agentStore.onChange((agents) => broadcastToMain("agents:listChange", agents.map(toAgentSummary)));
 
 // -------- Lifecycle --------
 
@@ -1887,13 +1604,58 @@ function debugBackfillTimestamps(): void {
   // No-op; kept for reference.
 }
 
-app.whenReady().then(() => {
+configureRailState({
+  getOverlay: () => overlayWindow,
+  getMainWindow,
+  getTrayPopup,
+});
+configureChat({
+  getOverlay: () => overlayWindow,
+  getCurrentDock: currentDock,
+  onVisibilityChange: broadcastChatVisible,
+  resolveRailVisibility,
+});
+configureResponse({ onClose: hideChat });
+configureHoverPolling({
+  getOverlay: () => overlayWindow,
+  isRailPinned: getRailPinned,
+  isAppFocused: appIsFocused,
+});
+configureRailVisibility({
+  getOverlay: () => overlayWindow,
+  isRailPinned: getRailPinned,
+  isSessionOnlyMode: getRailSessionOnlyMode,
+  isSelfLive: () => rail.isSelfLive(),
+  isChatVisible,
+});
+
+app.whenReady().then(async () => {
+  // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
+  // "regular" but we set it explicitly, and force-show the dock icon in case
+  // something demoted us to accessory mode.
+  if (process.platform === "darwin") {
+    console.log("[app] setActivationPolicy(regular) + dock.show()");
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
   backend.restore();
+  await backend.validateStoredSession();
   chatheadsAuth.restore();
   anthropic.restore();
   githubAuth.restore();
   localRepos.restore();
-  createTray();
+  void mcpProxy.start().catch((err) => console.warn("[localMcpProxy] start failed:", err));
+  // In session-only mode the tray click is the user's escape hatch: it
+  // force-shows the rail and resets the 15-min grace timer. Outside that
+  // mode the lastActivityTs bump is inert — resolveRailVisibility ignores
+  // it while pinned or with session-only off.
+  createTray({
+    onClick: (bounds) => {
+      bumpActivity();
+      toggleTrayPopup(bounds);
+      resolveRailVisibility();
+    },
+  });
   rail.start();
   selfSession.start();
   applySyncForAuth(backend.getAuthState().signedIn);
@@ -1913,8 +1675,16 @@ app.whenReady().then(() => {
   }
 });
 
+app.on("before-quit", () => {
+  // Flag read by mainWindow's "close" handler to allow actual destruction
+  // during app quit (otherwise close is preventDefault'd and the app can't
+  // shut down cleanly).
+  appState().isQuitting = true;
+});
+
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  void mcpProxy.stop();
 });
 
 // Keep the app alive when all windows close — the mere presence of a
@@ -1923,6 +1693,29 @@ app.on("will-quit", () => {
 app.on("window-all-closed", () => {});
 
 app.on("activate", () => {
-  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  else mainWindow.show();
+  // Standard macOS reopen semantics: clicking the dock icon re-shows the
+  // main window — covering the (now-rare) case where it was actually destroyed.
+  showMainWindow();
+});
+
+// Unpinned mode: rail follows app focus. Float when active so hover works,
+// drop to normal when blurred so it sits behind other apps.
+app.on("did-become-active", () => {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (getRailPinned()) return;
+  overlayWindow.setAlwaysOnTop(true, "floating");
+  overlayWindow.moveTop();
+});
+
+app.on("did-resign-active", () => {
+  // Re-assert regular activation policy so the app survives the transition
+  // (macOS demotes us to accessory when the only visible window is a
+  // normal-level NSPanel).
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    void app.dock?.show();
+  }
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (getRailPinned()) return;
+  overlayWindow.setAlwaysOnTop(false);
 });

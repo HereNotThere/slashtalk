@@ -1,5 +1,23 @@
 {
   "name": "slashtalk",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"]
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k --no-color --names server,desktop \"bun run dev:server\" \"bun run dev:desktop\"",
+    "dev:server": "cd apps/server && bun --watch --no-clear-screen src/index.ts",
+    "dev:mcp": "cd apps/mcp && bun --watch --no-clear-screen src/index.ts",
+    "dev:desktop": "cd apps/desktop && bun run dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.3"
+  }
 }

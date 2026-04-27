@@ -1,21 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "../src/db";
-import {
-  users,
-  repos,
-  userRepos,
-  sessions,
-  sessionInsights,
-  heartbeats,
-} from "../src/db/schema";
+import { users, repos, userRepos, sessions, sessionInsights, heartbeats } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { mockGitHubAuth, resetDatabase, getCookie } from "./helpers";
-import {
-  getTeamActivityImpl,
-  getSessionImpl,
-} from "../src/chat/tools";
+import { getTeamActivityImpl, getSessionImpl } from "../src/chat/tools";
+import { loadSessionCards } from "../src/chat/cards";
 import { SUMMARY_ANALYZER } from "../src/analyzers/names";
 
 let redis: RedisBridge;
@@ -52,14 +43,8 @@ beforeAll(async () => {
   const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
   expect(getCookie(bobRes, "session")).toBeTruthy();
 
-  const [alice] = await db
-    .select()
-    .from(users)
-    .where(eq(users.githubLogin, "alice"));
-  const [bob] = await db
-    .select()
-    .from(users)
-    .where(eq(users.githubLogin, "bob"));
+  const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
+  const [bob] = await db.select().from(users).where(eq(users.githubLogin, "bob"));
   aliceId = alice.id;
   bobId = bob.id;
 
@@ -135,7 +120,10 @@ beforeAll(async () => {
       analyzerVersion: 1,
       model: "claude-haiku-4-5-20251001",
       inputLineSeq: 0,
-      output: { title: "Wiring WS reconnect", description: "Bob is working on the WebSocket reconnect logic" },
+      output: {
+        title: "Wiring WS reconnect",
+        description: "Bob is working on the WebSocket reconnect logic",
+      },
     },
   ]);
 
@@ -257,9 +245,7 @@ describe("chat tool: get_team_activity", () => {
 
   it("excludes sessions outside the caller's repo graph", async () => {
     const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
-    const allSessionIds = result.teammates.flatMap((t) =>
-      t.sessions.map((s) => s.id),
-    );
+    const allSessionIds = result.teammates.flatMap((t) => t.sessions.map((s) => s.id));
     expect(allSessionIds).not.toContain(OUTSIDER_SESSION);
   });
 
@@ -298,9 +284,7 @@ describe("chat tool: get_team_activity", () => {
       sinceHours: 24,
       repoFullName: "team/slashtalk",
     });
-    const sessionIds = result.teammates.flatMap((t) =>
-      t.sessions.map((s) => s.id),
-    );
+    const sessionIds = result.teammates.flatMap((t) => t.sessions.map((s) => s.id));
     expect(sessionIds).toContain(BOB_SESSION);
     expect(sessionIds).not.toContain(OUTSIDER_SESSION);
   });
@@ -355,3 +339,42 @@ describe("chat tool: get_session", () => {
   });
 });
 
+describe("chat cards: loadSessionCards", () => {
+  it("hydrates compact cards for visible sessions in input order", async () => {
+    const cards = await loadSessionCards(db, aliceId, [BOB_SESSION, ALICE_SESSION]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION, ALICE_SESSION]);
+    const bob = cards[0];
+    expect(bob.user.login).toBe("bob");
+    expect(bob.repo).toBe("team/slashtalk");
+    expect(bob.title).toBe("Wiring WS reconnect");
+    expect(bob.source).toBe("claude");
+  });
+
+  it("drops sessions outside the caller's repo graph", async () => {
+    const cards = await loadSessionCards(db, aliceId, [BOB_SESSION, OUTSIDER_SESSION]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION]);
+  });
+
+  it("de-dupes repeated session IDs while preserving first-seen order", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      BOB_SESSION,
+      ALICE_SESSION,
+      BOB_SESSION,
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION, ALICE_SESSION]);
+  });
+
+  it("silently skips unknown session IDs", async () => {
+    const cards = await loadSessionCards(db, aliceId, [
+      BOB_SESSION,
+      "00000000-0000-0000-0000-000000000000",
+    ]);
+    expect(cards.map((c) => c.id)).toEqual([BOB_SESSION]);
+  });
+
+  it("returns empty for an empty or all-invisible input", async () => {
+    expect(await loadSessionCards(db, aliceId, [])).toEqual([]);
+    expect(await loadSessionCards(db, aliceId, [OUTSIDER_SESSION])).toEqual([]);
+  });
+});

@@ -38,6 +38,11 @@ DATABASE_URL=postgres://slashtalk:slashtalk@localhost:5432/slashtalk
 REDIS_URL=redis://localhost:6379
 GITHUB_CLIENT_ID=<your GitHub OAuth app client ID>
 GITHUB_CLIENT_SECRET=<your GitHub OAuth app client secret>
+# Optional: enables selected-private-repo claims without OAuth `repo` scope
+GITHUB_APP_CLIENT_ID=<your GitHub App client ID>
+GITHUB_APP_CLIENT_SECRET=<your GitHub App client secret>
+GITHUB_APP_ID=<your GitHub App ID>
+GITHUB_APP_SLUG=<your GitHub App slug>
 JWT_SECRET=<any random string>
 ENCRYPTION_KEY=<64-char hex string, e.g. openssl rand -hex 32>
 BASE_URL=http://localhost:10000
@@ -45,6 +50,8 @@ PORT=10000
 ```
 
 To create a GitHub OAuth app, go to **Settings → Developer settings → OAuth Apps → New OAuth App** with callback URL `http://localhost:10000/auth/github/callback`.
+
+For private repo claims, create a GitHub App with repository **Metadata: read-only**, callback URL `http://localhost:10000/auth/github-app/callback`, expiring user authorization tokens enabled, and no webhooks required for local development. `/auth/github-app` runs the GitHub App user-authorization flow; `/auth/github-app?install=1` is the explicit install/configure fallback.
 
 ### 3. Install dependencies
 
@@ -141,36 +148,89 @@ REDIS_URL=redis://localhost:6380 \
 bun test --cwd apps/server
 ```
 
+## Desktop app (local dev)
+
+By default the packaged desktop talks to the hosted services
+(`https://slashtalk.onrender.com` for the API and `/mcp` on the same server
+for remote MCP). Local Claude Code and Codex installs point at the desktop-local
+proxy (`http://127.0.0.1:37613/mcp`) so the device API key stays in Electron
+safeStorage instead of AI-client config files. To point the desktop at a
+locally-running backend instead, create `apps/desktop/.env` with:
+
+```
+MAIN_VITE_SLASHTALK_API_URL=http://localhost:10000
+```
+
+`MAIN_VITE_SLASHTALK_MCP_URL` remains available as a remote-MCP escape hatch
+for the desktop proxy and self-session client, but the default remote target is
+`MAIN_VITE_SLASHTALK_API_URL + /mcp`. `SLASHTALK_LOCAL_MCP_PORT` can override
+the local proxy port for testing.
+
+Then start the backend and desktop from the repo root:
+
+```sh
+bun run dev:server
+bun run dev:desktop
+```
+
+Or run each process separately:
+
+```sh
+# Terminal 1: slashtalk API server (port 10000)
+cd apps/server && bun run dev
+
+# Terminal 2: desktop
+cd apps/desktop && bun run dev
+```
+
+Notes:
+
+- The `MAIN_VITE_` prefix is required — electron-vite only exposes prefixed
+  env vars to the main process. Plain `SLASHTALK_*` in `.env` is ignored.
+  (Plain `SLASHTALK_*` exported in your shell still works as a runtime
+  override.)
+- Keep API and explicit MCP override URLs pointed at the same environment.
+  The desktop device apiKey is minted by the API server and accepted by the
+  server-owned `/mcp` route for local-proxy and legacy compatibility. Direct
+  Claude Code and Codex clients can also authenticate to the same `/mcp` route
+  through MCP OAuth.
+- `apps/mcp` is deprecated for the migration window. Only start it when
+  testing legacy standalone-MCP behavior.
+- For a hosted-API + local-everything-else dev session, comment the local
+  URLs out and the desktop falls back to the hosted defaults.
+
 ## Project structure
+
+See [`AGENTS.md`](AGENTS.md) for the full map and per-workspace pointers.
 
 ```
 slashtalk/
-├── packages/shared/        # Shared TypeScript types
-├── apps/
-│   ├── server/             # ElysiaJS backend
-│   │   └── src/
-│   │       ├── index.ts          # Entry point
-│   │       ├── app.ts            # App factory (for testing)
-│   │       ├── config.ts         # Env var loading
-│   │       ├── db/               # Drizzle schema + client
-│   │       ├── auth/             # GitHub OAuth, JWT, API keys
-│   │       ├── ingest/           # NDJSON upload + aggregator
-│   │       ├── social/           # Feed, repo sync
-│   │       ├── sessions/         # Session routes, state, snapshots
-│   │       ├── user/             # Profile, devices, setup tokens
-│   │       ├── ws/               # WebSocket + Redis pub/sub
-│   │       └── install/          # CLI install script
-│   └── desktop/            # Electron app (future)
-└── specs/                  # Design specs
+├── AGENTS.md               # Canonical entry for agents (Claude Code, Codex, …)
+├── ARCHITECTURE.md         # Domain map: ingest, sessions, analyzers, ws, …
+├── CLAUDE.md               # Thin redirect + load-bearing memories
+├── docs/                   # System of record — design docs, specs, references
+│   ├── design-docs/        # core-beliefs.md + topic-level decisions
+│   ├── product-specs/      # backend.md (ex-specs/backend.spec.md), upload.md
+│   ├── exec-plans/         # active/, completed/, tech-debt-tracker.md
+│   ├── generated/          # db-schema.md (auto-generated from Drizzle)
+│   ├── references/         # 3rd-party lib notes (Elysia, Drizzle, …)
+│   ├── RELIABILITY.md      # resume protocol, heartbeat state machine
+│   ├── SECURITY.md         # tokens, encryption, PII
+│   └── QUALITY_SCORE.md    # per-domain health grades
+├── packages/shared/        # Source-only TS types
+└── apps/
+    ├── server/             # ElysiaJS backend (auth, ingest, sessions, ws, analyzers)
+    ├── desktop/            # Electron overlay, 6 renderer windows + tray/dock chrome
+    └── mcp/                # MCP server (being consolidated into server)
 ```
 
 ## Key scripts
 
-| Command | Directory | Description |
-|---------|-----------|-------------|
-| `bun run dev` | `apps/server` | Start with file watching |
-| `bun run start` | `apps/server` | Start without watching |
+| Command               | Directory     | Description                 |
+| --------------------- | ------------- | --------------------------- |
+| `bun run dev`         | `apps/server` | Start with file watching    |
+| `bun run start`       | `apps/server` | Start without watching      |
 | `bun run db:generate` | `apps/server` | Generate Drizzle migrations |
-| `bun run db:migrate` | `apps/server` | Apply migrations |
-| `bun run typecheck` | `apps/server` | TypeScript type check |
-| `bun test` | `apps/server` | Run test suite |
+| `bun run db:migrate`  | `apps/server` | Apply migrations            |
+| `bun run typecheck`   | `apps/server` | TypeScript type check       |
+| `bun test`            | `apps/server` | Run test suite              |

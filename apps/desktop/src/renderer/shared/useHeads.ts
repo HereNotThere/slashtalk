@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { ChatHead } from '../../shared/types';
+import { useEffect, useState } from "react";
+import type { ChatHead } from "../../shared/types";
 
 // Subscribes to main-process head updates. Used by every renderer that needs
 // the live head list (main, overlay, statusbar).

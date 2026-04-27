@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   SOURCES,
   type EventSource,
@@ -28,7 +28,7 @@ interface ParsedLine {
  */
 function parseChunk(
   text: string,
-  fromLineSeq: number
+  fromLineSeq: number,
 ): { parsed: ParsedLine[]; nextLineSeq: number } {
   if (text.length === 0) return { parsed: [], nextLineSeq: fromLineSeq };
 
@@ -52,10 +52,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/v1", name: "ingest" })
     .use(apiKeyAuth)
     .onParse({ as: "local" }, async ({ request, contentType }) => {
-      if (
-        contentType === "application/x-ndjson" ||
-        contentType === "text/plain"
-      ) {
+      if (contentType === "application/x-ndjson" || contentType === "text/plain") {
         return await request.text();
       }
     })
@@ -150,28 +147,22 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
 
           if (currentSession) {
             const updates = processEvents(source, currentSession, acceptedPayloads);
-            await db
-              .update(sessions)
-              .set(updates)
-              .where(eq(sessions.sessionId, query.session));
+            await db.update(sessions).set(updates).where(eq(sessions.sessionId, query.session));
 
             // Retry while repo_id unresolved; fall back to the session's
             // stored cwd so strategy 3 (project-slug) can fire even when no
-            // event has ever carried a cwd.
+            // event has ever carried a cwd. The `isNull(repoId)` guard in the
+            // WHERE makes this a compare-and-set: concurrent ingest calls for
+            // the same session can both reach this branch with stale snapshots,
+            // but only the first writer's value sticks.
             if (!currentSession.repoId) {
               const cwd = updates.cwd ?? currentSession.cwd ?? null;
-              const repoId = await matchSessionRepo(
-                db,
-                user.id,
-                cwd,
-                query.project,
-                device?.id
-              );
+              const repoId = await matchSessionRepo(db, user.id, cwd, query.project, device?.id);
               if (repoId) {
                 await db
                   .update(sessions)
                   .set({ repoId })
-                  .where(eq(sessions.sessionId, query.session));
+                  .where(and(eq(sessions.sessionId, query.session), isNull(sessions.repoId)));
               }
             }
           }
@@ -200,7 +191,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
               repo_id: finalSession.repoId,
               last_ts: finalSession.lastTs?.toISOString(),
             };
-            await redis.publish(`repo:${finalSession.repoId}`, msg);
+            void redis.publish(`repo:${finalSession.repoId}`, msg);
           }
         }
 
@@ -218,32 +209,29 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
           prefixHash: t.Optional(t.String()),
           source: t.Optional(t.Union(SOURCES.map((s) => t.Literal(s)))),
         }),
-      }
+      },
     )
 
     // GET /v1/sync-state — get server-side sync state for resume
-    .get(
-      "/sync-state",
-      async ({ user }): Promise<Record<string, SyncStateEntry>> => {
-        const rows = await db
-          .select({
-            sessionId: sessions.sessionId,
-            serverLineSeq: sessions.serverLineSeq,
-            prefixHash: sessions.prefixHash,
-          })
-          .from(sessions)
-          .where(eq(sessions.userId, user.id));
+    .get("/sync-state", async ({ user }): Promise<Record<string, SyncStateEntry>> => {
+      const rows = await db
+        .select({
+          sessionId: sessions.sessionId,
+          serverLineSeq: sessions.serverLineSeq,
+          prefixHash: sessions.prefixHash,
+        })
+        .from(sessions)
+        .where(eq(sessions.userId, user.id));
 
-        const state: Record<string, SyncStateEntry> = {};
-        for (const row of rows) {
-          state[row.sessionId] = {
-            serverLineSeq: row.serverLineSeq ?? 0,
-            prefixHash: row.prefixHash,
-          };
-        }
-        return state;
+      const state: Record<string, SyncStateEntry> = {};
+      for (const row of rows) {
+        state[row.sessionId] = {
+          serverLineSeq: row.serverLineSeq ?? 0,
+          prefixHash: row.prefixHash,
+        };
       }
-    )
+      return state;
+    })
 
     // POST /v1/heartbeat — session heartbeat
     .post(
@@ -309,7 +297,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
               last_ts: session.lastTs?.toISOString(),
               state: newState,
             };
-            await redis.publish(`repo:${session.repoId}`, msg);
+            void redis.publish(`repo:${session.repoId}`, msg);
           }
         }
 
@@ -324,5 +312,5 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
           version: t.Optional(t.String()),
           startedAt: t.Optional(t.String()),
         }),
-      }
+      },
     );

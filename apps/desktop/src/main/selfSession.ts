@@ -12,8 +12,8 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import * as backend from "./backend";
 import * as chatheadsAuth from "./chatheadsAuth";
+import { mcpUrl } from "./config";
 
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -24,23 +24,9 @@ let reconnectDelay = RECONNECT_MIN_MS;
 let running = false;
 let unsubAuth: (() => void) | null = null;
 let authRejected = false;
-let loggedDisabled = false;
 let loggedUnauthorized = false;
+let loggedConnectFailureUrl: string | null = null;
 
-function isLocalUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname;
-    return host === "localhost" || host === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-
-function mcpUrl(): string | null {
-  const explicit = process.env["SLASHTALK_MCP_URL"];
-  if (explicit) return explicit;
-  return isLocalUrl(backend.getBaseUrl()) ? "http://localhost:3000/mcp" : null;
-}
 
 function isUnauthorized(err: unknown): boolean {
   return (err as { code?: unknown } | null)?.code === 401;
@@ -51,15 +37,6 @@ async function connect(): Promise<void> {
   if (client) return; // already connected
   if (authRejected) return;
   const url = mcpUrl();
-  if (!url) {
-    if (!loggedDisabled) {
-      loggedDisabled = true;
-      console.log(
-        "[selfSession] MCP disabled; set SLASHTALK_MCP_URL to enable desktop presence",
-      );
-    }
-    return;
-  }
   const token = chatheadsAuth.getToken();
   if (!token) return;
 
@@ -105,7 +82,14 @@ async function connect(): Promise<void> {
       }
       return;
     }
-    console.error("[selfSession] connect failed:", err);
+    if (loggedConnectFailureUrl !== url) {
+      loggedConnectFailureUrl = url;
+      console.warn("[selfSession] MCP connect failed", {
+        url,
+        message: err instanceof Error ? err.message : String(err),
+        cause: (err as { cause?: { code?: string } } | null)?.cause?.code,
+      });
+    }
     scheduleReconnect();
   }
 }
@@ -141,6 +125,7 @@ export function start(): void {
   unsubAuth = chatheadsAuth.onChange((state) => {
     authRejected = false;
     loggedUnauthorized = false;
+    loggedConnectFailureUrl = null;
     if (state.signedIn) void connect();
     else void disconnect();
   });

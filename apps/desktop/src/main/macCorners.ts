@@ -11,9 +11,28 @@
 // rectangle. We also flip the NSWindow to opaque=NO + clearColor so those
 // pixels composite as transparent. `transparent: false` stays in Electron
 // options because flipping it there disables vibrancy entirely.
+//
+// Version gate: on macOS < 15 the WindowServer still composites a faint
+// rectangular outline around the NSWindow's frame even after setOpaque:NO +
+// clearColor, leaving a visible 1px box around the rounded pill. We bail out
+// on those versions and let the rail render as a plain vibrancy rectangle
+// instead — no rounded corners, no rim, but no leaking outline either.
 
 import type { BrowserWindow } from "electron";
 import koffi from "koffi";
+
+// macOS 15 (Sequoia) is the floor where the setOpaque:NO + clearColor trick
+// reliably hides the underlying NSWindow rectangle. Below this we skip the
+// reshape entirely and accept a plain rectangular frame.
+const MIN_MACOS_MAJOR_FOR_ROUND = 15;
+
+export function supportsRoundedWindowFrame(): boolean {
+  if (process.platform !== "darwin") return false;
+  // process.getSystemVersion() returns the marketing version on macOS, e.g.
+  // "14.7.3" or "15.1". Fall back to no-rounding if the string is unparseable.
+  const major = parseInt(process.getSystemVersion().split(".")[0] ?? "", 10);
+  return Number.isFinite(major) && major >= MIN_MACOS_MAJOR_FOR_ROUND;
+}
 
 // Lazy so importing the module on non-darwin is free.
 interface Bindings {
@@ -24,6 +43,8 @@ interface Bindings {
   msgSend_pd: (obj: bigint, sel: bigint, arg: number) => void;
   msgSend_ppp: (obj: bigint, sel: bigint, arg: bigint) => void;
   msgSend_pdd: (obj: bigint, sel: bigint, a: number, b: number) => bigint;
+  msgSend_pp_long: (obj: bigint, sel: bigint) => number;
+  msgSend_pp_ulong: (obj: bigint, sel: bigint) => bigint;
 }
 
 let bindings: Bindings | null = null;
@@ -44,34 +65,36 @@ function load(): Bindings | null {
   // the same symbol multiple times is fine; each returns an independent
   // binding.
   bindings = {
-    sel_registerName: objc.func("sel_registerName", "intptr_t", [
-      "const char*",
-    ]),
+    sel_registerName: objc.func("sel_registerName", "intptr_t", ["const char*"]),
     objc_getClass: objc.func("objc_getClass", "intptr_t", ["const char*"]),
     msgSend_pp: objc.func("objc_msgSend", "intptr_t", ["intptr_t", "intptr_t"]),
-    msgSend_pb: objc.func("objc_msgSend", "void", [
-      "intptr_t",
-      "intptr_t",
-      "bool",
-    ]),
-    msgSend_pd: objc.func("objc_msgSend", "void", [
-      "intptr_t",
-      "intptr_t",
-      "double",
-    ]),
-    msgSend_ppp: objc.func("objc_msgSend", "void", [
-      "intptr_t",
-      "intptr_t",
-      "intptr_t",
-    ]),
+    msgSend_pb: objc.func("objc_msgSend", "void", ["intptr_t", "intptr_t", "bool"]),
+    msgSend_pd: objc.func("objc_msgSend", "void", ["intptr_t", "intptr_t", "double"]),
+    msgSend_ppp: objc.func("objc_msgSend", "void", ["intptr_t", "intptr_t", "intptr_t"]),
     msgSend_pdd: objc.func("objc_msgSend", "intptr_t", [
       "intptr_t",
       "intptr_t",
       "double",
       "double",
     ]),
+    msgSend_pp_long: objc.func("objc_msgSend", "long", ["intptr_t", "intptr_t"]),
+    msgSend_pp_ulong: objc.func("objc_msgSend", "uint64", ["intptr_t", "intptr_t"]),
   };
   return bindings;
+}
+
+export function debugMacWindowState(win: BrowserWindow): {
+  level: number;
+  collectionBehavior: string;
+} | null {
+  const b = load();
+  if (!b) return null;
+  const contentView = readPointer(win.getNativeWindowHandle());
+  const nsWindow = b.msgSend_pp(contentView, b.sel_registerName("window"));
+  if (!nsWindow) return null;
+  const level = Number(b.msgSend_pp_long(nsWindow, b.sel_registerName("level")));
+  const cb = b.msgSend_pp_ulong(nsWindow, b.sel_registerName("collectionBehavior"));
+  return { level, collectionBehavior: `0x${cb.toString(16)}` };
 }
 
 function readPointer(buf: Buffer): bigint {
@@ -89,11 +112,8 @@ export interface MacBorder {
   alpha: number;
 }
 
-export function setMacCornerRadius(
-  win: BrowserWindow,
-  radius: number,
-  border?: MacBorder,
-): void {
+export function setMacCornerRadius(win: BrowserWindow, radius: number, border?: MacBorder): void {
+  if (!supportsRoundedWindowFrame()) return;
   const b = load();
   if (!b) return;
 
@@ -110,11 +130,7 @@ export function setMacCornerRadius(
     b.msgSend_pb(nsWindow, b.sel_registerName("setOpaque:"), false);
     const nsColor = b.objc_getClass("NSColor");
     const clearColor = b.msgSend_pp(nsColor, b.sel_registerName("clearColor"));
-    b.msgSend_ppp(
-      nsWindow,
-      b.sel_registerName("setBackgroundColor:"),
-      clearColor,
-    );
+    b.msgSend_ppp(nsWindow, b.sel_registerName("setBackgroundColor:"), clearColor);
   }
 
   b.msgSend_pb(contentView, b.sel_registerName("setWantsLayer:"), true);

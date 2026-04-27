@@ -5,11 +5,25 @@
 // arriving partial PUT can't wipe state a newer one already wrote.
 
 import { z } from "zod";
-import type { AgentSessionRow } from "@slashtalk/shared";
 import * as db from "./db.ts";
 import { log } from "./server.ts";
 
 const LIST_LIMIT = 50;
+
+interface LegacyAgentSessionRow {
+  user_login: string;
+  agent_id: string;
+  session_id: string;
+  mode: "cloud" | "local";
+  visibility: "private" | "team";
+  name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  last_activity: string;
+  summary: string | null;
+  summary_model: string | null;
+  summary_ts: string | null;
+}
 
 const IsoDate = z.string().datetime();
 
@@ -30,10 +44,7 @@ const UpsertBody = z.object({
   summary_ts: IsoDate.optional(),
 });
 
-export async function handleUpsert(
-  req: Request,
-  userId: string,
-): Promise<Response> {
+export async function handleUpsert(req: Request, userId: string): Promise<Response> {
   let raw: unknown;
   try {
     raw = await req.json();
@@ -43,10 +54,7 @@ export async function handleUpsert(
 
   const parsed = UpsertBody.safeParse(raw);
   if (!parsed.success) {
-    return json(
-      { error: "invalid_body", detail: parsed.error.flatten() },
-      400,
-    );
+    return json({ error: "invalid_body", detail: parsed.error.flatten() }, 400);
   }
   const b = parsed.data;
   const now = new Date().toISOString();
@@ -90,10 +98,7 @@ export async function handleUpsert(
   return json({ ok: true }, 200);
 }
 
-export async function handleList(
-  url: URL,
-  userId: string,
-): Promise<Response> {
+export async function handleList(url: URL, userId: string): Promise<Response> {
   // Default to self when no user_login is given. Later we'll gate cross-user
   // reads on team membership; for now any signed-in user can query any login,
   // but only visibility='team' rows exist in the DB so there's nothing to
@@ -103,7 +108,7 @@ export async function handleList(
 
   const sql = db.sql();
   const rows = agentId
-    ? await sql<AgentSessionRow[]>`
+    ? await sql<LegacyAgentSessionRow[]>`
         select
           user_login, agent_id, session_id, mode, visibility, name,
           started_at, ended_at, last_activity,
@@ -113,7 +118,7 @@ export async function handleList(
         order by started_at desc
         limit ${LIST_LIMIT}
       `
-    : await sql<AgentSessionRow[]>`
+    : await sql<LegacyAgentSessionRow[]>`
         select
           user_login, agent_id, session_id, mode, visibility, name,
           started_at, ended_at, last_activity,

@@ -6,15 +6,13 @@ import type {
   ToolUseBlock,
 } from "@anthropic-ai/sdk/resources/messages";
 import { eq } from "drizzle-orm";
-import type {
-  ChatAssistantMessage,
-  ChatCitation,
-  ChatMessage,
-} from "@slashtalk/shared";
+import type { ChatAssistantMessage, ChatCitation, ChatMessage } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { repos, userRepos } from "../db/schema";
 import { config } from "../config";
+import { MODELS } from "../models";
 import { buildChatTools, type ChatToolDefinition } from "./tools";
+import { loadSessionCards, MAX_CARDS_PER_MESSAGE } from "./cards";
 
 const SYSTEM_PROMPT = `You are the slashtalk team-presence assistant. You answer questions about what the user's teammates are working on in Claude Code right now, using only the tools provided.
 
@@ -35,7 +33,6 @@ Citations: whenever you reference a session, append [session:<id>] after the sen
 
 Tone: concise, factual, no preamble. Do not say "I'll call the tool" — just call it and answer. If the tools return no data, say so plainly. When referring to the caller, use second person ("you are…") rather than their login.`;
 
-const MODEL = "claude-sonnet-4-6";
 const MAX_ITERATIONS = 8;
 const MAX_TOKENS = 4096;
 // Round the injected timestamp to this bucket so the caller-context cache
@@ -66,9 +63,7 @@ export interface RunChatParams {
   messages: ChatMessage[];
 }
 
-export async function runChatAgent(
-  params: RunChatParams,
-): Promise<ChatAssistantMessage> {
+export async function runChatAgent(params: RunChatParams): Promise<ChatAssistantMessage> {
   const { db, user } = params;
 
   const visibleRepos = await db
@@ -109,7 +104,7 @@ export async function runChatAgent(
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const resp = await client().messages.create({
-      model: MODEL,
+      model: MODELS.sonnet,
       max_tokens: MAX_TOKENS,
       system,
       tools: toolDefs,
@@ -125,19 +120,26 @@ export async function runChatAgent(
 
     messages.push({ role: "assistant", content: resp.content });
 
-    const toolUses = resp.content.filter(
-      (b): b is ToolUseBlock => b.type === "tool_use",
-    );
+    const toolUses = resp.content.filter((b): b is ToolUseBlock => b.type === "tool_use");
     const toolResults: ToolResultBlockParam[] = await Promise.all(
       toolUses.map((use) => runToolCall(use, byName)),
     );
     messages.push({ role: "user", content: toolResults });
   }
 
+  const citations = extractCitations(finalText);
+  const cards = await loadSessionCards(
+    db,
+    user.id,
+    citations.slice(0, MAX_CARDS_PER_MESSAGE).map((c) => c.sessionId),
+    visibleRepos.map((r) => r.id),
+  );
+
   return {
     role: "assistant",
     content: finalText,
-    citations: extractCitations(finalText),
+    citations,
+    cards,
   };
 }
 
@@ -156,9 +158,7 @@ function buildContextBlock(user: ChatCaller, repoFullNames: string[]): string {
     total === 0
       ? "Caller has no tracked repos yet — the team graph is empty."
       : `Visible repos (${total}): ${shownRepos}.`;
-  const bucketedNow = new Date(
-    Math.floor(Date.now() / TIMESTAMP_BUCKET_MS) * TIMESTAMP_BUCKET_MS,
-  );
+  const bucketedNow = new Date(Math.floor(Date.now() / TIMESTAMP_BUCKET_MS) * TIMESTAMP_BUCKET_MS);
 
   return `<caller-context>
 ${nameLine}

@@ -1,0 +1,45 @@
+Electron + electron-vite — pinned in apps/desktop/package.json.
+
+Our pattern
+-----------
+
+7 BrowserWindows, each with its own renderer entry:
+  main, overlay, info, chat, response, statusbar/trayPopup,
+  dockPlaceholder.
+See apps/desktop/AGENTS.md for the window map and roles.
+
+Build: bun run build (electron-vite)
+Package: bun run dist:mac (electron-builder)
+
+Load-bearing gotchas
+--------------------
+
+- Preload scripts are CommonJS (.cjs). Do NOT import ESM-only packages
+  from preload/ — they break the build with no obvious error.
+
+- `safeStorage` availability varies by platform (Keychain / DPAPI /
+  libsecret). Call `safeStorage.isEncryptionAvailable()` before
+  encrypt/decrypt. If false, creds are not persisted.
+
+- `macCorners.ts` uses Cocoa FFI because window vibrancy cannot be
+  clipped via CSS `border-radius`. If overlay chrome breaks on macOS,
+  check this file.
+
+- fs.watch({recursive:true}) works on macOS but NOT on Linux. The
+  desktop uploader uses its own per-directory fallback if needed.
+
+- `process.kill(pid, 0)` is a cheap liveness probe that does not signal
+  the target; used by apps/desktop/src/main/heartbeat.ts.
+
+- Tailwind v4 via @tailwindcss/vite. Single entrypoint
+  apps/desktop/src/renderer/shared/tailwind.css. Each window imports it
+  via its own styles.css.
+
+Strict tracking gate
+--------------------
+
+apps/desktop/src/main/uploader.ts — `localRepos.isPathTracked(cwd)`
+runs before every upload/heartbeat. Sessions whose cwd doesn't resolve
+under a claimed local repo NEVER ship. See core-beliefs.md #6.
+
+Upstream: https://www.electronjs.org

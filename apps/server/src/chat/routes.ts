@@ -2,9 +2,11 @@ import { Elysia, t } from "elysia";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
 import { runChatAgent } from "./runner";
+import { generateGerunds } from "./gerund";
 
 const MAX_MESSAGES = 20;
 const MAX_CONTENT_CHARS = 8000;
+const MAX_GERUND_PROMPT_CHARS = 2000;
 
 export const chatRoutes = (db: Database) =>
   new Elysia({ name: "chat", prefix: "/api/chat" })
@@ -73,6 +75,25 @@ export const chatRoutes = (db: Database) =>
               }),
             ]),
           ),
+        }),
+      },
+    )
+    .post(
+      "/gerund",
+      async ({ body, set }) => {
+        const prompt = body.prompt.slice(0, MAX_GERUND_PROMPT_CHARS);
+        try {
+          const words = await generateGerunds(prompt);
+          return { words };
+        } catch (err) {
+          console.error("[chat] /api/chat/gerund failed:", err);
+          set.status = 500;
+          return { error: "gerund request failed" };
+        }
+      },
+      {
+        body: t.Object({
+          prompt: t.String(),
         }),
       },
     );

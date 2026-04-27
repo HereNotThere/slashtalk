@@ -4,7 +4,7 @@
 
 import * as store from "./store";
 import { createEmitter } from "./emitter";
-import type { AgentMode, AgentVisibility } from "../shared/types";
+import type { AgentMode, AgentVisibility, McpServerInput } from "../shared/types";
 
 export interface SessionTokens {
   input: number;
@@ -19,6 +19,11 @@ export interface LocalSession {
   /** Sum of model-request usage across this session. Populated either by
    *  streaming (span.model_request_end events) or a one-time backfill scan. */
   tokens?: SessionTokens;
+  /** Local agents only. The Claude Agent SDK assigns its own session_id on
+   *  the first turn; we capture and persist it so subsequent sends can
+   *  `resume` the same SDK session across app restarts. Cloud sessions reuse
+   *  `id` directly and don't set this. */
+  sdkSessionId?: string;
 }
 
 export interface LocalAgent {
@@ -42,6 +47,9 @@ export interface LocalAgent {
   /** Whether this agent's sessions flow to the chatheads backend as pointers
    *  + client-generated summaries. Undefined treated as 'private'. */
   visibility?: AgentVisibility;
+  /** User-added MCP servers for cloud agents. The built-in Slashtalk MCP is
+   *  derived at create/update time and intentionally not stored here. */
+  mcpServers?: McpServerInput[];
 }
 
 const AGENTS_KEY = "anthropic.agents";
@@ -79,15 +87,32 @@ export function add(a: Omit<LocalAgent, "sessions"> & { sessions?: LocalSession[
   save([...load(), { ...a, sessions: a.sessions ?? [] }]);
 }
 
+export function update(
+  id: string,
+  patch: Partial<
+    Pick<
+      LocalAgent,
+      "name" | "description" | "systemPrompt" | "model" | "cwd" | "visibility" | "mcpServers"
+    >
+  >,
+): LocalAgent | undefined {
+  let updated: LocalAgent | undefined;
+  const next = load().map((a) => {
+    if (a.id !== id) return a;
+    updated = { ...a, ...patch };
+    return updated;
+  });
+  if (updated) save(next);
+  return updated;
+}
+
 export function remove(id: string): void {
   save(load().filter((a) => a.id !== id));
 }
 
 export function setActiveSession(agentId: string, sessionId: string | null): void {
   const next = load().map((a) =>
-    a.id === agentId
-      ? { ...a, activeSessionId: sessionId ?? undefined }
-      : a,
+    a.id === agentId ? { ...a, activeSessionId: sessionId ?? undefined } : a,
   );
   save(next);
 }
@@ -108,15 +133,27 @@ export function addSession(agentId: string, session: LocalSession): void {
   save(next);
 }
 
-export function setSessionTitle(
+export function setSessionTitle(agentId: string, sessionId: string, title: string): void {
+  const next = load().map((a) => {
+    if (a.id !== agentId) return a;
+    const sessions = a.sessions.map((s) => (s.id === sessionId ? { ...s, title } : s));
+    return { ...a, sessions };
+  });
+  save(next);
+}
+
+/** Persists the SDK-assigned session id for a local session so we can
+ *  resume the same SDK conversation after an app restart. No-op if the
+ *  session no longer exists. */
+export function setSessionSdkId(
   agentId: string,
   sessionId: string,
-  title: string,
+  sdkSessionId: string,
 ): void {
   const next = load().map((a) => {
     if (a.id !== agentId) return a;
     const sessions = a.sessions.map((s) =>
-      s.id === sessionId ? { ...s, title } : s,
+      s.id === sessionId ? { ...s, sdkSessionId } : s,
     );
     return { ...a, sessions };
   });
@@ -125,11 +162,7 @@ export function setSessionTitle(
 
 /** Adds to the running token total for a live session (called on every
  *  span.model_request_end event). Initializes if not yet set. */
-export function addSessionUsage(
-  agentId: string,
-  sessionId: string,
-  delta: SessionTokens,
-): void {
+export function addSessionUsage(agentId: string, sessionId: string, delta: SessionTokens): void {
   const next = load().map((a) => {
     if (a.id !== agentId) return a;
     const sessions = a.sessions.map((s) =>
@@ -150,16 +183,10 @@ export function addSessionUsage(
 
 /** Replaces the session's token total (used by backfill, which computes the
  *  full sum in one pass). */
-export function setSessionUsage(
-  agentId: string,
-  sessionId: string,
-  total: SessionTokens,
-): void {
+export function setSessionUsage(agentId: string, sessionId: string, total: SessionTokens): void {
   const next = load().map((a) => {
     if (a.id !== agentId) return a;
-    const sessions = a.sessions.map((s) =>
-      s.id === sessionId ? { ...s, tokens: total } : s,
-    );
+    const sessions = a.sessions.map((s) => (s.id === sessionId ? { ...s, tokens: total } : s));
     return { ...a, sessions };
   });
   save(next);
@@ -177,8 +204,7 @@ export function removeSession(agentId: string, sessionId: string): void {
     return {
       ...a,
       sessions: a.sessions.filter((s) => s.id !== sessionId),
-      activeSessionId:
-        a.activeSessionId === sessionId ? undefined : a.activeSessionId,
+      activeSessionId: a.activeSessionId === sessionId ? undefined : a.activeSessionId,
     };
   });
   save(next);
@@ -205,8 +231,7 @@ export function reconcileSessions(
       };
     });
     // If the currently-active session got archived away, clear the pointer.
-    const stillActive =
-      a.activeSessionId && merged.some((s) => s.id === a.activeSessionId);
+    const stillActive = a.activeSessionId && merged.some((s) => s.id === a.activeSessionId);
     return {
       ...a,
       sessions: merged,

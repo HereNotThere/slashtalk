@@ -9,7 +9,10 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "spike:mcp-oauth": "bun run scripts/mcp-oauth-discovery-spike.ts",
+    "gen:db-schema": "bun run scripts/gen-db-schema.ts",
+    "gen:db-schema:check": "bun run scripts/gen-db-schema.ts -- --check"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.118",
@@ -17,12 +20,14 @@
     "@elysiajs/cors": "^1.3.0",
     "@elysiajs/jwt": "^1.3.0",
     "@elysiajs/openapi": "^1.3.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@slashtalk/shared": "workspace:*",
     "drizzle-orm": "^0.43.0",
     "drizzle-typebox": "^0.2.0",
     "elysia": "^1.3.0",
     "ioredis": "^5.6.0",
-    "postgres": "^3.4.0"
+    "postgres": "^3.4.0",
+    "zod": "^4"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",

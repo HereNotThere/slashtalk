@@ -18,10 +18,7 @@ export interface ToolContext {
 // capabilities, which is what coaxes MCP clients to keep a long-lived GET
 // SSE stream open — and that long-lived stream is how we get instant
 // disconnect detection via its abort signal.
-export function registerDefaultTools(
-  server: McpServer,
-  ctx: ToolContext,
-): void {
+export function registerDefaultTools(server: McpServer, ctx: ToolContext): void {
   server.registerTool(
     "share_workspace",
     {
@@ -54,9 +51,7 @@ export function registerDefaultTools(
       if (!sid) {
         return {
           isError: true,
-          content: [
-            { type: "text", text: "No session context available." },
-          ],
+          content: [{ type: "text", text: "No session context available." }],
         };
       }
       const uri = path.startsWith("file://") ? path : `file://${path}`;

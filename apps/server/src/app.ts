@@ -3,21 +3,40 @@ import { cors } from "@elysiajs/cors";
 import { openapi } from "@elysiajs/openapi";
 import type { Database } from "./db";
 import { githubAuth, cliAuth } from "./auth/github";
+import { githubAppAuth } from "./auth/github-app";
 import { ingestRoutes } from "./ingest/routes";
 import { socialRoutes } from "./social/routes";
 import { sessionRoutes } from "./sessions/routes";
 import { userRoutes, deviceReposRoutes } from "./user/routes";
+import { claimRoutes } from "./user/claim";
+import { orgsRoutes } from "./user/orgs";
 import { chatRoutes } from "./chat/routes";
+import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
+import { managedAgentSessionRoutes } from "./managed-agent-sessions/routes";
+import { mcpRoutes } from "./mcp/routes";
+import { mcpOAuthRoutes } from "./oauth/mcp";
 import { wsHandler } from "./ws/handler";
 import type { RedisBridge } from "./ws/redis-bridge";
 
 const INSTALL_SCRIPT = await Bun.file(
-  new URL("./install/install.sh", import.meta.url).pathname
+  new URL("./install/install.sh", import.meta.url).pathname,
 ).text();
 
 export function createApp(db: Database, redis: RedisBridge) {
   return new Elysia()
-    .use(cors())
+    .use(
+      cors({
+        allowedHeaders: [
+          "content-type",
+          "mcp-session-id",
+          "mcp-protocol-version",
+          "accept",
+          "authorization",
+          "cookie",
+        ],
+        exposeHeaders: ["mcp-session-id", "www-authenticate"],
+      }),
+    )
     .use(openapi())
     .get("/health", () => ({ status: "ok" }))
     .get("/install.sh", ({ set }) => {
@@ -25,12 +44,20 @@ export function createApp(db: Database, redis: RedisBridge) {
       return INSTALL_SCRIPT;
     })
     .use(githubAuth(db))
+    .use(githubAppAuth(db))
     .use(cliAuth(db))
     .use(ingestRoutes(db, redis))
     .use(socialRoutes(db))
     .use(sessionRoutes(db))
     .use(userRoutes(db))
+    .use(claimRoutes(db))
+    .use(orgsRoutes(db))
     .use(deviceReposRoutes(db))
     .use(chatRoutes(db))
+    .use(managedAgentSessionRoutes(db))
+    .use(mcpOAuthRoutes(db))
+    .use(mcpRoutes())
+    .use(spotifyPresenceRoutes(db, redis))
+    .use(presenceReadRoutes(db, redis))
     .use(wsHandler(db, redis));
 }

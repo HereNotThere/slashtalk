@@ -118,10 +118,7 @@ async function pollUser(
       },
     );
   } catch (err) {
-    console.warn(
-      `[pr-poller] ${u.githubLogin}: fetch failed:`,
-      (err as Error).message,
-    );
+    console.warn(`[pr-poller] ${u.githubLogin}: fetch failed:`, (err as Error).message);
     return;
   }
 
@@ -419,11 +416,7 @@ export function toPrMessage(ev: GithubEvent): PrActivityMessage | null {
   };
 }
 
-async function fanOut(
-  db: Database,
-  redis: RedisBridge,
-  msg: PrActivityMessage,
-): Promise<void> {
+async function fanOut(db: Database, redis: RedisBridge, msg: PrActivityMessage): Promise<void> {
   // Match the event's repo to a claimed repos row. Without that we have no
   // channel to publish on — silently skip (we're the only writer).
   const [row] = await db
@@ -432,7 +425,7 @@ async function fanOut(
     .where(eqLower(repos.fullName, msg.repoFullName))
     .limit(1);
   if (!row) return;
-  await redis.publish(`repo:${row.id}`, msg);
+  void redis.publish(`repo:${row.id}`, msg);
 }
 
 // Case-insensitive full-name match (GitHub treats "Foo/Bar" === "foo/bar").

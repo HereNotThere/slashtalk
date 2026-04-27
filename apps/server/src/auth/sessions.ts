@@ -1,14 +1,20 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import { refreshTokens } from "../db/schema";
+import { apiKeys, oauthTokens, refreshTokens, users } from "../db/schema";
+import { authAudit } from "./audit";
 import { hashToken } from "./tokens";
 
 export const JWT_TTL_SECONDS = 60 * 60; // 1 hour
 export const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
 interface JwtSigner {
-  sign: (payload: { sub: string; exp: number }) => Promise<string>;
+  sign: (payload: {
+    sub: string;
+    exp: number;
+    iat: true;
+    sessionIssuedAt: number;
+  }) => Promise<string>;
 }
 
 export async function issueSessionTokens(
@@ -16,9 +22,12 @@ export async function issueSessionTokens(
   jwt: JwtSigner,
   userId: number,
 ): Promise<{ jwt: string; refreshToken: string }> {
+  const now = Date.now();
   const token = await jwt.sign({
     sub: String(userId),
-    exp: Math.floor(Date.now() / 1000) + JWT_TTL_SECONDS,
+    exp: Math.floor(now / 1000) + JWT_TTL_SECONDS,
+    iat: true,
+    sessionIssuedAt: now,
   });
   const refreshToken = crypto.randomUUID();
   await db.insert(refreshTokens).values({
@@ -41,21 +50,66 @@ export async function rotateSessionTokens(
   presented: string,
 ): Promise<{ jwt: string; refreshToken: string; userId: number } | null> {
   const hash = await hashToken(presented);
-  const [rt] = await db
-    .delete(refreshTokens)
-    .where(eq(refreshTokens.tokenHash, hash))
-    .returning();
+  const [rt] = await db.delete(refreshTokens).where(eq(refreshTokens.tokenHash, hash)).returning();
   if (!rt || rt.expiresAt < new Date()) return null;
   const issued = await issueSessionTokens(db, jwt, rt.userId);
   return { ...issued, userId: rt.userId };
 }
 
-export async function revokeRefreshToken(
-  db: Database,
-  presented: string,
-): Promise<void> {
+export async function revokeRefreshToken(db: Database, presented: string): Promise<void> {
   const hash = await hashToken(presented);
-  await db.delete(refreshTokens).where(eq(refreshTokens.tokenHash, hash));
+  const [revoked] = await db
+    .delete(refreshTokens)
+    .where(eq(refreshTokens.tokenHash, hash))
+    .returning();
+  if (revoked) {
+    authAudit("refresh_token_revoked", {
+      userId: revoked.userId,
+      scope: "single",
+    });
+  }
+}
+
+export async function revokeAllUserCredentials(
+  db: Database,
+  userId: number,
+  reason: "sign_out_everywhere" | "github_grant_revoked",
+): Promise<void> {
+  const counts = await db.transaction(async (tx) => {
+    const revokedAt = new Date();
+    await tx
+      .update(users)
+      .set({ credentialsRevokedAt: revokedAt, updatedAt: revokedAt })
+      .where(eq(users.id, userId));
+    const refreshRows = await tx
+      .delete(refreshTokens)
+      .where(eq(refreshTokens.userId, userId))
+      .returning({ id: refreshTokens.id });
+    const apiKeyRows = await tx
+      .delete(apiKeys)
+      .where(eq(apiKeys.userId, userId))
+      .returning({ id: apiKeys.id });
+    const oauthRows = await tx
+      .update(oauthTokens)
+      .set({ revokedAt })
+      .where(and(eq(oauthTokens.userId, userId), isNull(oauthTokens.revokedAt)))
+      .returning({ id: oauthTokens.id });
+
+    return {
+      refreshTokens: refreshRows.length,
+      deviceApiKeys: apiKeyRows.length,
+      mcpOauthTokens: oauthRows.length,
+    };
+  });
+
+  authAudit("credentials_revoked", {
+    userId,
+    scope: "global",
+    reason,
+    refreshTokens: counts.refreshTokens,
+    deviceApiKeys: counts.deviceApiKeys,
+    mcpOauthTokens: counts.mcpOauthTokens,
+  });
 }
 
 /**

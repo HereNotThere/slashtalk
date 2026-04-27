@@ -40,8 +40,50 @@
     {
       "idx": 5,
       "version": "7",
-      "when": 1777039050717,
-      "tag": "0005_sharp_valkyrie",
+      "when": 1777122627135,
+      "tag": "0005_tricky_rhino",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777133397427,
+      "tag": "0006_damp_longshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777135165823,
+      "tag": "0007_messy_lockheed",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777142158601,
+      "tag": "0008_workable_virginia_dare",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777149303522,
+      "tag": "0009_chubby_freak",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777219200003,
+      "tag": "0010_repair_skipped_production_migrations",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777315132529,
+      "tag": "0011_fluffy_paper_doll",
       "breakpoints": true
     }
   ]

@@ -1,15 +1,8 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
-import { useProjects } from "../shared/useProjects";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
-import { CloseIcon, SearchIcon } from "../shared/icons";
+import { MagnifyingGlassIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 const DRAG_THRESHOLD = 4;
 const REORDER_ANIM_MS = 280;
@@ -25,6 +18,17 @@ const SPARK_DISTANCE_PX = 28;
 // hovers; leave-delay gives the cursor time to reach the info panel (whose
 // own hover handlers then cancel the scheduled hide in main).
 const HOVER_SHOW_DELAY_MS = 80;
+
+// Peers idle past this threshold collapse into a hover-expanding stack.
+const INACTIVE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+// Bubble (45px) + py-[7px] padding both sides = 59px main-axis stride per wrapper.
+const STACK_WRAPPER_PX = 59;
+// How much of each collapsed stack item peeks past the previous one. Smaller =
+// tighter stack. The bubble visible portion is roughly this much (zero would
+// fully hide everything past the first bubble).
+const STACK_PEEK_PX = 8;
+// Negative margin needed to overlap wrappers down to the peek.
+const STACK_COLLAPSED_OVERLAP_PX = STACK_WRAPPER_PX - STACK_PEEK_PX;
 
 // Compact "time since" — "now" / "5m" / "3h" / "2d".
 function formatAge(ms: number): string {
@@ -45,7 +49,6 @@ function formatAge(ms: number): string {
 //   main, with a short enter delay and a longer leave grace (main-side).
 export function App(): JSX.Element {
   const heads = useHeads();
-  const projects = useProjects();
   const stackRef = useRef<HTMLDivElement>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [dock, setDock] = useState<DockConfig>({
@@ -53,6 +56,13 @@ export function App(): JSX.Element {
     side: "end",
   });
   const hoverShowTimer = useRef<number | null>(null);
+  const [stackExpanded, setStackExpanded] = useState(false);
+  const [infoOpenHeadId, setInfoOpenHeadId] = useState<string | null>(null);
+  // Mirror main's default (`getRailCollapseInactive` returns true unless the
+  // user opted out). Matching here avoids a false→true flip on first paint
+  // when settings load asynchronously, which read as an expand/collapse yoyo.
+  const [collapseInactive, setCollapseInactive] = useState(true);
+  const [showActivityTimestamps, setShowActivityTimestamps] = useState(true);
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   // FLIP "previous position" cache, keyed on id. We store the main-axis coord
   // (top for vertical rail, left for horizontal) so a reorder that moves a
@@ -110,7 +120,7 @@ export function App(): JSX.Element {
 
     prevPos.current = newPos;
     prevIds.current = new Set(bubbleRefs.current.keys());
-  }, [heads, projects, replayToken, isHorizontal]);
+  }, [heads, replayToken, isHorizontal]);
 
   useEffect(() => {
     return window.chatheads.onOverlayConfig((cfg) => {
@@ -140,16 +150,51 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    return window.chatheads.onInfoState(({ visible, headId }) => {
+      setInfoOpenHeadId(visible ? headId : null);
+    });
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.rail.getCollapseInactive().then((v) => {
+      if (alive) setCollapseInactive(v);
+    });
+    const off = window.chatheads.rail.onCollapseInactiveChange((v) => setCollapseInactive(v));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.rail.getShowActivityTimestamps().then((v) => {
+      if (alive) setShowActivityTimestamps(v);
+    });
+    const off = window.chatheads.rail.onShowActivityTimestampsChange((v) =>
+      setShowActivityTimestamps(v),
+    );
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  useEffect(() => {
     let downPos: { x: number; y: number } | null = null;
-    let downIsChat = false;
+    let downAction: "search" | "create" | null = null;
     let dragging = false;
 
     const onDown = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       downPos = { x: e.screenX, y: e.screenY };
-      const target =
-        e.target instanceof Element ? e.target.closest("[data-bubble]") : null;
-      downIsChat = target?.hasAttribute("data-chat") ?? false;
+      const target = e.target instanceof Element ? e.target.closest("[data-bubble]") : null;
+      downAction = target?.hasAttribute("data-search")
+        ? "search"
+        : target?.hasAttribute("data-create")
+          ? "create"
+          : null;
       dragging = false;
     };
 
@@ -166,16 +211,17 @@ export function App(): JSX.Element {
     const onUp = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       if (dragging) void window.chatheads.dragEnd();
-      else if (downIsChat) void window.chatheads.toggleChat();
+      else if (downAction === "search") void window.chatheads.toggleChat();
+      else if (downAction === "create") void window.chatheads.openAgentCreator();
       downPos = null;
-      downIsChat = false;
+      downAction = null;
       dragging = false;
     };
 
     const onBlur = (): void => {
       if (dragging) void window.chatheads.dragEnd();
       downPos = null;
-      downIsChat = false;
+      downAction = null;
       dragging = false;
     };
 
@@ -191,10 +237,7 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  const hoverEnterBubble = (
-    headId: string,
-    bubbleScreen: { x: number; y: number },
-  ): void => {
+  const hoverEnterBubble = (headId: string, bubbleScreen: { x: number; y: number }): void => {
     if (hoverShowTimer.current != null) {
       window.clearTimeout(hoverShowTimer.current);
     }
@@ -215,42 +258,100 @@ export function App(): JSX.Element {
     void window.chatheads.infoHoverLeave();
   };
 
-  const registerBubble = (id: string) => (el: HTMLDivElement | null): void => {
-    if (el) bubbleRefs.current.set(id, el);
-    else bubbleRefs.current.delete(id);
-  };
+  const registerBubble =
+    (id: string) =>
+    (el: HTMLDivElement | null): void => {
+      if (el) bubbleRefs.current.set(id, el);
+      else bubbleRefs.current.delete(id);
+    };
 
-  const handleBubbleEnter = (
-    headId: string,
-    e: React.MouseEvent<HTMLDivElement>,
-  ): void => {
-    const rect = e.currentTarget.getBoundingClientRect();
+  const handleBubbleEnter = (headId: string, e: React.MouseEvent<HTMLDivElement>): void => {
+    // The wrapper has padding around the bubble; report the inner bubble's
+    // rect so the info window anchors to the avatar, not the padding box.
+    const inner = e.currentTarget.querySelector<HTMLElement>("[data-bubble]");
+    const rect = (inner ?? e.currentTarget).getBoundingClientRect();
     const screenX = Math.round(rect.left + window.screenX);
     const screenY = Math.round(rect.top + window.screenY);
     hoverEnterBubble(headId, { x: screenX, y: screenY });
   };
 
   const self = heads[0];
-  const peers = heads.slice(1);
+  const allPeers = heads.slice(1);
+  const now = Date.now();
+  // Inactivity is a property of the peer's last action — independent of the
+  // tray toggle. The toggle only controls whether inactive peers get split
+  // into a stack; the pale ("bleak") treatment follows them regardless.
+  const isPeerInactive = (h: ChatHead): boolean => {
+    if (h.live === true) return false;
+    if (h.lastActionAt == null) return true;
+    return now - h.lastActionAt > INACTIVE_THRESHOLD_MS;
+  };
+  const shouldStack = (h: ChatHead): boolean => collapseInactive && isPeerInactive(h);
+  const activePeers = allPeers.filter((h) => !shouldStack(h));
+  const inactivePeers = allPeers.filter(shouldStack);
+  const stackPinnedByInfo =
+    infoOpenHeadId != null && inactivePeers.some((p) => p.id === infoOpenHeadId);
+  const stackVisuallyExpanded = stackExpanded || stackPinnedByInfo;
+
+  // Tell main how tall (vertical) / wide (horizontal) the rail wants to be so
+  // the BrowserWindow can grow/shrink with the inactive-stack expand/collapse.
+  // The constants here mirror the layout below — keep in sync. Main applies
+  // the value with `setBounds(animate=true)` so the window animation runs in
+  // parallel with the renderer's margin transition.
+  //
+  // Skip reporting until heads are populated. `useHeads` starts at [] and
+  // resolves async, so a first effect with empty heads would report a tiny
+  // length and shrink the window before the real data arrives — read as a
+  // collapse/expand yoyo on first open. Main closes the overlay outright
+  // when heads are genuinely empty, so this gate is safe.
+  const headsLoaded = heads.length > 0;
+  const activeCount = activePeers.length;
+  const inactiveCount = inactivePeers.length;
+  useEffect(() => {
+    if (!headsLoaded) return;
+    const RAIL_OUTER_PAD_PX = 16; // py-4 / px-4 main-axis padding on the rail
+    const wrapperCount = 3 + activeCount; // search + self + active + create
+    let length = wrapperCount * STACK_WRAPPER_PX;
+    if (inactiveCount > 0) {
+      length += stackVisuallyExpanded
+        ? inactiveCount * STACK_WRAPPER_PX
+        : STACK_WRAPPER_PX + (inactiveCount - 1) * STACK_PEEK_PX;
+    }
+    length += RAIL_OUTER_PAD_PX * 2;
+    void window.chatheads.setOverlayLength(length);
+  }, [headsLoaded, activeCount, inactiveCount, stackVisuallyExpanded]);
 
   // Outer fills the window exactly along the rail's main axis (height for
   // vertical, width for horizontal). Self + chat are shrink-0; the peer list
   // is a flex-1 scroll container that takes whatever's left. Using flex sizing
   // instead of fixed maxs avoids sub-pixel rounding that otherwise clipped the
   // last peer by 1-2px and left a scroll stub.
+  //
+  // Spacing between adjacent bubbles is per-bubble padding (7px each side, so
+  // the gap reads as 14px between bubbles) rather than container `gap`. This
+  // makes adjacent wrappers touch — the cursor never crosses an empty area
+  // between bubbles, which was causing the hover/info-card to flicker.
+  // Cross-axis padding lives on each bubble wrapper (not the rail container)
+  // so the hit area extends to the window edge — moving the cursor near the
+  // edge still triggers the bubble's hover. Main-axis padding (`py-4`) stays
+  // on the rail so first/last bubbles get breathing room above/below.
   const stackClass = isHorizontal
-    ? "flex flex-row items-center gap-[14px] px-lg py-md box-border w-screen"
-    : "flex flex-col items-center gap-[14px] px-md py-lg box-border h-screen";
+    ? "flex flex-row items-center px-4 box-border w-screen"
+    : "flex flex-col items-center py-4 box-border h-screen";
   const peersClass = isHorizontal
-    ? "h-full flex-1 min-w-0 flex flex-row items-center gap-[14px] overflow-x-auto overflow-y-hidden no-scrollbar"
-    : "w-full flex-1 min-h-0 flex flex-col items-center gap-[14px] overflow-y-auto overflow-x-hidden no-scrollbar";
+    ? "h-full flex-1 min-w-0 flex flex-row items-center overflow-x-auto overflow-y-hidden no-scrollbar"
+    : "w-full flex-1 min-h-0 flex flex-col items-center overflow-y-auto overflow-x-hidden no-scrollbar";
+  const bubblePadClass = isHorizontal ? "shrink-0 px-[7px] py-3" : "shrink-0 py-[7px] px-3";
   return (
     <div ref={stackRef} className={stackClass}>
+      <div className={bubblePadClass}>
+        <SearchBubble open={chatOpen} />
+      </div>
       {self && (
         <div
           key={self.id}
           ref={registerBubble(self.id)}
-          className="shrink-0"
+          className={bubblePadClass}
           onMouseEnter={(e) => handleBubbleEnter(self.id, e)}
           onMouseLeave={hoverLeaveBubble}
         >
@@ -258,16 +359,17 @@ export function App(): JSX.Element {
             head={self}
             onHoverEnter={() => {}}
             onHoverLeave={() => {}}
+            hideAge={!showActivityTimestamps}
           />
         </div>
       )}
-      {(peers.length > 0 || projects.length > 0) && (
+      {(activePeers.length > 0 || inactivePeers.length > 0) && (
         <div className={peersClass}>
-          {peers.map((h) => (
+          {activePeers.map((h) => (
             <div
               key={h.id}
               ref={registerBubble(h.id)}
-              className="shrink-0"
+              className={bubblePadClass}
               onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
               onMouseLeave={hoverLeaveBubble}
             >
@@ -275,82 +377,114 @@ export function App(): JSX.Element {
                 head={h}
                 onHoverEnter={() => {}}
                 onHoverLeave={() => {}}
+                pale={isPeerInactive(h)}
+                hideAge={!showActivityTimestamps}
               />
             </div>
           ))}
-          {peers.length > 0 && projects.length > 0 && (
-            <RailSeparator horizontal={isHorizontal} />
+          {inactivePeers.length > 0 && (
+            <div
+              className={`flex items-center shrink-0 ${isHorizontal ? "flex-row" : "flex-col"}`}
+              onMouseEnter={() => setStackExpanded(true)}
+              onMouseLeave={() => setStackExpanded(false)}
+            >
+              {inactivePeers.map((h, i) => {
+                // Each wrapper is STACK_WRAPPER_PX on the main axis.
+                // Expanded margin 0 → wrappers touch, bubbles are 14px apart
+                // via padding. Collapsed margin -STACK_COLLAPSED_OVERLAP_PX
+                // → wrappers overlap so each bubble peeks STACK_PEEK_PX
+                // past the previous.
+                const offset =
+                  i === 0 ? 0 : stackVisuallyExpanded ? 0 : -STACK_COLLAPSED_OVERLAP_PX;
+                const style: CSSProperties = {
+                  zIndex: inactivePeers.length - i,
+                  transition:
+                    "margin 280ms cubic-bezier(.2,.7,.2,1), filter 280ms cubic-bezier(.2,.7,.2,1)",
+                  transitionDelay: `${i * 20}ms`,
+                  // Drop a small shadow on each stacked bubble while collapsed
+                  // so the layered cards effect reads visually. drop-shadow
+                  // follows the bubble's alpha shape (the 45px circle), not
+                  // the wrapper's box. Skip the first (nothing peeks past it
+                  // — would just halo the top) and the last (no bubble below
+                  // it; the shadow would float out into empty space).
+                  filter:
+                    !stackVisuallyExpanded && i < inactivePeers.length - 1
+                      ? "drop-shadow(0 1px 0px rgba(255,255,255,0.15))"
+                      : undefined,
+                  ...(isHorizontal ? { marginLeft: offset } : { marginTop: offset }),
+                };
+                // Intentionally not registered in bubbleRefs: FLIP would
+                // overwrite el.style.transition on enter/reorder and kill the
+                // stack expand/collapse animation. Stacked peers overlap each
+                // other anyway, so reorder animations would be invisible.
+                return (
+                  <div
+                    key={h.id}
+                    onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
+                    onMouseLeave={hoverLeaveBubble}
+                    style={style}
+                    className={bubblePadClass}
+                  >
+                    <Bubble
+                      head={h}
+                      onHoverEnter={() => {}}
+                      onHoverLeave={() => {}}
+                      hideAge={!showActivityTimestamps || !stackVisuallyExpanded}
+                      pale
+                    />
+                  </div>
+                );
+              })}
+            </div>
           )}
-          {projects.map((h) => (
-            <div
-              key={h.id}
-              ref={registerBubble(h.id)}
-              className="shrink-0"
-              onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
-              onMouseLeave={hoverLeaveBubble}
-            >
-              <Bubble
-                head={h}
-                onHoverEnter={() => {}}
-                onHoverLeave={() => {}}
-              />
-            </div>
-          ))}
         </div>
       )}
-      <ChatBubble open={chatOpen} />
-    </div>
-  );
-}
-
-// Divider between the teammate row and the project row. Takes one extra
-// SPACING-row worth of space along the rail's main axis (the flex `gap` adds
-// 14px on each side of the 1px line); matches the SEPARATOR_EXTRA reserved in
-// the main-process overlay-size formula.
-function RailSeparator({
-  horizontal,
-}: {
-  horizontal: boolean;
-}): JSX.Element {
-  if (horizontal) {
-    return (
-      <div
-        className="h-full shrink-0 flex items-center justify-center"
-        style={{ width: 1 }}
-        aria-hidden
-      >
-        <div className="h-[60%] w-px bg-white/20 rounded-full" />
+      <div className={bubblePadClass}>
+        <CreateBubble />
       </div>
-    );
-  }
-  return (
-    <div
-      className="w-full shrink-0 flex items-center justify-center"
-      style={{ height: 1 }}
-      aria-hidden
-    >
-      <div className="w-[60%] h-px bg-white/20 rounded-full" />
     </div>
   );
 }
 
-function ChatBubble({ open }: { open: boolean }): JSX.Element {
+function SearchBubble({ open }: { open: boolean }): JSX.Element {
   return (
     <div
       data-bubble
-      data-chat
-      title={open ? "Close" : "Ask your team"}
+      data-search
+      title={open ? "Close search" : "Search your team"}
       className="
-        relative w-[45px] h-[45px] rounded-full cursor-pointer
+        relative w-11.25 h-11.25 rounded-full cursor-pointer
         flex items-center justify-center
         bg-black/15 text-white
-        outline outline-1 -outline-offset-1 outline-bubble-outline
+        outline-1 -outline-offset-1 outline-bubble-outline
         transition-transform duration-150 ease-out
         hover:scale-[1.03] hover:bg-black/20
       "
     >
-      <div className="pointer-events-none scale-125">
-        {open ? <CloseIcon /> : <SearchIcon />}
+      <div className="pointer-events-none">
+        {open ? <XMarkIcon className="w-5 h-5" /> : <MagnifyingGlassIcon className="w-5 h-5" />}
+      </div>
+    </div>
+  );
+}
+
+function CreateBubble(): JSX.Element {
+  return (
+    <div
+      data-bubble
+      data-create
+      title="Create an agent"
+      className="
+        relative w-11.25 h-11.25 rounded-full cursor-pointer
+        flex items-center justify-center
+        bg-black/15 text-white
+        outline-1 -outline-offset-1 outline-bubble-outline
+        transition-transform duration-150 ease-out
+        hover:scale-[1.03] hover:bg-black/20
+      "
+    >
+      <div className="pointer-events-none">
+        <PlusIcon className="w-5 h-5" />
       </div>
     </div>
   );
@@ -360,10 +494,14 @@ function Bubble({
   head,
   onHoverEnter,
   onHoverLeave,
+  hideAge = false,
+  pale = false,
 }: {
   head: ChatHead;
   onHoverEnter: () => void;
   onHoverLeave: () => void;
+  hideAge?: boolean;
+  pale?: boolean;
 }): JSX.Element {
   useActivityBadgeUpdate(head.lastActionAt ?? null);
   const celebrating = usePrCelebration(head.prActivityAt ?? null);
@@ -379,12 +517,15 @@ function Bubble({
       title={head.label}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={onHoverLeave}
+      style={{
+        transition: "transform 150ms ease-out, filter 280ms cubic-bezier(.2,.7,.2,1)",
+        filter: pale ? "saturate(0.5) contrast(0.5)" : undefined,
+      }}
       className="
-        relative w-[45px] h-[45px] rounded-full cursor-pointer
+        relative w-11.25 h-11.25 rounded-full cursor-pointer
         flex items-center justify-center text-[28px]
         bg-bubble
         backdrop-blur-[18px] backdrop-saturate-[1.4]
-        transition-transform duration-150 ease-out
         hover:scale-[1.03]
       "
     >
@@ -394,9 +535,7 @@ function Bubble({
             className="absolute inset-0 rounded-full opacity-[0.28] pointer-events-none"
             style={{ background: head.tint }}
           />
-          <span className="relative z-[1] leading-none pointer-events-none">
-            {head.avatar.value}
-          </span>
+          <span className="relative z-1 leading-none pointer-events-none">{head.avatar.value}</span>
         </>
       ) : (
         <img
@@ -405,18 +544,29 @@ function Bubble({
           className="w-full h-full rounded-full object-cover pointer-events-none"
         />
       )}
-      {head.lastActionAt != null && (
+      {!hideAge && head.lastActionAt != null && !head.live && (
         <div
           className="
-            absolute bottom-0 right-0 z-[2]
-            px-1.5 py-px rounded-full
-            bg-gray-700/85 text-white text-[9px] font-light leading-none
-            border border-gray-600/60
+            absolute bottom-0 right-0 z-2
+            px-1.5 py-0.5 rounded-full
+            bg-black/30 backdrop-blur-md backdrop-saturate-[1.4]
+            text-white text-[9px] font-light leading-none
+            border border-white/10
             pointer-events-none
           "
         >
           {formatAge(Date.now() - head.lastActionAt)}
         </div>
+      )}
+      {head.live === true && (
+        <div
+          aria-hidden
+          className="
+            absolute -inset-0.5 rounded-full
+            border-2 border-primary pointer-events-none z-3
+          "
+          style={{ animation: "live-ring 1.6s ease-in-out infinite" }}
+        />
       )}
       {celebrating != null && <PrCelebration key={celebrating} />}
     </div>

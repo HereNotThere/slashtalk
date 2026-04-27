@@ -35,23 +35,18 @@ export function mockGitHubAuth(): () => void {
 
   globalThis.fetch = async (
     input: string | URL | Request,
-    init?: RequestInit
+    init?: RequestInit,
   ): Promise<Response> => {
     const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
     // Mock GitHub OAuth token exchange
     if (url === "https://github.com/login/oauth/access_token") {
       const body = JSON.parse(init?.body as string);
       if (MOCK_USERS[body.code]) {
-        return new Response(
-          JSON.stringify({ access_token: `ghtoken_${body.code}` }),
-          { headers: { "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({ access_token: `ghtoken_${body.code}` }), {
+          headers: { "Content-Type": "application/json" },
+        });
       }
       return new Response(JSON.stringify({ error: "bad_verification_code" }), {
         headers: { "Content-Type": "application/json" },
@@ -82,10 +77,7 @@ export function mockGitHubAuth(): () => void {
 
 // ── Database Schema ──────────────────────────────────────────
 
-const MIGRATIONS_FOLDER = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../drizzle",
-);
+const MIGRATIONS_FOLDER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../drizzle");
 
 export async function resetDatabase() {
   await db.execute(sql`SET client_min_messages = WARNING`);
@@ -110,13 +102,15 @@ export function getCookie(res: Response, name: string): string | null {
   return null;
 }
 
-export function makeEvent(overrides: Partial<{
-  uuid: string;
-  type: string;
-  timestamp: string;
-  sessionId: string;
-  parentUuid: string | null;
-}> = {}) {
+export function makeEvent(
+  overrides: Partial<{
+    uuid: string;
+    type: string;
+    timestamp: string;
+    sessionId: string;
+    parentUuid: string | null;
+  }> = {},
+) {
   return {
     uuid: overrides.uuid ?? crypto.randomUUID(),
     type: overrides.type ?? "user",

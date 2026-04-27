@@ -10,9 +10,10 @@ import {
 
 type FetchCall = { url: string };
 
-function mockFetcher(
-  responses: Record<string, { ok?: boolean; body?: unknown } | Error>,
-): { fetcher: typeof fetch; calls: FetchCall[] } {
+function mockFetcher(responses: Record<string, { ok?: boolean; body?: unknown } | Error>): {
+  fetcher: typeof fetch;
+  calls: FetchCall[];
+} {
   const calls: FetchCall[] = [];
   const fetcher = (async (input: RequestInfo | URL): Promise<Response> => {
     const url = typeof input === "string" ? input : input.toString();

@@ -6,13 +6,31 @@ import { db } from "../db";
 import { users, apiKeys, devices } from "../db/schema";
 import { hashToken } from "./tokens";
 
+type SessionJwtPayload = {
+  sub?: string | number;
+  iat?: number | boolean;
+  sessionIssuedAt?: number;
+};
+
+const authUserColumns = {
+  id: users.id,
+  githubId: users.githubId,
+  githubLogin: users.githubLogin,
+  avatarUrl: users.avatarUrl,
+  displayName: users.displayName,
+  githubToken: users.githubToken,
+  credentialsRevokedAt: users.credentialsRevokedAt,
+  createdAt: users.createdAt,
+  updatedAt: users.updatedAt,
+};
+
 /** JWT auth plugin — validates cookie-based JWT, derives `user` into context */
 export const jwtAuth = new Elysia({ name: "auth/jwt" })
   .use(
     jwt({
       name: "jwt",
       secret: config.jwtSecret,
-    })
+    }),
   )
   .derive({ as: "scoped" }, async ({ jwt, cookie: { session }, set }) => {
     const token = session?.value;
@@ -21,14 +39,14 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
       throw new Error("Unauthorized");
     }
 
-    const payload = await jwt.verify(token as string);
+    const payload = (await jwt.verify(token as string)) as false | SessionJwtPayload;
     if (!payload || !payload.sub) {
       set.status = 401;
       throw new Error("Invalid token");
     }
 
     const [user] = await db
-      .select()
+      .select(authUserColumns)
       .from(users)
       .where(eq(users.id, Number(payload.sub)))
       .limit(1);
@@ -36,6 +54,19 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
     if (!user) {
       set.status = 401;
       throw new Error("User not found");
+    }
+
+    if (user.credentialsRevokedAt) {
+      const issuedAtMs =
+        typeof payload.sessionIssuedAt === "number"
+          ? payload.sessionIssuedAt
+          : typeof payload.iat === "number"
+            ? payload.iat * 1000
+            : null;
+      if (!issuedAtMs || issuedAtMs < user.credentialsRevokedAt.getTime()) {
+        set.status = 401;
+        throw new Error("Invalid token");
+      }
     }
 
     return { user };
@@ -54,11 +85,7 @@ export const apiKeyAuth = new Elysia({ name: "auth/apiKey" }).derive(
     const key = authHeader.slice(7);
     const keyHash = await hashToken(key);
 
-    const [apiKey] = await db
-      .select()
-      .from(apiKeys)
-      .where(eq(apiKeys.keyHash, keyHash))
-      .limit(1);
+    const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash)).limit(1);
 
     if (!apiKey) {
       set.status = 401;
@@ -66,7 +93,7 @@ export const apiKeyAuth = new Elysia({ name: "auth/apiKey" }).derive(
     }
 
     const [user] = await db
-      .select()
+      .select(authUserColumns)
       .from(users)
       .where(eq(users.id, apiKey.userId))
       .limit(1);
@@ -83,11 +110,8 @@ export const apiKeyAuth = new Elysia({ name: "auth/apiKey" }).derive(
       .limit(1);
 
     // Update last_used_at
-    await db
-      .update(apiKeys)
-      .set({ lastUsedAt: new Date() })
-      .where(eq(apiKeys.id, apiKey.id));
+    await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, apiKey.id));
 
     return { user, device: device ?? null };
-  }
+  },
 );

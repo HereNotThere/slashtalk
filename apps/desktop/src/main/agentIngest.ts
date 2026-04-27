@@ -1,76 +1,48 @@
-// Posts managed-agent session pointers + summaries to the Slashtalk MCP backend.
-// One function, one endpoint (PUT /v1/agent_sessions). Callers gate on agent
+// Posts managed-agent session pointers + summaries to the Slashtalk backend.
+// One function, one endpoint (PUT /v1/managed-agent-sessions). Callers gate on agent
 // visibility before invoking — private agents never reach this module. Soft-
 // fails on network/auth errors so a missing backend never blocks local agent
 // usage.
 
-import type { AgentSessionRow } from "@slashtalk/shared";
-import * as backend from "./backend";
+import type { ManagedAgentSessionRow } from "@slashtalk/shared";
 import * as chatheadsAuth from "./chatheadsAuth";
+import { apiBaseUrl } from "./config";
 import type { LocalAgent } from "./agentStore";
 
-let loggedDisabled = false;
 let loggedUnauthorized = false;
-
-function isLocalUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname;
-    return host === "localhost" || host === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-
-function baseUrl(): string | null {
-  const explicit = process.env["SLASHTALK_MCP_BASE_URL"];
-  if (explicit) return explicit;
-  return isLocalUrl(backend.getBaseUrl()) ? "http://localhost:3000" : null;
-}
-
-function logDisabledOnce(): void {
-  if (loggedDisabled) return;
-  loggedDisabled = true;
-  console.log(
-    "[agentIngest] MCP disabled; set SLASHTALK_MCP_BASE_URL to enable team agent summaries",
-  );
-}
 
 function logUnauthorizedOnce(): void {
   if (loggedUnauthorized) return;
   loggedUnauthorized = true;
   console.warn(
-    "[agentIngest] MCP rejected the current apiKey; check that SLASHTALK_MCP_BASE_URL points at the same environment as SLASHTALK_API_URL",
+    "[agentIngest] server rejected the current apiKey; check that the desktop API URL points at the same environment that minted the apiKey",
   );
 }
 
 export interface UpsertSessionPayload {
-  agent_id: string;
-  session_id: string;
+  agentId: string;
+  sessionId: string;
   mode: "cloud" | "local";
   visibility: "private" | "team";
   name?: string;
-  started_at: string;
-  ended_at?: string;
-  last_activity?: string;
+  startedAt: string;
+  endedAt?: string;
+  lastActivity?: string;
   summary?: string;
-  summary_model?: string;
-  summary_ts?: string;
+  summaryModel?: string;
+  summaryTs?: string;
 }
 
 export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
   const token = chatheadsAuth.getToken();
-  const base = baseUrl();
-  if (!base) {
-    logDisabledOnce();
-    return;
-  }
+  const base = apiBaseUrl();
   if (!token) {
     // Not signed into the Slashtalk backend yet. Skip silently — teammates
     // can't see any ingest anyway, and the agent still runs locally.
     return;
   }
   try {
-    const res = await fetch(`${base}/v1/agent_sessions`, {
+    const res = await fetch(`${base}/v1/managed-agent-sessions`, {
       method: "PUT",
       headers: {
         "content-type": "application/json",
@@ -84,33 +56,27 @@ export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
         return;
       }
       const preview = await res.text().catch(() => "");
-      console.warn(
-        `[agentIngest] upsert ${res.status}: ${preview.slice(0, 200)}`,
-      );
+      console.warn(`[agentIngest] upsert ${res.status}: ${preview.slice(0, 200)}`);
     }
   } catch (err) {
     console.warn("[agentIngest] upsert failed:", err);
   }
 }
 
-/** GET /v1/agent_sessions. Empty array on any failure — the info panel
+/** GET /v1/managed-agent-sessions. Empty array on any failure — the info panel
  *  treats this as "no agent activity" which is the right fallback for
  *  network hiccups / unsigned-in state. */
 async function listSessions(params: {
   userLogin?: string;
   agentId?: string;
-}): Promise<AgentSessionRow[]> {
+}): Promise<ManagedAgentSessionRow[]> {
   const token = chatheadsAuth.getToken();
   if (!token) return [];
-  const base = baseUrl();
-  if (!base) {
-    logDisabledOnce();
-    return [];
-  }
+  const base = apiBaseUrl();
   try {
-    const url = new URL(`${base}/v1/agent_sessions`);
-    if (params.userLogin) url.searchParams.set("user_login", params.userLogin);
-    if (params.agentId) url.searchParams.set("agent_id", params.agentId);
+    const url = new URL(`${base}/v1/managed-agent-sessions`);
+    if (params.userLogin) url.searchParams.set("userLogin", params.userLogin);
+    if (params.agentId) url.searchParams.set("agentId", params.agentId);
     const res = await fetch(url, {
       method: "GET",
       headers: { authorization: `Bearer ${token}` },
@@ -121,12 +87,10 @@ async function listSessions(params: {
         return [];
       }
       const preview = await res.text().catch(() => "");
-      console.warn(
-        `[agentIngest] list ${res.status}: ${preview.slice(0, 200)}`,
-      );
+      console.warn(`[agentIngest] list ${res.status}: ${preview.slice(0, 200)}`);
       return [];
     }
-    const body = (await res.json()) as { sessions?: AgentSessionRow[] };
+    const body = (await res.json()) as { sessions?: ManagedAgentSessionRow[] };
     return body.sessions ?? [];
   } catch (err) {
     console.warn("[agentIngest] list failed:", err);
@@ -134,11 +98,11 @@ async function listSessions(params: {
   }
 }
 
-export function listForUser(userLogin: string): Promise<AgentSessionRow[]> {
+export function listForUser(userLogin: string): Promise<ManagedAgentSessionRow[]> {
   return listSessions({ userLogin });
 }
 
-export function listForAgent(agentId: string): Promise<AgentSessionRow[]> {
+export function listForAgent(agentId: string): Promise<ManagedAgentSessionRow[]> {
   return listSessions({ agentId });
 }
 
@@ -153,12 +117,12 @@ export function upsertSessionStart(
   if ((agent.visibility ?? "private") !== "team") return;
   if (agent.mode === "local") return; // local-ingest is a later commit
   void upsertSession({
-    agent_id: agent.id,
-    session_id: sessionId,
+    agentId: agent.id,
+    sessionId,
     mode: "cloud",
     visibility: "team",
     name: agent.name,
-    started_at: new Date(startedAtMs).toISOString(),
-    last_activity: new Date().toISOString(),
+    startedAt: new Date(startedAtMs).toISOString(),
+    lastActivity: new Date().toISOString(),
   });
 }

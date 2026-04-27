@@ -13,10 +13,23 @@ import {
   sessions,
 } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
+import { authAudit } from "../auth/audit";
+import {
+  githubAppConnectionStatus,
+  githubAppConnectUrl,
+  githubAppConnectUrlForUser,
+  githubAppInstallUrl,
+} from "../auth/github-app";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
+import { __clearClaimCaches } from "./claim";
+import { __clearOrgsCaches } from "./orgs";
 
-// "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
-const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
+/** Test-only: reset the GitHub-proxy caches + claim-gate state so assertions
+ *  don't bleed across cases. No production path calls this. */
+export function __clearOrgCaches(): void {
+  __clearOrgsCaches();
+  __clearClaimCaches();
+}
 
 export const userRoutes = (db: Database) =>
   new Elysia({ prefix: "/api/me", name: "user" })
@@ -43,9 +56,7 @@ export const userRoutes = (db: Database) =>
         const [device] = await db
           .select()
           .from(devices)
-          .where(
-            and(eq(devices.id, Number(params.id)), eq(devices.userId, user.id)),
-          )
+          .where(and(eq(devices.id, Number(params.id)), eq(devices.userId, user.id)))
           .limit(1);
 
         if (!device) {
@@ -55,101 +66,27 @@ export const userRoutes = (db: Database) =>
 
         await db.delete(apiKeys).where(eq(apiKeys.deviceId, device.id));
         await db.delete(devices).where(eq(devices.id, device.id));
+        authAudit("device_credentials_revoked", {
+          userId: user.id,
+          deviceId: device.id,
+          scope: "device",
+        });
 
         return { ok: true };
       },
       { params: t.Object({ id: t.String() }) },
     )
 
-    // GET /api/me/repos — list repos the user has claimed
-    .get("/repos", async ({ user }) => {
-      return await db
-        .select({
-          repoId: repos.id,
-          fullName: repos.fullName,
-          owner: repos.owner,
-          name: repos.name,
-          private: repos.private,
-          permission: userRepos.permission,
-          syncedAt: userRepos.syncedAt,
-        })
-        .from(userRepos)
-        .innerJoin(repos, eq(repos.id, userRepos.repoId))
-        .where(eq(userRepos.userId, user.id));
+    // GET /api/me/github-app/status — whether this user has linked the
+    // narrow GitHub App repo-access grant used for private repo claims.
+    .get("/github-app/status", async ({ user }) => {
+      const status = await githubAppConnectionStatus(db, user.id);
+      return {
+        ...status,
+        installUrl: status.configured ? githubAppInstallUrl() : null,
+        connectUrl: status.configured ? githubAppConnectUrlForUser(user.id) : githubAppConnectUrl(),
+      };
     })
-
-    // POST /api/me/repos — claim a repo by "owner/name". Upserts into the
-    // repos table and asserts the calling user tracks it. No GitHub API call
-    // happens here — under read-only OAuth we can't verify repo access
-    // server-side, so the client proves possession another way (e.g. the
-    // desktop app only offers repos it found via a local .git/config).
-    .post(
-      "/repos",
-      async ({ user, body, set }) => {
-        const raw = body.fullName.trim();
-        if (!FULL_NAME.test(raw)) {
-          set.status = 400;
-          return { error: "fullName must be in owner/name form" };
-        }
-        const fullName = normalizeFullName(raw);
-        const [ownerLogin, name] = fullName.split("/");
-
-        const [repo] = await db
-          .insert(repos)
-          .values({ fullName, owner: ownerLogin, name, private: body.private ?? false })
-          .onConflictDoUpdate({
-            target: repos.fullName,
-            // touch so returning() always yields the row
-            set: { owner: ownerLogin, name },
-          })
-          .returning();
-
-        await db
-          .insert(userRepos)
-          .values({
-            userId: user.id,
-            repoId: repo.id,
-            permission: "claimed",
-            syncedAt: new Date(),
-          })
-          .onConflictDoNothing({
-            target: [userRepos.userId, userRepos.repoId],
-          });
-
-        return {
-          repoId: repo.id,
-          fullName: repo.fullName,
-          owner: repo.owner,
-          name: repo.name,
-          private: repo.private ?? false,
-          permission: "claimed",
-          syncedAt: new Date().toISOString(),
-        };
-      },
-      {
-        body: t.Object({
-          fullName: t.String({ minLength: 3, maxLength: 140 }),
-          private: t.Optional(t.Boolean()),
-        }),
-      }
-    )
-
-    // DELETE /api/me/repos/:repoId — stop tracking a repo
-    .delete(
-      "/repos/:repoId",
-      async ({ user, params }) => {
-        await db
-          .delete(userRepos)
-          .where(
-            and(
-              eq(userRepos.userId, user.id),
-              eq(userRepos.repoId, Number(params.repoId))
-            )
-          );
-        return { ok: true };
-      },
-      { params: t.Object({ repoId: t.String() }) }
-    )
 
     // POST /api/me/setup-token — generate a new setup token
     .post("/setup-token", async ({ user }) => {
@@ -195,11 +132,7 @@ export const deviceReposRoutes = (db: Database) =>
             set.status = 401;
             throw new Error("Invalid API key");
           }
-          const [user] = await db
-            .select()
-            .from(users)
-            .where(eq(users.id, apiKey.userId))
-            .limit(1);
+          const [user] = await db.select().from(users).where(eq(users.id, apiKey.userId)).limit(1);
           if (!user) {
             set.status = 401;
             throw new Error("User not found");
@@ -267,9 +200,7 @@ export const deviceReposRoutes = (db: Database) =>
           .innerJoin(repos, eq(repos.id, userRepos.repoId))
           .where(eq(userRepos.userId, user.id));
 
-        const repoIdByFullName = new Map(
-          visibleRepos.map((repo) => [repo.fullName, repo.repoId]),
-        );
+        const repoIdByFullName = new Map(visibleRepos.map((repo) => [repo.fullName, repo.repoId]));
         const visibleRepoIds = new Set(visibleRepos.map((repo) => repo.repoId));
         const skippedRepos: string[] = [];
 
@@ -278,10 +209,7 @@ export const deviceReposRoutes = (db: Database) =>
           fullName?: string;
           repoFullName?: string;
         }): number | null => {
-          if (
-            typeof input.repoId === "number" &&
-            visibleRepoIds.has(input.repoId)
-          ) {
+          if (typeof input.repoId === "number" && visibleRepoIds.has(input.repoId)) {
             return input.repoId;
           }
 
@@ -295,9 +223,7 @@ export const deviceReposRoutes = (db: Database) =>
 
         // Store local path → repo mappings (from install-time discovery)
         let repoPathsStored = 0;
-        await db
-          .delete(deviceRepoPaths)
-          .where(eq(deviceRepoPaths.deviceId, deviceId));
+        await db.delete(deviceRepoPaths).where(eq(deviceRepoPaths.deviceId, deviceId));
 
         if (body.repoPaths !== undefined) {
           const repoPathsByRepoId = new Map<number, string>();
@@ -314,13 +240,13 @@ export const deviceReposRoutes = (db: Database) =>
             repoPathsByRepoId.set(repoId, repoPath.localPath);
           }
 
-          const normalizedRepoPaths = Array.from(
-            repoPathsByRepoId.entries(),
-          ).map(([repoId, localPath]) => ({
-            deviceId,
-            repoId,
-            localPath,
-          }));
+          const normalizedRepoPaths = Array.from(repoPathsByRepoId.entries()).map(
+            ([repoId, localPath]) => ({
+              deviceId,
+              repoId,
+              localPath,
+            }),
+          );
 
           repoPathsStored = normalizedRepoPaths.length;
           if (normalizedRepoPaths.length > 0) {
@@ -329,9 +255,7 @@ export const deviceReposRoutes = (db: Database) =>
         }
 
         // Store exclusions
-        await db
-          .delete(deviceExcludedRepos)
-          .where(eq(deviceExcludedRepos.deviceId, deviceId));
+        await db.delete(deviceExcludedRepos).where(eq(deviceExcludedRepos.deviceId, deviceId));
 
         const excludedRepoIds = new Set<number>();
         for (const repoId of body.excludedRepoIds ?? []) {
@@ -416,7 +340,7 @@ export const deviceReposRoutes = (db: Database) =>
           await db
             .update(sessions)
             .set({ repoId })
-            .where(eq(sessions.sessionId, session.sessionId));
+            .where(and(eq(sessions.sessionId, session.sessionId), isNull(sessions.repoId)));
         }
 
         return {

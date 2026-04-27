@@ -6,12 +6,7 @@
 
 import { eq, and } from "drizzle-orm";
 import type { Database } from "../db";
-import {
-  repos,
-  userRepos,
-  deviceRepoPaths,
-  deviceExcludedRepos,
-} from "../db/schema";
+import { repos, userRepos, deviceRepoPaths, deviceExcludedRepos } from "../db/schema";
 
 function toProjectSlug(path: string): string {
   return path.replaceAll("/", "-");
@@ -27,19 +22,14 @@ export function normalizeFullName(s: string): string {
 async function isRepoExcludedForDevice(
   db: Database,
   deviceId: number | null | undefined,
-  repoId: number
+  repoId: number,
 ): Promise<boolean> {
   if (!deviceId) return false;
 
   const [excluded] = await db
     .select({ repoId: deviceExcludedRepos.repoId })
     .from(deviceExcludedRepos)
-    .where(
-      and(
-        eq(deviceExcludedRepos.deviceId, deviceId),
-        eq(deviceExcludedRepos.repoId, repoId)
-      )
-    )
+    .where(and(eq(deviceExcludedRepos.deviceId, deviceId), eq(deviceExcludedRepos.repoId, repoId)))
     .limit(1);
 
   return Boolean(excluded);
@@ -48,7 +38,7 @@ async function isRepoExcludedForDevice(
 async function acceptRepoCandidate(
   db: Database,
   deviceId: number | null | undefined,
-  repoId: number
+  repoId: number,
 ): Promise<number | null> {
   return (await isRepoExcludedForDevice(db, deviceId, repoId)) ? null : repoId;
 }
@@ -68,7 +58,7 @@ export async function matchSessionRepo(
   userId: number,
   cwdOrNull: string | null,
   project: string,
-  deviceId?: number | null
+  deviceId?: number | null,
 ): Promise<number | null> {
   if (!cwdOrNull && !project) return null;
 
@@ -84,9 +74,7 @@ export async function matchSessionRepo(
     for (const p of sorted) {
       const slug = toProjectSlug(p.localPath);
       const cwd = cwdOrNull;
-      const matchesCwd = cwd
-        ? cwd === p.localPath || cwd.startsWith(p.localPath + "/")
-        : false;
+      const matchesCwd = cwd ? cwd === p.localPath || cwd.startsWith(p.localPath + "/") : false;
       const matchesProject =
         Boolean(project) && (project === slug || project.startsWith(`${slug}-`));
 
@@ -124,10 +112,7 @@ export async function matchSessionRepo(
 
   // Strategy 3: project slug fallback
   for (const row of userRepoRows) {
-    if (
-      projectLower.endsWith(row.name) ||
-      projectLower.endsWith(`-${row.name}`)
-    ) {
+    if (projectLower.endsWith(row.name) || projectLower.endsWith(`-${row.name}`)) {
       return await acceptRepoCandidate(db, deviceId, row.repoId);
     }
   }

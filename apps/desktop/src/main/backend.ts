@@ -21,25 +21,20 @@ import type {
   FeedUser,
   IngestResponse,
   SessionSnapshot,
+  SpotifyPresence,
   SyncStateEntry,
 } from "@slashtalk/shared";
 import type {
   BackendAuthState,
   BackendUser,
+  GithubAppStatus,
   RepoSummary,
   TeammateSummary,
 } from "../shared/types";
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
+import { apiBaseUrl } from "./config";
 
-// `MAIN_VITE_SLASHTALK_API_URL` in apps/desktop/.env is baked in at build time
-// by electron-vite (the MAIN_VITE_ prefix is what makes it visible to the main
-// process). Runtime `SLASHTALK_API_URL` still works as an override for ad-hoc
-// local testing. Unset → hosted default.
-const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as
-  | string
-  | undefined;
-const DEFAULT_BASE_URL = "https://slashtalk.onrender.com";
 const CREDS_KEY = "backendCredsEnc";
 
 interface StoredCreds {
@@ -53,12 +48,6 @@ interface StoredCreds {
 let creds: StoredCreds | null = null;
 let pendingSignIn: { cancel: (reason: string) => void } | null = null;
 const authChanges = createEmitter<BackendAuthState>();
-
-function baseUrl(): string {
-  return (
-    process.env["SLASHTALK_API_URL"] ?? BAKED_BASE_URL ?? DEFAULT_BASE_URL
-  );
-}
 
 export const onChange = authChanges.on;
 
@@ -79,10 +68,6 @@ export function getApiKey(): string | null {
   return creds?.apiKey ?? null;
 }
 
-export function getBaseUrl(): string {
-  return baseUrl();
-}
-
 function persistCreds(): void {
   if (creds) saveEncrypted(CREDS_KEY, creds);
   else clearEncrypted(CREDS_KEY);
@@ -90,6 +75,34 @@ function persistCreds(): void {
 
 export function restore(): void {
   creds = loadEncrypted<StoredCreds>(CREDS_KEY);
+}
+
+export async function validateStoredSession(): Promise<void> {
+  if (!creds) return;
+
+  try {
+    await jsonFetch("/api/me/", { method: "GET" });
+  } catch (err) {
+    if (!creds) return;
+    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      clearLocalSession();
+      return;
+    }
+    console.warn("[auth] stored session validation skipped:", err);
+    return;
+  }
+
+  if (!creds) return;
+  try {
+    await listDeviceRepos();
+  } catch (err) {
+    if (!creds) return;
+    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      clearLocalSession();
+      return;
+    }
+    console.warn("[auth] stored device validation skipped:", err);
+  }
 }
 
 // ---------- Sign in ----------
@@ -128,20 +141,18 @@ function awaitLoopbackCallback(): Promise<CallbackParams> {
         "Content-Type": "text/html; charset=utf-8",
         Connection: "close",
       });
-      res.end(
-        `<!doctype html><meta charset="utf-8"><title>Signed in</title>` +
-          `<style>body{font:-apple-system,BlinkMacSystemFont,sans-serif;padding:40px;text-align:center;color:#333}</style>` +
-          `<h2>Signed in to slashtalk</h2><p>You can close this tab and return to the app.</p>` +
-          `<script>setTimeout(()=>window.close(),500)</script>`,
-      );
+      res.end(signedInHtml(login));
       finish();
       resolve({ jwt, refreshToken, login });
     });
 
-    const timer = setTimeout(() => {
-      finish();
-      reject(new Error("Sign-in timed out"));
-    }, 5 * 60 * 1000);
+    const timer = setTimeout(
+      () => {
+        finish();
+        reject(new Error("Sign-in timed out"));
+      },
+      5 * 60 * 1000,
+    );
 
     const finish = (): void => {
       clearTimeout(timer);
@@ -169,10 +180,129 @@ function awaitLoopbackCallback(): Promise<CallbackParams> {
         reject(new Error("Failed to bind loopback port"));
         return;
       }
-      void shell.openExternal(
-        `${baseUrl()}/auth/github?desktop_port=${addr.port}`,
-      );
+      void shell.openExternal(`${apiBaseUrl()}/auth/github?desktop_port=${addr.port}`);
     });
+  });
+}
+
+function signedInHtml(login: string): string {
+  const escapedLogin = escapeHtml(login);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signed in · Slashtalk</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #101312;
+      --panel: #181d1a;
+      --panel-border: rgba(255, 255, 255, 0.10);
+      --text: #f2f5f3;
+      --muted: #9ba5a0;
+      --accent: #2ecf81;
+      --accent-ink: #07150d;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f8f5;
+        --panel: #ffffff;
+        --panel-border: rgba(17, 24, 39, 0.10);
+        --text: #171a18;
+        --muted: #68716b;
+        --accent-ink: #ffffff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 50% 0%, rgba(46, 207, 129, 0.14), transparent 34%),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(420px, 100%);
+      padding: 28px;
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+      text-align: center;
+    }
+    .mark {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 18px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-size: 27px;
+      font-weight: 800;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .account {
+      margin-top: 18px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(148, 163, 184, 0.10);
+      color: var(--text);
+      font-size: 14px;
+    }
+    .brand {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">✓</div>
+    <h1>Signed in to Slashtalk</h1>
+    <p>You can return to the desktop app.</p>
+    <div class="account">@${escapedLogin}</div>
+    <div class="brand">This tab will close automatically.</div>
+  </main>
+  <script>setTimeout(() => window.close(), 900);</script>
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
   });
 }
 
@@ -246,6 +376,29 @@ export async function signOut(): Promise<void> {
   }
 }
 
+export async function signOutEverywhere(): Promise<void> {
+  if (!creds) return;
+  try {
+    await jsonFetch("/auth/logout-everywhere", { method: "POST" });
+  } finally {
+    clearLocalSession();
+  }
+}
+
+export async function getGithubAppStatus(): Promise<GithubAppStatus> {
+  return jsonFetch<GithubAppStatus>("/api/me/github-app/status", {
+    method: "GET",
+  });
+}
+
+export async function connectGithubApp(): Promise<void> {
+  const status = await getGithubAppStatus();
+  if (!status.configured) {
+    throw new Error("Private repo access is not configured for this Slashtalk server.");
+  }
+  await shell.openExternal(status.connectUrl);
+}
+
 // ---------- HTTP ----------
 
 type Auth =
@@ -276,17 +429,29 @@ function logHttp(
   else console[level](prefix);
 }
 
+/** Thrown by `jsonFetch` on any non-2xx response after the single-flight
+ *  JWT-refresh has been tried. Extends `Error` so older callers that just
+ *  read `.message` keep working; new callers can read `status` and `body`
+ *  to branch on structured server errors without regexing the message. */
+export class HttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: string,
+    method: string,
+    path: string,
+  ) {
+    super(`${method} ${path} failed (${status}): ${body}`);
+    this.name = "HttpError";
+  }
+}
+
 function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
   return doJsonFetch<T>(path, opts, false);
 }
 
-async function doJsonFetch<T>(
-  path: string,
-  opts: FetchOpts,
-  retried: boolean,
-): Promise<T> {
+async function doJsonFetch<T>(path: string, opts: FetchOpts, retried: boolean): Promise<T> {
   const auth: Auth = opts.auth ?? "session";
-  const url = `${baseUrl()}${path}`;
+  const url = `${apiBaseUrl()}${path}`;
   const headers: Record<string, string> = { Accept: "application/json" };
 
   if (auth === "apiKey") {
@@ -320,10 +485,15 @@ async function doJsonFetch<T>(
     if (refreshed) return doJsonFetch<T>(path, opts, true);
   }
 
+  if (res.status === 401 && auth === "apiKey" && creds) {
+    logHttp("warn", opts.method, path, "401", ms, "— signing out");
+    clearLocalSession();
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     logHttp("error", opts.method, path, String(res.status), ms, text.slice(0, 500));
-    throw new Error(`${opts.method} ${path} failed (${res.status}): ${text}`);
+    throw new HttpError(res.status, text, opts.method, path);
   }
 
   if (res.status === 204) {
@@ -331,7 +501,14 @@ async function doJsonFetch<T>(
     return undefined as T;
   }
   const text = await res.text();
-  logHttp("log", opts.method, path, String(res.status), ms, `${text.length}B ${text.slice(0, 200)}`);
+  logHttp(
+    "log",
+    opts.method,
+    path,
+    String(res.status),
+    ms,
+    `${text.length}B ${text.slice(0, 200)}`,
+  );
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
@@ -356,7 +533,7 @@ async function doRefresh(): Promise<boolean> {
   const started = Date.now();
   let res: Response;
   try {
-    res = await fetch(`${baseUrl()}/auth/refresh`, {
+    res = await fetch(`${apiBaseUrl()}/auth/refresh`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -383,9 +560,10 @@ async function doRefresh(): Promise<boolean> {
     return false;
   }
 
-  const data = (await res.json().catch(() => null)) as
-    | { jwt?: string; refreshToken?: string }
-    | null;
+  const data = (await res.json().catch(() => null)) as {
+    jwt?: string;
+    refreshToken?: string;
+  } | null;
   if (!data?.jwt || !data.refreshToken) {
     logHttp("error", "POST", "/auth/refresh", "200", ms, "— malformed response");
     return false;
@@ -400,15 +578,80 @@ async function doRefresh(): Promise<boolean> {
 
 // ---------- Public API ----------
 
-export function listRepos(): Promise<RepoSummary[]> {
-  return jsonFetch<RepoSummary[]>("/api/me/repos", { method: "GET" });
+/** Thrown by `claimRepo` with the server's structured error kind so callers
+ *  (e.g. the tray UI) can branch on `no_access` vs `token_expired` rather
+ *  than regexing the message. */
+export class ClaimRepoError extends Error {
+  constructor(
+    public readonly kind:
+      | "no_access"
+      | "github_app_required"
+      | "token_expired"
+      | "rate_limited"
+      | "invalid_full_name"
+      | "upstream_unavailable"
+      | "unknown",
+    message: string,
+    public readonly status: number,
+    public readonly connectUrl?: string,
+  ) {
+    super(message);
+    this.name = "ClaimRepoError";
+  }
 }
 
-export function claimRepo(fullName: string): Promise<RepoSummary> {
-  return jsonFetch<RepoSummary>("/api/me/repos", {
-    method: "POST",
-    body: { fullName },
-  });
+type ClaimRepoErrorKind = ClaimRepoError["kind"];
+
+function isClaimRepoErrorKind(value: unknown): value is ClaimRepoErrorKind {
+  return (
+    value === "no_access" ||
+    value === "github_app_required" ||
+    value === "token_expired" ||
+    value === "rate_limited" ||
+    value === "invalid_full_name" ||
+    value === "upstream_unavailable" ||
+    value === "unknown"
+  );
+}
+
+export async function claimRepo(fullName: string): Promise<RepoSummary> {
+  try {
+    // Delegates to `jsonFetch` so the JWT single-flight refresh-on-401
+    // (doJsonFetch line 318) still runs before we treat a 401 as GitHub-side
+    // token_expired. Without this, a slashtalk-JWT expiry during a claim
+    // would misfire as "your GitHub token is stale."
+    return await jsonFetch<RepoSummary>("/api/me/repos", {
+      method: "POST",
+      body: { fullName },
+    });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      const parsed = parseClaimError(err.body);
+      const kind = isClaimRepoErrorKind(parsed?.error) ? parsed.error : "unknown";
+      throw new ClaimRepoError(
+        kind,
+        parsed?.message ?? `Claim failed (${err.status})`,
+        err.status,
+        parsed?.connectUrl,
+      );
+    }
+    throw err;
+  }
+}
+
+interface ClaimErrorBody {
+  error?: string;
+  message?: string;
+  connectUrl?: string;
+}
+
+function parseClaimError(body: string): ClaimErrorBody | null {
+  if (!body) return null;
+  try {
+    return JSON.parse(body) as ClaimErrorBody;
+  } catch {
+    return null;
+  }
 }
 
 export async function listTeammates(): Promise<TeammateSummary[]> {
@@ -432,17 +675,8 @@ export function listFeedSessions(): Promise<FeedSessionSnapshot[]> {
   return jsonFetch<FeedSessionSnapshot[]>("/api/feed", { method: "GET" });
 }
 
-export function listFeedSessionsForUser(
-  login: string,
-): Promise<FeedSessionSnapshot[]> {
+export function listFeedSessionsForUser(login: string): Promise<FeedSessionSnapshot[]> {
   const qs = new URLSearchParams({ user: login });
-  return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
-}
-
-export function listFeedSessionsForRepo(
-  fullName: string,
-): Promise<FeedSessionSnapshot[]> {
-  const qs = new URLSearchParams({ repo: fullName });
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
 
@@ -475,7 +709,7 @@ export async function ingestChunk(args: {
   project: string;
   fromLineSeq: number;
   prefixHash: string;
-  source?: "claude" | "codex";
+  source?: "claude" | "codex" | "cursor";
   body: string;
 }): Promise<IngestResponse> {
   if (!creds) throw new Error("Not signed in");
@@ -486,7 +720,7 @@ export async function ingestChunk(args: {
     prefixHash: args.prefixHash,
     source: args.source ?? "claude",
   });
-  const res = await fetch(`${baseUrl()}/v1/ingest?${qs.toString()}`, {
+  const res = await fetch(`${apiBaseUrl()}/v1/ingest?${qs.toString()}`, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -519,6 +753,21 @@ export async function askChat(messages: ChatMessage[]): Promise<ChatAskResponse>
   });
 }
 
+export async function fetchChatGerunds(prompt: string): Promise<string[]> {
+  const fallback = ["Thinking"];
+  try {
+    const res = await jsonFetch<{ words?: unknown }>("/api/chat/gerund", {
+      method: "POST",
+      body: { prompt },
+    });
+    if (!Array.isArray(res.words)) return fallback;
+    const words = res.words.filter((w): w is string => typeof w === "string" && w.length > 0);
+    return words.length > 0 ? words : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function sendHeartbeat(body: {
   sessionId: string;
   pid?: number;
@@ -531,5 +780,23 @@ export function sendHeartbeat(body: {
     method: "POST",
     body,
     auth: "apiKey",
+  });
+}
+
+// ---------- Spotify presence ----------
+
+export function postSpotifyPresence(
+  track: Omit<SpotifyPresence, "updatedAt"> | null,
+): Promise<{ ok: true }> {
+  return jsonFetch("/v1/presence/spotify", {
+    method: "POST",
+    body: { track },
+    auth: "apiKey",
+  });
+}
+
+export function listPeerPresence(): Promise<Record<string, SpotifyPresence>> {
+  return jsonFetch<Record<string, SpotifyPresence>>("/api/presence/peers", {
+    method: "GET",
   });
 }

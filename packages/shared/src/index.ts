@@ -10,7 +10,7 @@ export const SessionState = {
 export type SessionState = (typeof SessionState)[keyof typeof SessionState];
 
 /** Source of a session's JSONL events */
-export const SOURCES = ["claude", "codex"] as const;
+export const SOURCES = ["claude", "codex", "cursor"] as const;
 export type EventSource = (typeof SOURCES)[number];
 
 /** LLM provider a session's model belongs to */
@@ -77,6 +77,7 @@ export interface SessionPr {
 /** Full session snapshot — shared between server API and desktop client */
 export interface SessionSnapshot {
   id: string;
+  source: EventSource;
   project: string;
   title: string | null;
   description: string | null;
@@ -128,23 +129,41 @@ export interface FeedUser {
   repos: string[];
 }
 
-/** One managed-agent session stored in the MCP backend's agent_sessions table.
+/** GitHub org the user is a member of. */
+export interface OrgSummary {
+  login: string;
+  name: string | null;
+  avatarUrl: string;
+}
+
+/** Repo within an org as returned by GitHub's /orgs/:org/repos endpoint,
+ *  scoped to those readable by the authenticated user. */
+export interface OrgRepo {
+  repoId: number;
+  fullName: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  permission: "pull" | "triage" | "push" | "maintain" | "admin";
+}
+
+/** One managed-agent session stored in the server's agent_sessions table.
  *  Private agent sessions never reach the backend, so every row returned here
  *  is visibility='team'. Both server and desktop speak this shape so there is
  *  no skew between the PUT payload and GET response. */
-export interface AgentSessionRow {
-  user_login: string;
-  agent_id: string;
-  session_id: string;
+export interface ManagedAgentSessionRow {
+  userLogin: string;
+  agentId: string;
+  sessionId: string;
   mode: "cloud" | "local";
   visibility: "private" | "team";
   name: string | null;
-  started_at: string;
-  ended_at: string | null;
-  last_activity: string;
+  startedAt: string;
+  endedAt: string | null;
+  lastActivity: string;
   summary: string | null;
-  summary_model: string | null;
-  summary_ts: string | null;
+  summaryModel: string | null;
+  summaryTs: string | null;
 }
 
 /** Ingest response */
@@ -201,6 +220,23 @@ export interface SessionUpdatedMessage {
   state?: SessionState;
 }
 
+/** WS push: an analyzer cron published new output for a session.
+ *
+ *  Fired from `apps/server/src/analyzers/scheduler.ts` after each successful
+ *  analyzer run. The desktop info popover treats this as "your cached
+ *  insights for this session are stale — replace with `output`". */
+export interface SessionInsightsUpdatedMessage {
+  type: "session_insights_updated";
+  session_id: string;
+  repo_id: number;
+  /** Analyzer name (e.g. "summary", "rolling-summary") — the output shape
+   *  varies by analyzer, see apps/server/src/analyzers/registry.ts. */
+  analyzer: string;
+  output: unknown;
+  /** ISO8601 */
+  analyzed_at: string;
+}
+
 /**
  * Chat (team-presence Q&A). The server is stateless: the client owns the
  * thread and re-sends the full `messages` array on every turn. Tool turns
@@ -216,10 +252,33 @@ export interface ChatUserMessage {
   content: string;
 }
 
+/**
+ * Compact session card rendered underneath an assistant message. Server
+ * hydrates these from sessions the model cited in the answer; visibility
+ * is scoped to the caller's user_repos like everywhere else.
+ */
+export interface SessionCard {
+  id: string;
+  user: {
+    login: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+  title: string | null;
+  state: SessionState;
+  repo: string | null;
+  branch: string | null;
+  lastTs: string | null;
+  currentTool: string | null;
+  lastUserPrompt: string | null;
+  source: EventSource;
+}
+
 export interface ChatAssistantMessage {
   role: "assistant";
   content: string;
   citations?: ChatCitation[];
+  cards?: SessionCard[];
 }
 
 export type ChatMessage = ChatUserMessage | ChatAssistantMessage;
@@ -241,4 +300,16 @@ export interface ApiResponse<T> {
 export interface ApiError {
   error: string;
   message: string;
+}
+
+/** Spotify "now playing" broadcast from a desktop client. Null clears. */
+export interface SpotifyPresence {
+  trackId: string;
+  name: string;
+  artist: string;
+  /** https://open.spotify.com/track/<id> — safe to open in a browser. */
+  url: string;
+  isPlaying: boolean;
+  /** ISO-8601. Server stamps this on write. */
+  updatedAt: string;
 }

@@ -20,8 +20,7 @@ export function startScheduler(db: Database, redis: RedisBridge): void {
   console.log(
     `[analyzers] scheduler enabled (tick=${config.analyzerTickMs}ms, concurrency=${config.analyzerConcurrency}, cap=${config.analyzerMaxSessionsPerTick})`,
   );
-  const onTick = () =>
-    tick(db, redis).catch((e) => console.error("[analyzers] tick error", e));
+  const onTick = () => tick(db, redis).catch((e) => console.error("[analyzers] tick error", e));
   setTimeout(onTick, INITIAL_DELAY_MS);
   setInterval(onTick, config.analyzerTickMs);
 }
@@ -182,7 +181,7 @@ async function runOne(
     );
 
     if (session.repoId) {
-      await publishInsightsUpdate(
+      publishInsightsUpdate(
         redis,
         session.sessionId,
         session.repoId,

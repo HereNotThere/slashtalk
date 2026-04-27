@@ -39,10 +39,42 @@ export class RedisBridge {
     }
   }
 
-  /** Publish a message to a channel */
+  /** Publish a message to a channel. Soft-fail: never throws, never blocks
+   *  the caller on Redis I/O. Callers should fire-and-forget (`void
+   *  bridge.publish(...)`) — see CLAUDE.md rule #7. */
   async publish(channel: string, message: object): Promise<void> {
     if (!this.connected) return;
-    await this.pub.publish(channel, JSON.stringify(message));
+    try {
+      await this.pub.publish(channel, JSON.stringify(message));
+    } catch (err) {
+      console.warn(`[redis] publish to ${channel} failed:`, (err as Error).message);
+    }
+  }
+
+  /** Set a JSON-encoded value with a TTL in seconds. Used for ephemeral
+   *  presence state (Spotify "now playing"). No-op when Redis is down. */
+  async setex(key: string, seconds: number, value: object): Promise<void> {
+    if (!this.connected) return;
+    await this.pub.setex(key, seconds, JSON.stringify(value));
+  }
+
+  /** Read a JSON-encoded value. Returns null if missing, expired, or Redis
+   *  is down; also returns null when the stored value is malformed. */
+  async getJson<T>(key: string): Promise<T | null> {
+    if (!this.connected) return null;
+    const raw = await this.pub.get(key);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Delete a key. No-op when Redis is down. */
+  async del(key: string): Promise<void> {
+    if (!this.connected) return;
+    await this.pub.del(key);
   }
 
   /** Subscribe a handler to a channel */

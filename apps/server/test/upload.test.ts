@@ -20,13 +20,7 @@ import {
   decryptGithubToken,
 } from "../src/auth/tokens";
 import { classifySessionState } from "../src/sessions/state";
-import {
-  resetDatabase,
-  mockGitHubAuth,
-  getCookie,
-  makeEvent,
-  makeNdjson,
-} from "./helpers";
+import { resetDatabase, mockGitHubAuth, getCookie, makeEvent, makeNdjson } from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -39,8 +33,7 @@ let aliceApiKey: string;
 let aliceUserId: number;
 let aliceDeviceId: number;
 
-const ENC_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const ENC_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 beforeAll(async () => {
   restoreFetch = mockGitHubAuth();
@@ -54,14 +47,9 @@ beforeAll(async () => {
   baseUrl = `http://localhost:${app.server!.port}`;
 
   // Bootstrap a user with an API key for ingest tests
-  const loginRes = await fetch(
-    `${baseUrl}/auth/github/callback?code=alice_code`
-  );
+  const loginRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
   aliceCookie = getCookie(loginRes, "session")!;
-  const [alice] = await db
-    .select()
-    .from(users)
-    .where(eq(users.githubLogin, "alice"));
+  const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
   aliceUserId = alice.id;
 
   const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
@@ -100,9 +88,7 @@ afterAll(async () => {
 describe("token utilities", () => {
   it("generateApiKey returns UUID format", () => {
     const key = generateApiKey();
-    expect(key).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-    );
+    expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   });
 
   it("hashToken produces deterministic 64-char hex", async () => {
@@ -273,7 +259,7 @@ describe("NDJSON ingest", () => {
           Authorization: `Bearer ${aliceApiKey}`,
         },
         body: makeNdjson(events),
-      }
+      },
     );
     expect(res.status).toBe(200);
 
@@ -285,21 +271,16 @@ describe("NDJSON ingest", () => {
 
   it("deduplicates events on re-ingest from the same line seq", async () => {
     const eventUuid = "c0000000-0000-0000-0000-000000000099";
-    const events = [
-      makeEvent({ uuid: eventUuid, sessionId: SESSION_ID, type: "user" }),
-    ];
+    const events = [makeEvent({ uuid: eventUuid, sessionId: SESSION_ID, type: "user" })];
 
-    await fetch(
-      `${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromLineSeq=100`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-ndjson",
-          Authorization: `Bearer ${aliceApiKey}`,
-        },
-        body: makeNdjson(events),
-      }
-    );
+    await fetch(`${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromLineSeq=100`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        Authorization: `Bearer ${aliceApiKey}`,
+      },
+      body: makeNdjson(events),
+    });
 
     const res = await fetch(
       `${baseUrl}/v1/ingest?project=upload-test&session=${SESSION_ID}&fromLineSeq=100`,
@@ -310,7 +291,7 @@ describe("NDJSON ingest", () => {
           Authorization: `Bearer ${aliceApiKey}`,
         },
         body: makeNdjson(events),
-      }
+      },
     );
     const data = (await res.json()) as IngestResponse;
     expect(data.acceptedEvents).toBe(0);
@@ -382,8 +363,7 @@ describe("NDJSON ingest", () => {
         type: "event_msg",
         payload: {
           type: "user_message",
-          message:
-            "Please add Codex session upload support to the existing session pipeline.",
+          message: "Please add Codex session upload support to the existing session pipeline.",
         },
       },
       {
@@ -447,7 +427,7 @@ describe("NDJSON ingest", () => {
 
     const res = await fetch(
       `${baseUrl}/v1/ingest?project=${encodeURIComponent(
-        "-Users-alice-work-slashtalk-apps-server"
+        "-Users-alice-work-slashtalk-apps-server",
       )}&session=${sessionId}&fromLineSeq=0&source=codex`,
       {
         method: "POST",
@@ -456,14 +436,11 @@ describe("NDJSON ingest", () => {
           Authorization: `Bearer ${aliceApiKey}`,
         },
         body: makeNdjson(codexEvents),
-      }
+      },
     );
     expect(res.status).toBe(200);
 
-    const [session] = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.sessionId, sessionId));
+    const [session] = await db.select().from(sessions).where(eq(sessions.sessionId, sessionId));
 
     expect(session.source).toBe("codex");
     expect(session.provider).toBe("openai");
@@ -485,6 +462,113 @@ describe("NDJSON ingest", () => {
     expect(session.currentTurnId).toBeNull();
     expect(session.topFilesRead).toEqual({ [filePath]: 1 });
     expect(session.events).toBe(codexEvents.length);
+  });
+
+  it("aggregates Cursor transcript sessions into the existing snapshot shape", async () => {
+    const [repo] = await db
+      .insert(repos)
+      .values({
+        githubId: 3012,
+        fullName: "shared-org/slashtalk-cursor",
+        owner: "shared-org",
+        name: "slashtalk-cursor",
+      })
+      .returning();
+
+    await db.insert(userRepos).values({
+      userId: aliceUserId,
+      repoId: repo.id,
+      permission: "push",
+    });
+
+    const repoRoot = "/Users/alice/work/slashtalk-cursor";
+    await db.insert(deviceRepoPaths).values({
+      deviceId: aliceDeviceId,
+      repoId: repo.id,
+      localPath: repoRoot,
+    });
+
+    const sessionId = "2d3e7a61-aab3-4295-b17e-1c4154ec29db";
+    const cwd = `${repoRoot}/apps/desktop`;
+    const readPath = `${repoRoot}/package.json`;
+    const editPath = `${cwd}/src/main/uploader.ts`;
+
+    const cursorEvents = [
+      {
+        timestamp: "2026-04-24T06:20:00Z",
+        role: "user",
+        cwd,
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "<user_query>\nadd Cursor transcript upload support\n</user_query>",
+            },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-04-24T06:20:03Z",
+        role: "assistant",
+        cwd,
+        message: {
+          content: [
+            { type: "text", text: "Checking the existing uploader." },
+            { type: "tool_use", name: "Read", input: { path: readPath } },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-04-24T06:20:05Z",
+        role: "assistant",
+        cwd,
+        message: {
+          content: [
+            { type: "text", text: "Applying the first patch." },
+            { type: "tool_use", name: "StrReplace", input: { path: editPath } },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-04-24T06:20:10Z",
+        role: "assistant",
+        cwd,
+        message: {
+          content: [{ type: "text", text: "Cursor ingest plumbing is in place." }],
+        },
+      },
+    ];
+
+    const res = await fetch(
+      `${baseUrl}/v1/ingest?project=${encodeURIComponent(
+        "-Users-alice-work-slashtalk-cursor-apps-desktop",
+      )}&session=${sessionId}&fromLineSeq=0&source=cursor`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          Authorization: `Bearer ${aliceApiKey}`,
+        },
+        body: makeNdjson(cursorEvents),
+      },
+    );
+    expect(res.status).toBe(200);
+
+    const [session] = await db.select().from(sessions).where(eq(sessions.sessionId, sessionId));
+
+    expect(session.source).toBe("cursor");
+    expect(session.provider).toBeNull();
+    expect(session.repoId).toBe(repo.id);
+    expect(session.cwd).toBe(cwd);
+    expect(session.userMsgs).toBe(1);
+    expect(session.assistantMsgs).toBe(3);
+    expect(session.toolCalls).toBe(2);
+    expect(session.toolErrors).toBe(0);
+    expect(session.title).toContain("add Cursor transcript upload support");
+    expect(session.lastUserPrompt).toContain("Cursor transcript upload support");
+    expect(session.topFilesRead).toEqual({ [readPath]: 1 });
+    expect(session.topFilesEdited).toEqual({ [editPath]: 1 });
+    expect(session.events).toBe(cursorEvents.length);
   });
 });
 
@@ -545,35 +629,26 @@ describe("device repo registration", () => {
             cwd,
           },
         ]),
-      }
+      },
     );
     expect(ingestRes.status).toBe(200);
 
-    let [session] = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.sessionId, sessionId));
+    let [session] = await db.select().from(sessions).where(eq(sessions.sessionId, sessionId));
     expect(session.repoId).toBeNull();
 
-    const registerRes = await fetch(
-      `${baseUrl}/v1/devices/${aliceDeviceId}/repos`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${aliceApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          repoPaths: [{ repoFullName: "shared-org/platform", localPath: repoRoot }],
-        }),
-      }
-    );
+    const registerRes = await fetch(`${baseUrl}/v1/devices/${aliceDeviceId}/repos`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        repoPaths: [{ repoFullName: "shared-org/platform", localPath: repoRoot }],
+      }),
+    });
     expect(registerRes.status).toBe(200);
 
-    [session] = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.sessionId, sessionId));
+    [session] = await db.select().from(sessions).where(eq(sessions.sessionId, sessionId));
     expect(session.repoId).toBe(repo.id);
   });
 });
@@ -608,10 +683,7 @@ describe("heartbeat", () => {
     });
     expect(res.status).toBe(200);
 
-    const [hb] = await db
-      .select()
-      .from(heartbeats)
-      .where(eq(heartbeats.sessionId, HB_SESSION_ID));
+    const [hb] = await db.select().from(heartbeats).where(eq(heartbeats.sessionId, HB_SESSION_ID));
     expect(hb).toBeTruthy();
     expect(hb.pid).toBe(12345);
     expect(hb.kind).toBe("interactive");
@@ -632,10 +704,7 @@ describe("heartbeat", () => {
     });
     expect(res.status).toBe(200);
 
-    const [hb] = await db
-      .select()
-      .from(heartbeats)
-      .where(eq(heartbeats.sessionId, HB_SESSION_ID));
+    const [hb] = await db.select().from(heartbeats).where(eq(heartbeats.sessionId, HB_SESSION_ID));
     expect(hb.pid).toBe(99999);
     expect(hb.kind).toBe("background");
   });

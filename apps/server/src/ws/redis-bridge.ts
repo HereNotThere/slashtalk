@@ -39,10 +39,16 @@ export class RedisBridge {
     }
   }
 
-  /** Publish a message to a channel */
+  /** Publish a message to a channel. Soft-fail: never throws, never blocks
+   *  the caller on Redis I/O. Callers should fire-and-forget (`void
+   *  bridge.publish(...)`) — see CLAUDE.md rule #7. */
   async publish(channel: string, message: object): Promise<void> {
     if (!this.connected) return;
-    await this.pub.publish(channel, JSON.stringify(message));
+    try {
+      await this.pub.publish(channel, JSON.stringify(message));
+    } catch (err) {
+      console.warn(`[redis] publish to ${channel} failed:`, (err as Error).message);
+    }
   }
 
   /** Set a JSON-encoded value with a TTL in seconds. Used for ephemeral

@@ -36,6 +36,7 @@ export interface TeamActivityResult {
 
 export interface GetTeamActivityArgs {
   sinceHours?: number;
+  since?: string;
   state?: SessionState;
   login?: string;
   repoFullName?: string;
@@ -69,8 +70,7 @@ export async function getTeamActivityImpl(
   args: GetTeamActivityArgs,
   ctx?: ChatToolContext,
 ): Promise<TeamActivityResult> {
-  const sinceHours = args.sinceHours ?? DEFAULT_LOOKBACK_HOURS;
-  const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+  const since = resolveSince(args);
 
   let repoIdScope: number[];
   if (ctx?.visibleRepoIds) {
@@ -302,6 +302,11 @@ export function buildChatTools(
             description:
               "Lookback window in hours; default 48. Use a smaller value for 'right now' questions; larger (up to 168) for 'catch me up' over days.",
           },
+          since: {
+            type: "string",
+            description:
+              "ISO8601 timestamp for the inclusive start of the activity window. Prefer this for calendar-relative questions like 'today'. If provided, it wins over sinceHours.",
+          },
           state: {
             type: "string",
             enum: ["busy", "active", "idle", "recent"],
@@ -344,4 +349,21 @@ export function buildChatTools(
       },
     },
   ];
+}
+
+function resolveSince(args: GetTeamActivityArgs): Date {
+  if (args.since) {
+    const parsed = new Date(args.since);
+    if (!Number.isNaN(parsed.getTime())) return clampSince(parsed);
+  }
+
+  const rawHours = args.sinceHours ?? DEFAULT_LOOKBACK_HOURS;
+  const sinceHours = Math.min(Math.max(rawHours, 1), MAX_LOOKBACK_HOURS);
+  return new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+}
+
+function clampSince(since: Date): Date {
+  const oldest = Date.now() - MAX_LOOKBACK_HOURS * 60 * 60 * 1000;
+  if (since.getTime() < oldest) return new Date(oldest);
+  return since;
 }

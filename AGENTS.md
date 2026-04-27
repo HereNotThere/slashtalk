@@ -23,14 +23,13 @@ This file is the **map** — start here, then follow links. Deep content lives i
 
 Bun workspace monorepo. **`bun` is the only supported package manager** ([core-beliefs #1](docs/design-docs/core-beliefs.md#1-bun-is-the-only-package-manager)). Version pinned in [`.tool-versions`](.tool-versions).
 
-| Workspace                            | Map                                    | Purpose                                                                    |
-| ------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------- |
-| [`apps/server`](apps/server)         | [AGENTS.md](apps/server/AGENTS.md)     | Elysia backend (auth, ingest, sessions, social, analyzers, ws)             |
-| [`apps/desktop`](apps/desktop)       | [AGENTS.md](apps/desktop/AGENTS.md)    | Electron overlay, 6 renderer windows + tray/dock chrome                    |
-| [`apps/mcp`](apps/mcp)               | [AGENTS.md](apps/mcp/AGENTS.md)        | Deprecated standalone MCP service kept for migration-window legacy testing |
-| [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types                                                       |
+| Workspace                            | Map                                    | Purpose                                                        |
+| ------------------------------------ | -------------------------------------- | -------------------------------------------------------------- |
+| [`apps/server`](apps/server)         | [AGENTS.md](apps/server/AGENTS.md)     | Elysia backend (auth, ingest, sessions, social, analyzers, ws) |
+| [`apps/desktop`](apps/desktop)       | [AGENTS.md](apps/desktop/AGENTS.md)    | Electron overlay, 6 renderer windows + tray/dock chrome        |
+| [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types                                           |
 
-Per-workspace `AGENTS.md` shape varies intentionally by workspace role — server is recipe-heavy, desktop is design-system-heavy, mcp is transitional, shared is constraint-heavy. The minimum every workspace AGENTS.md must include is `Layout` + `Commands` + `Before committing`. See [`docs/CONVENTIONS.md#per-workspace-agentsmd`](docs/CONVENTIONS.md#per-workspace-agentsmd).
+Per-workspace `AGENTS.md` shape varies intentionally by workspace role — server is recipe-heavy, desktop is design-system-heavy, and shared is constraint-heavy. The minimum every workspace AGENTS.md must include is `Layout` + `Commands` + `Before committing`. See [`docs/CONVENTIONS.md#per-workspace-agentsmd`](docs/CONVENTIONS.md#per-workspace-agentsmd).
 
 ## Route prefix encodes auth
 
@@ -50,7 +49,6 @@ bun run dev                                    # start server + desktop for loca
 bun install                                    # install all workspaces
 bun --filter @slashtalk/server <script>
 bun --filter @slashtalk/electron <script>
-bun --filter @slashtalk/mcp <script>
 bun --filter @slashtalk/shared <script>
 ```
 

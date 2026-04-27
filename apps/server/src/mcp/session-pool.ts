@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import type { Database } from "../db";
 import { createMcpServer, log } from "./server";
 import type { ClientInfo, McpPresenceStore, UserProfile } from "./presence";
 
-export type Identity = { userId: string; profile?: UserProfile };
+export type Identity = { userId: string; userDbId: number; profile?: UserProfile };
 
 type Session = {
   server: McpServer;
@@ -16,6 +17,7 @@ type Session = {
 export type SessionPoolOptions = {
   name: string;
   version: string;
+  db: Database;
   presence: McpPresenceStore;
   idleTimeoutMs?: number;
   sweepIntervalMs?: number;
@@ -75,6 +77,10 @@ export class McpSessionPool {
     const server = createMcpServer({
       name: this.opts.name,
       version: this.opts.version,
+      tools: {
+        db: this.opts.db,
+        userId: identity.userDbId,
+      },
     });
 
     const { userId, profile } = identity;

@@ -187,8 +187,8 @@ Notes:
   server-owned `/mcp` route for local-proxy and legacy compatibility. Direct
   Claude Code and Codex clients can also authenticate to the same `/mcp` route
   through MCP OAuth.
-- `apps/mcp` is deprecated for the migration window. Only start it when
-  testing legacy standalone-MCP behavior.
+- The former standalone `apps/mcp` service has been removed. MCP local
+  development runs through the server-owned `/mcp` route.
 - For a hosted-API + local-everything-else dev session, comment the local
   URLs out and the desktop falls back to the hosted defaults.
 

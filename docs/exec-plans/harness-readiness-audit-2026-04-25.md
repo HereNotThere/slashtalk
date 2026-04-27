@@ -75,7 +75,7 @@ The first audit pass scored this YES because `AGENTS.md`, `CLAUDE.md`, `ARCHITEC
 
 - [`apps/server/AGENTS.md`](../../apps/server/AGENTS.md) is a procedural manual with five "Adding X" recipes (~148 lines).
 - [`apps/desktop/AGENTS.md`](../../apps/desktop/AGENTS.md) is a design-token reference (~70 lines, no recipes).
-- [`apps/mcp/AGENTS.md`](../../apps/mcp/AGENTS.md) is a transitional/deprecation notice (~42 lines).
+- The former `apps/mcp/AGENTS.md` was a transitional/deprecation notice before the standalone MCP workspace was removed.
 - [`packages/shared/AGENTS.md`](../../packages/shared/AGENTS.md) is a constraint definition (~35 lines).
 - "Before committing" checklists are present but specify different command sets in each workspace.
 

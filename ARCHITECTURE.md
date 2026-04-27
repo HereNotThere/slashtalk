@@ -137,7 +137,7 @@ Tailwind v4 via single shared `tailwind.css`.
 
 ## MCP surface
 
-`apps/server` serves the consolidated MCP HTTP resource at root `/mcp` and owns managed-agent session ingest at `/v1/managed-agent-sessions`. `/mcp` accepts standards-aligned MCP OAuth access tokens for direct Claude Code and Codex clients, while retaining Slashtalk device API key compatibility for the desktop-local proxy and legacy installs. `/v1/managed-agent-sessions` remains device API key authenticated. `apps/mcp/` remains in the repo as the deprecated standalone service for one migration window; new MCP capability should land in `apps/server`.
+`apps/server` serves the consolidated MCP HTTP resource at root `/mcp` and owns managed-agent session ingest at `/v1/managed-agent-sessions`. `/mcp` accepts standards-aligned MCP OAuth access tokens for direct Claude Code and Codex clients, while retaining Slashtalk device API key compatibility for the desktop-local proxy and legacy installs. `/v1/managed-agent-sessions` remains device API key authenticated. The deprecated standalone `apps/mcp` workspace has been removed; new MCP capability belongs in `apps/server`.
 
 ## Shared types (`packages/shared/src/`)
 

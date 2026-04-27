@@ -4,7 +4,7 @@ Phase 2 verifies that Claude Code and Codex can talk to Slashtalk MCP through th
 
 ## Setup
 
-Use the consolidated server from Phase 1. Do not point the desktop at the deprecated standalone `apps/mcp` service unless you are testing legacy behavior.
+Use the consolidated server from Phase 1. The former standalone `apps/mcp` service has been removed, so all local proxy testing should point at the server-owned `/mcp` route.
 
 ```sh
 cat > apps/desktop/.env <<'EOF'
@@ -82,7 +82,7 @@ Expected:
 - Local proxy returns `200`.
 - Response includes `mcp-session-id`.
 - Server log includes `mcp_session_opened` for your user.
-- The MCP tool list remains empty in this migration phase.
+- The MCP tool list includes `get_team_activity` and `get_session`.
 
 Use the returned session id to list tools:
 
@@ -97,11 +97,22 @@ curl -i http://127.0.0.1:37613/mcp \
   --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
-Expected body includes:
+Expected body includes `get_team_activity` and `get_session`, and does not include `share_workspace`.
 
-```json
-{ "tools": [] }
+Call the team activity tool through the proxy:
+
+```sh
+curl -i http://127.0.0.1:37613/mcp \
+  -X POST \
+  -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -H 'mcp-protocol-version: 2025-06-18' \
+  -H 'mcp-session-id: <mcp-session-id>' \
+  --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_team_activity","arguments":{"sinceHours":24}}}'
 ```
+
+Expected response content is JSON with `teammates` and `since`, scoped to repos visible to the signed-in desktop user.
 
 ## Real Client Checks
 

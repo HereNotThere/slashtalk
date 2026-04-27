@@ -1,6 +1,6 @@
 # MCP Consolidation Manual Test
 
-Phase 1 verifies that `apps/server` owns root `/mcp` and `/v1/managed-agent-sessions` with the existing Slashtalk device API key. The consolidated MCP route intentionally advertises no tools during this migration.
+Phase 1 verifies that `apps/server` owns root `/mcp` and `/v1/managed-agent-sessions` with the existing Slashtalk device API key. The consolidated MCP route advertises the team-activity tools used by Claude Code / Codex clients.
 
 ## Start Services
 
@@ -106,8 +106,25 @@ curl -i http://localhost:10000/mcp \
 Expected:
 
 - HTTP `200`.
-- Tool list is empty.
+- Tool list includes `get_team_activity` and `get_session`.
 - `share_workspace` is not present.
+
+Call the team activity tool:
+
+```sh
+curl -i http://localhost:10000/mcp \
+  -H 'Authorization: Bearer <device-api-key>' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'mcp-session-id: <mcp-session-id>' \
+  --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_team_activity","arguments":{"sinceHours":24}}}'
+```
+
+Expected:
+
+- HTTP `200`.
+- Response content is JSON with `teammates` and `since`.
+- Results are scoped to repos visible to the authenticated user.
 
 Negative checks:
 
@@ -180,7 +197,7 @@ Expected: `manual-private-session` is not returned.
 
 ## Claude Code Smoke Test
 
-Restart Claude Code after updating `~/.claude.json`, then verify the Slashtalk MCP server connects. Since this migration advertises no MCP tools, success is a connected server with no `share_workspace` tool listed.
+Restart Claude Code after updating `~/.claude.json`, then verify the Slashtalk MCP server connects. Success is a connected server with `get_team_activity` and `get_session` listed, and no `share_workspace` tool listed.
 
 Watch `apps/server` logs while Claude Code starts. Expected log:
 
@@ -198,5 +215,5 @@ docker rm -f slashtalk-dev-pg slashtalk-dev-redis
 
 ## Verification Log
 
-- 2026-04-25: Claude Code connected to `http://localhost:10000/mcp` and server logged `mcp_session_opened` with `clientInfo.name="claude-code"`. Claude showed no advertised tools, which is expected for Phase 1 after removing `share_workspace`.
+- 2026-04-25: Claude Code connected to `http://localhost:10000/mcp` and server logged `mcp_session_opened` with `clientInfo.name="claude-code"`. Claude showed no advertised tools, which was expected for Phase 1 after removing `share_workspace`.
 - 2026-04-25: Assistant ran `/v1/managed-agent-sessions` smoke test using the Claude Code device API key from local config without printing the token. Team-visible upsert returned `200`, list returned the inserted `sessionId`, private upsert returned `200`, and private list returned `0` sessions.

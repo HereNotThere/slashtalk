@@ -12,7 +12,7 @@ import {
   deviceRepoPaths,
   sessions,
 } from "../db/schema";
-import { jwtAuth } from "../auth/middleware";
+import { jwtAuth, apiKeyAuth } from "../auth/middleware";
 import { authAudit } from "../auth/audit";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
@@ -352,3 +352,26 @@ export const deviceReposRoutes = (db: Database) =>
         }),
       },
     );
+
+// apiKey-authed (lives on /v1) so the desktop's device key authorizes this.
+export const userLocationRoutes = (db: Database) =>
+  new Elysia({ prefix: "/v1/me", name: "user-location" }).use(apiKeyAuth).post(
+    "/location",
+    async ({ body, user }) => {
+      await db
+        .update(users)
+        .set({
+          timezone: body.timezone,
+          city: body.city,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
+      return { ok: true as const };
+    },
+    {
+      body: t.Object({
+        timezone: t.Union([t.String({ maxLength: 64 }), t.Null()]),
+        city: t.Union([t.String({ maxLength: 128 }), t.Null()]),
+      }),
+    },
+  );

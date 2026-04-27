@@ -22,6 +22,7 @@ import type {
   McpTarget,
   ResponseOpenPayload,
   UpdateAgentInput,
+  UserLocation,
 } from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
@@ -725,6 +726,51 @@ ipcMain.handle("spotify:setShareEnabled", async (_e, enabled: boolean): Promise<
     }
   }
   updateSpotifyRunning();
+});
+
+// User location — renderer reports IANA tz + resolved city. We cache the
+// latest payload so a sign-in can re-post when the renderer reported it while
+// signed out, and dedup so concurrent renderers don't each fire a POST.
+let lastKnownUserLocation: UserLocation | null = null;
+let lastSentUserLocation: UserLocation | null = null;
+let userLocationFlush: Promise<void> | null = null;
+
+async function flushUserLocation(): Promise<void> {
+  if (!backend.getAuthState().signedIn) return;
+  const next = lastKnownUserLocation;
+  if (!next) return;
+  if (
+    lastSentUserLocation &&
+    lastSentUserLocation.timezone === next.timezone &&
+    lastSentUserLocation.city === next.city
+  ) {
+    return;
+  }
+  if (userLocationFlush) return userLocationFlush;
+  userLocationFlush = (async () => {
+    try {
+      await backend.postUserLocation(next);
+      lastSentUserLocation = next;
+    } catch (err) {
+      console.warn("[user-location] post failed", err);
+    } finally {
+      userLocationFlush = null;
+    }
+  })();
+  return userLocationFlush;
+}
+
+ipcMain.handle("user:setLocation", async (_e, payload: UserLocation): Promise<void> => {
+  lastKnownUserLocation = payload;
+  await flushUserLocation();
+});
+
+backend.onChange((state) => {
+  if (state.signedIn) {
+    void flushUserLocation();
+  } else {
+    lastSentUserLocation = null;
+  }
 });
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());

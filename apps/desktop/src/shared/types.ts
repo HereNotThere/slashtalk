@@ -68,6 +68,8 @@ export interface BackendUser {
 
 export type BackendAuthState = { signedIn: false } | { signedIn: true; user: BackendUser };
 
+export type UserLocation = { timezone: string | null; city: string | null };
+
 // Signed-in identity for the MCP/agents shim. Token stays main-side.
 export interface ChatHeadsUser {
   login: string;
@@ -379,6 +381,8 @@ export interface ChatHeadsBridge {
     setEnabled: (enabled: boolean) => Promise<void>;
     onEnabledChange: (cb: (enabled: boolean) => void) => Unsubscribe;
   };
+
+  setUserLocation: (payload: UserLocation) => Promise<void>;
 
   // Info box (overlay → main). Show/hide are driven by hover; the rail keeps
   // the leave timer and asks main to hide after the user leaves the bubble

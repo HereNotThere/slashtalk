@@ -134,6 +134,12 @@ async function resolveLocationCached(): Promise<ResolvedLocation | null> {
   return loc;
 }
 
+function reportLocationToMain(city: string | null): void {
+  // Tests import this module without an electron bridge — guard.
+  if (typeof window === "undefined" || !window.chatheads?.setUserLocation) return;
+  void window.chatheads.setUserLocation({ timezone: currentTimezone(), city });
+}
+
 async function fetchWeatherIconCached(lat: number, lon: number): Promise<string | null> {
   const now = Date.now();
   if (
@@ -161,6 +167,7 @@ export function useLocationWeather(): LocationWeather {
       const loc = await resolveLocationCached();
       if (cancelled || !loc) return;
       setState((s) => (s.city === loc.city ? s : { ...s, city: loc.city }));
+      reportLocationToMain(loc.city);
       const icon = await fetchWeatherIconCached(loc.lat, loc.lon);
       if (cancelled || !icon) return;
       setState((s) => (s.icon === icon ? s : { ...s, icon }));

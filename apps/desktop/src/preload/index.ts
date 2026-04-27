@@ -127,6 +127,8 @@ const bridge: ChatHeadsBridge = {
     onEnabledChange: (cb) => subscribe<boolean>("spotify:shareEnabled", cb),
   },
 
+  setUserLocation: (payload) => ipcRenderer.invoke("user:setLocation", payload) as Promise<void>,
+
   showInfo: (headId, bubbleScreen) =>
     ipcRenderer.invoke("heads:showInfo", headId, bubbleScreen) as Promise<void>,
   infoHoverEnter: () => ipcRenderer.invoke("info:hoverEnter") as Promise<void>,

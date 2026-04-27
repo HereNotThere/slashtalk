@@ -25,7 +25,13 @@ import type {
   SpotifyPresence,
   SyncStateEntry,
 } from "@slashtalk/shared";
-import type { BackendAuthState, BackendUser, RepoSummary, TeammateSummary } from "../shared/types";
+import type {
+  BackendAuthState,
+  BackendUser,
+  RepoSummary,
+  TeammateSummary,
+  UserLocation,
+} from "../shared/types";
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 import { apiBaseUrl } from "./config";
@@ -783,5 +789,15 @@ export function postSpotifyPresence(
 export function listPeerPresence(): Promise<Record<string, SpotifyPresence>> {
   return jsonFetch<Record<string, SpotifyPresence>>("/api/presence/peers", {
     method: "GET",
+  });
+}
+
+// ---------- User location ----------
+
+export function postUserLocation(body: UserLocation): Promise<{ ok: true }> {
+  return jsonFetch("/v1/me/location", {
+    method: "POST",
+    body,
+    auth: "apiKey",
   });
 }

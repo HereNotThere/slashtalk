@@ -27,6 +27,7 @@ import {
 } from "../auth/github-app";
 import { config } from "../config";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
+import { TtlCache } from "../util/ttl-cache";
 import type { OrgSummary, OrgRepo } from "@slashtalk/shared";
 
 // "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
@@ -37,15 +38,14 @@ const ORG_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
 // Per-user caches for the GitHub-proxied lookups. The tray popup opens/closes
 // repeatedly — hitting GitHub every time would burn rate limit and feel slow.
 // Keyed by userId / `${userId}:${org}`; entries expire after 60s.
-const ORGS_TTL_MS = 60_000;
-const orgsCache = new Map<number, { at: number; value: OrgSummary[] }>();
-const orgReposCache = new Map<string, { at: number; value: OrgRepo[] }>();
+const TTL_MS = 60_000;
+const orgsCache = new TtlCache<number, OrgSummary[]>(TTL_MS);
+const orgReposCache = new TtlCache<string, OrgRepo[]>(TTL_MS);
 
 // Claim-verification cache: dedups a repeated `GET /repos/:owner/:name` for
 // the same (user, fullName) pair (desktop double-clicks, retry-on-failure).
 // Keyed by `${userId}:${fullName-lower}`.
-const CLAIM_VERIFY_TTL_MS = 60_000;
-const claimVerifyCache = new Map<string, { at: number; value: VerifiedRepo }>();
+const claimVerifyCache = new TtlCache<string, VerifiedRepo>(TTL_MS);
 
 // Per-user rate-limit for `POST /api/me/repos`. Blocks an adversary with a
 // stolen JWT from enumerating private repos by brute-forcing fullNames.
@@ -54,22 +54,15 @@ const claimVerifyCache = new Map<string, { at: number; value: VerifiedRepo }>();
 const CLAIM_RATE_WINDOW_MS = 60 * 60 * 1000;
 const CLAIM_RATE_MAX = 30;
 const claimRateBuckets = new Map<number, number[]>();
-// When the maps grow past this, run a full sweep to drop expired entries.
-// Memory protection for a long-lived single process.
-const SWEEP_THRESHOLD = 5_000;
+const RATE_SWEEP_THRESHOLD = 5_000;
 
-function sweepClaimCaches(now: number): void {
-  if (claimRateBuckets.size < SWEEP_THRESHOLD && claimVerifyCache.size < SWEEP_THRESHOLD) {
-    return;
-  }
+function sweepClaimRateBuckets(now: number): void {
+  if (claimRateBuckets.size < RATE_SWEEP_THRESHOLD) return;
   const rateCutoff = now - CLAIM_RATE_WINDOW_MS;
   for (const [userId, ts] of claimRateBuckets) {
     const fresh = ts.filter((t) => t > rateCutoff);
     if (fresh.length === 0) claimRateBuckets.delete(userId);
     else if (fresh.length !== ts.length) claimRateBuckets.set(userId, fresh);
-  }
-  for (const [key, entry] of claimVerifyCache) {
-    if (now - entry.at >= CLAIM_VERIFY_TTL_MS) claimVerifyCache.delete(key);
   }
 }
 
@@ -88,7 +81,7 @@ export function __clearOrgCaches(): void {
  *  linger in memory forever. */
 function recordClaimAttempt(userId: number): boolean {
   const now = Date.now();
-  sweepClaimCaches(now);
+  sweepClaimRateBuckets(now);
   const cutoff = now - CLAIM_RATE_WINDOW_MS;
   const prior = claimRateBuckets.get(userId) ?? [];
   const fresh = prior.filter((t) => t > cutoff);
@@ -434,15 +427,7 @@ export const userRoutes = (db: Database) =>
         // GitHub. Keyed by (userId, lowercased fullName) — GitHub's repo
         // namespace is case-insensitive. Stale entries are dropped on access.
         const cacheKey = `${user.id}:${normalizedFullName}`;
-        const cached = claimVerifyCache.get(cacheKey);
-        let verified: VerifiedRepo | null = null;
-        if (cached) {
-          if (Date.now() - cached.at < CLAIM_VERIFY_TTL_MS) {
-            verified = cached.value;
-          } else {
-            claimVerifyCache.delete(cacheKey);
-          }
-        }
+        let verified: VerifiedRepo | null = claimVerifyCache.get(cacheKey) ?? null;
 
         if (!verified) {
           const token = await fetchUserGithubToken(db, user.id);
@@ -514,7 +499,7 @@ export const userRoutes = (db: Database) =>
             };
           }
           verified = outcome.repo;
-          claimVerifyCache.set(cacheKey, { at: Date.now(), value: verified });
+          claimVerifyCache.set(cacheKey, verified);
         }
 
         // Use GitHub's canonical casing / numeric id for DB storage. The
@@ -614,7 +599,7 @@ export const userRoutes = (db: Database) =>
     // tray-popup empty state rather than an error.
     .get("/orgs", async ({ user }): Promise<OrgSummary[]> => {
       const cached = orgsCache.get(user.id);
-      if (cached && Date.now() - cached.at < ORGS_TTL_MS) return cached.value;
+      if (cached) return cached;
 
       const token = await fetchUserGithubToken(db, user.id);
       if (!token) return [];
@@ -644,7 +629,7 @@ export const userRoutes = (db: Database) =>
           name: o.name ?? null,
           avatarUrl: o.avatar_url ?? "",
         }));
-      orgsCache.set(user.id, { at: Date.now(), value });
+      orgsCache.set(user.id, value);
       return value;
     })
 
@@ -663,7 +648,7 @@ export const userRoutes = (db: Database) =>
 
         const cacheKey = `${user.id}:${org}`;
         const cached = orgReposCache.get(cacheKey);
-        if (cached && Date.now() - cached.at < ORGS_TTL_MS) return cached.value;
+        if (cached) return cached;
 
         const token = await fetchUserGithubToken(db, user.id);
         if (!token) return [];
@@ -710,7 +695,7 @@ export const userRoutes = (db: Database) =>
           url = parseNextUrl(res.headers.get("link"));
         }
 
-        orgReposCache.set(cacheKey, { at: Date.now(), value: collected });
+        orgReposCache.set(cacheKey, collected);
         return collected;
       },
       { params: t.Object({ org: t.String() }) },

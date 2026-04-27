@@ -990,7 +990,7 @@ export const deviceReposRoutes = (db: Database) =>
           await db
             .update(sessions)
             .set({ repoId })
-            .where(eq(sessions.sessionId, session.sessionId));
+            .where(and(eq(sessions.sessionId, session.sessionId), isNull(sessions.repoId)));
         }
 
         return {

@@ -4,6 +4,7 @@ import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { loadInsightsForSessions, toSnapshot } from "../sessions/snapshot";
 import type { EventSource, SessionState } from "@slashtalk/shared";
 import { normalizeFullName } from "../social/github-sync";
+import { isCollisionIgnoredPath } from "../correlate/file-index";
 
 export interface TeamActivitySessionSummary {
   id: string;
@@ -40,6 +41,7 @@ export interface GetTeamActivityArgs {
   state?: SessionState;
   login?: string;
   repoFullName?: string;
+  filePath?: string;
 }
 
 const SESSIONS_PER_USER_CAP = 3;
@@ -71,6 +73,12 @@ export async function getTeamActivityImpl(
   ctx?: ChatToolContext,
 ): Promise<TeamActivityResult> {
   const since = resolveSince(args);
+
+  // Lockfiles and similar high-traffic basenames are not conflict-worthy —
+  // share the ignore list with the live collision index in `correlate/`.
+  if (args.filePath && isCollisionIgnoredPath(args.filePath)) {
+    return { teammates: [], since: since.toISOString() };
+  }
 
   let repoIdScope: number[];
   if (ctx?.visibleRepoIds) {
@@ -173,6 +181,10 @@ export async function getTeamActivityImpl(
       insightsMap.get(s.sessionId) ?? null,
     );
     if (args.state && snapshot.state !== args.state) continue;
+    if (args.filePath) {
+      const editedPaths = snapshot.topFilesEdited.map(([p]) => p);
+      if (!editedPaths.some((p) => pathMatches(p, args.filePath!))) continue;
+    }
     const arr = byUser.get(s.userId) ?? [];
     if (arr.length >= SESSIONS_PER_USER_CAP) continue;
     arr.push({
@@ -203,7 +215,17 @@ export async function getTeamActivityImpl(
     };
   });
 
-  return { teammates, since: since.toISOString() };
+  // For conflict-detection lookups, the caller is the one editing the file —
+  // surfacing themselves as overlap is noise.
+  const finalTeammates = args.filePath ? teammates.filter((t) => !t.isSelf) : teammates;
+  return { teammates: finalTeammates, since: since.toISOString() };
+}
+
+function pathMatches(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.endsWith("/" + b)) return true;
+  if (b.endsWith("/" + a)) return true;
+  return false;
 }
 
 export interface GetSessionArgs {
@@ -291,7 +313,7 @@ export function buildChatTools(
     {
       name: "get_team_activity",
       description:
-        "Per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Returns teammates (including the caller) with up to 3 recent sessions each. Each session carries title, description, state, repo, branch, lastTs, current tool, a truncated last user prompt, top edited files, tool-error count, and source (claude|codex). Filter by login or repoFullName to scope the answer; prefer those filters over fetching everyone and filtering locally.",
+        "Per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Returns teammates (including the caller) with up to 3 recent sessions each. Each session carries title, description, state, repo, branch, lastTs, current tool, a truncated last user prompt, top edited files, tool-error count, and source (claude|codex). Filter by login or repoFullName to scope the answer; prefer those filters over fetching everyone and filtering locally. Pass `filePath` to find which other teammates are currently editing a specific file (the caller is excluded from this view).",
       input_schema: {
         type: "object",
         properties: {
@@ -321,6 +343,11 @@ export function buildChatTools(
             type: "string",
             description:
               "owner/name to scope the answer to a single repo. Must be a repo the caller can see.",
+          },
+          filePath: {
+            type: "string",
+            description:
+              "Conflict-detection filter. When set, returns only teammates with a recent session whose top edited files include this path; the caller is omitted. Absolute or repo-relative paths are accepted — matching is segment-aware suffix on both sides. Lockfiles and similar high-traffic paths (package.json, bun.lock, yarn.lock, …) always return no overlap; they are noise, not collaboration. Pair with `repoFullName` to keep the answer tight.",
           },
         },
       },

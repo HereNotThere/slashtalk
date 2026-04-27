@@ -308,6 +308,94 @@ describe("chat tool: get_team_activity", () => {
   });
 });
 
+describe("chat tool: get_team_activity — filePath overlap", () => {
+  beforeAll(async () => {
+    // Seed Bob's session with a known set of edited files so we can exercise
+    // the conflict-detection filter. Paths are absolute (Claude Code / Codex
+    // store tool inputs verbatim).
+    await db
+      .update(sessions)
+      .set({
+        topFilesEdited: {
+          "/Users/dev/team/slashtalk/apps/server/src/auth/middleware.ts": 5,
+          "/Users/dev/team/slashtalk/apps/server/src/auth/tokens.ts": 2,
+          "/Users/dev/team/slashtalk/apps/server/src/oauth/mcp.ts": 1,
+        },
+      })
+      .where(eq(sessions.sessionId, BOB_SESSION));
+  });
+
+  it("matches an absolute path against bob's edited files", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "/Users/dev/team/slashtalk/apps/server/src/auth/middleware.ts",
+    });
+    expect(result.teammates.map((t) => t.login)).toEqual(["bob"]);
+  });
+
+  it("matches a repo-relative path against an absolute path stored in the db", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "apps/server/src/auth/middleware.ts",
+    });
+    expect(result.teammates.map((t) => t.login)).toEqual(["bob"]);
+  });
+
+  it("does not match on substring overlap (auth.ts must not match oauth/mcp.ts)", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "auth.ts",
+    });
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("returns empty when no teammate is editing the file", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "apps/server/src/never-touched.ts",
+    });
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("returns empty for ignored basenames (lockfiles etc.) even on real overlap", async () => {
+    // Bob has bun.lock in his edited set — should still be filtered as noise.
+    await db
+      .update(sessions)
+      .set({
+        topFilesEdited: {
+          "/Users/dev/team/slashtalk/apps/server/src/auth/middleware.ts": 5,
+          "/Users/dev/team/slashtalk/bun.lock": 3,
+        },
+      })
+      .where(eq(sessions.sessionId, BOB_SESSION));
+
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "bun.lock",
+    });
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("excludes the caller from file-overlap results even when they edit the same file", async () => {
+    await db
+      .update(sessions)
+      .set({
+        topFilesEdited: {
+          "/Users/dev/team/slashtalk/apps/server/src/auth/middleware.ts": 1,
+        },
+      })
+      .where(eq(sessions.sessionId, ALICE_SESSION));
+
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "apps/server/src/auth/middleware.ts",
+    });
+    const logins = result.teammates.map((t) => t.login);
+    expect(logins).toContain("bob");
+    expect(logins).not.toContain("alice");
+  });
+});
+
 describe("chat tool: get_session", () => {
   it("returns detail for a session in the caller's repo graph", async () => {
     const result = await getSessionImpl(db, aliceId, {

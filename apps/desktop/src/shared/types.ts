@@ -361,6 +361,17 @@ export interface ChatHeadsBridge {
     getSessionOnlyMode: () => Promise<boolean>;
     setSessionOnlyMode: (enabled: boolean) => Promise<void>;
     onSessionOnlyModeChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+    /** When on, peers idle past the inactivity threshold collapse into a
+     *  hover-expanding stack at the bottom of the rail. Off by default so
+     *  long-tail teams aren't hidden until the user opts in. */
+    getCollapseInactive: () => Promise<boolean>;
+    setCollapseInactive: (enabled: boolean) => Promise<void>;
+    onCollapseInactiveChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+    /** When on, each chathead renders an "Xm/Xh/Xd" activity timestamp badge.
+     *  Default on; tray toggle clears the badges to declutter the rail. */
+    getShowActivityTimestamps: () => Promise<boolean>;
+    setShowActivityTimestamps: (shown: boolean) => Promise<void>;
+    onShowActivityTimestampsChange: (cb: (shown: boolean) => void) => Unsubscribe;
   };
 
   // Opt-in toggle for broadcasting the user's Spotify "Now Playing" to peers.
@@ -382,6 +393,13 @@ export interface ChatHeadsBridge {
   showInfo: (headId: string, bubbleScreen?: { x: number; y: number }) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
+  /** Overlay subscribes so the inactive-peer stack can stay expanded while the
+   *  info card is open even if the cursor leaves the rail. */
+  onInfoState: (cb: (state: { visible: boolean; headId: string | null }) => void) => Unsubscribe;
+  /** Renderer reports the rail's desired main-axis length (px) so main can
+   *  size the BrowserWindow to the actual content — including the collapsed
+   *  vs. expanded state of the inactive-peer stack. */
+  setOverlayLength: (length: number) => Promise<void>;
 
   // Chat input (overlay ↔ main, chat renderer → main)
   toggleChat: () => Promise<void>;

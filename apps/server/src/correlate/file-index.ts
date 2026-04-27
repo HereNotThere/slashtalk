@@ -53,7 +53,14 @@ function basename(filePath: string): string {
   return i === -1 ? norm : norm.slice(i + 1);
 }
 
-function isIgnored(filePath: string): boolean {
+/**
+ * Files we never treat as conflict signal — lockfiles and similar
+ * high-traffic paths are noise, not collaboration.
+ *
+ * Public so other surfaces (e.g. the MCP `get_team_activity` filePath filter)
+ * can reuse the same ignore list rather than drift their own.
+ */
+export function isCollisionIgnoredPath(filePath: string): boolean {
   return IGNORE_BASENAMES.has(basename(filePath));
 }
 
@@ -110,7 +117,9 @@ export function detectCollisions(args: DetectArgs): DetectedCollision[] {
   pruneRepo(idx, now);
 
   const priorSet = new Set(args.priorFiles);
-  const newlyAdded = args.currentFiles.filter((f) => !priorSet.has(f) && !isIgnored(f));
+  const newlyAdded = args.currentFiles.filter(
+    (f) => !priorSet.has(f) && !isCollisionIgnoredPath(f),
+  );
 
   const collisions: DetectedCollision[] = [];
   for (const file of newlyAdded) {
@@ -149,7 +158,7 @@ export function detectCollisions(args: DetectArgs): DetectedCollision[] {
 
 function recordSession(args: DetectArgs, idx: RepoIndex, now: number): void {
   const prior = idx.bySession.get(args.sessionId);
-  const newFiles = new Set(args.currentFiles.filter((f) => !isIgnored(f)));
+  const newFiles = new Set(args.currentFiles.filter((f) => !isCollisionIgnoredPath(f)));
 
   if (prior) {
     for (const old of prior.files) {

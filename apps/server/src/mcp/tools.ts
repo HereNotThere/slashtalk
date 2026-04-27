@@ -16,7 +16,7 @@ export function registerTeamActivityTools(server: McpServer, ctx: McpToolContext
     {
       title: "Get team activity",
       description:
-        "Return a per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Use this for questions like 'what did the team do today?', 'what did eric do today?', or 'what is happening in owner/repo?'.",
+        "Return a per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Use this for two things. (1) Team-status questions: 'what did the team do today?', 'what did eric do today?', 'what is happening in owner/repo?'. (2) Proactive conflict detection: whenever the user is about to edit a file, call this with `repoFullName` and `filePath` set to surface live overlap with teammates currently editing the same file. In the conflict-detection case, only mention overlap to the user if a returned session is `busy` or `active` and belongs to someone else; stay silent otherwise. Prefer `since` over `sinceHours` for calendar-relative questions like 'today'.",
       inputSchema: {
         sinceHours: z
           .number()
@@ -42,6 +42,12 @@ export function registerTeamActivityTools(server: McpServer, ctx: McpToolContext
           .string()
           .optional()
           .describe("owner/name repo to scope the answer. Must be visible to the caller."),
+        filePath: z
+          .string()
+          .optional()
+          .describe(
+            "Conflict-detection filter. When set, returns only teammates with a recent session whose top edited files include this path; the caller is omitted. Absolute or repo-relative paths are accepted — matching is segment-aware suffix on both sides. Lockfiles and similar high-traffic paths (package.json, bun.lock, yarn.lock, …) always return no overlap; they are noise, not collaboration. Pair with `repoFullName` to keep the answer tight.",
+          ),
       },
       annotations: {
         readOnlyHint: true,

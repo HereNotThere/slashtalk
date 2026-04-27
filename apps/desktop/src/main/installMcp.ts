@@ -49,12 +49,8 @@ export interface Installer {
   remoteMcpUrl: () => string;
 }
 
-const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
-  | string
-  | undefined;
-const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as
-  | string
-  | undefined;
+const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as string | undefined;
+const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as string | undefined;
 const DEFAULT_BASE_URL = "https://slashtalk.onrender.com";
 const MCP_KEY = "slashtalk-mcp";
 export const LOCAL_PROXY_SECRET_HEADER = "X-Slashtalk-Proxy-Token";
@@ -62,17 +58,11 @@ export const DEFAULT_LOCAL_MCP_PORT = 37613;
 let fallbackLocalProxySecret: string | null = null;
 
 function backendBaseUrl(): string {
-  return (
-    process.env["SLASHTALK_API_URL"] ?? BAKED_BASE_URL ?? DEFAULT_BASE_URL
-  );
+  return process.env["SLASHTALK_API_URL"] ?? BAKED_BASE_URL ?? DEFAULT_BASE_URL;
 }
 
 function defaultRemoteMcpUrl(): string {
-  return (
-    process.env["SLASHTALK_MCP_URL"] ??
-    BAKED_MCP_URL ??
-    `${backendBaseUrl()}/mcp`
-  );
+  return process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? `${backendBaseUrl()}/mcp`;
 }
 
 export function localMcpPort(): number {
@@ -170,10 +160,7 @@ async function writeTomlConfig(file: string, text: string): Promise<void> {
 
 function isSlashtalkCodexSection(line: string): boolean {
   const trimmed = line.trim();
-  return (
-    trimmed === "[mcp_servers.slashtalk-mcp]" ||
-    trimmed === '[mcp_servers."slashtalk-mcp"]'
-  );
+  return trimmed === "[mcp_servers.slashtalk-mcp]" || trimmed === '[mcp_servers."slashtalk-mcp"]';
 }
 
 function isTomlSection(line: string): boolean {
@@ -214,20 +201,11 @@ async function installClaudeCode(
 ): Promise<void> {
   const config = await readJsonConfig(file);
   config.mcpServers = config.mcpServers ?? {};
-  config.mcpServers[MCP_KEY] = claudeEntry(
-    options,
-    localUrl,
-    remoteUrl,
-    proxySecret,
-  );
+  config.mcpServers[MCP_KEY] = claudeEntry(options, localUrl, remoteUrl, proxySecret);
   await writeJsonConfig(file, config);
 }
 
-async function installCodex(
-  file: string,
-  localUrl: string,
-  proxySecret: string,
-): Promise<void> {
+async function installCodex(file: string, localUrl: string, proxySecret: string): Promise<void> {
   const existing = await readTomlConfig(file);
   const withoutOurs = removeSlashtalkCodexSection(existing);
   const next = [withoutOurs, codexEntry(localUrl, proxySecret)]
@@ -256,9 +234,7 @@ export function createInstaller(deps: InstallerDeps = {}): Installer {
         );
       } else {
         if (options.mode === "legacy-bearer") {
-          throw new Error(
-            "Codex legacy-bearer install is intentionally unsupported",
-          );
+          throw new Error("Codex legacy-bearer install is intentionally unsupported");
         }
         await installCodex(file, getLocalProxyUrl(), getLocalProxySecret());
       }
@@ -275,10 +251,7 @@ export function createInstaller(deps: InstallerDeps = {}): Installer {
         }
       } else {
         const existing = await readTomlConfig(file);
-        await writeTomlConfig(
-          file,
-          removeSlashtalkCodexSection(existing) + "\n",
-        );
+        await writeTomlConfig(file, removeSlashtalkCodexSection(existing) + "\n");
       }
       return { installed: false, path: file };
     },
@@ -308,10 +281,7 @@ export function createInstaller(deps: InstallerDeps = {}): Installer {
           return { installed: false, path: file };
         }
       };
-      const [claudeCode, codex] = await Promise.all([
-        checkClaude(),
-        checkCodex(),
-      ]);
+      const [claudeCode, codex] = await Promise.all([checkClaude(), checkCodex()]);
       return { claudeCode, codex };
     },
 
@@ -326,11 +296,8 @@ export function configureInstaller(deps: InstallerDeps): void {
   defaultInstaller = createInstaller(deps);
 }
 
-export const install: Installer["install"] = (...args) =>
-  defaultInstaller.install(...args);
-export const uninstall: Installer["uninstall"] = (...args) =>
-  defaultInstaller.uninstall(...args);
+export const install: Installer["install"] = (...args) => defaultInstaller.install(...args);
+export const uninstall: Installer["uninstall"] = (...args) => defaultInstaller.uninstall(...args);
 export const status: Installer["status"] = () => defaultInstaller.status();
 export const mcpUrl: Installer["mcpUrl"] = () => defaultInstaller.mcpUrl();
-export const remoteMcpUrl: Installer["remoteMcpUrl"] = () =>
-  defaultInstaller.remoteMcpUrl();
+export const remoteMcpUrl: Installer["remoteMcpUrl"] = () => defaultInstaller.remoteMcpUrl();

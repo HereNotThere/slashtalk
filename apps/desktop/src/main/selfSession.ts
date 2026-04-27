@@ -27,16 +27,10 @@ let authRejected = false;
 let loggedUnauthorized = false;
 let loggedConnectFailureUrl: string | null = null;
 
-const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
-  | string
-  | undefined;
+const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as string | undefined;
 
 function mcpUrl(): string {
-  return (
-    process.env["SLASHTALK_MCP_URL"] ??
-    BAKED_MCP_URL ??
-    `${backend.getBaseUrl()}/mcp`
-  );
+  return process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? `${backend.getBaseUrl()}/mcp`;
 }
 
 function isUnauthorized(err: unknown): boolean {

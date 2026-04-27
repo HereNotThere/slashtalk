@@ -23,23 +23,23 @@ This file is the **map** — start here, then follow links. Deep content lives i
 
 Bun workspace monorepo. **`bun` is the only supported package manager** ([core-beliefs #1](docs/design-docs/core-beliefs.md#1-bun-is-the-only-package-manager)). Version pinned in [`.tool-versions`](.tool-versions).
 
-| Workspace | Map | Purpose |
-| --- | --- | --- |
-| [`apps/server`](apps/server) | [AGENTS.md](apps/server/AGENTS.md) | Elysia backend (auth, ingest, sessions, social, analyzers, ws) |
-| [`apps/desktop`](apps/desktop) | [AGENTS.md](apps/desktop/AGENTS.md) | Electron overlay, 6 renderer windows + tray/dock chrome |
-| [`apps/mcp`](apps/mcp) | [AGENTS.md](apps/mcp/AGENTS.md) | Deprecated standalone MCP service kept for migration-window legacy testing |
-| [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types |
+| Workspace                            | Map                                    | Purpose                                                                    |
+| ------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------- |
+| [`apps/server`](apps/server)         | [AGENTS.md](apps/server/AGENTS.md)     | Elysia backend (auth, ingest, sessions, social, analyzers, ws)             |
+| [`apps/desktop`](apps/desktop)       | [AGENTS.md](apps/desktop/AGENTS.md)    | Electron overlay, 6 renderer windows + tray/dock chrome                    |
+| [`apps/mcp`](apps/mcp)               | [AGENTS.md](apps/mcp/AGENTS.md)        | Deprecated standalone MCP service kept for migration-window legacy testing |
+| [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types                                                       |
 
 Per-workspace `AGENTS.md` shape varies intentionally by workspace role — server is recipe-heavy, desktop is design-system-heavy, mcp is transitional, shared is constraint-heavy. The minimum every workspace AGENTS.md must include is `Layout` + `Commands` + `Before committing`. See [`docs/CONVENTIONS.md#per-workspace-agentsmd`](docs/CONVENTIONS.md#per-workspace-agentsmd).
 
 ## Route prefix encodes auth
 
-| Prefix | Auth | Used by |
-| --- | --- | --- |
-| `/v1/*` | `apiKeyAuth` (Bearer token, SHA-256 compared) | Desktop + CLI |
-| `/mcp` | MCP OAuth access token; device API key for local proxy / legacy | MCP HTTP clients |
-| `/auth/*` + `/api/*` | `jwtAuth` (httpOnly `session` cookie or `Cookie:` header) | Browser + desktop cookie |
-| `/ws?token=…` | JWT, else API key | All clients |
+| Prefix               | Auth                                                            | Used by                  |
+| -------------------- | --------------------------------------------------------------- | ------------------------ |
+| `/v1/*`              | `apiKeyAuth` (Bearer token, SHA-256 compared)                   | Desktop + CLI            |
+| `/mcp`               | MCP OAuth access token; device API key for local proxy / legacy | MCP HTTP clients         |
+| `/auth/*` + `/api/*` | `jwtAuth` (httpOnly `session` cookie or `Cookie:` header)       | Browser + desktop cookie |
+| `/ws?token=…`        | JWT, else API key                                               | All clients              |
 
 Mixing is a rule violation. Root `/mcp` is the explicit MCP resource-server exception because MCP protocol versioning happens in the initialize handshake — see [core-beliefs #2](docs/design-docs/core-beliefs.md#2-route-prefix-encodes-auth).
 

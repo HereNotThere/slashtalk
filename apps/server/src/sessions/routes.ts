@@ -4,11 +4,7 @@ import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { sessions, events, heartbeats, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import {
-  toSnapshot,
-  loadInsightsForSessions,
-  sortByStateThenTime,
-} from "./snapshot";
+import { toSnapshot, loadInsightsForSessions, sortByStateThenTime } from "./snapshot";
 
 const SESSION_STATE_VALUES = Object.values(SessionState);
 
@@ -33,10 +29,7 @@ export const sessionRoutes = (db: Database) =>
         const sessionIds = rows.map((s) => s.sessionId);
         const hbRows =
           sessionIds.length > 0
-            ? await db
-                .select()
-                .from(heartbeats)
-                .where(inArray(heartbeats.sessionId, sessionIds))
+            ? await db.select().from(heartbeats).where(inArray(heartbeats.sessionId, sessionIds))
             : [];
         const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
         const insightsMap = await loadInsightsForSessions(db, sessionIds);
@@ -58,11 +51,9 @@ export const sessionRoutes = (db: Database) =>
       {
         query: t.Object({
           project: t.Optional(t.String()),
-          state: t.Optional(
-            t.Union(SESSION_STATE_VALUES.map((s) => t.Literal(s)))
-          ),
+          state: t.Optional(t.Union(SESSION_STATE_VALUES.map((s) => t.Literal(s)))),
         }),
-      }
+      },
     )
 
     // GET /api/session/:id — full session snapshot (own or shared repo)
@@ -89,12 +80,7 @@ export const sessionRoutes = (db: Database) =>
           const [access] = await db
             .select()
             .from(userRepos)
-            .where(
-              and(
-                eq(userRepos.userId, user.id),
-                eq(userRepos.repoId, session.repoId)
-              )
-            )
+            .where(and(eq(userRepos.userId, user.id), eq(userRepos.repoId, session.repoId)))
             .limit(1);
           if (!access) {
             set.status = 404;
@@ -109,13 +95,9 @@ export const sessionRoutes = (db: Database) =>
           .limit(1);
 
         const insightsMap = await loadInsightsForSessions(db, [params.id]);
-        return toSnapshot(
-          session,
-          hb ?? null,
-          insightsMap.get(params.id) ?? null,
-        );
+        return toSnapshot(session, hb ?? null, insightsMap.get(params.id) ?? null);
       },
-      { params: t.Object({ id: t.String() }) }
+      { params: t.Object({ id: t.String() }) },
     )
 
     // GET /api/session/:id/events — paginated event list
@@ -146,12 +128,7 @@ export const sessionRoutes = (db: Database) =>
           const [access] = await db
             .select()
             .from(userRepos)
-            .where(
-              and(
-                eq(userRepos.userId, user.id),
-                eq(userRepos.repoId, session.repoId)
-              )
-            )
+            .where(and(eq(userRepos.userId, user.id), eq(userRepos.repoId, session.repoId)))
             .limit(1);
           if (!access) {
             set.status = 404;
@@ -167,8 +144,8 @@ export const sessionRoutes = (db: Database) =>
           .where(
             and(
               eq(events.sessionId, params.id),
-              cursor != null ? sql`${events.lineSeq} > ${cursor}` : undefined
-            )
+              cursor != null ? sql`${events.lineSeq} > ${cursor}` : undefined,
+            ),
           )
           .orderBy(sql`${events.lineSeq} asc`)
           .limit(limit);
@@ -181,5 +158,5 @@ export const sessionRoutes = (db: Database) =>
           cursor: t.Optional(t.String()),
           limit: t.Optional(t.String()),
         }),
-      }
+      },
     );

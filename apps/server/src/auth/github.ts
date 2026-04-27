@@ -3,17 +3,8 @@ import { jwt } from "@elysiajs/jwt";
 import { eq, and } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import {
-  users,
-  setupTokens,
-  devices,
-  apiKeys,
-} from "../db/schema";
-import {
-  generateApiKey,
-  hashToken,
-  encryptGithubToken,
-} from "./tokens";
+import { users, setupTokens, devices, apiKeys } from "../db/schema";
+import { generateApiKey, hashToken, encryptGithubToken } from "./tokens";
 import {
   issueSessionTokens,
   rotateSessionTokens,
@@ -65,19 +56,13 @@ export const githubAuth = (db: Database) =>
           desktop_port: t.Optional(t.String()),
           return_to: t.Optional(t.String()),
         }),
-      }
+      },
     )
 
     // GET /auth/github/callback — handle OAuth callback
     .get(
       "/github/callback",
-      async ({
-        query,
-        jwt,
-        cookie: { session, refresh: refreshCookie },
-        redirect,
-        set,
-      }) => {
+      async ({ query, jwt, cookie: { session, refresh: refreshCookie }, redirect, set }) => {
         const tokenRes = await fetch(GITHUB_TOKEN_URL, {
           method: "POST",
           headers: {
@@ -112,7 +97,7 @@ export const githubAuth = (db: Database) =>
 
         const encryptedToken = await encryptGithubToken(
           tokenData.access_token,
-          config.encryptionKey
+          config.encryptionKey,
         );
 
         const [user] = await db
@@ -167,7 +152,7 @@ export const githubAuth = (db: Database) =>
           code: t.String(),
           state: t.Optional(t.String()),
         }),
-      }
+      },
     )
 
     // POST /auth/refresh — rotate refresh token, issue new JWT.
@@ -175,12 +160,7 @@ export const githubAuth = (db: Database) =>
     // or the JSON body (desktop / non-browser clients).
     .post(
       "/refresh",
-      async ({
-        jwt,
-        cookie: { session, refresh: refreshCookie },
-        body,
-        set,
-      }) => {
+      async ({ jwt, cookie: { session, refresh: refreshCookie }, body, set }) => {
         const presented = presentedRefreshToken(refreshCookie?.value, body);
         if (!presented) {
           set.status = 401;
@@ -208,20 +188,15 @@ export const githubAuth = (db: Database) =>
         };
       },
       {
-        body: t.Optional(
-          t.Object({ refreshToken: t.Optional(t.String()) }),
-        ),
-      }
+        body: t.Optional(t.Object({ refreshToken: t.Optional(t.String()) })),
+      },
     )
 
     // POST /auth/logout — revoke the presented refresh token and clear
     // cookies. Accepts the token from cookie or body, same as /refresh.
     .post(
       "/logout",
-      async ({
-        cookie: { session, refresh: refreshCookie },
-        body,
-      }) => {
+      async ({ cookie: { session, refresh: refreshCookie }, body }) => {
         const presented = presentedRefreshToken(refreshCookie?.value, body);
         if (presented) {
           await revokeRefreshToken(db, presented);
@@ -230,10 +205,8 @@ export const githubAuth = (db: Database) =>
         return { ok: true };
       },
       {
-        body: t.Optional(
-          t.Object({ refreshToken: t.Optional(t.String()) }),
-        ),
-      }
+        body: t.Optional(t.Object({ refreshToken: t.Optional(t.String()) })),
+      },
     )
 
     // POST /auth/logout-everywhere — explicit global revoke. This invalidates
@@ -254,11 +227,7 @@ export const githubAuth = (db: Database) =>
           return { error: "Invalid token" };
         }
 
-        await revokeAllUserCredentials(
-          db,
-          Number(payload.sub),
-          "sign_out_everywhere",
-        );
+        await revokeAllUserCredentials(db, Number(payload.sub), "sign_out_everywhere");
         clearSessionCookies({ session, refresh: refreshCookie });
         return { ok: true };
       },
@@ -291,12 +260,7 @@ export const cliAuth = (db: Database) =>
         const [st] = await db
           .select()
           .from(setupTokens)
-          .where(
-            and(
-              eq(setupTokens.token, body.token),
-              eq(setupTokens.redeemed, false)
-            )
-          )
+          .where(and(eq(setupTokens.token, body.token), eq(setupTokens.redeemed, false)))
           .limit(1);
 
         if (!st || st.expiresAt < new Date()) {
@@ -304,10 +268,7 @@ export const cliAuth = (db: Database) =>
           return { error: "Invalid or expired setup token" };
         }
 
-        await db
-          .update(setupTokens)
-          .set({ redeemed: true })
-          .where(eq(setupTokens.id, st.id));
+        await db.update(setupTokens).set({ redeemed: true }).where(eq(setupTokens.id, st.id));
 
         // Upsert by (userId, deviceName): a second sign-in on the same
         // machine reuses the existing device row so device_repo_paths and
@@ -346,5 +307,5 @@ export const cliAuth = (db: Database) =>
           deviceName: t.String(),
           os: t.Optional(t.String()),
         }),
-      }
+      },
     );

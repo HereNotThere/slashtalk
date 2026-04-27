@@ -6,12 +6,12 @@ For the authoring rules, see [`../CONVENTIONS.md`](../CONVENTIONS.md). For the p
 
 ## What's here
 
-| File | Type | Purpose |
-| --- | --- | --- |
-| [`tech-debt-tracker.md`](tech-debt-tracker.md) | Tracker (perpetual) | Backlog of known gaps + harness-readiness sprint priorities. Append-only-ish; items get ✅ and a code reference when shipped. |
-| [`harness-readiness-audit-2026-04-25.md`](harness-readiness-audit-2026-04-25.md) | Dated audit | External harness-readiness audit snapshot. Frozen — never retroactively edited. |
-| [`active/`](active/) | Subdirectory | Plans currently in flight. Empty when no plan is actively driving work. |
-| [`completed/`](completed/) | Subdirectory | Archived plans from past sprints. Move plans here when the goal has been verified, not when the last item is checked off. |
+| File                                                                             | Type                | Purpose                                                                                                                       |
+| -------------------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| [`tech-debt-tracker.md`](tech-debt-tracker.md)                                   | Tracker (perpetual) | Backlog of known gaps + harness-readiness sprint priorities. Append-only-ish; items get ✅ and a code reference when shipped. |
+| [`harness-readiness-audit-2026-04-25.md`](harness-readiness-audit-2026-04-25.md) | Dated audit         | External harness-readiness audit snapshot. Frozen — never retroactively edited.                                               |
+| [`active/`](active/)                                                             | Subdirectory        | Plans currently in flight. Empty when no plan is actively driving work.                                                       |
+| [`completed/`](completed/)                                                       | Subdirectory        | Archived plans from past sprints. Move plans here when the goal has been verified, not when the last item is checked off.     |
 
 ## Conventions
 

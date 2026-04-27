@@ -47,49 +47,41 @@ async function publishPresence(
 }
 
 export const spotifyPresenceRoutes = (db: Database, redis: RedisBridge) =>
-  new Elysia({ prefix: "/v1", name: "spotify-presence" })
-    .use(apiKeyAuth)
-    .post(
-      "/presence/spotify",
-      async ({ body, user }) => {
-        if (body.track === null) {
-          await redis.del(key(user.id));
-          await publishPresence(db, redis, user.id, user.githubLogin, null);
-          return { ok: true as const };
-        }
-        const payload: SpotifyPresence = {
-          trackId: body.track.trackId,
-          name: body.track.name,
-          artist: body.track.artist,
-          url: body.track.url,
-          isPlaying: body.track.isPlaying,
-          updatedAt: new Date().toISOString(),
-        };
-        await redis.setex(key(user.id), TTL_SECONDS, payload);
-        await publishPresence(
-          db,
-          redis,
-          user.id,
-          user.githubLogin,
-          payload,
-        );
+  new Elysia({ prefix: "/v1", name: "spotify-presence" }).use(apiKeyAuth).post(
+    "/presence/spotify",
+    async ({ body, user }) => {
+      if (body.track === null) {
+        await redis.del(key(user.id));
+        await publishPresence(db, redis, user.id, user.githubLogin, null);
         return { ok: true as const };
-      },
-      {
-        body: t.Object({
-          track: t.Union([
-            t.Null(),
-            t.Object({
-              trackId: t.String(),
-              name: t.String(),
-              artist: t.String(),
-              url: t.String(),
-              isPlaying: t.Boolean(),
-            }),
-          ]),
-        }),
-      },
-    );
+      }
+      const payload: SpotifyPresence = {
+        trackId: body.track.trackId,
+        name: body.track.name,
+        artist: body.track.artist,
+        url: body.track.url,
+        isPlaying: body.track.isPlaying,
+        updatedAt: new Date().toISOString(),
+      };
+      await redis.setex(key(user.id), TTL_SECONDS, payload);
+      await publishPresence(db, redis, user.id, user.githubLogin, payload);
+      return { ok: true as const };
+    },
+    {
+      body: t.Object({
+        track: t.Union([
+          t.Null(),
+          t.Object({
+            trackId: t.String(),
+            name: t.String(),
+            artist: t.String(),
+            url: t.String(),
+            isPlaying: t.Boolean(),
+          }),
+        ]),
+      }),
+    },
+  );
 
 export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/api", name: "presence-read" })
@@ -106,9 +98,7 @@ export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
         .from(userRepos)
         .where(inArray(userRepos.repoId, myRepoIds));
 
-      const ids = [
-        ...new Set([user.id, ...peerRows.map((r) => r.userId)]),
-      ];
+      const ids = [...new Set([user.id, ...peerRows.map((r) => r.userId)])];
       if (ids.length === 0) return {} as Record<string, SpotifyPresence>;
 
       const userRows = await db

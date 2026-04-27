@@ -6,11 +6,7 @@ import type {
   ToolUseBlock,
 } from "@anthropic-ai/sdk/resources/messages";
 import { eq } from "drizzle-orm";
-import type {
-  ChatAssistantMessage,
-  ChatCitation,
-  ChatMessage,
-} from "@slashtalk/shared";
+import type { ChatAssistantMessage, ChatCitation, ChatMessage } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { repos, userRepos } from "../db/schema";
 import { config } from "../config";
@@ -67,9 +63,7 @@ export interface RunChatParams {
   messages: ChatMessage[];
 }
 
-export async function runChatAgent(
-  params: RunChatParams,
-): Promise<ChatAssistantMessage> {
+export async function runChatAgent(params: RunChatParams): Promise<ChatAssistantMessage> {
   const { db, user } = params;
 
   const visibleRepos = await db
@@ -126,9 +120,7 @@ export async function runChatAgent(
 
     messages.push({ role: "assistant", content: resp.content });
 
-    const toolUses = resp.content.filter(
-      (b): b is ToolUseBlock => b.type === "tool_use",
-    );
+    const toolUses = resp.content.filter((b): b is ToolUseBlock => b.type === "tool_use");
     const toolResults: ToolResultBlockParam[] = await Promise.all(
       toolUses.map((use) => runToolCall(use, byName)),
     );
@@ -166,9 +158,7 @@ function buildContextBlock(user: ChatCaller, repoFullNames: string[]): string {
     total === 0
       ? "Caller has no tracked repos yet — the team graph is empty."
       : `Visible repos (${total}): ${shownRepos}.`;
-  const bucketedNow = new Date(
-    Math.floor(Date.now() / TIMESTAMP_BUCKET_MS) * TIMESTAMP_BUCKET_MS,
-  );
+  const bucketedNow = new Date(Math.floor(Date.now() / TIMESTAMP_BUCKET_MS) * TIMESTAMP_BUCKET_MS);
 
   return `<caller-context>
 ${nameLine}

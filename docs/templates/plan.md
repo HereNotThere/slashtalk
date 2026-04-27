@@ -19,11 +19,11 @@ Replace every <placeholder>. Delete this comment block before committing.
 
 <Numbered, ordered work items. Use the same ✅ / strikethrough convention as tech-debt-tracker.md so completed items remain visible as a record.>
 
-| # | Item | Owner | Status |
-| --- | --- | --- | --- |
-| 1 | <item> | <name> | pending |
-| 2 | <item> | <name> | pending |
-| 3 | <item> | <name> | pending |
+| #   | Item   | Owner  | Status  |
+| --- | ------ | ------ | ------- |
+| 1   | <item> | <name> | pending |
+| 2   | <item> | <name> | pending |
+| 3   | <item> | <name> | pending |
 
 <Or, for narrative-style plans:>
 
@@ -49,5 +49,5 @@ Replace every <placeholder>. Delete this comment block before committing.
 
 ## See also
 
-- [`<related-plan>`](<path>) — <why related>
+- [`<related-plan>`](path) — <why related>
 - [`tech-debt-tracker.md`](tech-debt-tracker.md) — if this plan's items also appear there

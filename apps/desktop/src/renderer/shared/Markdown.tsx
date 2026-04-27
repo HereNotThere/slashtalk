@@ -25,9 +25,7 @@ export function Markdown({
   className?: string;
   inline?: boolean;
 }): JSX.Element {
-  const merged = className
-    ? `${MARKDOWN_CLASSES} ${className}`
-    : MARKDOWN_CLASSES;
+  const merged = className ? `${MARKDOWN_CLASSES} ${className}` : MARKDOWN_CLASSES;
   const markdown = (
     <ReactMarkdown
       remarkPlugins={REMARK_PLUGINS}

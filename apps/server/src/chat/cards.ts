@@ -38,9 +38,7 @@ export async function loadSessionCards(
           .then((rows) => new Set(rows.map((r) => r.id))),
   ]);
 
-  const visible = sessionRows.filter(
-    (r) => r.repoId !== null && visibleRepoIds.has(r.repoId),
-  );
+  const visible = sessionRows.filter((r) => r.repoId !== null && visibleRepoIds.has(r.repoId));
   if (visible.length === 0) return [];
 
   const visibleIds = visible.map((s) => s.sessionId);
@@ -49,10 +47,7 @@ export async function loadSessionCards(
   const repoIds = [...new Set(visible.map((s) => s.repoId!))];
 
   const [hbRows, userRows, repoRows, insightsMap] = await Promise.all([
-    db
-      .select()
-      .from(heartbeats)
-      .where(inArray(heartbeats.sessionId, visibleIds)),
+    db.select().from(heartbeats).where(inArray(heartbeats.sessionId, visibleIds)),
     db
       .select({
         id: users.id,
@@ -98,10 +93,7 @@ export async function loadSessionCards(
       branch: snapshot.branch,
       lastTs: snapshot.lastTs,
       currentTool: snapshot.currentTool?.name ?? null,
-      lastUserPrompt: truncate(
-        snapshot.lastUserPrompt,
-        CARD_LAST_PROMPT_MAX_CHARS,
-      ),
+      lastUserPrompt: truncate(snapshot.lastUserPrompt, CARD_LAST_PROMPT_MAX_CHARS),
       source: row.source,
     });
   }

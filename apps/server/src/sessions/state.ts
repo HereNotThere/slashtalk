@@ -24,24 +24,17 @@ export function classifySessionState(params: {
   const now = params.now ?? new Date();
   const heartbeatFresh =
     params.heartbeatUpdatedAt != null &&
-    (now.getTime() - params.heartbeatUpdatedAt.getTime()) / 1000 <
-      HEARTBEAT_FRESH_S;
+    (now.getTime() - params.heartbeatUpdatedAt.getTime()) / 1000 < HEARTBEAT_FRESH_S;
 
   if (heartbeatFresh) {
     if (params.inTurn) return SessionState.BUSY;
-    if (
-      params.lastTs &&
-      (now.getTime() - params.lastTs.getTime()) / 1000 < ACTIVE_WINDOW_S
-    ) {
+    if (params.lastTs && (now.getTime() - params.lastTs.getTime()) / 1000 < ACTIVE_WINDOW_S) {
       return SessionState.ACTIVE;
     }
     return SessionState.IDLE;
   }
 
-  if (
-    params.lastTs &&
-    (now.getTime() - params.lastTs.getTime()) / 1000 < RECENT_WINDOW_S
-  ) {
+  if (params.lastTs && (now.getTime() - params.lastTs.getTime()) / 1000 < RECENT_WINDOW_S) {
     return SessionState.RECENT;
   }
 

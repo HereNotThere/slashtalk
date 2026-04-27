@@ -38,9 +38,7 @@ import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 // by electron-vite (the MAIN_VITE_ prefix is what makes it visible to the main
 // process). Runtime `SLASHTALK_API_URL` still works as an override for ad-hoc
 // local testing. Unset → hosted default.
-const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as
-  | string
-  | undefined;
+const BAKED_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as string | undefined;
 const DEFAULT_BASE_URL = "https://slashtalk.onrender.com";
 const CREDS_KEY = "backendCredsEnc";
 
@@ -57,9 +55,7 @@ let pendingSignIn: { cancel: (reason: string) => void } | null = null;
 const authChanges = createEmitter<BackendAuthState>();
 
 function baseUrl(): string {
-  return (
-    process.env["SLASHTALK_API_URL"] ?? BAKED_BASE_URL ?? DEFAULT_BASE_URL
-  );
+  return process.env["SLASHTALK_API_URL"] ?? BAKED_BASE_URL ?? DEFAULT_BASE_URL;
 }
 
 export const onChange = authChanges.on;
@@ -163,10 +159,13 @@ function awaitLoopbackCallback(): Promise<CallbackParams> {
       resolve({ jwt, refreshToken, login });
     });
 
-    const timer = setTimeout(() => {
-      finish();
-      reject(new Error("Sign-in timed out"));
-    }, 5 * 60 * 1000);
+    const timer = setTimeout(
+      () => {
+        finish();
+        reject(new Error("Sign-in timed out"));
+      },
+      5 * 60 * 1000,
+    );
 
     const finish = (): void => {
       clearTimeout(timer);
@@ -194,9 +193,7 @@ function awaitLoopbackCallback(): Promise<CallbackParams> {
         reject(new Error("Failed to bind loopback port"));
         return;
       }
-      void shell.openExternal(
-        `${baseUrl()}/auth/github?desktop_port=${addr.port}`,
-      );
+      void shell.openExternal(`${baseUrl()}/auth/github?desktop_port=${addr.port}`);
     });
   });
 }
@@ -465,11 +462,7 @@ function jsonFetch<T>(path: string, opts: FetchOpts): Promise<T> {
   return doJsonFetch<T>(path, opts, false);
 }
 
-async function doJsonFetch<T>(
-  path: string,
-  opts: FetchOpts,
-  retried: boolean,
-): Promise<T> {
+async function doJsonFetch<T>(path: string, opts: FetchOpts, retried: boolean): Promise<T> {
   const auth: Auth = opts.auth ?? "session";
   const url = `${baseUrl()}${path}`;
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -521,7 +514,14 @@ async function doJsonFetch<T>(
     return undefined as T;
   }
   const text = await res.text();
-  logHttp("log", opts.method, path, String(res.status), ms, `${text.length}B ${text.slice(0, 200)}`);
+  logHttp(
+    "log",
+    opts.method,
+    path,
+    String(res.status),
+    ms,
+    `${text.length}B ${text.slice(0, 200)}`,
+  );
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
@@ -573,9 +573,10 @@ async function doRefresh(): Promise<boolean> {
     return false;
   }
 
-  const data = (await res.json().catch(() => null)) as
-    | { jwt?: string; refreshToken?: string }
-    | null;
+  const data = (await res.json().catch(() => null)) as {
+    jwt?: string;
+    refreshToken?: string;
+  } | null;
   if (!data?.jwt || !data.refreshToken) {
     logHttp("error", "POST", "/auth/refresh", "200", ms, "— malformed response");
     return false;
@@ -639,9 +640,7 @@ export async function claimRepo(fullName: string): Promise<RepoSummary> {
   } catch (err) {
     if (err instanceof HttpError) {
       const parsed = parseClaimError(err.body);
-      const kind = isClaimRepoErrorKind(parsed?.error)
-        ? parsed.error
-        : "unknown";
+      const kind = isClaimRepoErrorKind(parsed?.error) ? parsed.error : "unknown";
       throw new ClaimRepoError(
         kind,
         parsed?.message ?? `Claim failed (${err.status})`,
@@ -689,9 +688,7 @@ export function listFeedSessions(): Promise<FeedSessionSnapshot[]> {
   return jsonFetch<FeedSessionSnapshot[]>("/api/feed", { method: "GET" });
 }
 
-export function listFeedSessionsForUser(
-  login: string,
-): Promise<FeedSessionSnapshot[]> {
+export function listFeedSessionsForUser(login: string): Promise<FeedSessionSnapshot[]> {
   const qs = new URLSearchParams({ user: login });
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
@@ -777,9 +774,7 @@ export async function fetchChatGerunds(prompt: string): Promise<string[]> {
       body: { prompt },
     });
     if (!Array.isArray(res.words)) return fallback;
-    const words = res.words.filter(
-      (w): w is string => typeof w === "string" && w.length > 0,
-    );
+    const words = res.words.filter((w): w is string => typeof w === "string" && w.length > 0);
     return words.length > 0 ? words : fallback;
   } catch {
     return fallback;

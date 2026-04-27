@@ -44,10 +44,7 @@ const UpsertBody = z.object({
   summary_ts: IsoDate.optional(),
 });
 
-export async function handleUpsert(
-  req: Request,
-  userId: string,
-): Promise<Response> {
+export async function handleUpsert(req: Request, userId: string): Promise<Response> {
   let raw: unknown;
   try {
     raw = await req.json();
@@ -57,10 +54,7 @@ export async function handleUpsert(
 
   const parsed = UpsertBody.safeParse(raw);
   if (!parsed.success) {
-    return json(
-      { error: "invalid_body", detail: parsed.error.flatten() },
-      400,
-    );
+    return json({ error: "invalid_body", detail: parsed.error.flatten() }, 400);
   }
   const b = parsed.data;
   const now = new Date().toISOString();
@@ -104,10 +98,7 @@ export async function handleUpsert(
   return json({ ok: true }, 200);
 }
 
-export async function handleList(
-  url: URL,
-  userId: string,
-): Promise<Response> {
+export async function handleList(url: URL, userId: string): Promise<Response> {
   // Default to self when no user_login is given. Later we'll gate cross-user
   // reads on team membership; for now any signed-in user can query any login,
   // but only visibility='team' rows exist in the DB so there's nothing to

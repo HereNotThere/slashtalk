@@ -57,12 +57,7 @@ export class McpPresenceStore {
   private states = new Map<string, PresenceState>();
   private listeners = new Set<Listener>();
 
-  online(
-    userId: string,
-    sessionId: string,
-    clientInfo?: ClientInfo,
-    profile?: UserProfile,
-  ): void {
+  online(userId: string, sessionId: string, clientInfo?: ClientInfo, profile?: UserProfile): void {
     const now = Date.now();
     const session: SessionInfo = {
       sessionId,

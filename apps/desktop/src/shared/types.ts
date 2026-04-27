@@ -16,9 +16,7 @@ export type { ManagedAgentSessionRow, SpotifyPresence };
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
 export type InfoSession = SessionSnapshot | FeedSessionSnapshot;
 
-export type Avatar =
-  | { type: 'emoji'; value: string }
-  | { type: 'remote'; value: string };
+export type Avatar = { type: "emoji"; value: string } | { type: "remote"; value: string };
 
 export interface ChatHead {
   id: string;
@@ -66,9 +64,7 @@ export interface BackendUser {
   displayName: string | null;
 }
 
-export type BackendAuthState =
-  | { signedIn: false }
-  | { signedIn: true; user: BackendUser };
+export type BackendAuthState = { signedIn: false } | { signedIn: true; user: BackendUser };
 
 // Signed-in identity for the MCP/agents shim. Token stays main-side.
 export interface ChatHeadsUser {
@@ -77,9 +73,7 @@ export interface ChatHeadsUser {
   avatar: string;
 }
 
-export type ChatHeadsAuthState =
-  | { signedIn: false }
-  | { signedIn: true; user: ChatHeadsUser };
+export type ChatHeadsAuthState = { signedIn: false } | { signedIn: true; user: ChatHeadsUser };
 
 export interface RepoSummary {
   repoId: number;
@@ -140,8 +134,8 @@ export interface McpPresenceDetail {
   sessions: McpSessionInfo[];
 }
 
-export type AgentMode = 'cloud' | 'local';
-export type AgentVisibility = 'private' | 'team';
+export type AgentMode = "cloud" | "local";
+export type AgentVisibility = "private" | "team";
 
 export interface AgentSummary {
   id: string;
@@ -181,10 +175,10 @@ export interface GithubPendingConnect {
 }
 
 export type GithubConnectState =
-  | { kind: 'disconnected' }
-  | { kind: 'connecting'; pending: GithubPendingConnect }
-  | { kind: 'connected'; login?: string; scope: string }
-  | { kind: 'error'; message: string };
+  | { kind: "disconnected" }
+  | { kind: "connecting"; pending: GithubPendingConnect }
+  | { kind: "connected"; login?: string; scope: string }
+  | { kind: "error"; message: string };
 
 export interface CreateAgentInput {
   name: string;
@@ -208,10 +202,10 @@ export interface UpdateAgentInput {
 }
 
 export type AgentStreamEvent =
-  | { kind: 'text'; agentId: string; text: string }
-  | { kind: 'thinking'; agentId: string }
+  | { kind: "text"; agentId: string; text: string }
+  | { kind: "thinking"; agentId: string }
   | {
-      kind: 'tool_use';
+      kind: "tool_use";
       agentId: string;
       id: string;
       name: string;
@@ -219,39 +213,39 @@ export type AgentStreamEvent =
       input?: unknown;
     }
   | {
-      kind: 'tool_result';
+      kind: "tool_result";
       agentId: string;
       toolUseId: string;
       isError?: boolean;
       summary?: string;
     }
-  | { kind: 'phase'; agentId: string; label: string | null }
+  | { kind: "phase"; agentId: string; label: string | null }
   | {
-      kind: 'usage';
+      kind: "usage";
       agentId: string;
       input: number;
       output: number;
     }
-  | { kind: 'done'; agentId: string; stopReason?: string }
-  | { kind: 'error'; agentId: string; message: string };
+  | { kind: "done"; agentId: string; stopReason?: string }
+  | { kind: "error"; agentId: string; message: string };
 
 export type AssistantBlock =
-  | { kind: 'text'; text: string }
-  | { kind: 'thinking' }
+  | { kind: "text"; text: string }
+  | { kind: "thinking" }
   | {
-      kind: 'tool_use';
+      kind: "tool_use";
       id: string;
       name: string;
       server?: string;
       input?: unknown;
-      status: 'running' | 'ok' | 'error';
+      status: "running" | "ok" | "error";
       resultSummary?: string;
     };
 
 export type AgentMsg =
-  | { role: 'user'; text: string }
+  | { role: "user"; text: string }
   | {
-      role: 'assistant';
+      role: "assistant";
       blocks: AssistantBlock[];
       phase?: string | null;
       done: boolean;
@@ -262,8 +256,8 @@ export interface AgentHistoryPage {
   nextCursor: string | null;
 }
 
-export type McpTarget = 'claude-code' | 'codex';
-export type McpInstallMode = 'local-proxy' | 'legacy-bearer';
+export type McpTarget = "claude-code" | "codex";
+export type McpInstallMode = "local-proxy" | "legacy-bearer";
 
 export interface McpInstallOptions {
   mode?: McpInstallMode;
@@ -305,10 +299,7 @@ export interface ChatHeadsBridge {
 
   // MCP install into external AI clients.
   mcp: {
-    install: (
-      target: McpTarget,
-      options?: McpInstallOptions,
-    ) => Promise<McpTargetState>;
+    install: (target: McpTarget, options?: McpInstallOptions) => Promise<McpTargetState>;
     uninstall: (target: McpTarget) => Promise<McpTargetState>;
     status: () => Promise<McpInstallStatus>;
     url: () => Promise<string>;
@@ -388,10 +379,7 @@ export interface ChatHeadsBridge {
   // panel itself hold the window open while the cursor is over it.
   // Both axes of the bubble's screen-space top-left are reported so main can
   // align the popover against whichever axis matches the current dock.
-  showInfo: (
-    headId: string,
-    bubbleScreen?: { x: number; y: number },
-  ) => Promise<void>;
+  showInfo: (headId: string, bubbleScreen?: { x: number; y: number }) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
 
@@ -401,9 +389,7 @@ export interface ChatHeadsBridge {
   /** Overlay subscribes so it can hide the chat bubble while the pill is open. */
   onChatState: (cb: (state: { visible: boolean }) => void) => Unsubscribe;
   /** Chat renderer subscribes so it can mirror layout based on rail side. */
-  onChatConfig: (
-    cb: (cfg: { anchor: ChatAnchor }) => void,
-  ) => Unsubscribe;
+  onChatConfig: (cb: (cfg: { anchor: ChatAnchor }) => void) => Unsubscribe;
   /** Overlay renderer subscribes to learn the current dock so it can swap
    *  flex direction / scroll axis / FLIP tracking. */
   onOverlayConfig: (cb: (cfg: DockConfig) => void) => Unsubscribe;
@@ -422,10 +408,7 @@ export interface ChatHeadsBridge {
   ) => Promise<import("@slashtalk/shared").ChatAskResponse>;
 
   /** Open the info popover for the session owner represented by a chat card. */
-  openSessionCard: (payload: {
-    sessionId: string;
-    login: string;
-  }) => Promise<void>;
+  openSessionCard: (payload: { sessionId: string; login: string }) => Promise<void>;
 
   // LLM-picked "thinking state" phrases for the loading indicator, describing
   // what the assistant is actually doing for this specific prompt. The UI

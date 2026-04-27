@@ -140,8 +140,7 @@ async function peekInitializeBody(
       method?: string;
       params?: { clientInfo?: ClientInfo };
     };
-    const clientInfo =
-      body.method === "initialize" ? body.params?.clientInfo : undefined;
+    const clientInfo = body.method === "initialize" ? body.params?.clientInfo : undefined;
     return { req, parsedBody: body, clientInfo };
   } catch {
     return { req };

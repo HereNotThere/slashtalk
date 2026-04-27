@@ -5,10 +5,7 @@ import { eq } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
 import { users } from "../db/schema";
-import {
-  decryptGithubToken,
-  encryptGithubToken,
-} from "./tokens";
+import { decryptGithubToken, encryptGithubToken } from "./tokens";
 
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
@@ -118,15 +115,9 @@ export const githubAppAuth = (db: Database) =>
 
       const expectedState = stringCookieValue(cookie[STATE_COOKIE]?.value);
       cookie[STATE_COOKIE]?.remove();
-      const intent = verifyGithubAppConnectIntent(
-        stringCookieValue(cookie[INTENT_COOKIE]?.value),
-      );
+      const intent = verifyGithubAppConnectIntent(stringCookieValue(cookie[INTENT_COOKIE]?.value));
       cookie[INTENT_COOKIE]?.remove();
-      if (
-        typeof query.state !== "string" ||
-        !expectedState ||
-        query.state !== expectedState
-      ) {
+      if (typeof query.state !== "string" || !expectedState || query.state !== expectedState) {
         set.status = 400;
         return { error: "Invalid GitHub App state" };
       }
@@ -169,8 +160,7 @@ export const githubAppAuth = (db: Database) =>
         set.status = 403;
         return {
           error: "GitHub App account mismatch",
-          message:
-            "Authorize the GitHub App with the same GitHub account you use for Slashtalk.",
+          message: "Authorize the GitHub App with the same GitHub account you use for Slashtalk.",
         };
       }
 
@@ -181,9 +171,7 @@ export const githubAppAuth = (db: Database) =>
 
 export function githubAppInstallUrl(state?: string): string | null {
   if (!config.githubAppSlug) return null;
-  const url = new URL(
-    `https://github.com/apps/${config.githubAppSlug}/installations/new`,
-  );
+  const url = new URL(`https://github.com/apps/${config.githubAppSlug}/installations/new`);
   if (state) url.searchParams.set("state", state);
   return url.toString();
 }
@@ -197,11 +185,7 @@ export function githubAppInstallConnectUrl(): string {
 }
 
 export function isGithubAppConfigured(): boolean {
-  return Boolean(
-    config.githubAppClientId &&
-      config.githubAppClientSecret &&
-      config.githubAppSlug,
-  );
+  return Boolean(config.githubAppClientId && config.githubAppClientSecret && config.githubAppSlug);
 }
 
 export function githubAppConnectUrlForUser(
@@ -301,27 +285,18 @@ function signGithubAppConnectIntent(userId: number): string {
       nonce: crypto.randomUUID(),
     }),
   ).toString("base64url");
-  const sig = createHmac("sha256", config.jwtSecret)
-    .update(payload)
-    .digest("base64url");
+  const sig = createHmac("sha256", config.jwtSecret).update(payload).digest("base64url");
   return `${payload}.${sig}`;
 }
 
-function verifyGithubAppConnectIntent(
-  token: string | undefined,
-): { userId: number } | null {
+function verifyGithubAppConnectIntent(token: string | undefined): { userId: number } | null {
   if (!token) return null;
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
-  const expected = createHmac("sha256", config.jwtSecret)
-    .update(payload)
-    .digest("base64url");
+  const expected = createHmac("sha256", config.jwtSecret).update(payload).digest("base64url");
   const actualBytes = Buffer.from(sig);
   const expectedBytes = Buffer.from(expected);
-  if (
-    actualBytes.length !== expectedBytes.length ||
-    !timingSafeEqual(actualBytes, expectedBytes)
-  ) {
+  if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) {
     return null;
   }
 
@@ -369,11 +344,7 @@ async function findUserById(
   userId: number,
   payload?: { sessionIssuedAt?: number; iat?: number | boolean },
 ) {
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) return null;
   if (payload && user.credentialsRevokedAt) {
     const issuedAtMs =
@@ -453,9 +424,7 @@ async function githubAppTokenRequest(init: RequestInit) {
   return body;
 }
 
-async function fetchGitHubUserIdentity(
-  token: string,
-): Promise<GitHubIdentityResponse | null> {
+async function fetchGitHubUserIdentity(token: string): Promise<GitHubIdentityResponse | null> {
   let res: Response;
   try {
     res = await fetch(GITHUB_USER_URL, {
@@ -485,10 +454,7 @@ async function storeGitHubAppTokens(
   await db
     .update(users)
     .set({
-      githubAppUserToken: await encryptGithubToken(
-        tokenData.access_token,
-        config.encryptionKey,
-      ),
+      githubAppUserToken: await encryptGithubToken(tokenData.access_token, config.encryptionKey),
       githubAppRefreshToken: tokenData.refresh_token
         ? await encryptGithubToken(tokenData.refresh_token, config.encryptionKey)
         : undefined,

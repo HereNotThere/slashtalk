@@ -45,9 +45,7 @@ const SCOPE = process.env["GITHUB_SCOPE"] ?? "repo read:user read:org";
 
 // Baked in at build time via electron-vite's MAIN_VITE_ prefix. Runtime
 // GITHUB_CLIENT_ID still wins for ad-hoc local testing without rebuilding.
-const BAKED_CLIENT_ID = import.meta.env.MAIN_VITE_GITHUB_CLIENT_ID as
-  | string
-  | undefined;
+const BAKED_CLIENT_ID = import.meta.env.MAIN_VITE_GITHUB_CLIENT_ID as string | undefined;
 
 let creds: GithubCreds | null = null;
 let pendingPoll: { abort: () => void } | null = null;

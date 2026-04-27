@@ -15,7 +15,7 @@ export async function hashToken(token: string): Promise<string> {
 /** Encrypt a GitHub token using AES-256-GCM */
 export async function encryptGithubToken(
   plaintext: string,
-  encryptionKey: string
+  encryptionKey: string,
 ): Promise<string> {
   const keyBytes = hexToBytes(encryptionKey);
   const key = await crypto.subtle.importKey(
@@ -23,15 +23,11 @@ export async function encryptGithubToken(
     keyBytes.buffer as ArrayBuffer,
     "AES-GCM",
     false,
-    ["encrypt"]
+    ["encrypt"],
   );
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plaintext);
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    encoded
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
   // Format: hex(iv):hex(ciphertext)
   return bytesToHex(iv) + ":" + bytesToHex(new Uint8Array(ciphertext));
 }
@@ -39,7 +35,7 @@ export async function encryptGithubToken(
 /** Decrypt a GitHub token using AES-256-GCM */
 export async function decryptGithubToken(
   encrypted: string,
-  encryptionKey: string
+  encryptionKey: string,
 ): Promise<string> {
   const [ivHex, ciphertextHex] = encrypted.split(":");
   const keyBytes = hexToBytes(encryptionKey);
@@ -48,14 +44,14 @@ export async function decryptGithubToken(
     keyBytes.buffer as ArrayBuffer,
     "AES-GCM",
     false,
-    ["decrypt"]
+    ["decrypt"],
   );
   const ivBytes = hexToBytes(ivHex);
   const ctBytes = hexToBytes(ciphertextHex);
   const decrypted = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: ivBytes.buffer as ArrayBuffer },
     key,
-    ctBytes.buffer as ArrayBuffer
+    ctBytes.buffer as ArrayBuffer,
   );
   return new TextDecoder().decode(decrypted);
 }

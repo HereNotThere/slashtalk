@@ -24,6 +24,7 @@ Domain map for slashtalk. For rules that shape these domains, see [`docs/design-
 ## Server domains (`apps/server/src/`)
 
 ### `auth`
+
 GitHub OAuth (identity-only, `read:user read:org`) + JWT session cookie + refresh tokens + API keys + setup tokens.
 
 - **Files:** `auth/github.ts` (`githubAuth`, `cliAuth`), `auth/middleware.ts` (`jwtAuth`, `apiKeyAuth`), `auth/tokens.ts` (encryption/hashing/JWT helpers).
@@ -32,6 +33,7 @@ GitHub OAuth (identity-only, `read:user read:org`) + JWT session cookie + refres
 - **See:** [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ### `ingest`
+
 NDJSON uploader endpoint; classifies events; aggregates per-session deltas; matches sessions to repos.
 
 - **Files:** `ingest/routes.ts`, `ingest/classifier.ts`, `ingest/aggregator.ts` (repo matching lives in `social/github-sync.ts::matchSessionRepo`).
@@ -41,6 +43,7 @@ NDJSON uploader endpoint; classifies events; aggregates per-session deltas; matc
 - **See:** [`docs/RELIABILITY.md`](docs/RELIABILITY.md#ingest-resume-protocol), [`docs/product-specs/upload.md`](docs/product-specs/upload.md).
 
 ### `sessions`
+
 Read-side: snapshot assembly + state classification.
 
 - **Files:** `sessions/routes.ts`, `sessions/snapshot.ts`, `sessions/state.ts`.
@@ -49,6 +52,7 @@ Read-side: snapshot assembly + state classification.
 - **State is computed at read time**, not stored — see [`docs/RELIABILITY.md`](docs/RELIABILITY.md#heartbeat--state-machine).
 
 ### `social`
+
 Feed (social graph = repo co-membership) + PR-activity poller.
 
 - **Files:** `social/routes.ts`, `social/pr-poller.ts`, `social/github-sync.ts` (owns `matchSessionRepo`, called from `ingest/routes.ts` and `user/routes.ts`).
@@ -57,6 +61,7 @@ Feed (social graph = repo co-membership) + PR-activity poller.
 - **Publishes:** `pr_activity` on `repo:<id>` from the 60-second PR poller (stores encrypted OAuth token per user).
 
 ### `presence`
+
 Per-user presence events (e.g. Spotify now-playing) — written from the desktop, read by peers.
 
 - **Files:** `presence/routes.ts` (exports `spotifyPresenceRoutes` at `/v1`, `presenceReadRoutes` at `/api`).
@@ -64,6 +69,7 @@ Per-user presence events (e.g. Spotify now-playing) — written from the desktop
 - **Publishes:** presence events on `user:<userId>` and (fan-out) `repo:<id>` for every repo the user shares.
 
 ### `user`
+
 Profile + device + repo-claim management.
 
 - **Files:** `user/routes.ts` (exports `userRoutes`, `deviceReposRoutes`).
@@ -71,6 +77,7 @@ Profile + device + repo-claim management.
 - **Routes:** `GET /api/me`, `GET /api/me/devices`, `DELETE /api/me/devices/:id`, `GET /api/me/repos`, `POST /api/me/repos` (claim), `GET /v1/devices/:id/repos`, `POST /v1/devices/:id/repos`.
 
 ### `chat`
+
 Team-presence Q&A. Stateless server; client owns the thread.
 
 - **Files:** `chat/routes.ts` (plus helpers referenced from `app.ts`).
@@ -78,6 +85,7 @@ Team-presence Q&A. Stateless server; client owns the thread.
 - **Reads:** session snapshots + insights via the same access-control rules as `/api/feed`.
 
 ### `ws`
+
 WebSocket upgrade + Redis pub/sub bridge.
 
 - **Files:** `ws/handler.ts`, `ws/redis-bridge.ts`.
@@ -86,6 +94,7 @@ WebSocket upgrade + Redis pub/sub bridge.
 - **Soft-fail:** Redis errors in `RedisBridge.publish`/`subscribe` are swallowed so HTTP stays up. See [core-beliefs #7](docs/design-docs/core-beliefs.md#7-redis-publishing-is-soft-fail).
 
 ### `analyzers`
+
 Background LLM scheduler that produces session insights (title/description, rolling summary) via Anthropic.
 
 - **Files:** `analyzers/index.ts` (barrel), `analyzers/scheduler.ts`, `analyzers/registry.ts`, `analyzers/types.ts`, `analyzers/llm.ts`, `analyzers/publish.ts`, `analyzers/names.ts`, `analyzers/summary.ts`, `analyzers/rolling-summary.ts`, `analyzers/event-compact.ts`.
@@ -95,6 +104,7 @@ Background LLM scheduler that produces session insights (title/description, roll
 - **See:** [`docs/references/anthropic-sdk-llms.txt`](docs/references/anthropic-sdk-llms.txt), [core-beliefs #8](docs/design-docs/core-beliefs.md#8-latest-claude-model-ids).
 
 ### `install` (vestigial)
+
 `install/install.sh` is served at `GET /install.sh` but targets the old byte-offset ingest API and will 400 if invoked. Scheduled for removal — see [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md). **Do not extend.**
 
 ## Desktop architecture (`apps/desktop/src/`)
@@ -102,19 +112,23 @@ Background LLM scheduler that produces session insights (title/description, roll
 Six renderer windows plus auxiliary system chrome (`trayPopup`, `dockPlaceholder`) orchestrated from a single main process. Detailed renderer layout in [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md).
 
 ### Watcher pipeline
+
 - `main/uploader.ts` — `fs.watch(~/.claude/projects, {recursive:true})` + `~/.codex/sessions`, debounce 150 ms, concurrency cap 16, ships deltas to `/v1/ingest`. Strict-tracking gate runs before every upload ([core-beliefs #6](docs/design-docs/core-beliefs.md#6-strict-tracking-gate-in-the-desktop-uploader)).
 - `main/heartbeat.ts` — every 15 s + on fs-change, posts `/v1/heartbeat` for each live session (`process.kill(pid, 0)` liveness).
 
 ### Transport
+
 - `main/backend.ts` — HTTP client with single-flight JWT refresh + API-key headers. 401 on JWT auth triggers `/auth/refresh`; 401 on API-key auth clears credentials.
 - `main/ws.ts` — WS client (`ws` package) with exponential-backoff reconnect, routes messages to renderers via `main/emitter.ts` and IPC.
 
 ### Credential + state
+
 - `main/safeStore.ts` — Electron `safeStorage` (Keychain/DPAPI/libsecret) for JWT + API key.
 - `main/store.ts` — plaintext JSON in `app.getPath('userData')` for non-secret state.
 - `main/localRepos.ts` — tracked-repo list, `.git/config` parsing, worktree resolution. Rehydrates from server on sign-in.
 
 ### UI / windows
+
 **Six renderer windows** (each with its own `index.html`, listed in [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md#layout)): `main` (config), `overlay` (rail), `info` (peek popover), `chat` (input pill), `response` (full viewer), `statusbar` (menu-bar entry).
 
 **Auxiliary windows** owned by the main process: `trayPopup` (popup attached to the macOS tray) and `dockPlaceholder` (drag ghost). These do not have their own renderer entry under `src/renderer/` — they are orchestrated from `src/main/`.

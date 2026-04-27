@@ -186,26 +186,22 @@ export async function getTeamActivityImpl(
       lastTs: snapshot.lastTs,
       currentTool: snapshot.currentTool?.name ?? null,
       lastUserPrompt: truncate(snapshot.lastUserPrompt, LAST_PROMPT_MAX_CHARS),
-      topFilesEdited: snapshot.topFilesEdited
-        .slice(0, TOP_FILES_IN_ROLLUP)
-        .map(([path]) => path),
+      topFilesEdited: snapshot.topFilesEdited.slice(0, TOP_FILES_IN_ROLLUP).map(([path]) => path),
       toolErrors: snapshot.toolErrors,
     });
     byUser.set(s.userId, arr);
   }
 
-  const teammates: TeamActivityTeammate[] = [...byUser.entries()].map(
-    ([uid, sess]) => {
-      const u = userMap.get(uid);
-      return {
-        login: u?.login ?? "unknown",
-        name: u?.displayName ?? null,
-        avatarUrl: u?.avatarUrl ?? null,
-        isSelf: uid === userId,
-        sessions: sess,
-      };
-    },
-  );
+  const teammates: TeamActivityTeammate[] = [...byUser.entries()].map(([uid, sess]) => {
+    const u = userMap.get(uid);
+    return {
+      login: u?.login ?? "unknown",
+      name: u?.displayName ?? null,
+      avatarUrl: u?.avatarUrl ?? null,
+      isSelf: uid === userId,
+      sessions: sess,
+    };
+  });
 
   return { teammates, since: since.toISOString() };
 }
@@ -215,10 +211,13 @@ export interface GetSessionArgs {
 }
 
 export type GetSessionResult =
-  | { kind: "ok"; session: ReturnType<typeof toSnapshot> & {
-      user: { login: string; name: string | null } | null;
-      repo: string | null;
-    } }
+  | {
+      kind: "ok";
+      session: ReturnType<typeof toSnapshot> & {
+        user: { login: string; name: string | null } | null;
+        repo: string | null;
+      };
+    }
   | { kind: "error"; message: string };
 
 export async function getSessionImpl(
@@ -246,28 +245,16 @@ export async function getSessionImpl(
   }
 
   const [hbRows, insightsMap, userRows, repoRows] = await Promise.all([
-    db
-      .select()
-      .from(heartbeats)
-      .where(eq(heartbeats.sessionId, args.sessionId))
-      .limit(1),
+    db.select().from(heartbeats).where(eq(heartbeats.sessionId, args.sessionId)).limit(1),
     loadInsightsForSessions(db, [args.sessionId]),
     db
       .select({ login: users.githubLogin, displayName: users.displayName })
       .from(users)
       .where(eq(users.id, row.userId))
       .limit(1),
-    db
-      .select({ fullName: repos.fullName })
-      .from(repos)
-      .where(eq(repos.id, row.repoId))
-      .limit(1),
+    db.select({ fullName: repos.fullName }).from(repos).where(eq(repos.id, row.repoId)).limit(1),
   ]);
-  const snapshot = toSnapshot(
-    row,
-    hbRows[0] ?? null,
-    insightsMap.get(args.sessionId) ?? null,
-  );
+  const snapshot = toSnapshot(row, hbRows[0] ?? null, insightsMap.get(args.sessionId) ?? null);
   const u = userRows[0];
   const r = repoRows[0];
 
@@ -333,12 +320,7 @@ export function buildChatTools(
         },
       },
       handler: async (input) => {
-        const result = await getTeamActivityImpl(
-          db,
-          userId,
-          input as GetTeamActivityArgs,
-          ctx,
-        );
+        const result = await getTeamActivityImpl(db, userId, input as GetTeamActivityArgs, ctx);
         return { content: JSON.stringify(result) };
       },
     },
@@ -354,11 +336,7 @@ export function buildChatTools(
         required: ["sessionId"],
       },
       handler: async (input) => {
-        const result = await getSessionImpl(
-          db,
-          userId,
-          input as unknown as GetSessionArgs,
-        );
+        const result = await getSessionImpl(db, userId, input as unknown as GetSessionArgs);
         if (result.kind === "error") {
           return { content: result.message, isError: true };
         }

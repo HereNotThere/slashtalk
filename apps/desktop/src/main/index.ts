@@ -156,9 +156,7 @@ function getSpotifyShareEnabled(): boolean {
 
 function updateSpotifyRunning(): void {
   const shouldRun =
-    backend.getAuthState().signedIn &&
-    getSpotifyShareEnabled() &&
-    process.platform === "darwin";
+    backend.getAuthState().signedIn && getSpotifyShareEnabled() && process.platform === "darwin";
   if (shouldRun) void spotify.start();
   else spotify.stop();
 }
@@ -183,9 +181,7 @@ function applyRailPinned(): void {
   if (pinned) stopHoverPolling();
   else startHoverPolling();
   const native = debugMacWindowState(overlayWindow);
-  console.log(
-    `[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`,
-  );
+  console.log(`[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`);
 }
 
 // ---------- Session-only rail visibility ----------
@@ -238,9 +234,7 @@ function resolveRailVisibility(): void {
 }
 
 function appIsFocused(): boolean {
-  return BrowserWindow.getAllWindows().some(
-    (w) => !w.isDestroyed() && w.isFocused(),
-  );
+  return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused());
 }
 
 // ---------- Cross-app hover polling ----------
@@ -581,16 +575,9 @@ function resizeOverlay(): void {
   const dock = currentDock();
   const wa = display.workArea;
   // Main-axis cap — leaves OVERLAY_SCREEN_MARGIN at each end.
-  const axisExtent =
-    dock.orientation === "vertical" ? wa.height : wa.width;
-  const maxLength = Math.max(
-    overlayLength(0),
-    axisExtent - OVERLAY_SCREEN_MARGIN * 2,
-  );
-  const length = Math.min(
-    overlayLength(heads.length),
-    maxLength,
-  );
+  const axisExtent = dock.orientation === "vertical" ? wa.height : wa.width;
+  const maxLength = Math.max(overlayLength(0), axisExtent - OVERLAY_SCREEN_MARGIN * 2);
+  const length = Math.min(overlayLength(heads.length), maxLength);
   const size =
     dock.orientation === "vertical"
       ? { width: OVERLAY_WIDTH, height: length }
@@ -598,14 +585,11 @@ function resizeOverlay(): void {
   const bounds = overlayWindow.getBounds();
   // Keep the rail inside the work area after a size change so the chat bubble
   // never clips past the edge.
-  const axisPos =
-    dock.orientation === "vertical" ? bounds.y : bounds.x;
-  const axisMin =
-    (dock.orientation === "vertical" ? wa.y : wa.x) + OVERLAY_SCREEN_MARGIN;
+  const axisPos = dock.orientation === "vertical" ? bounds.y : bounds.x;
+  const axisMin = (dock.orientation === "vertical" ? wa.y : wa.x) + OVERLAY_SCREEN_MARGIN;
   const axisMax =
-    (dock.orientation === "vertical"
-      ? wa.y + wa.height - length
-      : wa.x + wa.width - length) - OVERLAY_SCREEN_MARGIN;
+    (dock.orientation === "vertical" ? wa.y + wa.height - length : wa.x + wa.width - length) -
+    OVERLAY_SCREEN_MARGIN;
   const clamped = Math.max(axisMin, Math.min(axisPos, axisMax));
   const nextBounds =
     dock.orientation === "vertical"
@@ -666,10 +650,7 @@ function ensureInfoWindow(): BrowserWindow {
   return infoWindow;
 }
 
-function positionInfo(
-  headId: string,
-  bubbleScreen?: { x: number; y: number },
-): void {
+function positionInfo(headId: string, bubbleScreen?: { x: number; y: number }): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
@@ -690,15 +671,11 @@ function positionInfo(
       dock.side === "start"
         ? stackBounds.x + stackBounds.width + INFO_GAP
         : stackBounds.x - INFO_GAP - INFO_WIDTH;
-    const avatarTopY =
-      bubbleScreen?.y ?? stackBounds.y + fallbackAxisOffset;
+    const avatarTopY = bubbleScreen?.y ?? stackBounds.y + fallbackAxisOffset;
     const desiredY = Math.round(avatarTopY - 16);
     const bottomLimit = screenFrame.y + screenFrame.height - 32;
     const maxY = bottomLimit - infoCurrentHeight;
-    const infoY = Math.max(
-      screenFrame.y + 8,
-      Math.min(desiredY, maxY),
-    );
+    const infoY = Math.max(screenFrame.y + 8, Math.min(desiredY, maxY));
     infoWindow.setBounds({
       x: Math.round(infoX),
       y: infoY,
@@ -714,8 +691,7 @@ function positionInfo(
     dock.side === "start"
       ? stackBounds.y + stackBounds.height + INFO_GAP
       : stackBounds.y - INFO_GAP - infoCurrentHeight;
-  const avatarLeftX =
-    bubbleScreen?.x ?? stackBounds.x + fallbackAxisOffset;
+  const avatarLeftX = bubbleScreen?.x ?? stackBounds.x + fallbackAxisOffset;
   const desiredX = Math.round(avatarLeftX - 16);
   const rightLimit = screenFrame.x + screenFrame.width - 8;
   const maxX = rightLimit - INFO_WIDTH;
@@ -830,11 +806,7 @@ function hideInfoNow(): void {
     if (infoHideFadeTimer) clearTimeout(infoHideFadeTimer);
     infoHideFadeTimer = setTimeout(() => {
       infoHideFadeTimer = null;
-      if (
-        infoWindow &&
-        !infoWindow.isDestroyed() &&
-        selectedHeadId === null
-      ) {
+      if (infoWindow && !infoWindow.isDestroyed() && selectedHeadId === null) {
         infoWindow.hide();
       }
     }, INFO_FADE_OUT_MS);
@@ -920,8 +892,7 @@ function positionChat(): void {
     // renderer). Anchor from window bounds so this works whether content fits
     // or the peer list is scrolling under a height cap.
     const bubbleCenterX = stackBounds.x + stackBounds.width / 2;
-    const bubbleCenterY =
-      stackBounds.y + PADDING_Y + BUBBLE_SIZE / 2;
+    const bubbleCenterY = stackBounds.y + PADDING_Y + BUBBLE_SIZE / 2;
     const chatX =
       anchor === "left"
         ? bubbleCenterX - CHAT_ICON_OFFSET
@@ -939,8 +910,7 @@ function positionChat(): void {
   // Horizontal rail: search bubble pinned to the left end of the row. Pill
   // lives on the inner side of the rail (below for top, above for bottom),
   // extending rightward from the bubble.
-  const bubbleCenterX =
-    stackBounds.x + PADDING_Y + BUBBLE_SIZE / 2;
+  const bubbleCenterX = stackBounds.x + PADDING_Y + BUBBLE_SIZE / 2;
   const chatX = bubbleCenterX - CHAT_ICON_OFFSET;
   const chatY =
     dock.side === "start"
@@ -1116,9 +1086,7 @@ function positionTrayPopup(trayBounds: Electron.Rectangle): void {
   const display = screen.getDisplayMatching(trayBounds);
   const screenFrame = display.workArea;
 
-  const x = Math.round(
-    trayBounds.x + trayBounds.width / 2 - TRAY_POPUP_WIDTH / 2,
-  );
+  const x = Math.round(trayBounds.x + trayBounds.width / 2 - TRAY_POPUP_WIDTH / 2);
   const y = Math.round(trayBounds.y + trayBounds.height + 6);
 
   const clampedX = Math.max(
@@ -1140,8 +1108,7 @@ function toggleTrayPopup(bounds: Electron.Rectangle): void {
 }
 
 function hideTrayPopup(): void {
-  if (trayPopup && !trayPopup.isDestroyed() && trayPopup.isVisible())
-    trayPopup.hide();
+  if (trayPopup && !trayPopup.isDestroyed() && trayPopup.isVisible()) trayPopup.hide();
 }
 
 function createTray(): void {
@@ -1186,48 +1153,38 @@ ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
   broadcastRailPinned();
 });
 
-ipcMain.handle("rail:getSessionOnlyMode", (): boolean =>
-  getRailSessionOnlyMode(),
-);
-ipcMain.handle(
-  "rail:setSessionOnlyMode",
-  (_e, enabled: boolean): void => {
-    store.set(SESSION_ONLY_KEY, !!enabled);
-    resolveRailVisibility();
-    broadcastRailSessionOnlyMode();
-  },
-);
+ipcMain.handle("rail:getSessionOnlyMode", (): boolean => getRailSessionOnlyMode());
+ipcMain.handle("rail:setSessionOnlyMode", (_e, enabled: boolean): void => {
+  store.set(SESSION_ONLY_KEY, !!enabled);
+  resolveRailVisibility();
+  broadcastRailSessionOnlyMode();
+});
 
 ipcMain.handle("spotify:isSupported", (): boolean => process.platform === "darwin");
 ipcMain.handle("spotify:getShareEnabled", (): boolean => getSpotifyShareEnabled());
-ipcMain.handle(
-  "spotify:setShareEnabled",
-  async (_e, enabled: boolean): Promise<void> => {
-    const next = !!enabled;
-    const prev = getSpotifyShareEnabled();
-    if (prev === next) return;
-    store.set(SPOTIFY_SHARE_KEY, next);
-    broadcastToTrayAndMain("spotify:shareEnabled", next);
-    // Turning off while signed in: clear peers immediately so the card
-    // disappears in seconds instead of waiting for the 120s Redis TTL.
-    if (prev && !next && backend.getAuthState().signedIn) {
-      try {
-        await backend.postSpotifyPresence(null);
-      } catch (err) {
-        console.warn("[spotify] clear on disable failed", err);
-      }
+ipcMain.handle("spotify:setShareEnabled", async (_e, enabled: boolean): Promise<void> => {
+  const next = !!enabled;
+  const prev = getSpotifyShareEnabled();
+  if (prev === next) return;
+  store.set(SPOTIFY_SHARE_KEY, next);
+  broadcastToTrayAndMain("spotify:shareEnabled", next);
+  // Turning off while signed in: clear peers immediately so the card
+  // disappears in seconds instead of waiting for the 120s Redis TTL.
+  if (prev && !next && backend.getAuthState().signedIn) {
+    try {
+      await backend.postSpotifyPresence(null);
+    } catch (err) {
+      console.warn("[spotify] clear on disable failed", err);
     }
-    updateSpotifyRunning();
-  },
-);
+  }
+  updateSpotifyRunning();
+});
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
 ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
 ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());
 ipcMain.handle("debug:addFakeTeammate", () => rail.debugAddFakeTeammate());
-ipcMain.handle("debug:removeFakeTeammate", () =>
-  rail.debugRemoveFakeTeammate(),
-);
+ipcMain.handle("debug:removeFakeTeammate", () => rail.debugRemoveFakeTeammate());
 ipcMain.handle("debug:replayEnterAnimation", () => replayEnterAnimation());
 
 function replayEnterAnimation(): void {
@@ -1290,15 +1247,11 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
-  "chat:ask",
-  (_e, messages: Parameters<typeof backend.askChat>[0]) =>
-    backend.askChat(messages),
+ipcMain.handle("chat:ask", (_e, messages: Parameters<typeof backend.askChat>[0]) =>
+  backend.askChat(messages),
 );
 
-ipcMain.handle("chat:gerund", (_e, prompt: string) =>
-  backend.fetchChatGerunds(prompt),
-);
+ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));
 
 // -------- Dock to edge (drag → release → snap) --------
 
@@ -1331,10 +1284,7 @@ function availableDockEdges(display: Electron.Display): Set<Edge> {
 // edge is blocked by the macOS Dock, its candidate is simply dropped — the
 // next-closest allowed edge wins, so dragging toward the blocked side snaps
 // elsewhere instead of overlapping system UI.
-function dockFromPoint(
-  p: { x: number; y: number },
-  display: Electron.Display,
-): DockConfig {
+function dockFromPoint(p: { x: number; y: number }, display: Electron.Display): DockConfig {
   const wa = display.workArea;
   const allowed = availableDockEdges(display);
   const candidates: Array<{ d: number; dock: DockConfig }> = [];
@@ -1377,24 +1327,17 @@ function currentDock(): DockConfig {
   return dockFromPoint(center, overlayDisplay());
 }
 
-function computeDockBoundsOn(
-  display: Electron.Display,
-  dock: DockConfig,
-): Electron.Rectangle {
+function computeDockBoundsOn(display: Electron.Display, dock: DockConfig): Electron.Rectangle {
   const wa = display.workArea;
   const { width, height } = overlaySize(heads.length, dock.orientation);
   if (dock.orientation === "vertical") {
     const x =
-      dock.side === "start"
-        ? wa.x + DOCK_EDGE_MARGIN
-        : wa.x + wa.width - width - DOCK_EDGE_MARGIN;
+      dock.side === "start" ? wa.x + DOCK_EDGE_MARGIN : wa.x + wa.width - width - DOCK_EDGE_MARGIN;
     const y = wa.y + Math.floor((wa.height - height) / 2);
     return { x, y, width, height };
   }
   const y =
-    dock.side === "start"
-      ? wa.y + DOCK_EDGE_MARGIN
-      : wa.y + wa.height - height - DOCK_EDGE_MARGIN;
+    dock.side === "start" ? wa.y + DOCK_EDGE_MARGIN : wa.y + wa.height - height - DOCK_EDGE_MARGIN;
   const x = wa.x + Math.floor((wa.width - width) / 2);
   return { x, y, width, height };
 }
@@ -1443,9 +1386,7 @@ function ensureDockPlaceholder(): BrowserWindow {
     visibleOnFullScreen: true,
   });
   dockPlaceholderWindow.setIgnoreMouseEvents(true);
-  void dockPlaceholderWindow.loadURL(
-    "data:text/html;charset=utf-8," + encodeURIComponent(html),
-  );
+  void dockPlaceholderWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
   dockPlaceholderWindow.on("closed", () => {
     dockPlaceholderWindow = null;
   });
@@ -1463,11 +1404,7 @@ function hideDockPlaceholder(): void {
   if (dockPlaceholderWindow.isVisible()) dockPlaceholderWindow.hide();
 }
 
-function animateOverlayTo(
-  target: Electron.Rectangle,
-  duration: number,
-  onDone?: () => void,
-): void {
+function animateOverlayTo(target: Electron.Rectangle, duration: number, onDone?: () => void): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   overlayAnimToken += 1;
   const token = overlayAnimToken;
@@ -1475,11 +1412,7 @@ function animateOverlayTo(
   const t0 = Date.now();
   const ease = (t: number): number => 1 - Math.pow(1 - t, 3); // easeOutCubic
   const step = (): void => {
-    if (
-      token !== overlayAnimToken ||
-      !overlayWindow ||
-      overlayWindow.isDestroyed()
-    ) {
+    if (token !== overlayAnimToken || !overlayWindow || overlayWindow.isDestroyed()) {
       return;
     }
     const t = Math.min(1, (Date.now() - t0) / duration);
@@ -1580,9 +1513,7 @@ ipcMain.handle("app:openAgentCreator", (): void => {
 
 ipcMain.handle("app:quit", (): void => app.quit());
 
-ipcMain.handle("clipboard:writeText", (_e, text: string): void =>
-  clipboard.writeText(text ?? ""),
-);
+ipcMain.handle("clipboard:writeText", (_e, text: string): void => clipboard.writeText(text ?? ""));
 ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
   await shell.openExternal(url);
 });
@@ -1605,12 +1536,8 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
   if (!win || win.isDestroyed()) return;
   let maxForWin = RESIZE_MAX;
   if (win === infoWindow) {
-    const { height: screenH } = screen.getDisplayMatching(win.getBounds())
-      .workAreaSize;
-    maxForWin = Math.min(
-      INFO_MAX_ABSOLUTE,
-      Math.floor(screenH * INFO_MAX_SCREEN_FRACTION),
-    );
+    const { height: screenH } = screen.getDisplayMatching(win.getBounds()).workAreaSize;
+    maxForWin = Math.min(INFO_MAX_ABSOLUTE, Math.floor(screenH * INFO_MAX_SCREEN_FRACTION));
   }
   const h = Math.max(RESIZE_MIN, Math.min(maxForWin, Math.round(height)));
 
@@ -1671,20 +1598,14 @@ ipcMain.handle("sessions:preload", async (_e, headId: string): Promise<void> => 
   void fetchSessionsForHead(headId);
 });
 
-ipcMain.handle(
-  "agentSessions:forAgent",
-  async (_e, agentId: string) => agentIngest.listForAgent(agentId),
+ipcMain.handle("agentSessions:forAgent", async (_e, agentId: string) =>
+  agentIngest.listForAgent(agentId),
 );
 
 ipcMain.handle("mcp:install", (_e, target: McpTarget, options?: unknown) =>
-  installMcp.install(
-    target,
-    options as Parameters<typeof installMcp.install>[1],
-  ),
+  installMcp.install(target, options as Parameters<typeof installMcp.install>[1]),
 );
-ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) =>
-  installMcp.uninstall(target),
-);
+ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) => installMcp.uninstall(target));
 ipcMain.handle("mcp:status", () => installMcp.status());
 ipcMain.handle("mcp:url", () => installMcp.mcpUrl());
 ipcMain.handle("mcp:detailForHead", (_e, _headId: string) => {
@@ -1705,36 +1626,10 @@ ipcMain.handle("agents:setApiKey", async (_e, key: string): Promise<void> => {
 });
 ipcMain.handle("agents:clearApiKey", () => anthropic.clearApiKey());
 ipcMain.handle("agents:list", () => agentStore.list().map(toAgentSummary));
-ipcMain.handle(
-  "agents:create",
-  async (_e, input: CreateAgentInput): Promise<AgentSummary> => {
-    const visibility = input.visibility ?? "private";
-    if (input.mode === "local") {
-      const created = localAgent.createAgent(input);
-      const row: LocalAgent = {
-        id: created.id,
-        name: created.name,
-        description: created.description,
-        systemPrompt: created.systemPrompt,
-        model: created.model,
-        createdAt: Date.now(),
-        sessions: [],
-        mode: "local",
-        cwd: created.cwd,
-        visibility,
-        mcpServers: [],
-      };
-      agentStore.add(row);
-      return toAgentSummary(row);
-    }
-
-    const created = await anthropic.createAgent({
-      name: input.name,
-      description: input.description,
-      systemPrompt: input.systemPrompt,
-      model: input.model,
-      mcpServers: input.mcpServers,
-    });
+ipcMain.handle("agents:create", async (_e, input: CreateAgentInput): Promise<AgentSummary> => {
+  const visibility = input.visibility ?? "private";
+  if (input.mode === "local") {
+    const created = localAgent.createAgent(input);
     const row: LocalAgent = {
       id: created.id,
       name: created.name,
@@ -1743,21 +1638,40 @@ ipcMain.handle(
       model: created.model,
       createdAt: Date.now(),
       sessions: [],
-      mode: "cloud",
+      mode: "local",
+      cwd: created.cwd,
       visibility,
-      mcpServers: input.mcpServers ?? [],
+      mcpServers: [],
     };
     agentStore.add(row);
     return toAgentSummary(row);
-  },
-);
+  }
+
+  const created = await anthropic.createAgent({
+    name: input.name,
+    description: input.description,
+    systemPrompt: input.systemPrompt,
+    model: input.model,
+    mcpServers: input.mcpServers,
+  });
+  const row: LocalAgent = {
+    id: created.id,
+    name: created.name,
+    description: created.description,
+    systemPrompt: created.systemPrompt,
+    model: created.model,
+    createdAt: Date.now(),
+    sessions: [],
+    mode: "cloud",
+    visibility,
+    mcpServers: input.mcpServers ?? [],
+  };
+  agentStore.add(row);
+  return toAgentSummary(row);
+});
 ipcMain.handle(
   "agents:update",
-  async (
-    _e,
-    id: string,
-    input: UpdateAgentInput,
-  ): Promise<AgentSummary> => {
+  async (_e, id: string, input: UpdateAgentInput): Promise<AgentSummary> => {
     const existing = agentStore.get(id);
     if (!existing) throw new Error("Unknown agent");
 
@@ -1775,7 +1689,7 @@ ipcMain.handle(
       visibility: input.visibility ?? existing.visibility ?? "private",
       mcpServers: isLocalAgent(existing)
         ? existing.mcpServers
-        : input.mcpServers ?? existing.mcpServers ?? [],
+        : (input.mcpServers ?? existing.mcpServers ?? []),
     };
 
     if (!isLocalAgent(existing)) {
@@ -1840,12 +1754,7 @@ ipcMain.handle(
 );
 ipcMain.handle(
   "agents:send",
-  async (
-    _e,
-    agentId: string,
-    text: string,
-    requestedSessionId?: string | null,
-  ) => {
+  async (_e, agentId: string, text: string, requestedSessionId?: string | null) => {
     const row = agentStore.get(agentId);
     if (!row) throw new Error("Unknown agent");
     streamingAgents.add(agentId);
@@ -1903,14 +1812,11 @@ ipcMain.handle(
     }
   },
 );
-ipcMain.handle(
-  "agents:listSessions",
-  (_e, agentId: string): AgentSessionSummary[] => {
-    const row = agentStore.get(agentId);
-    if (row && !isLocalAgent(row)) void refreshSessionsFromServer(agentId);
-    return row?.sessions ?? [];
-  },
-);
+ipcMain.handle("agents:listSessions", (_e, agentId: string): AgentSessionSummary[] => {
+  const row = agentStore.get(agentId);
+  if (row && !isLocalAgent(row)) void refreshSessionsFromServer(agentId);
+  return row?.sessions ?? [];
+});
 
 const pendingArchive = new Set<string>();
 const PENDING_ARCHIVE_TTL_MS = 30_000;
@@ -1918,9 +1824,7 @@ const PENDING_ARCHIVE_TTL_MS = 30_000;
 async function refreshSessionsFromServer(agentId: string): Promise<void> {
   try {
     const server = await anthropic.listAgentSessions(agentId);
-    const active = server.filter(
-      (s) => s.archivedAt == null && !pendingArchive.has(s.id),
-    );
+    const active = server.filter((s) => s.archivedAt == null && !pendingArchive.has(s.id));
     agentStore.reconcileSessions(
       agentId,
       active.map((s) => ({
@@ -1935,13 +1839,10 @@ async function refreshSessionsFromServer(agentId: string): Promise<void> {
   }
 }
 
-ipcMain.handle(
-  "agents:popOut",
-  (_e, agentId: string, sessionId: string): void => {
-    agentStore.setActiveSession(agentId, sessionId);
-    showResponse({ kind: "agent", agentId, sessionId });
-  },
-);
+ipcMain.handle("agents:popOut", (_e, agentId: string, sessionId: string): void => {
+  agentStore.setActiveSession(agentId, sessionId);
+  showResponse({ kind: "agent", agentId, sessionId });
+});
 
 ipcMain.handle(
   "agents:removeSession",
@@ -1958,8 +1859,7 @@ ipcMain.handle(
     setTimeout(() => pendingArchive.delete(sessionId), PENDING_ARCHIVE_TTL_MS);
 
     const isTeamCloud = !!row && (row.visibility ?? "private") === "team";
-    const startedAtMs =
-      row?.sessions.find((s) => s.id === sessionId)?.createdAt ?? Date.now();
+    const startedAtMs = row?.sessions.find((s) => s.id === sessionId)?.createdAt ?? Date.now();
     const agentSnapshot = row;
 
     agentStore.removeSession(agentId, sessionId);
@@ -2007,29 +1907,23 @@ async function finalizeTeamSession(
   }
 }
 
-ipcMain.handle(
-  "agents:newSession",
-  async (_e, agentId: string): Promise<AgentSessionSummary> => {
-    const row = agentStore.get(agentId);
-    if (!row) throw new Error("Unknown agent");
-    const id = isLocalAgent(row)
-      ? localAgent.localSessionId()
-      : (await anthropic.startSession(agentId)).sessionId;
-    const session: AgentSessionSummary = { id, createdAt: Date.now() };
-    agentStore.addSession(agentId, session);
-    agentIngest.upsertSessionStart(row, id, session.createdAt);
-    emitSessionsChange(agentId);
-    return session;
-  },
-);
+ipcMain.handle("agents:newSession", async (_e, agentId: string): Promise<AgentSessionSummary> => {
+  const row = agentStore.get(agentId);
+  if (!row) throw new Error("Unknown agent");
+  const id = isLocalAgent(row)
+    ? localAgent.localSessionId()
+    : (await anthropic.startSession(agentId)).sessionId;
+  const session: AgentSessionSummary = { id, createdAt: Date.now() };
+  agentStore.addSession(agentId, session);
+  agentIngest.upsertSessionStart(row, id, session.createdAt);
+  emitSessionsChange(agentId);
+  return session;
+});
 
-ipcMain.handle(
-  "agents:selectSession",
-  (_e, agentId: string, sessionId: string): void => {
-    agentStore.setActiveSession(agentId, sessionId);
-    emitSessionsChange(agentId);
-  },
-);
+ipcMain.handle("agents:selectSession", (_e, agentId: string, sessionId: string): void => {
+  agentStore.setActiveSession(agentId, sessionId);
+  emitSessionsChange(agentId);
+});
 
 ipcMain.handle(
   "agents:ensureSessionUsage",
@@ -2075,10 +1969,7 @@ peerPresence.onChange(({ login, presence }) => {
   infoWindow.webContents.send("info:presence", { login, spotify: presence });
 });
 
-ipcMain.handle(
-  "spotify:forLogin",
-  (_e, login: string) => peerPresence.get(login),
-);
+ipcMain.handle("spotify:forLogin", (_e, login: string) => peerPresence.get(login));
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());
@@ -2092,9 +1983,7 @@ ipcMain.handle("backend:signOutEverywhere", async () => {
   await backend.signOutEverywhere();
   localRepos.clearOnSignOut();
 });
-ipcMain.handle("backend:getGithubAppStatus", () =>
-  backend.getGithubAppStatus(),
-);
+ipcMain.handle("backend:getGithubAppStatus", () => backend.getGithubAppStatus());
 ipcMain.handle("backend:connectGithubApp", () => backend.connectGithubApp());
 
 function applySyncForAuth(signedIn: boolean): void {
@@ -2107,9 +1996,7 @@ function applySyncForAuth(signedIn: boolean): void {
     for (const target of ["claude-code", "codex"] as const) {
       void installMcp
         .install(target)
-        .catch((err) =>
-          console.warn(`installMcp.install ${target} failed:`, err),
-        );
+        .catch((err) => console.warn(`installMcp.install ${target} failed:`, err));
     }
   } else {
     heartbeat.stop();
@@ -2120,9 +2007,7 @@ function applySyncForAuth(signedIn: boolean): void {
     for (const target of ["claude-code", "codex"] as const) {
       void installMcp
         .uninstall(target)
-        .catch((err) =>
-          console.warn(`installMcp.uninstall ${target} failed:`, err),
-        );
+        .catch((err) => console.warn(`installMcp.uninstall ${target} failed:`, err));
     }
   }
 }
@@ -2218,9 +2103,7 @@ ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>
 
 // -------- Tray repo-picker (tracked local repos) --------
 
-ipcMain.handle("trackedRepos:selection", () => [
-  ...localRepos.selectedRepoIds(),
-]);
+ipcMain.handle("trackedRepos:selection", () => [...localRepos.selectedRepoIds()]);
 ipcMain.handle("trackedRepos:toggle", (_e, repoId: number) => [
   ...localRepos.toggleSelected(repoId),
 ]);
@@ -2259,20 +2142,14 @@ backend.onChange((state) =>
     ? trayPopup.webContents.send("backend:authState", state)
     : undefined,
 );
-localRepos.onChange((repos) =>
-  broadcastToTrayAndMain("backend:trackedRepos", repos),
-);
+localRepos.onChange((repos) => broadcastToTrayAndMain("backend:trackedRepos", repos));
 localRepos.onSelectionChange((ids) =>
   broadcastToTrayAndMain("trackedRepos:selectionChange", [...ids]),
 );
 chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
 githubAuth.onChange((state) => broadcastToMain("github:state", state));
-anthropic.onConfiguredChange((configured) =>
-  broadcastToMain("agents:configured", configured),
-);
-agentStore.onChange((agents) =>
-  broadcastToMain("agents:listChange", agents.map(toAgentSummary)),
-);
+anthropic.onConfiguredChange((configured) => broadcastToMain("agents:configured", configured));
+agentStore.onChange((agents) => broadcastToMain("agents:listChange", agents.map(toAgentSummary)));
 
 // -------- Lifecycle --------
 
@@ -2296,9 +2173,7 @@ app.whenReady().then(async () => {
   anthropic.restore();
   githubAuth.restore();
   localRepos.restore();
-  void mcpProxy
-    .start()
-    .catch((err) => console.warn("[localMcpProxy] start failed:", err));
+  void mcpProxy.start().catch((err) => console.warn("[localMcpProxy] start failed:", err));
   createTray();
   rail.start();
   selfSession.start();

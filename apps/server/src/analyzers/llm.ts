@@ -13,10 +13,7 @@ function client(): Anthropic {
 }
 
 // Per-million-token USD pricing. Cache-write is computed as base × 1.25 (5m TTL).
-const PRICING: Record<
-  string,
-  { in: number; out: number; cacheRead: number }
-> = {
+const PRICING: Record<string, { in: number; out: number; cacheRead: number }> = {
   "claude-haiku-4-5-20251001": { in: 1, out: 5, cacheRead: 0.1 },
   "claude-sonnet-4-6": { in: 3, out: 15, cacheRead: 0.3 },
   "claude-opus-4-7": { in: 15, out: 75, cacheRead: 1.5 },

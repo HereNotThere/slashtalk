@@ -20,7 +20,7 @@ These are top-level cross-cutting specs — UPPERCASE filenames at `docs/` root 
 
 (One file per topic in this subdirectory. Add new entries here as they're written.)
 
-- *(none yet beyond `core-beliefs.md` — new design decisions land here as `<topic>.md`)*
+- _(none yet beyond `core-beliefs.md` — new design decisions land here as `<topic>.md`)_
 
 ## Product specs
 

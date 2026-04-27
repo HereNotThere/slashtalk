@@ -17,7 +17,7 @@ import { wsHandler } from "./ws/handler";
 import type { RedisBridge } from "./ws/redis-bridge";
 
 const INSTALL_SCRIPT = await Bun.file(
-  new URL("./install/install.sh", import.meta.url).pathname
+  new URL("./install/install.sh", import.meta.url).pathname,
 ).text();
 
 export function createApp(db: Database, redis: RedisBridge) {

@@ -36,9 +36,7 @@ interface KeyRow {
 /** Validate a Bearer token and return the identity it's bound to, or null
  *  if the key is unknown / revoked. Also bumps last_used_at as a side effect
  *  so slashtalk's UI can show "last seen" on devices. */
-export async function verifyApiKey(
-  token: string,
-): Promise<ApiKeyIdentity | null> {
+export async function verifyApiKey(token: string): Promise<ApiKeyIdentity | null> {
   if (!token) return null;
   const sql = db.sql();
   const hash = await hashToken(token);

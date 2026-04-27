@@ -6,10 +6,10 @@ This doc exists because getting "on top only when focused" right on macOS took s
 
 ## Behavior
 
-| Pin state | Slashtalk focused | Slashtalk blurred | Cursor over rail |
-| --- | --- | --- | --- |
-| Pinned (default) | floats | floats | hover works |
-| Unpinned | floats | normal z-order → sits behind other apps | rail briefly floats so hover-to-peek works cross-app |
+| Pin state        | Slashtalk focused | Slashtalk blurred                       | Cursor over rail                                     |
+| ---------------- | ----------------- | --------------------------------------- | ---------------------------------------------------- |
+| Pinned (default) | floats            | floats                                  | hover works                                          |
+| Unpinned         | floats            | normal z-order → sits behind other apps | rail briefly floats so hover-to-peek works cross-app |
 
 Persisted as `railPinned` in `store` (default `true`).
 
@@ -39,12 +39,12 @@ The overlay is `focusable: false`, which Electron implements as an `NSPanel` wit
 
 5. **Non-activating NSPanels don't ride normal app z-order on activation.** When Slashtalk becomes frontmost after being blurred, other apps' windows can stay above the rail because non-activating panels aren't included in the "bring app windows forward" operation. The `did-become-active` handler explicitly calls `setAlwaysOnTop(true, "floating") + moveTop()` to force it up.
 
-6. **Cross-app hover requires floating-level hit-testing.** A window at normal level behind another app's windows receives no mouse events — period. There's no NSWindow flag that overrides this; that's what the floating level exists for. The only way to get cross-app hover on an unpinned rail is to *temporarily* raise to floating when the cursor approaches. That's what `hoverPollTick()` does (12.5Hz cursor sampling, ~6px edge margin, 200ms leave grace).
+6. **Cross-app hover requires floating-level hit-testing.** A window at normal level behind another app's windows receives no mouse events — period. There's no NSWindow flag that overrides this; that's what the floating level exists for. The only way to get cross-app hover on an unpinned rail is to _temporarily_ raise to floating when the cursor approaches. That's what `hoverPollTick()` does (12.5Hz cursor sampling, ~6px edge margin, 200ms leave grace).
 
 ## Things that don't work — don't retry
 
 - **Toggling only `setAlwaysOnTop`.** The rail "looks" on top because its screen position is at an uncovered edge, but the collection behavior from `setVisibleOnAllWorkspaces` keeps its NSPanel at floating level under the hood. On top of that, the dock drops as described above.
-- **Hiding the rail on blur, showing on focus.** Clean in theory, but with the main window hidden too the app has zero visible windows → dock icon and Cmd+Tab entry vanish. Re-asserting `setActivationPolicy("regular")` *can* recover but the transition feels broken, and pinning back up doesn't always restore dock presence.
+- **Hiding the rail on blur, showing on focus.** Clean in theory, but with the main window hidden too the app has zero visible windows → dock icon and Cmd+Tab entry vanish. Re-asserting `setActivationPolicy("regular")` _can_ recover but the transition feels broken, and pinning back up doesn't always restore dock presence.
 - **Making the rail `focusable: true` in unpinned mode.** Solves the Cmd+Tab "app has nothing to focus" problem, but the system shadow darkens every time the rail is clicked — immediately obvious on the frosted pill, looks broken.
 - **Dropping `setVisibleOnAllWorkspaces` when unpinned.** Breaks cross-app mouse events entirely. Hover dies even when the rail is the topmost window at the cursor position.
 

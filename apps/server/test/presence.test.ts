@@ -67,14 +67,8 @@ describe("spotify presence", () => {
     expect(bobRes.status).toBe(200);
     bobCookie = getCookie(bobRes, "session")!;
 
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "alice"));
-    const [bob] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "bob"));
+    const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
+    const [bob] = await db.select().from(users).where(eq(users.githubLogin, "bob"));
 
     const [shared] = await db
       .insert(repos)
@@ -172,18 +166,13 @@ describe("spotify presence", () => {
     //  inserting a user row + signing a session for them would require
     //  extra plumbing — instead, verify from Bob's side that Alice only
     //  appears because they share the `shared` repo, by dropping that row.)
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.githubLogin, "alice"));
+    const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
     const [shared] = await db
       .select()
       .from(repos)
       .where(eq(repos.fullName, "presence-test/shared"));
 
-    await db
-      .delete(userRepos)
-      .where(eq(userRepos.userId, alice.id));
+    await db.delete(userRepos).where(eq(userRepos.userId, alice.id));
 
     const bobRes = await fetch(`${baseUrl}/api/presence/peers`, {
       headers: { Cookie: bobCookie },
@@ -192,9 +181,7 @@ describe("spotify presence", () => {
     expect(body.alice).toBeUndefined();
 
     // Restore for any downstream tests in the file.
-    await db
-      .insert(userRepos)
-      .values({ userId: alice.id, repoId: shared.id, permission: "push" });
+    await db.insert(userRepos).values({ userId: alice.id, repoId: shared.id, permission: "push" });
   });
 
   it("rejects malformed track payload with 422", async () => {

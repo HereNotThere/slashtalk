@@ -40,9 +40,7 @@ async function runMigrations(client: SQL): Promise<void> {
   `;
 
   const dir = join(import.meta.dir, "..", "migrations");
-  const files = (await readdir(dir))
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
+  const files = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
 
   const appliedRows = await client<{ name: string }[]>`
     select name from _migrations

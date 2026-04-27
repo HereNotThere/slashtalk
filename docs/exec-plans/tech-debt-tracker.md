@@ -131,10 +131,10 @@ Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026
 
 Three days moves the repo from ~60% to ~90% harness-ready by the audit's checklist:
 
-| Day | Items | Status |
-| --- | --- | --- |
-| 1 | 24 (pino) + 25 (Sentry) | pending |
-| 2 am | 23 (lefthook) | pending |
-| 2 pm | 22 (server lint, after item 39 decision) | pending |
-| 3 am | 26 (skills) | pending |
-| 3 pm | 21 (Legibility batch) | ✅ shipped 2026-04-25 (went beyond audit scope: also landed CONVENTIONS.md + templates/) |
+| Day  | Items                                    | Status                                                                                   |
+| ---- | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 1    | 24 (pino) + 25 (Sentry)                  | pending                                                                                  |
+| 2 am | 23 (lefthook)                            | pending                                                                                  |
+| 2 pm | 22 (server lint, after item 39 decision) | pending                                                                                  |
+| 3 am | 26 (skills)                              | pending                                                                                  |
+| 3 pm | 21 (Legibility batch)                    | ✅ shipped 2026-04-25 (went beyond audit scope: also landed CONVENTIONS.md + templates/) |

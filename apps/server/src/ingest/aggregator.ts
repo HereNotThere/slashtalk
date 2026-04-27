@@ -82,10 +82,7 @@ interface SessionUpdates {
   inTurn: boolean;
   currentTurnId: string | null;
   lastBoundaryTs: Date | null;
-  outstandingTools: Record<
-    string,
-    { name: string; desc: string | null; started: number }
-  >;
+  outstandingTools: Record<string, { name: string; desc: string | null; started: number }>;
   lastUserPrompt: string | null;
   topFilesRead: Record<string, number>;
   topFilesEdited: Record<string, number>;
@@ -186,8 +183,10 @@ function initState(current: CurrentSession): SessionUpdates {
     currentTurnId: current.currentTurnId ?? null,
     lastBoundaryTs: current.lastBoundaryTs,
     outstandingTools: {
-      ...((current.outstandingTools as Record<string, SessionUpdates["outstandingTools"][string]>) ??
-        {}),
+      ...((current.outstandingTools as Record<
+        string,
+        SessionUpdates["outstandingTools"][string]
+      >) ?? {}),
     },
     lastUserPrompt: current.lastUserPrompt,
     topFilesRead: {
@@ -207,12 +206,7 @@ function initState(current: CurrentSession): SessionUpdates {
   };
 }
 
-function pushRecent(
-  state: SessionUpdates,
-  ts: string,
-  type: string,
-  summary: string,
-): void {
+function pushRecent(state: SessionUpdates, ts: string, type: string, summary: string): void {
   state.recentEvents.push({ ts, type, summary });
   if (state.recentEvents.length > 20) {
     state.recentEvents = state.recentEvents.slice(-20);
@@ -267,8 +261,7 @@ function summarizeToolUse(name: string, input: Record<string, unknown> | undefin
     case "MultiEdit":
     case "Write":
     case "Read": {
-      const path =
-        stringInput(input, "file_path") ?? stringInput(input, "path");
+      const path = stringInput(input, "file_path") ?? stringInput(input, "path");
       return path ? `${name} ${shortenPath(path)}` : name;
     }
     case "NotebookEdit": {
@@ -277,9 +270,7 @@ function summarizeToolUse(name: string, input: Record<string, unknown> | undefin
     }
     case "Bash": {
       const cmd = stringInput(input, "command");
-      return cmd
-        ? truncate(`Bash: ${cmd.replace(/\s+/g, " ").trim()}`, 80)
-        : "Bash";
+      return cmd ? truncate(`Bash: ${cmd.replace(/\s+/g, " ").trim()}`, 80) : "Bash";
     }
     case "Grep": {
       const pattern = stringInput(input, "pattern");
@@ -347,10 +338,7 @@ const FILE_TOOLS_READ = new Set(["Read", "Grep", "Glob"]);
 const FILE_TOOLS_EDIT = new Set(["Edit", "MultiEdit", "StrReplace"]);
 const FILE_TOOLS_WRITE = new Set(["Write"]);
 
-function processClaudeEvents(
-  current: CurrentSession,
-  newEvents: unknown[],
-): SessionUpdates {
+function processClaudeEvents(current: CurrentSession, newEvents: unknown[]): SessionUpdates {
   const state = initState(current);
   state.provider ??= "anthropic";
 
@@ -429,9 +417,7 @@ function processClaudeEvents(
           };
 
           const filePath =
-            (typeof block.input?.["file_path"] === "string"
-              ? block.input["file_path"]
-              : null) ??
+            (typeof block.input?.["file_path"] === "string" ? block.input["file_path"] : null) ??
             (typeof block.input?.["path"] === "string" ? block.input["path"] : null);
           if (!filePath || typeof filePath !== "string") continue;
           if (FILE_TOOLS_READ.has(block.name)) incMap(state.topFilesRead, filePath);
@@ -517,10 +503,7 @@ function cursorToolPath(block: ContentBlock): string | null {
   return null;
 }
 
-function processCursorEvents(
-  current: CurrentSession,
-  newEvents: unknown[],
-): SessionUpdates {
+function processCursorEvents(current: CurrentSession, newEvents: unknown[]): SessionUpdates {
   const state = initState(current);
 
   for (const raw of newEvents) {
@@ -593,10 +576,7 @@ function summarizeCodexEvent(event: JsonObj): string {
     ) {
       return `tool: ${asString(payload?.name) ?? payloadType}`;
     }
-    if (
-      payloadType === "function_call_output" ||
-      payloadType === "custom_tool_call_output"
-    ) {
+    if (payloadType === "function_call_output" || payloadType === "custom_tool_call_output") {
       return `tool result: ${asString(payload?.call_id) ?? "call"}`;
     }
   }
@@ -651,10 +631,7 @@ function toolDesc(name: string, args: JsonObj | null, rawArgs: string | null): s
   return null;
 }
 
-function processCodexEvents(
-  current: CurrentSession,
-  newEvents: unknown[],
-): SessionUpdates {
+function processCodexEvents(current: CurrentSession, newEvents: unknown[]): SessionUpdates {
   const state = initState(current);
 
   for (const raw of newEvents) {
@@ -728,8 +705,7 @@ function processCodexEvents(
 
       if (payloadType === "token_count") {
         const info = payload.info;
-        const usage =
-          isObj(info) && isObj(info.last_token_usage) ? info.last_token_usage : null;
+        const usage = isObj(info) && isObj(info.last_token_usage) ? info.last_token_usage : null;
         if (usage) {
           state.tokensIn += asNumber(usage.input_tokens) ?? 0;
           state.tokensCacheRead += asNumber(usage.cached_input_tokens) ?? 0;
@@ -786,10 +762,7 @@ function processCodexEvents(
         continue;
       }
 
-      if (
-        payloadType === "function_call_output" ||
-        payloadType === "custom_tool_call_output"
-      ) {
+      if (payloadType === "function_call_output" || payloadType === "custom_tool_call_output") {
         const callId = asString(payload.call_id);
         if (callId) delete state.outstandingTools[callId];
       }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
 /**
  * Calculate the next time the activity badge should update.
@@ -15,11 +15,11 @@ function msUntilNextUpdate(lastActivityAtMs: number): number {
   // "now" (< 60s) — update every 5s to catch the transition
   if (ageSec < 60) return 5000;
   // "Xm" (60s to 60m) — update every minute
-  if (ageMin < 60) return 60000 - ((ageSec % 60) * 1000);
+  if (ageMin < 60) return 60000 - (ageSec % 60) * 1000;
   // "Xh" (60m to 24h) — update every hour
-  if (ageHr < 24) return 60 * 60 * 1000 - ((ageMin % 60) * 60 * 1000);
+  if (ageHr < 24) return 60 * 60 * 1000 - (ageMin % 60) * 60 * 1000;
   // "Xd" (24h+) — update every day
-  return 24 * 60 * 60 * 1000 - ((ageHr % 24) * 60 * 60 * 1000);
+  return 24 * 60 * 60 * 1000 - (ageHr % 24) * 60 * 60 * 1000;
 }
 
 /**

@@ -3,12 +3,7 @@ import { jwt } from "@elysiajs/jwt";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import {
-  oauthAuthorizationCodes,
-  oauthClients,
-  oauthTokens,
-  users,
-} from "../db/schema";
+import { oauthAuthorizationCodes, oauthClients, oauthTokens, users } from "../db/schema";
 import { hashToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
 
@@ -153,9 +148,7 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
     .get("/oauth/authorize", async ({ request, jwt, cookie, set }) => {
       const url = new URL(request.url);
       const sessionToken =
-        typeof cookie.session?.value === "string"
-          ? cookie.session.value
-          : undefined;
+        typeof cookie.session?.value === "string" ? cookie.session.value : undefined;
       const user = await sessionUser(db, jwt, sessionToken);
       if (!user) {
         set.status = 302;
@@ -165,11 +158,7 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
         return null;
       }
 
-      const parsed = await parseAuthorizeRequest(
-        db,
-        url.searchParams,
-        mcpOrigin(request),
-      );
+      const parsed = await parseAuthorizeRequest(db, url.searchParams, mcpOrigin(request));
       if (!parsed.ok) {
         set.status = 400;
         return { error: "invalid_request", error_description: parsed.error };
@@ -251,11 +240,7 @@ function clientIp(request: Request): string {
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "::1"
-  );
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 class KeyedRequestLimiter {
@@ -263,9 +248,7 @@ class KeyedRequestLimiter {
 
   constructor(private options: { max: number; windowMs: number }) {}
 
-  record(key: string):
-    | { ok: true }
-    | { ok: false; limit: number; windowMs: number } {
+  record(key: string): { ok: true } | { ok: false; limit: number; windowMs: number } {
     const now = Date.now();
     const cutoff = now - this.options.windowMs;
     const bucket = this.buckets.get(key)?.filter((ts) => ts > cutoff) ?? [];
@@ -288,11 +271,7 @@ type JwtVerifier = {
   verify: (token: string) => Promise<false | { sub?: string | number }>;
 };
 
-async function sessionUser(
-  db: Database,
-  jwt: JwtVerifier,
-  token: string | undefined,
-) {
+async function sessionUser(db: Database, jwt: JwtVerifier, token: string | undefined) {
   if (!token) return null;
   const payload = await jwt.verify(token);
   if (!payload || !payload.sub) return null;
@@ -304,14 +283,11 @@ async function sessionUser(
   return user ?? null;
 }
 
-type OAuthClientMetadata = Omit<
-  OAuthClientRegistration,
-  "client_id" | "client_id_issued_at"
->;
+type OAuthClientMetadata = Omit<OAuthClientRegistration, "client_id" | "client_id_issued_at">;
 
-function parseRegistration(input: RegisterRequest):
-  | { ok: true; value: OAuthClientMetadata }
-  | { ok: false; error: string } {
+function parseRegistration(
+  input: RegisterRequest,
+): { ok: true; value: OAuthClientMetadata } | { ok: false; error: string } {
   const clientName =
     typeof input.client_name === "string" && input.client_name.trim() !== ""
       ? input.client_name.trim()
@@ -468,10 +444,7 @@ async function parseAuthorizeRequest(
   if (!isAllowedLoopbackRedirect(redirectUri)) {
     return { ok: false, error: "redirect_uri must be a loopback callback" };
   }
-  if (
-    client.clientKind === "dynamic" &&
-    !stringArray(client.redirectUris).includes(redirectUri)
-  ) {
+  if (client.clientKind === "dynamic" && !stringArray(client.redirectUris).includes(redirectUri)) {
     return { ok: false, error: "redirect_uri not registered" };
   }
 
@@ -541,8 +514,7 @@ async function parseTokenRequest(
   request: Request,
   origin: string,
 ): Promise<
-  | { ok: true; value: ParsedTokenRequest }
-  | { ok: false; error: string; errorDescription: string }
+  { ok: true; value: ParsedTokenRequest } | { ok: false; error: string; errorDescription: string }
 > {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/x-www-form-urlencoded")) {
@@ -575,8 +547,7 @@ async function parseTokenRequest(
       return {
         ok: false,
         error: "invalid_request",
-        errorDescription:
-          "client_id, redirect_uri, code, and code_verifier are required",
+        errorDescription: "client_id, redirect_uri, code, and code_verifier are required",
       };
     }
 
@@ -780,9 +751,6 @@ function invalidGrant(errorDescription: string) {
 }
 
 async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(verifier),
-  );
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   return Buffer.from(digest).toString("base64url");
 }

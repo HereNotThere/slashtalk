@@ -2,9 +2,7 @@ import { describe, it, expect } from "bun:test";
 import type { SpotifyPresence } from "@slashtalk/shared";
 import { diffPresence } from "../src/main/peerPresenceDiff";
 
-function mk(
-  overrides: Partial<SpotifyPresence> & { trackId: string },
-): SpotifyPresence {
+function mk(overrides: Partial<SpotifyPresence> & { trackId: string }): SpotifyPresence {
   return {
     trackId: overrides.trackId,
     name: overrides.name ?? "Song",
@@ -42,18 +40,14 @@ describe("diffPresence", () => {
   it("emits a clear when a peer disappears (stopped playing)", () => {
     const prev = { alice: mk({ trackId: "abc" }) };
     const next = {};
-    expect(diffPresence(prev, next)).toEqual([
-      { login: "alice", presence: null },
-    ]);
+    expect(diffPresence(prev, next)).toEqual([{ login: "alice", presence: null }]);
   });
 
   it("emits an add when a peer shows up", () => {
     const prev = {};
     const nextPresence = mk({ trackId: "abc" });
     const next = { alice: nextPresence };
-    expect(diffPresence(prev, next)).toEqual([
-      { login: "alice", presence: nextPresence },
-    ]);
+    expect(diffPresence(prev, next)).toEqual([{ login: "alice", presence: nextPresence }]);
   });
 
   it("only emits for peers that actually changed in a mixed update", () => {
@@ -68,9 +62,7 @@ describe("diffPresence", () => {
       // carol: missing → clear
       dave: mk({ trackId: "d1" }), // new
     };
-    const byLogin = new Map(
-      diffPresence(prev, next).map((c) => [c.login, c.presence]),
-    );
+    const byLogin = new Map(diffPresence(prev, next).map((c) => [c.login, c.presence]));
     expect(byLogin.has("alice")).toBe(false);
     expect(byLogin.get("bob")?.trackId).toBe("b2");
     expect(byLogin.get("carol")).toBeNull();

@@ -26,11 +26,7 @@ export function extractText(content: unknown): string {
 export function findBlock(content: unknown, type: string): JsonObj | null {
   if (!Array.isArray(content)) return null;
   for (const block of content) {
-    if (
-      block &&
-      typeof block === "object" &&
-      (block as JsonObj).type === type
-    ) {
+    if (block && typeof block === "object" && (block as JsonObj).type === type) {
       return block as JsonObj;
     }
   }
@@ -47,8 +43,7 @@ export function describeToolCall(block: JsonObj): string {
   if (typeof i.command === "string") return `${name}: ${snippet(i.command, 120)}`;
   if (typeof i.pattern === "string") return `${name}(/${snippet(i.pattern, 80)}/)`;
   if (typeof i.query === "string") return `${name}: ${snippet(i.query, 120)}`;
-  if (typeof i.description === "string")
-    return `${name}: ${snippet(i.description, 120)}`;
+  if (typeof i.description === "string") return `${name}: ${snippet(i.description, 120)}`;
   if (typeof i.prompt === "string") return `${name}: ${snippet(i.prompt, 120)}`;
   return name;
 }
@@ -57,11 +52,7 @@ export function describeToolResult(block: JsonObj): string {
   const isError = block.is_error === true;
   const content = block.content;
   const text =
-    typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? extractText(content)
-        : "";
+    typeof content === "string" ? content : Array.isArray(content) ? extractText(content) : "";
   const snip = snippet(text, 140);
   if (isError) return `ERROR ${snip || "(no message)"}`;
   return snip || "(ok)";
@@ -75,8 +66,7 @@ export function compactEvent(e: typeof events.$inferSelect): string {
 
   switch (e.kind) {
     case "user_msg": {
-      const text =
-        typeof content === "string" ? content : extractText(content);
+      const text = typeof content === "string" ? content : extractText(content);
       return `[${ts}] prompt: ${snippet(text, 240) || "(empty)"}`;
     }
     case "assistant_msg": {
@@ -92,9 +82,7 @@ export function compactEvent(e: typeof events.$inferSelect): string {
     }
     case "tool_result": {
       const block = findBlock(content, "tool_result");
-      return block
-        ? `[${ts}] result: ${describeToolResult(block)}`
-        : `[${ts}] result`;
+      return block ? `[${ts}] result: ${describeToolResult(block)}` : `[${ts}] result`;
     }
     case "tool_call": {
       const name = typeof payload.name === "string" ? payload.name : "tool";

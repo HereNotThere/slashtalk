@@ -185,7 +185,7 @@ Restart Claude Code after updating `~/.claude.json`, then verify the Slashtalk M
 Watch `apps/server` logs while Claude Code starts. Expected log:
 
 ```json
-{"level":"info","msg":"mcp_session_opened", "...": "..."}
+{ "level": "info", "msg": "mcp_session_opened", "...": "..." }
 ```
 
 ## Cleanup

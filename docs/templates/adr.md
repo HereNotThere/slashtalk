@@ -10,10 +10,12 @@ Replace every <placeholder>. Delete this comment block before committing.
 -->
 
 ---
+
 status: proposed
 date: <YYYY-MM-DD>
 supersedes: <NNNN-slug or null>
 superseded_by: null
+
 ---
 
 # <NNNN>. <Decision title>
@@ -31,14 +33,17 @@ superseded_by: null
 <What becomes easier as a result. What becomes harder. What's now ruled out. Be honest about both sides — an ADR that only lists upsides is incomplete.>
 
 **Easier:**
+
 - <consequence 1>
 - <consequence 2>
 
 **Harder:**
+
 - <consequence 1>
 - <consequence 2>
 
 **Ruled out:**
+
 - <option that's now off the table>
 
 ## Alternatives considered

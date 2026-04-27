@@ -10,10 +10,7 @@ export interface PresenceChange {
   presence: SpotifyPresence | null;
 }
 
-function sameEntry(
-  a: SpotifyPresence | undefined,
-  b: SpotifyPresence | undefined,
-): boolean {
+function sameEntry(a: SpotifyPresence | undefined, b: SpotifyPresence | undefined): boolean {
   if (!a && !b) return true;
   if (!a || !b) return false;
   // updatedAt ticks every keepalive even when nothing changed, so ignore it
@@ -26,10 +23,7 @@ function sameEntry(
  * `prev` and `next`. `presence: null` means cleared (user stopped playing
  * or dropped off). Order is not guaranteed.
  */
-export function diffPresence(
-  prev: PresenceMap,
-  next: PresenceMap,
-): PresenceChange[] {
+export function diffPresence(prev: PresenceMap, next: PresenceMap): PresenceChange[] {
   const logins = new Set([...Object.keys(prev), ...Object.keys(next)]);
   const out: PresenceChange[] = [];
   for (const login of logins) {

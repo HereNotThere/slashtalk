@@ -1,11 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-} from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "../src/db";
 import { createApp } from "../src/app";
@@ -77,11 +70,7 @@ beforeAll(async () => {
     init?: RequestInit,
   ): Promise<Response> => {
     const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
     if (url === "https://github.com/login/oauth/access_token") {
       const body = JSON.parse(init?.body as string);
@@ -91,10 +80,9 @@ beforeAll(async () => {
           headers: { "Content-Type": "application/json" },
         });
       }
-      return new Response(
-        JSON.stringify({ access_token: "ghtoken_alice_code" }),
-        { headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ access_token: "ghtoken_alice_code" }), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
     if (url === "https://api.github.com/user") {
       return new Response(JSON.stringify(ALICE), {
@@ -123,20 +111,15 @@ beforeAll(async () => {
         headers: jsonHeaders(response.link),
       });
     }
-    if (
-      url.startsWith("https://api.github.com/user/installations/100/repositories?")
-    ) {
+    if (url.startsWith("https://api.github.com/user/installations/100/repositories?")) {
       appInstallationReposFetchCount += 1;
       const response =
         appInstallationReposResponses[appInstallationReposFetchCount - 1] ??
         appInstallationReposResponses[appInstallationReposResponses.length - 1]!;
-      return new Response(
-        JSON.stringify(response.body ?? {}),
-        {
-          status: response.status,
-          headers: jsonHeaders(response.link),
-        },
-      );
+      return new Response(JSON.stringify(response.body ?? {}), {
+        status: response.status,
+        headers: jsonHeaders(response.link),
+      });
     }
 
     // Pass through (local Elysia server, etc.)
@@ -226,11 +209,7 @@ function repoOkBody(fullName: string, id: number, priv = false): unknown {
   };
 }
 
-async function expectError(
-  res: Response,
-  status: number,
-  kind: string,
-): Promise<void> {
+async function expectError(res: Response, status: number, kind: string): Promise<void> {
   expect(res.status).toBe(status);
   const body = (await res.json()) as { error: string };
   expect(body.error).toBe(kind);
@@ -271,8 +250,7 @@ async function storeGitHubAppToken(
       githubAppRefreshToken: refreshToken
         ? await encryptGithubToken(refreshToken, config.encryptionKey)
         : null,
-      githubAppTokenExpiresAt:
-        options.tokenExpiresAt ?? new Date(Date.now() + 60 * 60 * 1000),
+      githubAppTokenExpiresAt: options.tokenExpiresAt ?? new Date(Date.now() + 60 * 60 * 1000),
       githubAppRefreshTokenExpiresAt:
         options.refreshTokenExpiresAt ?? new Date(Date.now() + 60 * 60 * 1000),
       githubAppConnectedAt: new Date(),
@@ -324,14 +302,9 @@ describe("POST /api/me/repos — claim gate", () => {
     };
     expect(body.error).toBe("no_access");
     expect(body.requiresGithubApp).toBe(true);
-    expect(body.connectUrl).toStartWith(
-      "http://localhost:10000/auth/github-app?intent=",
-    );
+    expect(body.connectUrl).toStartWith("http://localhost:10000/auth/github-app?intent=");
 
-    const rows = await db
-      .select()
-      .from(userRepos)
-      .where(eq(userRepos.userId, aliceUserId));
+    const rows = await db.select().from(userRepos).where(eq(userRepos.userId, aliceUserId));
     expect(rows.length).toBe(0);
     expect(repoFetchCount).toBe(1);
   });
@@ -343,9 +316,7 @@ describe("POST /api/me/repos — claim gate", () => {
       {
         status: 200,
         body: {
-          installations: [
-            { id: 100, app_slug: config.githubAppSlug, suspended_at: null },
-          ],
+          installations: [{ id: 100, app_slug: config.githubAppSlug, suspended_at: null }],
         },
       },
     ];
@@ -373,9 +344,7 @@ describe("POST /api/me/repos — claim gate", () => {
       {
         status: 200,
         body: {
-          installations: [
-            { id: 100, app_slug: config.githubAppSlug, suspended_at: null },
-          ],
+          installations: [{ id: 100, app_slug: config.githubAppSlug, suspended_at: null }],
         },
       },
     ];
@@ -395,9 +364,7 @@ describe("POST /api/me/repos — claim gate", () => {
     };
     expect(body.error).toBe("no_access");
     expect(body.message).toContain("GitHub App");
-    expect(body.connectUrl).toContain(
-      "http://localhost:10000/auth/github-app?intent=",
-    );
+    expect(body.connectUrl).toContain("http://localhost:10000/auth/github-app?intent=");
     expect(body.connectUrl).toContain("install=1");
     expect(repoFetchCount).toBe(1);
     expect(appInstallationsFetchCount).toBe(1);
@@ -415,9 +382,7 @@ describe("POST /api/me/repos — claim gate", () => {
       {
         status: 200,
         body: {
-          installations: [
-            { id: 100, app_slug: config.githubAppSlug, suspended_at: null },
-          ],
+          installations: [{ id: 100, app_slug: config.githubAppSlug, suspended_at: null }],
         },
       },
     ];
@@ -431,10 +396,7 @@ describe("POST /api/me/repos — claim gate", () => {
     const res = await claim("acme/refreshed");
     expect(res.status).toBe(200);
 
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, aliceUserId));
+    const [alice] = await db.select().from(users).where(eq(users.id, aliceUserId));
     expect(alice.githubAppTokenExpiresAt!.getTime()).toBeGreaterThan(Date.now());
     expect(lastAppInstallationsAuthorization).toBe("Bearer ghu_app_refreshed");
     expect(appInstallationsFetchCount).toBe(1);
@@ -463,9 +425,7 @@ describe("POST /api/me/repos — claim gate", () => {
     expect(body.installUrl).toBe(
       `https://github.com/apps/${config.githubAppSlug}/installations/new`,
     );
-    expect(body.connectUrl).toStartWith(
-      "http://localhost:10000/auth/github-app?intent=",
-    );
+    expect(body.connectUrl).toStartWith("http://localhost:10000/auth/github-app?intent=");
   });
 
   it("follows GitHub App pagination when verifying installed repositories", async () => {
@@ -480,9 +440,7 @@ describe("POST /api/me/repos — claim gate", () => {
       {
         status: 200,
         body: {
-          installations: [
-            { id: 100, app_slug: config.githubAppSlug, suspended_at: null },
-          ],
+          installations: [{ id: 100, app_slug: config.githubAppSlug, suspended_at: null }],
         },
       },
     ];
@@ -514,10 +472,7 @@ describe("POST /api/me/repos — claim gate", () => {
 
     await expectError(await claim("acme/x"), 401, "token_expired");
 
-    const rows = await db
-      .select()
-      .from(userRepos)
-      .where(eq(userRepos.userId, aliceUserId));
+    const rows = await db.select().from(userRepos).where(eq(userRepos.userId, aliceUserId));
     expect(rows.length).toBe(0);
 
     const refreshRows = await db
@@ -535,15 +490,10 @@ describe("POST /api/me/repos — claim gate", () => {
     const [oauthToken] = await db
       .select()
       .from(oauthTokens)
-      .where(
-        eq(oauthTokens.accessTokenHash, await hashToken(derived.accessToken)),
-      );
+      .where(eq(oauthTokens.accessTokenHash, await hashToken(derived.accessToken)));
     expect(oauthToken?.revokedAt).toBeTruthy();
 
-    const [alice] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, aliceUserId));
+    const [alice] = await db.select().from(users).where(eq(users.id, aliceUserId));
     expect(alice.credentialsRevokedAt).toBeTruthy();
 
     const setup = await fetch(`${baseUrl}/api/me/setup-token`, {

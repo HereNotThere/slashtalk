@@ -18,20 +18,13 @@ import * as backend from "./backend";
 import * as githubAuth from "./githubDeviceAuth";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 import { createEmitter } from "./emitter";
-import type {
-  AgentHistoryPage,
-  AgentMsg,
-  AssistantBlock,
-  McpServerInput,
-} from "../shared/types";
+import type { AgentHistoryPage, AgentMsg, AssistantBlock, McpServerInput } from "../shared/types";
 
 const ENV_KEY = "anthropic.environmentId";
 const VAULT_KEY = "anthropic.vaultId";
 const API_KEY_STORE_KEY = "anthropic.apiKeyEnc";
 
-const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as
-  | string
-  | undefined;
+const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as string | undefined;
 const SLASHTALK_MCP_NAME = "slashtalk-mcp";
 
 const GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/";
@@ -45,11 +38,7 @@ const configuredChanges = createEmitter<boolean>();
 export const onConfiguredChange = configuredChanges.on;
 
 function slashtalkMcpUrl(): string {
-  return (
-    process.env["SLASHTALK_MCP_URL"] ??
-    BAKED_MCP_URL ??
-    `${backend.getBaseUrl()}/mcp`
-  );
+  return process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? `${backend.getBaseUrl()}/mcp`;
 }
 
 /** Load the persisted API key on startup. Must run before any UI asks
@@ -102,9 +91,7 @@ function client(): Anthropic {
   if (cachedClient) return cachedClient;
   const key = apiKey();
   if (!key) {
-    throw new Error(
-      "Anthropic API key is not set; configure one in the Agents panel.",
-    );
+    throw new Error("Anthropic API key is not set; configure one in the Agents panel.");
   }
   cachedClient = new Anthropic({ apiKey: key });
   return cachedClient;
@@ -163,10 +150,7 @@ async function ensureVault(): Promise<string | null> {
 }
 
 async function ensureAllCredentials(vaultId: string): Promise<void> {
-  await Promise.allSettled([
-    ensureSlashtalkCredential(vaultId),
-    ensureGithubCredential(vaultId),
-  ]);
+  await Promise.allSettled([ensureSlashtalkCredential(vaultId), ensureGithubCredential(vaultId)]);
 }
 
 async function ensureSlashtalkCredential(vaultId: string): Promise<void> {
@@ -271,10 +255,7 @@ export async function createAgent(input: CreateAgentInput): Promise<CreatedAgent
   };
 }
 
-export async function updateAgent(
-  agentId: string,
-  input: CreateAgentInput,
-): Promise<CreatedAgent> {
+export async function updateAgent(agentId: string, input: CreateAgentInput): Promise<CreatedAgent> {
   const current = await client().beta.agents.retrieve(agentId);
   const config = await buildAgentConfig(input);
   const agent = await client().beta.agents.update(agentId, {
@@ -374,18 +355,16 @@ export interface RemoteSession {
 
 /** Paginated listing of every session this API key has for an agent. Returns
  *  both active and archived — caller filters as needed. */
-export async function listAgentSessions(
-  agentId: string,
-): Promise<RemoteSession[]> {
+export async function listAgentSessions(agentId: string): Promise<RemoteSession[]> {
   const out: RemoteSession[] = [];
-  for await (const s of (client().beta.sessions.list({
+  for await (const s of client().beta.sessions.list({
     agent_id: agentId,
   }) as unknown as AsyncIterable<{
     id: string;
     created_at: string;
     title: string | null;
     archived_at: string | null;
-  }>)) {
+  }>) {
     out.push({
       id: s.id,
       createdAt: new Date(s.created_at).getTime(),
@@ -396,10 +375,7 @@ export async function listAgentSessions(
   return out;
 }
 
-export async function updateSessionTitle(
-  sessionId: string,
-  title: string,
-): Promise<void> {
+export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   await client().beta.sessions.update(sessionId, { title });
 }
 
@@ -497,7 +473,10 @@ export async function sumSessionUsage(
       params as never,
     )) as unknown as { data: unknown[]; next_page: string | null };
     for (const event of resp.data) {
-      const e = event as { type?: string; model_usage?: { input_tokens?: number; output_tokens?: number } };
+      const e = event as {
+        type?: string;
+        model_usage?: { input_tokens?: number; output_tokens?: number };
+      };
       if (e.type === "span.model_request_end" && e.model_usage) {
         input += e.model_usage.input_tokens ?? 0;
         output += e.model_usage.output_tokens ?? 0;
@@ -576,13 +555,8 @@ function reconstructMessages(events: unknown[]): AgentMsg[] {
       if (!block) continue;
       const isError = Boolean((e as { is_error?: boolean }).is_error);
       block.status = isError ? "error" : "ok";
-      block.resultSummary = summarizeResult(
-        (e as { content?: unknown[] }).content,
-      );
-    } else if (
-      e.type === "session.status_idle" ||
-      e.type === "session.status_terminated"
-    ) {
+      block.resultSummary = summarizeResult((e as { content?: unknown[] }).content);
+    } else if (e.type === "session.status_idle" || e.type === "session.status_terminated") {
       const tail = lastAssistant();
       if (tail) tail.done = true;
     }
@@ -666,9 +640,7 @@ export async function sendMessage(
             ? ((e as { mcp_tool_use_id?: string }).mcp_tool_use_id ?? "")
             : ((e as { tool_use_id?: string }).tool_use_id ?? "");
         const isError = Boolean((e as { is_error?: boolean }).is_error);
-        const summary = summarizeResult(
-          (e as { content?: unknown[] }).content,
-        );
+        const summary = summarizeResult((e as { content?: unknown[] }).content);
         onEvent({ kind: "tool_result", toolUseId, isError, summary });
       } else if (e.type === "span.model_request_start") {
         onEvent({ kind: "phase", label: "Thinking…" });

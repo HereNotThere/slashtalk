@@ -34,8 +34,7 @@ export class McpSessionPool {
 
   constructor(private opts: SessionPoolOptions) {
     this.idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
-    this.maxSessionsPerUser =
-      opts.maxSessionsPerUser ?? DEFAULT_MAX_SESSIONS_PER_USER;
+    this.maxSessionsPerUser = opts.maxSessionsPerUser ?? DEFAULT_MAX_SESSIONS_PER_USER;
     const interval = opts.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS;
     this.sweeper = setInterval(() => this.sweepStale(), interval);
   }
@@ -158,8 +157,7 @@ async function peekInitializeBody(
       method?: string;
       params?: { clientInfo?: ClientInfo };
     };
-    const clientInfo =
-      body.method === "initialize" ? body.params?.clientInfo : undefined;
+    const clientInfo = body.method === "initialize" ? body.params?.clientInfo : undefined;
     return { req, parsedBody: body, clientInfo };
   } catch {
     return { req };

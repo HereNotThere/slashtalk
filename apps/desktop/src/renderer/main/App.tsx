@@ -37,9 +37,7 @@ export function App(): JSX.Element {
         <div className="flex flex-col items-center gap-4 text-center">
           <SlashtalkLogo size={64} />
           <div>
-            <h1 className="m-0 text-[26px] font-bold leading-tight tracking-tight">
-              Slashtalk
-            </h1>
+            <h1 className="m-0 text-[26px] font-bold leading-tight tracking-tight">Slashtalk</h1>
             <div className="text-subtle text-[13px] mt-1.5">
               Floating bubbles that stay on top of everything.
             </div>
@@ -69,9 +67,7 @@ export function App(): JSX.Element {
       <header className="flex items-center gap-3 mb-6">
         <SlashtalkLogo size={44} />
         <div className="flex-1 min-w-0">
-          <h1 className="m-0 text-[24px] font-bold leading-tight tracking-tight">
-            Slashtalk
-          </h1>
+          <h1 className="m-0 text-[24px] font-bold leading-tight tracking-tight">Slashtalk</h1>
           <div className="text-subtle text-[12.5px] mt-0.5">
             Floating bubbles that stay on top of everything.
           </div>
@@ -91,11 +87,7 @@ export function App(): JSX.Element {
   );
 }
 
-function SectionHeading({
-  children,
-}: {
-  children: React.ReactNode;
-}): JSX.Element {
+function SectionHeading({ children }: { children: React.ReactNode }): JSX.Element {
   return (
     <h2 className="text-[11px] font-semibold text-subtle mt-6 mb-2 uppercase tracking-[0.08em]">
       {children}
@@ -113,11 +105,7 @@ function ActiveRow({ head }: { head: ChatHead }): JSX.Element {
         {head.avatar.type === "emoji" ? (
           head.avatar.value
         ) : (
-          <img
-            src={head.avatar.value}
-            alt=""
-            className="w-full h-full rounded-full object-cover"
-          />
+          <img src={head.avatar.value} alt="" className="w-full h-full rounded-full object-cover" />
         )}
       </span>
       <span className="text-[13px]">{head.label}</span>

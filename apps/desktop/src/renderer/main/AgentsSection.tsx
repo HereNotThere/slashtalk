@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  AGENT_TEMPLATES,
-  type AgentTemplate,
-} from "../shared/agentTemplates";
-import {
-  CwdPicker,
-  McpServersField,
-  ModeButton,
-} from "../shared/AgentRuntimeFields";
+import { AGENT_TEMPLATES, type AgentTemplate } from "../shared/agentTemplates";
+import { CwdPicker, McpServersField, ModeButton } from "../shared/AgentRuntimeFields";
 import type {
   AgentMode,
   AgentSummary,
@@ -44,8 +37,7 @@ export function AgentsSection({
     void window.chatheads.backend.listTrackedRepos().then(setTrackedRepos);
     const offCfg = window.chatheads.agents.onConfiguredChange(setConfigured);
     const offList = window.chatheads.agents.onListChange(setAgents);
-    const offRepos =
-      window.chatheads.backend.onTrackedReposChange(setTrackedRepos);
+    const offRepos = window.chatheads.backend.onTrackedReposChange(setTrackedRepos);
     return () => {
       offAuth();
       offCfg();
@@ -98,11 +90,7 @@ export function AgentsSection({
             rounded-lg px-3 py-1.5 text-[12px] font-medium cursor-pointer
             hover:bg-button-hover disabled:opacity-50 disabled:cursor-not-allowed
           "
-          title={
-            auth.signedIn
-              ? "Create a local or cloud agent"
-              : "Sign in to Slashtalk first"
-          }
+          title={auth.signedIn ? "Create a local or cloud agent" : "Sign in to Slashtalk first"}
         >
           {showCreate ? "Close" : "+ New agent"}
         </button>
@@ -110,8 +98,8 @@ export function AgentsSection({
 
       {!auth.signedIn && (
         <div className="text-[12px] text-subtle">
-          Sign in to Slashtalk first. Agents use your slashtalk device key for
-          MCP and team-session summaries.
+          Sign in to Slashtalk first. Agents use your slashtalk device key for MCP and team-session
+          summaries.
         </div>
       )}
 
@@ -151,8 +139,8 @@ export function AgentsSection({
       <div className="flex flex-col gap-1.5 mt-3">
         {agents.length === 0 ? (
           <div className="text-[12px] text-subtle">
-            No agents yet. Create a local agent without an API key, or add an
-            Anthropic key to enable cloud agents.
+            No agents yet. Create a local agent without an API key, or add an Anthropic key to
+            enable cloud agents.
           </div>
         ) : (
           agents.map((agent) => (
@@ -198,9 +186,7 @@ function AgentRow({
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-[13px] font-medium truncate">{agent.name}</div>
-        <div className="text-[11px] text-subtle truncate">
-          {agent.description || agent.model}
-        </div>
+        <div className="text-[11px] text-subtle truncate">{agent.description || agent.model}</div>
       </div>
       <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-border text-muted">
         {(agent.mode ?? "cloud") === "local" ? "Local" : "Cloud"}
@@ -272,8 +258,7 @@ function ApiKeyForm({
   return (
     <div className="bg-surface border border-border rounded-xl p-3 mb-3">
       <div className="text-[12px] text-subtle mb-2">
-        Paste an Anthropic API key to enable cloud agents. Local agents do not
-        require this.
+        Paste an Anthropic API key to enable cloud agents. Local agents do not require this.
       </div>
       <div className="flex gap-1.5">
         <input
@@ -322,9 +307,7 @@ function CreateAgentForm({
   const [description, setDescription] = useState("");
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState<AgentMode>(cloudAvailable ? "cloud" : "local");
-  const [model, setModel] = useState(
-    cloudAvailable ? DEFAULT_CLOUD_MODEL : DEFAULT_LOCAL_MODEL,
-  );
+  const [model, setModel] = useState(cloudAvailable ? DEFAULT_CLOUD_MODEL : DEFAULT_LOCAL_MODEL);
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
   const [cwd, setCwd] = useState("");
   const [mcpServers, setMcpServers] = useState<McpServerInput[]>([]);
@@ -481,15 +464,11 @@ function CreateAgentForm({
           servers={mcpServers}
           onAdd={(server) =>
             setMcpServers((prev) =>
-              prev.some((item) => item.name === server.name)
-                ? prev
-                : [...prev, server],
+              prev.some((item) => item.name === server.name) ? prev : [...prev, server],
             )
           }
           onRemove={(nameToRemove) =>
-            setMcpServers((prev) =>
-              prev.filter((server) => server.name !== nameToRemove),
-            )
+            setMcpServers((prev) => prev.filter((server) => server.name !== nameToRemove))
           }
         />
       )}
@@ -521,13 +500,9 @@ function EditAgentForm({
   const [description, setDescription] = useState(agent?.description ?? "");
   const [prompt, setPrompt] = useState(agent?.systemPrompt ?? "");
   const [model, setModel] = useState(agent?.model ?? "");
-  const [visibility, setVisibility] = useState<AgentVisibility>(
-    agent?.visibility ?? "private",
-  );
+  const [visibility, setVisibility] = useState<AgentVisibility>(agent?.visibility ?? "private");
   const [cwd, setCwd] = useState(agent?.cwd ?? "");
-  const [mcpServers, setMcpServers] = useState<McpServerInput[]>(
-    agent?.mcpServers ?? [],
-  );
+  const [mcpServers, setMcpServers] = useState<McpServerInput[]>(agent?.mcpServers ?? []);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -555,9 +530,7 @@ function EditAgentForm({
         systemPrompt: prompt.trim(),
         model: model.trim() || undefined,
         visibility,
-        ...(mode === "local"
-          ? { cwd: cwd.trim() || undefined }
-          : { mcpServers }),
+        ...(mode === "local" ? { cwd: cwd.trim() || undefined } : { mcpServers }),
       });
       onSaved(updated.name);
     } catch (err) {
@@ -644,15 +617,11 @@ function EditAgentForm({
           servers={mcpServers}
           onAdd={(server) =>
             setMcpServers((prev) =>
-              prev.some((item) => item.name === server.name)
-                ? prev
-                : [...prev, server],
+              prev.some((item) => item.name === server.name) ? prev : [...prev, server],
             )
           }
           onRemove={(nameToRemove) =>
-            setMcpServers((prev) =>
-              prev.filter((server) => server.name !== nameToRemove),
-            )
+            setMcpServers((prev) => prev.filter((server) => server.name !== nameToRemove))
           }
         />
       )}
@@ -667,13 +636,7 @@ function EditAgentForm({
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): JSX.Element {
+function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <div>
       <div className="text-[10.5px] font-semibold uppercase tracking-wider text-subtle mb-1">

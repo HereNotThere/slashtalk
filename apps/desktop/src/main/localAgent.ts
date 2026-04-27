@@ -25,12 +25,7 @@ import os from "node:os";
 import * as agentStore from "./agentStore";
 import * as localTranscripts from "./localTranscripts";
 import type { AgentStreamEvent } from "./anthropic";
-import type {
-  AgentHistoryPage,
-  AgentMsg,
-  AssistantBlock,
-  CreateAgentInput,
-} from "../shared/types";
+import type { AgentHistoryPage, AgentMsg, AssistantBlock, CreateAgentInput } from "../shared/types";
 
 const LOCAL_AGENT_PREFIX = "local:";
 const LOCAL_SESSION_PREFIX = "local-sess:";

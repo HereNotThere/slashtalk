@@ -19,9 +19,7 @@ export const managedAgentSessionRoutes = (db: Database) =>
     .put(
       "/managed-agent-sessions",
       async ({ body, user }) => {
-        const lastActivity = body.lastActivity
-          ? new Date(body.lastActivity)
-          : new Date();
+        const lastActivity = body.lastActivity ? new Date(body.lastActivity) : new Date();
 
         await db
           .insert(agentSessions)

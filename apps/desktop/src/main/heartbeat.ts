@@ -67,8 +67,7 @@ async function readClaudeLiveSession(filePath: string): Promise<LiveSession | nu
   }
 
   const pid = typeof parsed.pid === "number" ? parsed.pid : null;
-  const sessionId =
-    typeof parsed.sessionId === "string" ? parsed.sessionId : null;
+  const sessionId = typeof parsed.sessionId === "string" ? parsed.sessionId : null;
   if (pid === null || !sessionId) return null;
 
   let startedAt: string | undefined;
@@ -114,9 +113,7 @@ function enumerateCodexLive(now: number): LiveSession[] {
     .listTrackedSessions()
     .filter(
       (session) =>
-        session.source === "codex" &&
-        session.cwd &&
-        now - session.mtimeMs <= CODEX_LIVE_WINDOW_MS,
+        session.source === "codex" && session.cwd && now - session.mtimeMs <= CODEX_LIVE_WINDOW_MS,
     )
     .map((session) => ({
       sessionId: session.sessionId,
@@ -131,9 +128,7 @@ function enumerateCursorLive(now: number): LiveSession[] {
     .listTrackedSessions()
     .filter(
       (session) =>
-        session.source === "cursor" &&
-        session.cwd &&
-        now - session.mtimeMs <= CODEX_LIVE_WINDOW_MS,
+        session.source === "cursor" && session.cwd && now - session.mtimeMs <= CODEX_LIVE_WINDOW_MS,
     )
     .map((session) => ({
       sessionId: session.sessionId,
@@ -166,9 +161,7 @@ async function pulse(): Promise<void> {
               (session.pid ? ` pid=${session.pid}` : ` kind=${session.kind ?? "-"}`),
           ),
         )
-        .catch((err) =>
-          console.error("[heartbeat] send failed", session.sessionId, err),
-        ),
+        .catch((err) => console.error("[heartbeat] send failed", session.sessionId, err)),
     ),
   );
 }

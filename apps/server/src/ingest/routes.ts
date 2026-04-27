@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gte, isNull, lt } from "drizzle-orm";
 import {
   SOURCES,
   type CollisionDetectedMessage,
@@ -218,7 +218,6 @@ async function handleIngest(
   let currentLineSeq = fromLineSeq;
   let acceptedEvents = 0;
   let attemptedRows = 0;
-  const acceptedPayloads: unknown[] = [];
 
   const BATCH_SIZE = config.ingestBatchSize;
   let batch: Array<{ lineSeq: number; event: unknown }> = [];
@@ -249,10 +248,6 @@ async function handleIngest(
       .onConflictDoNothing({ target: [events.sessionId, events.lineSeq] })
       .returning({ lineSeq: events.lineSeq });
     acceptedEvents += inserted.length;
-    const acceptedSet = new Set(inserted.map((r) => r.lineSeq));
-    for (const { lineSeq, event } of batch) {
-      if (acceptedSet.has(lineSeq)) acceptedPayloads.push(event);
-    }
     batch = [];
   };
 
@@ -301,22 +296,52 @@ async function handleIngest(
     return { acceptedEvents: 0, duplicateEvents: 0, serverLineSeq: fromLineSeq };
   }
 
+  // Re-read the events to fold from Postgres rather than from an in-memory
+  // accumulator built during streaming. The DB is the durable source of
+  // truth: this picks up rows orphaned by an earlier failed retry (committed
+  // by one batch flush, abandoned when a later batch threw) so they're
+  // included in the aggregate exactly once on the next successful retry.
+  // Without this, those rows would dedup-skip on retry and never reach
+  // processEvents — silently dropping their contribution to userMsgs,
+  // token counts, topFilesEdited, cwd/repoId resolution, etc.
+  //
+  // Lower bound = max(fromLineSeq, currentSession.serverLineSeq) so we don't
+  // double-count events already folded by a concurrent ingest.
+  const [currentSession] = await db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.sessionId, query.session))
+    .limit(1);
+
   let priorFiles: string[] = [];
   let currentFiles: string[] = [];
 
-  if (acceptedPayloads.length > 0) {
-    const [currentSession] = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.sessionId, query.session))
-      .limit(1);
+  if (currentSession) {
+    const aggregateFrom = Math.max(fromLineSeq, currentSession.serverLineSeq ?? 0);
+    const eventsToFold =
+      aggregateFrom < currentLineSeq
+        ? await db
+            .select({ payload: events.payload })
+            .from(events)
+            .where(
+              and(
+                eq(events.sessionId, query.session),
+                gte(events.lineSeq, aggregateFrom),
+                lt(events.lineSeq, currentLineSeq),
+              ),
+            )
+            .orderBy(events.lineSeq)
+        : [];
 
-    if (currentSession) {
-      priorFiles = [
-        ...topFilesKeys(currentSession.topFilesEdited),
-        ...topFilesKeys(currentSession.topFilesWritten),
-      ];
-      const updates = processEvents(source, currentSession, acceptedPayloads);
+    priorFiles = [
+      ...topFilesKeys(currentSession.topFilesEdited),
+      ...topFilesKeys(currentSession.topFilesWritten),
+    ];
+    currentFiles = priorFiles;
+
+    if (eventsToFold.length > 0) {
+      const payloads = eventsToFold.map((e) => e.payload);
+      const updates = processEvents(source, currentSession, payloads);
       currentFiles = [
         ...Object.keys(updates.topFilesEdited),
         ...Object.keys(updates.topFilesWritten),
@@ -345,17 +370,18 @@ async function handleIngest(
             .where(and(eq(sessions.sessionId, query.session), isNull(sessions.repoId)));
         }
       }
+    } else {
+      // Stream advanced but nothing new to fold (all blanks, or already
+      // covered by a concurrent ingest). Still write the seq forward so the
+      // client doesn't keep retrying the chunk.
+      await db
+        .update(sessions)
+        .set({
+          serverLineSeq: currentLineSeq,
+          prefixHash: query.prefixHash ?? undefined,
+        })
+        .where(eq(sessions.sessionId, query.session));
     }
-  } else {
-    // No accepted events but the stream produced lines (all dups or blanks) —
-    // still advance the seq so the client doesn't keep retrying the chunk.
-    await db
-      .update(sessions)
-      .set({
-        serverLineSeq: currentLineSeq,
-        prefixHash: query.prefixHash ?? undefined,
-      })
-      .where(eq(sessions.sessionId, query.session));
   }
 
   if (acceptedEvents > 0) {

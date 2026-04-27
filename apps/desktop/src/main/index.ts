@@ -1,8 +1,6 @@
 import {
   app,
   BrowserWindow,
-  Tray,
-  nativeImage,
   nativeTheme,
   ipcMain,
   screen,
@@ -11,7 +9,6 @@ import {
   dialog,
   globalShortcut,
 } from "electron";
-import path from "node:path";
 import type {
   AgentHistoryPage,
   AgentSessionSummary,
@@ -24,7 +21,6 @@ import type {
   DockOrientation,
   InfoSession,
   McpTarget,
-  ResponseOpenPayload,
   UpdateAgentInput,
 } from "../shared/types";
 import * as store from "./store";
@@ -49,6 +45,10 @@ import type { LocalAgent } from "./agentStore";
 import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
+import { appState, loadRenderer, preloadPath } from "./windows/lib";
+import { getMainWindow, showMainWindow } from "./windows/main";
+import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
+import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
 
 installMcp.configureInstaller({
   localProxySecret: getLocalMcpProxySecret,
@@ -59,10 +59,6 @@ const mcpProxy = createLocalMcpProxy({
   getProxySecret: getLocalMcpProxySecret,
   remoteMcpUrl: installMcp.remoteMcpUrl,
 });
-
-function appState(): typeof app & { isQuitting?: boolean } {
-  return app as typeof app & { isQuitting?: boolean };
-}
 
 // Must stay in sync with the overlay renderer's Tailwind classes:
 // BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/SearchBubble/CreateBubble (45px),
@@ -89,9 +85,6 @@ const CHAT_HEIGHT = 80; // transparent window; pill + breathing room for CSS sha
 // Used to align the pill's icon over the chat bubble's position. Keep in sync
 // with the pill layout in renderer/chat/App.tsx.
 const CHAT_ICON_OFFSET = 36;
-
-const TRAY_POPUP_WIDTH = 320;
-const TRAY_POPUP_INITIAL_HEIGHT = 80;
 
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
@@ -325,7 +318,7 @@ function hoverPollTick(): void {
 }
 
 function broadcastToRailTargets<T>(channel: string, payload: T): void {
-  const targets = [overlayWindow, mainWindow, trayPopup].filter(
+  const targets = [overlayWindow, getMainWindow(), getTrayPopup()].filter(
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
   for (const w of targets) w.webContents.send(channel, payload);
@@ -347,13 +340,9 @@ function broadcastShowActivityTimestamps(): void {
   broadcastToRailTargets("rail:showActivityTimestamps", getShowActivityTimestamps());
 }
 
-let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
 let infoWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
-let responseWindow: BrowserWindow | null = null;
-let tray: Tray | null = null;
-let trayPopup: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
 let selectedHeadId: string | null = null;
@@ -399,53 +388,6 @@ let dockPlaceholderWindow: BrowserWindow | null = null;
 // Monotonic counter — each new tween takes the next token; in-flight steps
 // bail when they see a newer token, so a re-drag mid-slide cancels cleanly.
 let overlayAnimToken = 0;
-
-// electron-vite sets ELECTRON_RENDERER_URL in dev mode (pointing at the Vite
-// dev server) so we can reuse the same BrowserWindow code for dev + packaged.
-function loadRenderer(
-  win: BrowserWindow,
-  entry: "main" | "overlay" | "info" | "chat" | "response" | "statusbar",
-): void {
-  const devServer = process.env["ELECTRON_RENDERER_URL"];
-  if (!app.isPackaged && devServer) {
-    void win.loadURL(`${devServer}/${entry}/index.html`);
-  } else {
-    void win.loadFile(path.join(__dirname, `../renderer/${entry}/index.html`));
-  }
-}
-
-// Preload is built as CJS (.cjs) by electron.vite.config.ts — see note there.
-const preloadPath = path.join(__dirname, "../preload/index.cjs");
-
-// -------- Main (config) window --------
-
-function createMainWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 620,
-    height: 640,
-    title: "Slashtalk",
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-  loadRenderer(mainWindow, "main");
-  // Hide-on-close rather than destroy. Rationale: the rail overlay is
-  // `focusable: false`, which Electron implements as NSPanel on macOS. An
-  // app whose only windows are NSPanels drops out of Cmd+Tab and the Dock's
-  // "Show All Windows". Keeping a hidden regular NSWindow around guarantees
-  // Slashtalk stays in the app switcher. Activating the app (dock/Cmd+Tab)
-  // shows it again.
-  mainWindow.on("close", (e) => {
-    if (!appState().isQuitting) {
-      e.preventDefault();
-      mainWindow?.hide();
-    }
-  });
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
-}
 
 // -------- Overlay (bubbles) --------
 
@@ -640,7 +582,7 @@ function resizeOverlay(): void {
 }
 
 function broadcastHeads(): void {
-  const targets = [overlayWindow, mainWindow, trayPopup].filter(
+  const targets = [overlayWindow, getMainWindow(), getTrayPopup()].filter(
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
   for (const w of targets) w.webContents.send("heads:update", heads);
@@ -1040,143 +982,6 @@ function repositionChatIfVisible(): void {
   positionChat();
 }
 
-// -------- Response window --------
-
-function ensureResponseWindow(): BrowserWindow {
-  if (responseWindow && !responseWindow.isDestroyed()) return responseWindow;
-
-  responseWindow = new BrowserWindow({
-    width: 460,
-    height: 600,
-    minWidth: 400,
-    minHeight: 300,
-    frame: true,
-    transparent: false,
-    alwaysOnTop: true,
-    show: false,
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-
-  responseWindow.setAlwaysOnTop(true, "floating");
-  responseWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-  loadRenderer(responseWindow, "response");
-
-  responseWindow.on("closed", () => {
-    responseWindow = null;
-    hideChat();
-  });
-
-  return responseWindow;
-}
-
-function showResponse(payload: ResponseOpenPayload): void {
-  const win = ensureResponseWindow();
-  const send = (): void => {
-    win.webContents.send("response:open", payload);
-  };
-  if (win.webContents.isLoading()) {
-    win.webContents.once("did-finish-load", send);
-  } else {
-    send();
-  }
-  win.show();
-  win.focus();
-}
-
-// -------- Tray + popup --------
-
-function ensureTrayPopup(): BrowserWindow {
-  if (trayPopup && !trayPopup.isDestroyed()) return trayPopup;
-
-  trayPopup = new BrowserWindow({
-    width: TRAY_POPUP_WIDTH,
-    height: TRAY_POPUP_INITIAL_HEIGHT,
-    frame: false,
-    resizable: false,
-    movable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    show: false,
-    hasShadow: true,
-    vibrancy: "popover",
-    visualEffectState: "active",
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-
-  trayPopup.setAlwaysOnTop(true, "pop-up-menu");
-  trayPopup.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  loadRenderer(trayPopup, "statusbar");
-
-  trayPopup.on("blur", () => hideTrayPopup());
-  trayPopup.on("closed", () => {
-    trayPopup = null;
-  });
-
-  return trayPopup;
-}
-
-function positionTrayPopup(trayBounds: Electron.Rectangle): void {
-  const win = ensureTrayPopup();
-  const display = screen.getDisplayMatching(trayBounds);
-  const screenFrame = display.workArea;
-
-  const x = Math.round(trayBounds.x + trayBounds.width / 2 - TRAY_POPUP_WIDTH / 2);
-  const y = Math.round(trayBounds.y + trayBounds.height + 6);
-
-  const clampedX = Math.max(
-    screenFrame.x + 4,
-    Math.min(x, screenFrame.x + screenFrame.width - TRAY_POPUP_WIDTH - 4),
-  );
-  win.setPosition(clampedX, y);
-}
-
-function toggleTrayPopup(bounds: Electron.Rectangle): void {
-  const win = ensureTrayPopup();
-  if (win.isVisible()) {
-    hideTrayPopup();
-  } else {
-    positionTrayPopup(bounds);
-    win.show();
-    win.focus();
-  }
-}
-
-function hideTrayPopup(): void {
-  if (trayPopup && !trayPopup.isDestroyed() && trayPopup.isVisible()) trayPopup.hide();
-}
-
-function createTray(): void {
-  // resources/ lives at apps/desktop/resources/, alongside out/. __dirname is
-  // out/main at runtime in both dev and packaged builds.
-  const iconPath = path.join(__dirname, "../../resources/trayTemplate.png");
-  const icon = nativeImage.createFromPath(iconPath);
-  // Template image: macOS auto-tints to match menu bar (dark/light, focused).
-  // Only the alpha channel is used — gray values are ignored.
-  icon.setTemplateImage(true);
-
-  tray = new Tray(icon);
-  tray.setToolTip("ChatHeads");
-  tray.on("click", (_e, bounds) => handleTrayClick(bounds));
-  tray.on("right-click", (_e, bounds) => handleTrayClick(bounds));
-}
-
-// In session-only mode the tray click is the user's escape hatch: it
-// force-shows the rail and resets the 15-min grace timer. Outside that mode
-// the lastActivityTs bump is inert — resolveRailVisibility ignores it while
-// pinned or with session-only off.
-function handleTrayClick(bounds: Electron.Rectangle): void {
-  lastActivityTs = Date.now();
-  toggleTrayPopup(bounds);
-  resolveRailVisibility();
-}
-
 // -------- IPC --------
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
@@ -1544,24 +1349,14 @@ ipcMain.handle("drag:end", (): void => {
 });
 
 ipcMain.handle("app:openMain", (): void => {
-  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  else {
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  showMainWindow();
   hideTrayPopup();
 });
 
 ipcMain.handle("app:openAgentCreator", (): void => {
-  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  else {
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  const win = showMainWindow();
   hideTrayPopup();
-
-  const win = mainWindow;
-  if (!win || win.isDestroyed()) return;
+  if (win.isDestroyed()) return;
   const send = (): void => {
     if (!win.isDestroyed()) win.webContents.send("agents:openCreator");
   };
@@ -1618,7 +1413,7 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
       const b = win.getBounds();
       win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
     }
-  } else if (win === trayPopup) {
+  } else if (win === getTrayPopup()) {
     const b = win.getBounds();
     if (h === b.height) return;
     // Tray popup is anchored at top — height grows downward.
@@ -2170,8 +1965,9 @@ ipcMain.handle("trackedRepos:toggle", (_e, repoId: number) => [
 ]);
 
 function broadcastToMain(channel: string, payload: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
+  const win = getMainWindow();
+  if (win && !win.isDestroyed()) {
+    win.webContents.send(channel, payload);
   }
 }
 
@@ -2179,13 +1975,13 @@ function broadcastToMain(channel: string, payload: unknown): void {
 // repos:* push channels. We still broadcast to main so any future settings
 // UI on the main window stays in sync without extra plumbing.
 function broadcastToTrayAndMain(channel: string, payload: unknown): void {
-  for (const w of [mainWindow, trayPopup]) {
+  for (const w of [getMainWindow(), getTrayPopup()]) {
     if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
   }
 }
 
 function agentConsumerWindows(): BrowserWindow[] {
-  return [mainWindow, infoWindow, responseWindow].filter(
+  return [getMainWindow(), infoWindow, getResponseWindow()].filter(
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
 }
@@ -2198,11 +1994,10 @@ function broadcastAgentEvent(event: AgentStreamEvent): void {
 
 backend.onChange((state) => broadcastToMain("backend:authState", state));
 // Tray popup shows sign-in state too — mirror to it so the CTA flips live.
-backend.onChange((state) =>
-  trayPopup && !trayPopup.isDestroyed()
-    ? trayPopup.webContents.send("backend:authState", state)
-    : undefined,
-);
+backend.onChange((state) => {
+  const popup = getTrayPopup();
+  if (popup && !popup.isDestroyed()) popup.webContents.send("backend:authState", state);
+});
 localRepos.onChange((repos) => broadcastToTrayAndMain("backend:trackedRepos", repos));
 localRepos.onSelectionChange((ids) =>
   broadcastToTrayAndMain("trackedRepos:selectionChange", [...ids]),
@@ -2218,6 +2013,8 @@ agentStore.onChange((agents) => broadcastToMain("agents:listChange", agents.map(
 function debugBackfillTimestamps(): void {
   // No-op; kept for reference.
 }
+
+configureResponse({ onClose: hideChat });
 
 app.whenReady().then(async () => {
   // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
@@ -2235,7 +2032,17 @@ app.whenReady().then(async () => {
   githubAuth.restore();
   localRepos.restore();
   void mcpProxy.start().catch((err) => console.warn("[localMcpProxy] start failed:", err));
-  createTray();
+  // In session-only mode the tray click is the user's escape hatch: it
+  // force-shows the rail and resets the 15-min grace timer. Outside that
+  // mode the lastActivityTs bump is inert — resolveRailVisibility ignores
+  // it while pinned or with session-only off.
+  createTray({
+    onClick: (bounds) => {
+      lastActivityTs = Date.now();
+      toggleTrayPopup(bounds);
+      resolveRailVisibility();
+    },
+  });
   rail.start();
   selfSession.start();
   applySyncForAuth(backend.getAuthState().signedIn);
@@ -2274,11 +2081,8 @@ app.on("window-all-closed", () => {});
 
 app.on("activate", () => {
   // Standard macOS reopen semantics: clicking the dock icon re-shows the
-  // main window. `createMainWindow` covers the (now-rare) case where it was
-  // actually destroyed.
-  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-  else if (!mainWindow.isVisible()) mainWindow.show();
-  else mainWindow.focus();
+  // main window — covering the (now-rare) case where it was actually destroyed.
+  showMainWindow();
 });
 
 // Unpinned mode: rail follows app focus. Float when active so hover works,

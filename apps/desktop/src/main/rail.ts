@@ -69,6 +69,14 @@ let lastSnapshot: RailDebugSnapshot = { at: null, peers: null, error: null };
 const prActivityByLogin = new Map<string, number>();
 const PR_ACTIVITY_TTL_MS = 8_000;
 
+// Live-collision state, keyed by login. Unlike PR activity, this is a
+// PERSISTENT state — the warning stays until the user dismisses it (the
+// info popover renders an ✕). The banner inside the popover hides itself
+// based on whether the file is still in the matching session's
+// topFilesEdited, but the rail-level stamp persists across sessionCache
+// refreshes so the user can't lose track of it.
+const collisionByLogin = new Map<string, { at: number; file: string }>();
+
 // DEV ONLY — synthetic teammates for testing enter/exit animations without
 // touching the backend. Merged into the peer list in refresh() so regular
 // polls don't wipe them.
@@ -109,6 +117,7 @@ function headForUser(
   isLive?: boolean,
 ): ChatHead {
   const prAt = prActivityByLogin.get(login);
+  const collision = collisionByLogin.get(login);
   return {
     id: userHeadId(login),
     kind: "user",
@@ -117,6 +126,7 @@ function headForUser(
     avatar: { type: "remote", value: avatarUrl },
     ...(lastActivityAt != null && { lastActionAt: lastActivityAt }),
     ...(prAt != null && { prActivityAt: prAt }),
+    ...(collision != null && { collisionAt: collision.at, collisionFile: collision.file }),
     ...(isLive === true && { live: true }),
   };
 }
@@ -153,6 +163,8 @@ function sameHeads(a: ChatHead[], b: ChatHead[]): boolean {
     if (a[i].live !== b[i].live) return false;
     if (a[i].unread !== b[i].unread) return false;
     if (a[i].prActivityAt !== b[i].prActivityAt) return false;
+    if (a[i].collisionAt !== b[i].collisionAt) return false;
+    if (a[i].collisionFile !== b[i].collisionFile) return false;
   }
   return true;
 }
@@ -261,6 +273,34 @@ function scheduleRefresh(): void {
 
 export function refreshSoon(): void {
   scheduleRefresh();
+}
+
+/** Stamp a teammate's head as colliding with you on a specific file. The
+ *  stamp persists until `dismissCollision(login)` is called — the user
+ *  drives clearing via the ✕ on the popover banner. Repeated calls with a
+ *  different file replace the existing stamp (latest collision wins). */
+export function markCollision(login: string, filePath: string): void {
+  const now = Date.now();
+  collisionByLogin.set(login, { at: now, file: filePath });
+
+  const next = heads.map((h) =>
+    parseUserHeadId(h.id) === login ? { ...h, collisionAt: now, collisionFile: filePath } : h,
+  );
+  apply(next);
+}
+
+/** Clear an active collision stamp for a login. Triggered by the user
+ *  dismissing the in-popover banner. No-op if there's nothing to clear. */
+export function dismissCollision(login: string): void {
+  if (!collisionByLogin.delete(login)) return;
+  const next = heads.map((h) => {
+    if (parseUserHeadId(h.id) !== login) return h;
+    const rest = { ...h };
+    delete rest.collisionAt;
+    delete rest.collisionFile;
+    return rest as ChatHead;
+  });
+  apply(next);
 }
 
 /** Stamp a teammate's head with a fresh PR-activity timestamp so the overlay

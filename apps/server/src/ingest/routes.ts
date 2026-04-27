@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { and, eq, isNull } from "drizzle-orm";
 import {
   SOURCES,
+  type CollisionDetectedMessage,
   type EventSource,
   type IngestResponse,
   type SessionUpdatedMessage,
@@ -15,6 +16,12 @@ import { classifyEvent } from "./classifier";
 import { processEvents } from "./aggregator";
 import { matchSessionRepo } from "../social/github-sync";
 import { classifySessionState } from "../sessions/state";
+import { detectCollisions } from "../correlate/file-index";
+
+function topFilesKeys(field: unknown): string[] {
+  if (!field || typeof field !== "object") return [];
+  return Object.keys(field as Record<string, number>);
+}
 
 interface ParsedLine {
   lineSeq: number;
@@ -138,6 +145,11 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
           }
         }
 
+        // Keys carried out of the inner block so the publish block below can
+        // feed cross-session collision detection without a second select.
+        let priorFiles: string[] = [];
+        let currentFiles: string[] = [];
+
         if (acceptedPayloads.length > 0) {
           const [currentSession] = await db
             .select()
@@ -146,7 +158,15 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             .limit(1);
 
           if (currentSession) {
+            priorFiles = [
+              ...topFilesKeys(currentSession.topFilesEdited),
+              ...topFilesKeys(currentSession.topFilesWritten),
+            ];
             const updates = processEvents(source, currentSession, acceptedPayloads);
+            currentFiles = [
+              ...Object.keys(updates.topFilesEdited),
+              ...Object.keys(updates.topFilesWritten),
+            ];
             await db.update(sessions).set(updates).where(eq(sessions.sessionId, query.session));
 
             // Retry while repo_id unresolved; fall back to the session's
@@ -192,6 +212,30 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
               last_ts: finalSession.lastTs?.toISOString(),
             };
             void redis.publish(`repo:${finalSession.repoId}`, msg);
+
+            const collisions = detectCollisions({
+              repoId: finalSession.repoId,
+              sessionId: query.session,
+              userId: user.id,
+              githubLogin: user.githubLogin,
+              currentFiles,
+              priorFiles,
+            });
+            for (const c of collisions) {
+              const cmsg: CollisionDetectedMessage = {
+                type: "collision_detected",
+                repo_id: finalSession.repoId,
+                file_path: c.filePath,
+                ts: new Date().toISOString(),
+                trigger: {
+                  sessionId: query.session,
+                  userId: user.id,
+                  githubLogin: user.githubLogin,
+                },
+                others: c.others,
+              };
+              void redis.publish(`repo:${finalSession.repoId}`, cmsg);
+            }
           }
         }
 

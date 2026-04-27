@@ -22,3 +22,11 @@
     cursor: pointer;
   }
 }
+
+/* Pulsing red dot used by the in-row collision banner. Reuses the shared
+ * `live-ring` opacity keyframe so the dot pulses at the same cadence as
+ * the rose ring on the chat head — the two signals read as one event. */
+.collision-dot {
+  background-color: #fb7185; /* rose-400 — must match the head ring color */
+  animation: live-ring 1.6s ease-in-out infinite;
+}

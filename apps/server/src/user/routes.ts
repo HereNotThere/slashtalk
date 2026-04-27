@@ -77,7 +77,6 @@ export const userRoutes = (db: Database) =>
       { params: t.Object({ id: t.String() }) },
     )
 
-
     // GET /api/me/github-app/status — whether this user has linked the
     // narrow GitHub App repo-access grant used for private repo claims.
     .get("/github-app/status", async ({ user }) => {
@@ -88,7 +87,6 @@ export const userRoutes = (db: Database) =>
         connectUrl: status.configured ? githubAppConnectUrlForUser(user.id) : githubAppConnectUrl(),
       };
     })
-
 
     // POST /api/me/setup-token — generate a new setup token
     .post("/setup-token", async ({ user }) => {

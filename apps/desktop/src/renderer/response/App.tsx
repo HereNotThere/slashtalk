@@ -2,13 +2,41 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { PaperAirplaneIcon } from "@heroicons/react/24/outline";
-import type { ChatMessage, SessionCard, SessionState } from "@slashtalk/shared";
+import type {
+  ChatAssistantMessage,
+  ChatMessage,
+  SessionCard,
+  SessionState,
+} from "@slashtalk/shared";
 import type { AgentSummary, ChatHead, ResponseOpenPayload } from "../../shared/types";
 import { AgentChat } from "../info/AgentPanel";
 import { Button } from "../shared/Button";
+import { CheckIcon, CopyIcon } from "../shared/icons";
 
 const CITATION_TOKEN = /\[session:[0-9a-fA-F-]+\]/g;
 const CARDS_VISIBLE = 5;
+const COPIED_FEEDBACK_MS = 1500;
+
+function buildMarkdownForAssistantMessage(m: ChatAssistantMessage): string {
+  const body = m.content.replace(CITATION_TOKEN, "").trim();
+  if (!m.cards || m.cards.length === 0) return body;
+
+  const lines = [
+    "> The following coding sessions were referenced when generating this answer:",
+    ...m.cards.map((c) => {
+      const title = c.title ?? "Untitled session";
+      const author = c.user.displayName ?? c.user.login;
+      const bits = [
+        c.repo ? `repo \`${c.repo}\`` : null,
+        c.branch ? `branch \`${c.branch}\`` : null,
+        author ? `by ${author}` : null,
+      ].filter((bit): bit is string => bit !== null);
+      return `> - **${title}**${bits.length ? ` — ${bits.join(", ")}` : ""}`;
+    }),
+    "",
+  ];
+  return `${lines.join("\n")}\n${body}`;
+}
 
 function SlashtalkSpinner(): JSX.Element {
   return (
@@ -136,8 +164,21 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [gerunds, setGerunds] = useState<string[]>(DEFAULT_GERUNDS);
   const [gerundIdx, setGerundIdx] = useState(0);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleCopyAssistantMessage(m: ChatAssistantMessage, idx: number): Promise<void> {
+    try {
+      await window.chatheads.copyText(buildMarkdownForAssistantMessage(m));
+      setCopiedIdx(idx);
+      setTimeout(() => {
+        setCopiedIdx((current) => (current === idx ? null : current));
+      }, COPIED_FEEDBACK_MS);
+    } catch {
+      /* swallow */
+    }
+  }
 
   useEffect(() => {
     if (!loading) inputRef.current?.focus();
@@ -212,13 +253,17 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
                 </div>
               </div>
             ) : (
-              <div key={i} className="space-y-3">
+              <div key={i} className="group space-y-3">
                 <div className={MARKDOWN_CLASSES}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {m.content.replace(CITATION_TOKEN, "")}
                   </ReactMarkdown>
                 </div>
                 {m.cards && m.cards.length > 0 && <SessionCardStack cards={m.cards} />}
+                <CopyMessageButton
+                  copied={copiedIdx === i}
+                  onCopy={() => void handleCopyAssistantMessage(m, i)}
+                />
               </div>
             ),
           )}
@@ -267,6 +312,34 @@ function MessageResponse({ message }: { message: string | null }): JSX.Element {
         </div>
       </div>
     </div>
+  );
+}
+
+function CopyMessageButton({
+  copied,
+  onCopy,
+}: {
+  copied: boolean;
+  onCopy: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      aria-label={copied ? "Copied to clipboard" : "Copy response as markdown"}
+      className="
+        inline-flex items-center gap-1.5
+        px-2 py-1 -ml-2
+        rounded-md
+        text-xs text-subtle hover:text-fg
+        hover:bg-surface-alt-hover
+        opacity-0 group-hover:opacity-100 focus-visible:opacity-100
+        transition-opacity
+      "
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+      <span>{copied ? "Copied" : "Copy"}</span>
+    </button>
   );
 }
 

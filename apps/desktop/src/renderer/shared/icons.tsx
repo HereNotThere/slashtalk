@@ -106,3 +106,39 @@ export function SendIcon(): JSX.Element {
     </svg>
   );
 }
+
+export function CopyIcon(): JSX.Element {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect
+        x="5.25"
+        y="5.25"
+        width="8.5"
+        height="8.5"
+        rx="1.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M3.5 10.5 H2.75 A0.5 0.5 0 0 1 2.25 10 V2.75 A0.5 0.5 0 0 1 2.75 2.25 H10 A0.5 0.5 0 0 1 10.5 2.75 V3.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+export function CheckIcon(): JSX.Element {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.5 8.25 L6.75 11.5 L12.75 5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

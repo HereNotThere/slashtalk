@@ -505,16 +505,22 @@ function Bubble({
 }): JSX.Element {
   useActivityBadgeUpdate(head.lastActionAt ?? null);
   const celebrating = usePrCelebration(head.prActivityAt ?? null);
+  const colliding = head.collisionAt != null;
 
   const handleMouseEnter = (): void => {
     void window.chatheads.preloadSessions(head.id);
     onHoverEnter();
   };
 
+  const tooltip =
+    colliding && head.collisionFile
+      ? `${head.label} — also editing ${head.collisionFile}`
+      : head.label;
+
   return (
     <div
       data-bubble
-      title={head.label}
+      title={tooltip}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={onHoverLeave}
       style={{
@@ -558,7 +564,9 @@ function Bubble({
           {formatAge(Date.now() - head.lastActionAt)}
         </div>
       )}
-      {head.live === true && (
+      {/* Suppress the live (blue) ring when a collision is showing — only one
+       *  status ring at a time keeps the bubble legible. */}
+      {head.live === true && !colliding && (
         <div
           aria-hidden
           className="
@@ -566,6 +574,18 @@ function Bubble({
             border-2 border-primary pointer-events-none z-3
           "
           style={{ animation: "live-ring 1.6s ease-in-out infinite" }}
+        />
+      )}
+      {colliding && (
+        <div
+          aria-hidden
+          className="absolute inset-[-2px] rounded-full border-2 pointer-events-none"
+          style={{
+            borderColor: "#fb7185", // rose-400 — matches the popover banner dot
+            animation: "live-ring 1.6s ease-in-out infinite",
+            // Below the timestamp chip (z-2) so the chip stays readable.
+            zIndex: 1,
+          }}
         />
       )}
       {celebrating != null && <PrCelebration key={celebrating} />}

@@ -52,10 +52,22 @@ export function App(): JSX.Element {
         return h;
       });
     });
+    // Mirror rail-level head updates onto the visible head so transient
+    // fields (collisionAt/File, prActivityAt, lastActionAt, live) stay in
+    // sync. Without this the popover holds the snapshot taken at open time
+    // and dismiss/refresh actions don't propagate until the next show.
+    const offUpdate = window.chatheads.onUpdate((heads) => {
+      setHead((cur) => {
+        if (!cur) return cur;
+        const next = heads.find((h) => h.id === cur.id);
+        return next ?? cur;
+      });
+    });
     return () => {
       offShow();
       offHide();
       offPresence();
+      offUpdate();
     };
   }, []);
 
@@ -118,7 +130,12 @@ export function App(): JSX.Element {
             <UserHeader head={head} />
             {spotify && <NowPlaying track={spotify} />}
             <Divider />
-            <SessionsSection sessions={sessions} expandRequest={expandRequest} />
+            <SessionsSection
+              sessions={sessions}
+              expandRequest={expandRequest}
+              collisionFile={head?.collisionAt != null ? (head.collisionFile ?? null) : null}
+              collisionLogin={head?.label ?? null}
+            />
           </>
         )}
       </div>
@@ -212,9 +229,13 @@ const DEFAULT_SESSION_LIMIT = 5;
 function SessionsSection({
   sessions,
   expandRequest,
+  collisionFile,
+  collisionLogin,
 }: {
   sessions: InfoSession[] | null;
   expandRequest: { id: string; nonce: number } | null;
+  collisionFile: string | null;
+  collisionLogin: string | null;
 }): JSX.Element {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -244,6 +265,8 @@ function SessionsSection({
         sessions={visible}
         expandedId={expandedId}
         onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
+        collisionFile={collisionFile}
+        collisionLogin={collisionLogin}
       />
       {hasMore && (
         <>
@@ -265,17 +288,27 @@ function SessionList({
   sessions,
   expandedId,
   onToggle,
+  collisionFile,
+  collisionLogin,
 }: {
   sessions: InfoSession[];
   expandedId: string | null;
   onToggle: (id: string) => void;
+  collisionFile: string | null;
+  collisionLogin: string | null;
 }): JSX.Element {
   return (
     <>
       {sessions.map((s, i) => (
         <Fragment key={s.id}>
           {i > 0 && <div className="mx-4 h-px bg-divider" />}
-          <SessionRow session={s} expanded={expandedId === s.id} onToggle={() => onToggle(s.id)} />
+          <SessionRow
+            session={s}
+            expanded={expandedId === s.id}
+            onToggle={() => onToggle(s.id)}
+            collisionFile={collisionFile}
+            collisionLogin={collisionLogin}
+          />
         </Fragment>
       ))}
     </>
@@ -291,14 +324,74 @@ function repoLabel(s: InfoSession): string | null {
   return parts.length > 0 ? parts[parts.length - 1]! : null;
 }
 
+function sessionTouchesFile(session: InfoSession, filePath: string): boolean {
+  const sets = [session.topFilesEdited, session.topFilesWritten];
+  for (const set of sets) {
+    if (!Array.isArray(set)) continue;
+    for (const entry of set) {
+      if (Array.isArray(entry) && entry[0] === filePath) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Trim an absolute file path to start at the repo root, e.g.
+ * `/Users/erik/code/slashtalk/apps/server/src/x.ts` →
+ * `/slashtalk/apps/server/src/x.ts`. Everything before the repo dir is
+ * developer-machine-specific and irrelevant to readers.
+ *
+ * Resolution order:
+ *   1. Strip session.cwd as a prefix (most precise — that's literally the
+ *      repo root on the *other* machine).
+ *   2. Otherwise, look up the repo basename from `repo_full_name`/`cwd`
+ *      and slice from its last occurrence in the path.
+ */
+function repoBasenameFor(session: InfoSession): string | null {
+  if ("repo_full_name" in session && session.repo_full_name) {
+    const slash = session.repo_full_name.lastIndexOf("/");
+    return slash >= 0 ? session.repo_full_name.slice(slash + 1) : session.repo_full_name;
+  }
+  if (session.cwd) {
+    const parts = session.cwd.replace(/\\/g, "/").split("/").filter(Boolean);
+    return parts.length > 0 ? (parts[parts.length - 1] ?? null) : null;
+  }
+  return null;
+}
+
+function trimToRepoPath(filePath: string, session: InfoSession): string {
+  const norm = filePath.replace(/\\/g, "/");
+
+  if (session.cwd) {
+    const cwd = session.cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (norm.startsWith(cwd + "/")) {
+      const repoBasename = repoBasenameFor(session);
+      const tail = norm.slice(cwd.length); // starts with "/"
+      return repoBasename ? `/${repoBasename}${tail}` : tail;
+    }
+  }
+
+  const repoBasename = repoBasenameFor(session);
+  if (repoBasename) {
+    const needle = `/${repoBasename}/`;
+    const idx = norm.lastIndexOf(needle);
+    if (idx >= 0) return norm.slice(idx);
+  }
+  return norm;
+}
+
 function SessionRow({
   session,
   expanded,
   onToggle,
+  collisionFile,
+  collisionLogin,
 }: {
   session: InfoSession;
   expanded: boolean;
   onToggle: () => void;
+  collisionFile: string | null;
+  collisionLogin: string | null;
 }): JSX.Element {
   const repo = repoLabel(session);
   const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
@@ -306,6 +399,18 @@ function SessionRow({
   const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
   const status = statusLabel(session);
   const hasLocator = Boolean(repo) || Boolean(session.branch);
+  // Only flag collisions on sessions that aren't already wrapped — an ENDED
+  // session touching the same file is just historical, not a real conflict.
+  const sessionLive = session.state !== SessionState.ENDED;
+  const colliding =
+    collisionFile != null && sessionLive && sessionTouchesFile(session, collisionFile);
+
+  // Border priority: collision (outranks expanded) > expanded > none.
+  const borderClass = colliding
+    ? "border-danger"
+    : expanded
+      ? "border-success/70"
+      : "border-transparent";
 
   return (
     <div className={expanded ? "bg-surface-alt" : undefined}>
@@ -313,7 +418,7 @@ function SessionRow({
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className={`w-full text-left px-4 py-3 cursor-pointer hover:bg-surface-alt/60 transition-colors flex items-start gap-2 border-l-2 ${expanded ? "border-success/70" : "border-transparent"}`}
+        className={`w-full text-left px-4 py-3 cursor-pointer hover:bg-surface-alt/60 transition-colors flex items-start gap-2 border-l-2 ${borderClass}`}
       >
         <div className="flex-1 min-w-0">
           <div className="text-base font-medium text-fg truncate">{title}</div>
@@ -334,6 +439,39 @@ function SessionRow({
                   </>
                 )}
               </span>
+            </div>
+          )}
+          {colliding && collisionFile && (
+            // Sits between the repo/branch chip and the tokens row — reads as
+            // another piece of "where this session is" metadata. Subtle danger
+            // tint (no border), explicit Also-editing prefix, full path that
+            // wraps if long, dedicated × dismiss top-right.
+            <div className="mt-1.5 flex items-start gap-1.5 px-2 py-1 rounded bg-danger/10">
+              {/* mt-[5px] aligns the 8px dot's center with the first text line. */}
+              <span
+                aria-hidden
+                className="collision-dot shrink-0 inline-block w-2 h-2 rounded-full mt-[5px]"
+              />
+              <div className="text-[12px] leading-snug min-w-0 flex-1">
+                <span className="text-danger font-medium">Also editing </span>
+                <span className="font-mono text-fg/90 break-all">
+                  {trimToRepoPath(collisionFile, session)}
+                </span>
+              </div>
+              {collisionLogin && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void window.chatheads.collision.dismiss(collisionLogin);
+                  }}
+                  aria-label="Dismiss collision warning"
+                  title="Dismiss"
+                  className="shrink-0 -mr-1 px-1.5 py-0 text-[14px] leading-none text-subtle hover:text-fg rounded cursor-pointer"
+                >
+                  ×
+                </button>
+              )}
             </div>
           )}
           {(status !== null || tokensLabel !== null) && (

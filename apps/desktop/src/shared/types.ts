@@ -31,6 +31,12 @@ export interface ChatHead {
   /** Epoch ms when this teammate's most recent PR opened/merged event landed.
    *  Renderer treats it as transient (animates while it's < a few seconds old). */
   prActivityAt?: number;
+  /** Epoch ms of the most recent live-collision detection (this user is editing
+   *  the same file as you right now). Transient — TTL'd by rail.ts. */
+  collisionAt?: number;
+  /** Path of the file in the most recent collision; pairs with collisionAt for
+   *  the tooltip ("Editing src/auth.ts with you"). */
+  collisionFile?: string;
   /** True when this user has at least one BUSY/ACTIVE session in the latest
    *  feed poll — i.e. they're "working now". Renders a pulsing blue ring around
    *  the bubble on the rail and suppresses the "last session" timestamp badge
@@ -500,6 +506,12 @@ export interface ChatHeadsBridge {
     onSelectionChange: (cb: (selected: number[]) => void) => Unsubscribe;
   };
 
+  collision: {
+    /** Clear the persistent collision stamp on a teammate (their rail ring
+     *  goes away, the popover banner self-hides). User-initiated only. */
+    dismiss: (login: string) => Promise<void>;
+  };
+
   debug: {
     railSnapshot: () => Promise<RailDebugSnapshot>;
     refreshRail: () => Promise<RailDebugSnapshot>;
@@ -507,6 +519,13 @@ export interface ChatHeadsBridge {
     addFakeTeammate: () => Promise<void>;
     removeFakeTeammate: () => Promise<void>;
     replayEnterAnimation: () => Promise<void>;
+    /** Synthesize a collision ping locally without needing another user to be
+     *  editing the same file. Picks the first non-self peer (or a fake one if
+     *  there are no real peers) and stamps a collision on them. */
+    fireCollision: () => Promise<void>;
+    /** Adds a fake teammate AND immediately fires a collision against them, so
+     *  the full ring + chip animation is visible in one click. */
+    fireCollisionOnFake: () => Promise<void>;
   };
   /** Dev-only: main fires this to ask the overlay to replay the enter
    *  animation on all currently mounted bubbles. */

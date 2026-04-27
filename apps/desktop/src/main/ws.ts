@@ -17,12 +17,14 @@ import * as backend from "./backend";
 import { apiBaseUrl } from "./config";
 import { createEmitter } from "./emitter";
 import type {
+  CollisionDetectedMessage,
   PrActivityMessage,
   SessionInsightsUpdatedMessage,
   SessionUpdatedMessage,
 } from "@slashtalk/shared";
 
 type ServerMessage =
+  | CollisionDetectedMessage
   | PrActivityMessage
   | SessionInsightsUpdatedMessage
   | SessionUpdatedMessage
@@ -37,6 +39,9 @@ export const onSessionInsightsUpdated = sessionInsightsUpdated.on;
 
 const sessionUpdated = createEmitter<SessionUpdatedMessage>();
 export const onSessionUpdated = sessionUpdated.on;
+
+const collisionDetected = createEmitter<CollisionDetectedMessage>();
+export const onCollisionDetected = collisionDetected.on;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -116,6 +121,8 @@ function open(): void {
       sessionInsightsUpdated.emit(msg as SessionInsightsUpdatedMessage);
     } else if (msg.type === "session_updated") {
       sessionUpdated.emit(msg as SessionUpdatedMessage);
+    } else if (msg.type === "collision_detected") {
+      collisionDetected.emit(msg as CollisionDetectedMessage);
     }
     // Other types (ping, future) are ignored — connection liveness is handled
     // by the server's keepalive frames; we don't echo.

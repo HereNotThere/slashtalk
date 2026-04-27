@@ -412,7 +412,7 @@ function resizeOverlay(): void {
 }
 
 function broadcastHeads(): void {
-  const targets = [overlayWindow, getMainWindow(), getTrayPopup()].filter(
+  const targets = [overlayWindow, getMainWindow(), getTrayPopup(), infoWindow].filter(
     (w): w is BrowserWindow => !!w && !w.isDestroyed(),
   );
   for (const w of targets) w.webContents.send("heads:update", heads);
@@ -731,6 +731,101 @@ ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());
 ipcMain.handle("debug:addFakeTeammate", () => rail.debugAddFakeTeammate());
 ipcMain.handle("debug:removeFakeTeammate", () => rail.debugRemoveFakeTeammate());
 ipcMain.handle("debug:replayEnterAnimation", () => replayEnterAnimation());
+ipcMain.handle("debug:fireCollision", () => runDebugFireCollision());
+ipcMain.handle("debug:fireCollisionOnFake", () => runDebugFireCollisionOnFake());
+ipcMain.handle("collision:dismiss", (_e, login: string) => {
+  if (typeof login === "string" && login.length > 0) rail.dismissCollision(login);
+});
+
+// DEV ONLY — fire a synthetic collision against a peer in the rail, picking
+// a real file from one of their live sessions so the in-row banner has
+// something to attach to. Both ring + popover banner are guaranteed to
+// appear together (or neither does — see verifyAndMarkCollision).
+
+async function runDebugFireCollision(): Promise<void> {
+  const heads = rail.list();
+  // Prefer the head whose popover is currently open — that way the warning
+  // shows up in the popover you're already looking at. Fall back to other
+  // peers if the selected one has no usable sessions.
+  const selfHead = heads[0];
+  const ordered = selectedHeadId
+    ? [
+        ...heads.filter((h) => h.id === selectedHeadId),
+        ...heads.filter((h) => h.id !== selectedHeadId),
+      ]
+    : heads;
+  console.log(
+    `[debug] runDebugFireCollision invoked, rail=${heads.length} selected=${selectedHeadId ?? "(none)"}`,
+  );
+
+  // Find the first peer whose live (non-ENDED) sessions contain a real file
+  // we can collide on. Routes through the same verify-and-mark helper used
+  // by the WS path so debug + production produce identical UI guarantees.
+  for (const head of ordered) {
+    if (head === selfHead) continue;
+    const login = rail.parseUserHeadId(head.id);
+    if (!login) continue;
+    if (!sessionCache.has(head.id)) {
+      try {
+        await fetchSessionsForHead(head.id);
+      } catch {
+        continue;
+      }
+    }
+    const sessions = sessionCache.get(head.id);
+    const realFile = pickRealFileFromSessions(sessions);
+    if (realFile == null) continue;
+    console.log(`[debug] fireCollision → ${login} on ${realFile}`);
+    await verifyAndMarkCollision(login, realFile);
+    return;
+  }
+  console.warn(
+    "[debug] fireCollision: no peer in rail has a live session with edited/written files — try opening Cmd+Shift+' (collision-on-fake) instead, or wait for a teammate to start editing.",
+  );
+}
+
+/**
+ * Returns the first real file path appearing in any of the peer's *live*
+ * (non-ENDED) sessions' topFilesEdited/Written. Returns null when none
+ * found — the caller should try the next peer rather than fall back to a
+ * hardcoded path that won't match any session predicate.
+ */
+function pickRealFileFromSessions(sessions: InfoSession[] | undefined): string | null {
+  if (!sessions) return null;
+  const fields: Array<keyof Pick<InfoSession, "topFilesEdited" | "topFilesWritten">> = [
+    "topFilesEdited",
+    "topFilesWritten",
+  ];
+  for (const field of fields) {
+    for (const s of sessions) {
+      if (s.state === "ended") continue;
+      const top = s[field];
+      if (!Array.isArray(top) || top.length === 0) continue;
+      for (const entry of top) {
+        if (Array.isArray(entry) && typeof entry[0] === "string" && entry[0].length > 0) {
+          return entry[0];
+        }
+      }
+    }
+  }
+  return null;
+}
+
+async function runDebugFireCollisionOnFake(): Promise<void> {
+  console.log(`[debug] runDebugFireCollisionOnFake invoked`);
+  rail.debugAddFakeTeammate();
+  // Fakes have no backend sessions to attach a popover banner to, so we
+  // bypass verification and stamp the ring directly. Hovering the fake
+  // bubble shows nothing useful — this path is only for testing the
+  // ring/halo animation in isolation.
+  const heads = rail.list();
+  for (let i = heads.length - 1; i > 0; i--) {
+    const login = rail.parseUserHeadId(heads[i].id);
+    if (!login || !login.startsWith("debug_")) continue;
+    rail.markCollision(login, "src/example.ts");
+    return;
+  }
+}
 
 function replayEnterAnimation(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
@@ -1472,6 +1567,68 @@ ws.onPrActivity((msg) => {
   rail.markPrActivity(msg.login);
 });
 
+ws.onCollisionDetected((msg) => {
+  console.log(
+    `[ws] collision_detected on ${msg.file_path} (trigger=${msg.trigger.githubLogin} others=${msg.others.map((o) => o.githubLogin).join(",")})`,
+  );
+  const state = backend.getAuthState();
+  const selfLogin = state.signedIn ? state.user.githubLogin : null;
+  // Stamp every involved peer (trigger + others) — but verify each one's
+  // session data actually contains the file before painting the ring. This
+  // is what keeps ring + popover warning in lockstep: if no live session
+  // for a peer touches the file (stale cache, races, weird edge cases),
+  // we don't paint a ring with no explanation.
+  if (msg.trigger.githubLogin !== selfLogin) {
+    void verifyAndMarkCollision(msg.trigger.githubLogin, msg.file_path);
+  }
+  for (const other of msg.others) {
+    if (other.githubLogin === selfLogin) continue;
+    void verifyAndMarkCollision(other.githubLogin, msg.file_path);
+  }
+});
+
+/** Refresh the peer's session cache, then mark a collision only if at least
+ *  one live (non-ENDED) session of theirs has the file in topFilesEdited or
+ *  topFilesWritten — the same predicate the popover uses to render the
+ *  in-row warning. Single source of truth: ring + warning live and die
+ *  together. Used by both the WS path (production) and the debug picker. */
+async function verifyAndMarkCollision(login: string, filePath: string): Promise<void> {
+  const headId = rail.userHeadId(login);
+  // Drop the cache so we re-fetch with the latest topFiles. The server fires
+  // collision_detected after session_updated but the WS messages can arrive
+  // out of order or before our fetch completes; an explicit refresh
+  // guarantees we see the post-update aggregates.
+  sessionCache.delete(headId);
+  let sessions: InfoSession[];
+  try {
+    sessions = await fetchSessionsForHead(headId);
+  } catch (err) {
+    console.warn(`[collision] verify failed to fetch sessions for ${login}:`, err);
+    return;
+  }
+  if (!anyLiveSessionTouchesFile(sessions, filePath)) {
+    console.warn(
+      `[collision] verify: no live session of ${login} contains ${filePath} — skipping ring`,
+    );
+    return;
+  }
+  rail.markCollision(login, filePath);
+}
+
+function anyLiveSessionTouchesFile(sessions: InfoSession[], filePath: string): boolean {
+  for (const s of sessions) {
+    if (s.state === "ended") continue;
+    const sets = [s.topFilesEdited, s.topFilesWritten];
+    for (const set of sets) {
+      if (!Array.isArray(set)) continue;
+      for (const entry of set) {
+        if (Array.isArray(entry) && entry[0] === filePath) return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Local uploader ingestion invalidates the self-head cache synchronously —
 // faster than waiting for the server-side WS echo for your own sessions.
 uploader.onIngested(() => {
@@ -1674,10 +1831,18 @@ app.whenReady().then(async () => {
       ["CommandOrControl+Shift+J", () => rail.debugAddFakeTeammate()],
       ["CommandOrControl+Shift+L", () => rail.debugRemoveFakeTeammate()],
       ["CommandOrControl+Shift+K", () => replayEnterAnimation()],
+      // Fire a synthetic collision against the first peer (or do nothing if
+      // the rail is empty). Picks a real file from the peer's cached sessions
+      // so the in-row banner attaches. Using semicolon to avoid OS-level
+      // bindings that capture Cmd+Shift+letter combos.
+      ["CommandOrControl+Shift+;", () => void runDebugFireCollision()],
+      // Same, but spawns a fake teammate first so a single shortcut on an
+      // empty rail still produces a visible rail-ring animation.
+      ["CommandOrControl+Shift+'", () => void runDebugFireCollisionOnFake()],
     ];
     for (const [accel, fn] of bindings) {
       const ok = globalShortcut.register(accel, fn);
-      if (!ok) console.warn(`[debug] failed to register ${accel}`);
+      console.log(`[debug] shortcut ${accel}: ${ok ? "registered" : "FAILED"}`);
     }
   }
 });

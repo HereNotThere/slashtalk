@@ -223,6 +223,10 @@ const bridge: ChatHeadsBridge = {
     onSelectionChange: (cb) => subscribe<number[]>("trackedRepos:selectionChange", cb),
   },
 
+  collision: {
+    dismiss: (login) => ipcRenderer.invoke("collision:dismiss", login) as Promise<void>,
+  },
+
   debug: {
     railSnapshot: () => ipcRenderer.invoke("debug:railSnapshot") as Promise<RailDebugSnapshot>,
     refreshRail: () => ipcRenderer.invoke("debug:refreshRail") as Promise<RailDebugSnapshot>,
@@ -230,6 +234,8 @@ const bridge: ChatHeadsBridge = {
     addFakeTeammate: () => ipcRenderer.invoke("debug:addFakeTeammate") as Promise<void>,
     removeFakeTeammate: () => ipcRenderer.invoke("debug:removeFakeTeammate") as Promise<void>,
     replayEnterAnimation: () => ipcRenderer.invoke("debug:replayEnterAnimation") as Promise<void>,
+    fireCollision: () => ipcRenderer.invoke("debug:fireCollision") as Promise<void>,
+    fireCollisionOnFake: () => ipcRenderer.invoke("debug:fireCollisionOnFake") as Promise<void>,
   },
   onDebugReplayEnter: (cb) => {
     const handler = (): void => cb();

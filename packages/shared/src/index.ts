@@ -245,6 +245,26 @@ export interface SessionInsightsUpdatedMessage {
 }
 
 /**
+ * WS push: two or more live sessions in the same repo are touching the same
+ * file. Computed in-memory by `apps/server/src/correlate/file-index.ts` and
+ * fired from the ingest path on the same `repo:<id>` channel as session
+ * updates. Transient — not persisted. The desktop renders a yellow ring on
+ * the trigger and each `others` head, and an "also editing" chip on the
+ * affected session card.
+ */
+export interface CollisionDetectedMessage {
+  type: "collision_detected";
+  repo_id: number;
+  file_path: string;
+  /** ISO8601 — when the collision was detected, not when the file was first touched. */
+  ts: string;
+  /** The session whose ingest just newly added this file to its top-edited set. */
+  trigger: { sessionId: string; userId: number; githubLogin: string };
+  /** Other live sessions (different users) currently touching the same file. */
+  others: Array<{ sessionId: string; userId: number; githubLogin: string }>;
+}
+
+/**
  * Chat (team-presence Q&A). The server is stateless: the client owns the
  * thread and re-sends the full `messages` array on every turn. Tool turns
  * are hidden from the client — only user-visible text + citations come back.

@@ -315,6 +315,12 @@ async function handleIngest(
 
   let priorFiles: string[] = [];
   let currentFiles: string[] = [];
+  // Tracks whether *our* update wrote the row. The WHERE clause is a
+  // compare-and-set on serverLineSeq, so a stale retry or a concurrent ingest
+  // that already advanced past us silently no-ops here. We use this to (a)
+  // never regress serverLineSeq/prefixHash, (b) skip WS notifications we
+  // didn't earn — the race winner already published.
+  let updateApplied = false;
 
   if (currentSession) {
     const aggregateFrom = Math.max(fromLineSeq, currentSession.serverLineSeq ?? 0);
@@ -346,21 +352,26 @@ async function handleIngest(
         ...Object.keys(updates.topFilesEdited),
         ...Object.keys(updates.topFilesWritten),
       ];
-      await db
+      const result = await db
         .update(sessions)
         .set({
           ...updates,
           serverLineSeq: currentLineSeq,
           prefixHash: query.prefixHash ?? undefined,
         })
-        .where(eq(sessions.sessionId, query.session));
+        .where(
+          and(eq(sessions.sessionId, query.session), lt(sessions.serverLineSeq, currentLineSeq)),
+        )
+        .returning({ sessionId: sessions.sessionId });
+      updateApplied = result.length > 0;
 
       // Retry while repo_id unresolved; fall back to the session's stored cwd
       // so strategy 3 (project-slug) can fire even when no event has ever
       // carried a cwd. The `isNull(repoId)` guard makes this a compare-and-set:
       // concurrent ingests for the same session can both reach this branch
-      // with stale snapshots, but only the first writer's value sticks.
-      if (!currentSession.repoId) {
+      // with stale snapshots, but only the first writer's value sticks. Skip
+      // when our main update lost the race — the winner ran the same logic.
+      if (updateApplied && !currentSession.repoId) {
         const cwd = updates.cwd ?? currentSession.cwd ?? null;
         const repoId = await matchSessionRepo(db, user.id, cwd, query.project, device?.id);
         if (repoId) {
@@ -372,19 +383,29 @@ async function handleIngest(
       }
     } else {
       // Stream advanced but nothing new to fold (all blanks, or already
-      // covered by a concurrent ingest). Still write the seq forward so the
-      // client doesn't keep retrying the chunk.
-      await db
+      // covered by a concurrent ingest). Try to write the seq forward, but
+      // only if it's actually moving forward — the CAS guard prevents a
+      // stale retry from regressing serverLineSeq.
+      const result = await db
         .update(sessions)
         .set({
           serverLineSeq: currentLineSeq,
           prefixHash: query.prefixHash ?? undefined,
         })
-        .where(eq(sessions.sessionId, query.session));
+        .where(
+          and(eq(sessions.sessionId, query.session), lt(sessions.serverLineSeq, currentLineSeq)),
+        )
+        .returning({ sessionId: sessions.sessionId });
+      updateApplied = result.length > 0;
     }
   }
 
-  if (acceptedEvents > 0) {
+  // Notify on any update we actually applied — folding existing events still
+  // changes the aggregate clients render, even when no rows were inserted in
+  // this request (e.g. a retry that picks up rows orphaned by a previous
+  // failed flush). Conversely, skip when our update lost the CAS race; the
+  // winner has already published the more recent state.
+  if (updateApplied) {
     const [finalSession] = await db
       .select({
         repoId: sessions.repoId,

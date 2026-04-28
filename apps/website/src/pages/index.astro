@@ -2,31 +2,199 @@
 import Layout from '../layouts/Layout.astro';
 ---
 
-<Layout title="Slashtalk — presence for AI-native engineering teams">
-	<main class="mx-auto flex min-h-screen max-w-3xl flex-col items-start justify-center px-6 py-24">
-		<span class="mb-6 inline-flex items-center rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1 text-xs font-medium text-neutral-400">
-			Coming soon
-		</span>
-		<h1 class="text-5xl font-semibold tracking-tight text-white sm:text-6xl">
-			SlashTalk
-		</h1>
-		<p class="mt-6 max-w-xl text-lg text-neutral-400">
-			Slashtalk is the presence layer for AI-native engineering teams. See
-			who's shipping what, right now, without standups.
-		</p>
-		<div class="mt-10 flex gap-3">
-			<a
-				href="#"
-				class="rounded-md bg-white px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-neutral-200"
+<Layout title="Slashtalk — we built it for our team. Here's why.">
+	<main class="mx-auto max-w-2xl px-6 py-16 sm:py-24">
+		<header class="mb-16 flex items-center justify-between gap-3">
+			<div class="flex items-center gap-3">
+				<img
+					src="/favicon.svg"
+					alt="Slashtalk"
+					width="36"
+					height="36"
+					class="rounded-lg"
+				/>
+				<span
+					class="text-base font-semibold tracking-tight text-neutral-900"
+					>Slashtalk</span
+				>
+			</div>
+			<nav>
+				<a
+					href="#install"
+					class="text-sm font-medium text-neutral-600 transition hover:text-neutral-900"
+					>Install</a
+				>
+			</nav>
+		</header>
+
+		<article class="space-y-7 text-[17px] leading-[1.7] text-neutral-700">
+			<h1
+				class="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl"
 			>
-				Get notified
-			</a>
-			<a
-				href="https://slashtalk.com"
-				class="rounded-md border border-neutral-800 px-4 py-2 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900"
+				We built Slashtalk for our team. Here's why.
+			</h1>
+
+			<p>
+				Our team had a coordination problem we kept trying to solve with
+				more talking.
+			</p>
+
+			<p>
+				We're small, fully remote, and shipping fast. We weren't 100%
+				relying on tickets anymore. We pinged each other constantly — <em
+					class="italic text-neutral-900">"hey, are you on this?"</em
+				> — and every ping interrupted whoever we pinged. We tried daily
+				standups, status threads, Telegram-style channels. Nobody was paying
+				attention and the noise became louder, not clearer.
+			</p>
+
+			<p>
+				The tools we'd inherited were built for a slower kind of work.
+				Standups assume a day fits in two sentences. PR reviews assume
+				you've got time to wait. Slack assumes someone's reading. None of
+				those assumptions hold at the speed small teams are moving today.
+			</p>
+
+			<p>So we built the thing we wished we had.</p>
+
+			<hr class="my-12 border-neutral-200" />
+
+			<p>
+				Slashtalk is a floating dock that sits on top of whatever you're
+				working on.
+			</p>
+
+			<figure class="my-10">
+				<img
+					src="/screenshot-dock.png"
+					alt="The Slashtalk dock — a row of teammate avatars floating above your other apps."
+					class="w-full rounded-xl"
+				/>
+			</figure>
+
+			<p>
+				Each teammate is a card which shows what they're shipping: recent
+				PRs, what active sessions they're working on. The question "what
+				are you working on?" stops getting asked because the answer is
+				always on screen.
+			</p>
+
+			<figure class="my-10 flex justify-center">
+				<img
+					src="/screenshot-card.png"
+					alt="A teammate card showing recent sessions, current branch, and token usage."
+					class="w-full max-w-sm rounded-xl"
+				/>
+			</figure>
+
+			<p>
+				It can also answer things about the team's actual work — "did
+				anyone touch billing today?" "who's deep in the migration?" —
+				because it can see every active session. The answers come from
+				real code, not a guess (shoutout to the PMs and CEOs).
+			</p>
+
+			<figure class="my-10">
+				<img
+					src="/screenshot-ask.png"
+					alt="The Ask window — a chat interface synthesizing what the team shipped this week."
+					class="w-full rounded-xl"
+				/>
+			</figure>
+
+			<p>
+				When two of us start editing files that are about to collide,
+				both our cards flag it. We catch conflicts in the five minutes
+				they're being created, not in the three-day cycle of waiting
+				for review.
+			</p>
+
+			<p>
+				The install is one auth. No IDE plugin, no Slack app, no admin
+				onboarding call. Each contributor connects git and points
+				Slashtalk at the repo on their machine. The product reads
+				locally and stays out of your toolchain.
+			</p>
+
+			<p id="install" class="scroll-mt-8">
+				To install:
+			</p>
+
+			<div class="relative">
+				<pre
+					class="overflow-x-auto rounded-lg border border-neutral-200 bg-neutral-50 p-5 pr-20 text-sm leading-relaxed text-neutral-800"><code id="install-code">git clone https://github.com/HereNotThere/slashtalk.git
+cd slashtalk
+bun install
+bun run start</code></pre>
+				<button
+					type="button"
+					data-copy-target="install-code"
+					class="absolute top-3 right-3 inline-flex items-center rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 transition hover:bg-neutral-100"
+					aria-label="Copy install commands"
+				>
+					<span data-copy-label>Copy</span>
+				</button>
+			</div>
+
+
+			<p>
+				On first launch you'll be asked to authenticate with your git
+				provider and point Slashtalk at your local repo. That's the
+				setup.
+			</p>
+<p>
+				We've been on it ourselves for a while now, and so far, we’re shipping more with fewer interruptions and it’s been delightful to feel like you’re working alongside your teammates even when you’re not physically together.
+			</p>
+
+			<p>
+				If you're on a small team shipping fast with AI and the
+				coordination is starting to fray — try it and let us know what
+				you think.
+			</p>
+		</article>
+
+		<footer class="mt-24 border-t border-neutral-200 pt-8 text-sm text-neutral-500">
+			Slashtalk — from <a
+				href="https://x.com/TownsLabs"
+				class="text-neutral-700 underline decoration-neutral-300 underline-offset-4 transition hover:decoration-neutral-700"
+				>Towns Labs</a
 			>
-				Learn more
-			</a>
-		</div>
+		</footer>
 	</main>
 </Layout>
+
+<script>
+	const RESET_LABEL = 'Copy';
+	const resetTimers = new WeakMap<HTMLElement, number>();
+
+	function flashLabel(label: HTMLSpanElement, text: string) {
+		const existing = resetTimers.get(label);
+		if (existing !== undefined) clearTimeout(existing);
+		label.textContent = text;
+		const id = window.setTimeout(() => {
+			label.textContent = RESET_LABEL;
+			resetTimers.delete(label);
+		}, 1500);
+		resetTimers.set(label, id);
+	}
+
+	document.querySelectorAll<HTMLButtonElement>('[data-copy-target]').forEach(
+		(button) => {
+			button.addEventListener('click', async () => {
+				const targetId = button.getAttribute('data-copy-target');
+				if (!targetId) return;
+				const target = document.getElementById(targetId);
+				if (!target) return;
+				const label = button.querySelector<HTMLSpanElement>(
+					'[data-copy-label]',
+				);
+				try {
+					await navigator.clipboard.writeText(target.innerText);
+					if (label) flashLabel(label, 'Copied');
+				} catch {
+					if (label) flashLabel(label, 'Failed');
+				}
+			});
+		},
+	);
+</script>

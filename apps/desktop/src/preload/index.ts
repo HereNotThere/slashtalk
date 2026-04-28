@@ -142,12 +142,6 @@ const bridge: ChatHeadsBridge = {
   hideChat: () => ipcRenderer.invoke("chat:hide") as Promise<void>,
   onChatState: (cb) => subscribe<{ visible: boolean }>("chat:state", cb),
   onOverlayConfig: (cb) => subscribe<DockConfig>("overlay:config", cb),
-  openAgentCreator: () => ipcRenderer.invoke("app:openAgentCreator") as Promise<void>,
-  onOpenAgentCreator: (cb) => {
-    const handler = (): void => cb();
-    ipcRenderer.on("agents:openCreator", handler);
-    return () => ipcRenderer.off("agents:openCreator", handler);
-  },
 
   openResponse: (message) => ipcRenderer.invoke("response:open", message) as Promise<void>,
   onResponseOpen: (cb) => subscribe<ResponseOpenPayload>("response:open", cb),

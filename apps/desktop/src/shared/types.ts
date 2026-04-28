@@ -430,10 +430,6 @@ export interface ChatHeadsBridge {
    *  flex direction / scroll axis / FLIP tracking. */
   onOverlayConfig: (cb: (cfg: DockConfig) => void) => Unsubscribe;
 
-  // Agent creation affordance (overlay → main window).
-  openAgentCreator: () => Promise<void>;
-  onOpenAgentCreator: (cb: () => void) => Unsubscribe;
-
   // Response window (chat/agent pop-out → main → response)
   openResponse: (message: string) => Promise<void>;
   onResponseOpen: (cb: (payload: ResponseOpenPayload) => void) => Unsubscribe;

@@ -613,6 +613,11 @@ function HistorySideNav({
 
   useEffect(() => {
     if (!open) return;
+    // Reset before each refetch — the component is now always mounted, so
+    // state from a prior open lingers. Without this, a previous error +
+    // a subsequent successful fetch would render both at once.
+    setError(null);
+    setThreads(null);
     let cancelled = false;
     window.chatheads
       .fetchChatHistory()

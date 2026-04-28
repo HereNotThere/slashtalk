@@ -4,7 +4,7 @@ import { db } from "../src/db";
 import { users, repos, userRepos } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
-import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
+import { resetDatabase, mockGitHubAuth, getCookie, signInAs } from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -59,11 +59,11 @@ describe("spotify presence", () => {
   }
 
   it("sets up two users sharing a repo", async () => {
-    const aliceRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+    const aliceRes = await signInAs(baseUrl, "alice_code");
     expect(aliceRes.status).toBe(200);
     aliceCookie = getCookie(aliceRes, "session")!;
 
-    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobRes = await signInAs(baseUrl, "bob_code");
     expect(bobRes.status).toBe(200);
     bobCookie = getCookie(bobRes, "session")!;
 

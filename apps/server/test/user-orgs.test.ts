@@ -3,7 +3,7 @@ import { db } from "../src/db";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { __clearOrgCaches } from "../src/user/routes";
-import { resetDatabase, getCookie } from "./helpers";
+import { resetDatabase, getCookie, signInAs } from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -83,7 +83,7 @@ beforeAll(async () => {
   baseUrl = `http://localhost:${port}`;
 
   // Sign alice in so she has an encrypted GitHub token in the DB.
-  const res = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+  const res = await signInAs(baseUrl, "alice_code");
   expect(res.status).toBe(200);
   aliceCookie = getCookie(res, "session")!;
   expect(aliceCookie).toBeTruthy();
@@ -138,7 +138,7 @@ describe("GET /api/me/orgs", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
 
-    const fresh = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+    const fresh = await signInAs(baseUrl, "alice_code");
     aliceCookie = getCookie(fresh, "session")!;
     expect(aliceCookie).toBeTruthy();
   });

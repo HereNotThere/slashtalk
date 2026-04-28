@@ -20,7 +20,14 @@ import {
   decryptGithubToken,
 } from "../src/auth/tokens";
 import { classifySessionState } from "../src/sessions/state";
-import { resetDatabase, mockGitHubAuth, getCookie, makeEvent, makeNdjson } from "./helpers";
+import {
+  resetDatabase,
+  mockGitHubAuth,
+  getCookie,
+  makeEvent,
+  makeNdjson,
+  signInAs,
+} from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -47,7 +54,7 @@ beforeAll(async () => {
   baseUrl = `http://localhost:${app.server!.port}`;
 
   // Bootstrap a user with an API key for ingest tests
-  const loginRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+  const loginRes = await signInAs(baseUrl, "alice_code");
   aliceCookie = getCookie(loginRes, "session")!;
   const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
   aliceUserId = alice.id;
@@ -574,7 +581,7 @@ describe("NDJSON ingest", () => {
 
 describe("ingest authorization", () => {
   it("rejects ingest for a session owned by another user", async () => {
-    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobRes = await signInAs(baseUrl, "bob_code");
     const bobCookie = getCookie(bobRes, "session")!;
 
     const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
@@ -754,7 +761,7 @@ describe("heartbeat", () => {
   });
 
   it("rejects a heartbeat for a session owned by another user", async () => {
-    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobRes = await signInAs(baseUrl, "bob_code");
     const bobCookie = getCookie(bobRes, "session")!;
     const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
       method: "POST",

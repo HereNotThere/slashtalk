@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../src/db";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
-import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
+import { resetDatabase, mockGitHubAuth, getCookie, signInAs } from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -23,7 +23,7 @@ beforeAll(async () => {
   app.listen(0);
   baseUrl = `http://localhost:${app.server!.port}`;
 
-  const aliceRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+  const aliceRes = await signInAs(baseUrl, "alice_code");
   const aliceCookie = getCookie(aliceRes, "session")!;
 
   const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
@@ -40,7 +40,7 @@ beforeAll(async () => {
   const { apiKey } = (await exchangeRes.json()) as { apiKey: string };
   aliceApiKey = apiKey;
 
-  const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+  const bobRes = await signInAs(baseUrl, "bob_code");
   const bobCookie = getCookie(bobRes, "session")!;
   const bobSetupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
     method: "POST",

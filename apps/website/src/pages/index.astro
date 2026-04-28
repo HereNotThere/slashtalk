@@ -7,7 +7,7 @@ import Layout from '../layouts/Layout.astro';
 		<header class="mb-16 flex items-center justify-between gap-3">
 			<div class="flex items-center gap-3">
 				<img
-					src="/slashtalk.svg"
+					src="/favicon.svg"
 					alt="Slashtalk"
 					width="36"
 					height="36"
@@ -164,6 +164,20 @@ bun run start</code></pre>
 </Layout>
 
 <script>
+	const RESET_LABEL = 'Copy';
+	const resetTimers = new WeakMap<HTMLElement, number>();
+
+	function flashLabel(label: HTMLSpanElement, text: string) {
+		const existing = resetTimers.get(label);
+		if (existing !== undefined) clearTimeout(existing);
+		label.textContent = text;
+		const id = window.setTimeout(() => {
+			label.textContent = RESET_LABEL;
+			resetTimers.delete(label);
+		}, 1500);
+		resetTimers.set(label, id);
+	}
+
 	document.querySelectorAll<HTMLButtonElement>('[data-copy-target]').forEach(
 		(button) => {
 			button.addEventListener('click', async () => {
@@ -176,20 +190,9 @@ bun run start</code></pre>
 				);
 				try {
 					await navigator.clipboard.writeText(target.innerText);
-					if (label) {
-						const prev = label.textContent;
-						label.textContent = 'Copied';
-						setTimeout(() => {
-							label.textContent = prev;
-						}, 1500);
-					}
+					if (label) flashLabel(label, 'Copied');
 				} catch {
-					if (label) {
-						label.textContent = 'Failed';
-						setTimeout(() => {
-							label.textContent = 'Copy';
-						}, 1500);
-					}
+					if (label) flashLabel(label, 'Failed');
 				}
 			});
 		},

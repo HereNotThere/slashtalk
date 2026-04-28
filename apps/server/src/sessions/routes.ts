@@ -119,8 +119,8 @@ export const sessionRoutes = (db: Database) =>
           return { error: "Session not found" };
         }
 
-        const limit = Math.min(Number(query.limit ?? 50), 100);
-        const cursor = query.cursor ? Number(query.cursor) : null;
+        const limit = query.limit ?? 50;
+        const cursor = query.cursor ?? null;
         const q = db
           .select()
           .from(events)
@@ -137,9 +137,11 @@ export const sessionRoutes = (db: Database) =>
       },
       {
         params: t.Object({ id: t.String() }),
+        // Numeric: bare Number("abc") returned NaN, which Drizzle silently
+        // accepted as `.limit(NaN)` and returned unbounded rows.
         query: t.Object({
-          cursor: t.Optional(t.String()),
-          limit: t.Optional(t.String()),
+          cursor: t.Optional(t.Numeric({ minimum: 0 })),
+          limit: t.Optional(t.Numeric({ minimum: 1, maximum: 100 })),
         }),
       },
     );

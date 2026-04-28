@@ -461,4 +461,31 @@ describe("social feed integration", () => {
     expect(sessionIds).toContain(COMMON_SESSION_ID);
     expect(sessionIds).not.toContain(REPO_A_SESSION_ID);
   });
+
+  it("/api/session/:id/events rejects non-numeric limit and cursor", async () => {
+    const eventsStatus = (qs: string): Promise<number> =>
+      fetch(`${baseUrl}/api/session/${COMMON_SESSION_ID}/events?${qs}`, {
+        headers: { Cookie: aliceCookie },
+      }).then((r) => r.status);
+
+    expect(await eventsStatus("limit=abc")).toBe(422);
+    expect(await eventsStatus("cursor=xyz")).toBe(422);
+    expect(await eventsStatus("limit=999")).toBe(422);
+    expect(await eventsStatus("limit=10")).toBe(200);
+  });
+
+  it("/v1/ingest rejects non-numeric fromLineSeq", async () => {
+    const res = await fetch(
+      `${baseUrl}/v1/ingest?project=test-project-common&session=${COMMON_SESSION_ID}&fromLineSeq=abc`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          Authorization: `Bearer ${aliceApiKey}`,
+        },
+        body: "",
+      },
+    );
+    expect(res.status).toBe(422);
+  });
 });

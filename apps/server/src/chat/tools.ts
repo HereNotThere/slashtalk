@@ -51,6 +51,12 @@ export interface TeamActivityResult {
   since: string;
   /** Open PRs touching the queried `filePath`. Omitted when `filePath` is unset. */
   openPrs?: OpenPrOverlap[];
+  /** When `login` was supplied, the github_logins it resolved to (could be
+   *  empty if no peer matched). Lets the model distinguish "name didn't
+   *  resolve" from "name resolved but no recent sessions in scope" — without
+   *  this, both surface as `teammates: []` and the model defaults to the
+   *  misleading "no teammate named X" answer. */
+  resolvedLogins?: string[];
 }
 
 export interface GetTeamActivityArgs {
@@ -118,6 +124,36 @@ export async function getTeamActivityImpl(
     return { teammates: [], since: since.toISOString() };
   }
 
+  // Snapshot the full visible-repo set BEFORE applying args.repoFullName.
+  // Login resolution runs against every peer the caller can see across all
+  // shared repos — narrowing it to a single repo would silently miss e.g.
+  // ryancooley when args.repoFullName="slashtalk" but ryancooley happens to
+  // be linked via a different shared repo.
+  const fullVisibleRepoIds = repoIdScope;
+
+  const fullVisiblePeerRows = await db
+    .selectDistinct({ userId: userRepos.userId })
+    .from(userRepos)
+    .where(inArray(userRepos.repoId, fullVisibleRepoIds));
+  const fullVisiblePeerIds = fullVisiblePeerRows.map((r) => r.userId);
+
+  let userIdScope: number[];
+  if (args.login) {
+    userIdScope = await resolveLoginToPeerIds(db, args.login, fullVisiblePeerIds);
+  } else {
+    userIdScope = fullVisiblePeerIds;
+  }
+  // If login was supplied but matched nothing, return early with an empty
+  // `resolvedLogins` so the model can tell "name didn't resolve" apart from
+  // "resolved but no sessions in scope."
+  if (userIdScope.length === 0) {
+    return {
+      teammates: [],
+      since: since.toISOString(),
+      ...(args.login ? { resolvedLogins: [] } : {}),
+    };
+  }
+
   if (args.repoFullName) {
     const [repoRow] = await db
       .select({ id: repos.id })
@@ -125,25 +161,13 @@ export async function getTeamActivityImpl(
       .where(eq(repos.fullName, normalizeFullName(args.repoFullName)))
       .limit(1);
     if (!repoRow || !repoIdScope.includes(repoRow.id)) {
-      return { teammates: [], since: since.toISOString() };
+      return {
+        teammates: [],
+        since: since.toISOString(),
+        ...(args.login ? { resolvedLogins: [] } : {}),
+      };
     }
     repoIdScope = [repoRow.id];
-  }
-
-  const peerRows = await db
-    .selectDistinct({ userId: userRepos.userId })
-    .from(userRepos)
-    .where(inArray(userRepos.repoId, repoIdScope));
-  const peerIds = peerRows.map((r) => r.userId);
-
-  let userIdScope: number[];
-  if (args.login) {
-    userIdScope = await resolveLoginToPeerIds(db, args.login, peerIds);
-  } else {
-    userIdScope = peerIds;
-  }
-  if (userIdScope.length === 0) {
-    return { teammates: [], since: since.toISOString() };
   }
 
   const sessionRows = await db
@@ -264,6 +288,13 @@ export async function getTeamActivityImpl(
     teammates: finalTeammates,
     since: since.toISOString(),
   };
+
+  if (args.login) {
+    // Surface what the fuzzy resolver matched even when the session window
+    // returned nothing — userRows is keyed by userIdScope (the resolved set),
+    // so its logins are the resolution verbatim.
+    result.resolvedLogins = userRows.map((u) => u.login);
+  }
 
   if (args.filePath) {
     // Open PRs are stronger conflict signal than "is anyone typing right now".
@@ -434,7 +465,7 @@ export function buildChatTools(
     {
       name: "get_team_activity",
       description:
-        'Per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Returns teammates (including the caller) with up to 3 recent sessions each. Each session carries title, description, state, repo, branch, lastTs, current tool, a truncated last user prompt, top edited files, tool-error count, source (claude|codex), and `pr` (open/closed/merged PR matched by branch, when known). State thresholds: `busy` = heartbeat fresh (<30s) and in a turn; `active` = heartbeat fresh and last event <30s; `idle` = heartbeat fresh, last event >30s; `recent` = no fresh heartbeat but last event <1h; `ended` = no fresh heartbeat and last event >1h. By default `ended` sessions are omitted from the teammates roll-up (set `includeEnded: true` or `state: "ended"` to include them). Filter by login or repoFullName to scope the answer; prefer those filters over fetching everyone and filtering locally. Pass `filePath` to find which other teammates are currently editing a specific file (the caller is excluded from this view); the response also includes a top-level `openPrs` array of any open PRs whose branch had a teammate session touching that file — even when that session is `ended`, since the PR is the conflict signal.',
+        'Per-teammate roll-up of recent Claude Code / Codex sessions across repos the caller can see. Returns teammates (including the caller) with up to 3 recent sessions each. Each session carries title, description, state, repo, branch, lastTs, current tool, a truncated last user prompt, top edited files, tool-error count, source (claude|codex), and `pr` (open/closed/merged PR matched by branch, when known). State thresholds: `busy` = heartbeat fresh (<30s) and in a turn; `active` = heartbeat fresh and last event <30s; `idle` = heartbeat fresh, last event >30s; `recent` = no fresh heartbeat but last event <1h; `ended` = no fresh heartbeat and last event >1h. By default `ended` sessions are omitted from the teammates roll-up (set `includeEnded: true` or `state: "ended"` to include them). Filter by login or repoFullName to scope the answer; prefer those filters over fetching everyone and filtering locally. When `login` is set the response also carries `resolvedLogins`: the actual github_logins the fuzzy match resolved to. An empty `resolvedLogins` means no peer matched the name; a non-empty `resolvedLogins` with `teammates: []` means the peer was found but had no sessions in the time/repo window — widen `sinceHours` or drop `repoFullName` instead of telling the user the teammate doesn\'t exist. Pass `filePath` to find which other teammates are currently editing a specific file (the caller is excluded from this view); the response also includes a top-level `openPrs` array of any open PRs whose branch had a teammate session touching that file — even when that session is `ended`, since the PR is the conflict signal.',
       input_schema: {
         type: "object",
         properties: {

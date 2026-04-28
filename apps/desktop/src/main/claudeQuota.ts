@@ -33,36 +33,57 @@ let running = false;
 let lastSent: ParsedClaudeQuota | null = null;
 let lastSentAt = 0;
 
-async function read(): Promise<ParsedClaudeQuota | null> {
+// Three outcomes that need distinct handling — a single nullable return would
+// conflate "user signed out" with "I/O hiccup", causing peers to see the
+// presence row briefly disappear on every torn read of ~/.claude.json.
+type ReadResult =
+  | { kind: "present"; quota: ParsedClaudeQuota }
+  // File parsed cleanly but oauthAccount is missing or empty: the user is
+  // genuinely not signed in to Claude Code. Wipe the presence row.
+  | { kind: "signed-out" }
+  // Transient: I/O error other than ENOENT, or a torn JSON read while Claude
+  // Code is rewriting the file in place. Leave whatever's already in Redis
+  // alone — the next tick will correct it.
+  | { kind: "skip" };
+
+async function read(): Promise<ReadResult> {
   let text: string;
   try {
     text = await fsp.readFile(CONFIG_PATH, "utf8");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") {
-      console.warn("[claudeQuota] readFile failed:", (err as Error).message);
+    if (code === "ENOENT") {
+      // No config file at all — Claude Code has never run on this machine.
+      // That's a valid signed-out state, not a transient error.
+      return { kind: "signed-out" };
     }
-    return null;
+    console.warn("[claudeQuota] readFile failed:", (err as Error).message);
+    return { kind: "skip" };
   }
 
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(text);
   } catch (err) {
-    // ~/.claude.json gets rewritten in place — a torn read is rare but
-    // possible. Treat as transient: skip this tick.
-    console.warn("[claudeQuota] JSON parse failed:", (err as Error).message);
-    return null;
+    // Claude Code rewrites ~/.claude.json in place; a torn read is rare but
+    // possible. Skip — don't let a 1-tick parse error wipe peers' view.
+    console.warn("[claudeQuota] JSON parse failed (likely torn read):", (err as Error).message);
+    return { kind: "skip" };
   }
 
-  return parseClaudeQuotaFromConfig(parsedJson);
+  const quota = parseClaudeQuotaFromConfig(parsedJson);
+  if (!quota) return { kind: "signed-out" };
+  return { kind: "present", quota };
 }
 
 async function tick(): Promise<void> {
   if (!running) return;
-  const next = await read();
+  const result = await read();
+  if (result.kind === "skip") return;
+
   const now = Date.now();
-  if (next) {
+  if (result.kind === "present") {
+    const next = result.quota;
     const changed = !sameClaudeQuota(lastSent, next);
     const stale = now - lastSentAt > KEEPALIVE_MS;
     if (!changed && !stale) return;
@@ -75,6 +96,7 @@ async function tick(): Promise<void> {
       console.warn("[claudeQuota] post failed:", (err as Error).message);
     }
   } else if (lastSent !== null) {
+    // result.kind === "signed-out"
     try {
       await backend.postQuotaPresence("claude", null);
       // Only mark as cleared after the server confirms — otherwise a transient

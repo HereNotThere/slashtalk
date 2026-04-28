@@ -15,6 +15,7 @@ const CODEX_SESSIONS_DIR = path.join(os.homedir(), ".codex", "sessions");
 const CURSOR_PROJECTS_DIR = path.join(os.homedir(), ".cursor", "projects");
 
 const FALLBACK_MS = 15_000;
+const FAIL_BACKOFF_MAX_MS = 5 * 60_000;
 const CHANGE_DEBOUNCE_MS = 250;
 // File watchers fire on every JSONL append while a session is live, so without
 // a per-session floor the global 250ms debounce becomes the heartbeat cadence.
@@ -35,7 +36,16 @@ let timer: NodeJS.Timeout | null = null;
 let running = false;
 let pendingTimer: NodeJS.Timeout | null = null;
 let unsubTracked: (() => void) | null = null;
+let consecutiveFailures = 0;
 const lastSentBySession = new Map<string, number>();
+
+// Exponential backoff capped at FAIL_BACKOFF_MAX_MS so a server outage doesn't
+// pin the desktop to a 15s retry storm. Successful pulse() resets the counter.
+function nextPulseDelay(): number {
+  if (consecutiveFailures === 0) return FALLBACK_MS;
+  const grown = FALLBACK_MS * 2 ** Math.min(consecutiveFailures, 8);
+  return Math.min(grown, FAIL_BACKOFF_MAX_MS);
+}
 
 function pidAlive(pid: number): boolean {
   try {
@@ -164,9 +174,15 @@ async function pulse(): Promise<void> {
     const last = lastSentBySession.get(s.sessionId) ?? 0;
     return now - last >= MIN_PER_SESSION_MS;
   });
+  // Track per-pulse outcomes so a single mixed batch (some sent, some failed)
+  // is treated as healthy — backoff only kicks in when every send fails or
+  // there's nothing to send and the prior pulse was already failing.
+  let attempted = 0;
+  let failed = 0;
   await Promise.all(
-    due.map((session) =>
-      backend
+    due.map((session) => {
+      attempted++;
+      return backend
         .sendHeartbeat(session)
         .then(() => {
           lastSentBySession.set(session.sessionId, Date.now());
@@ -175,9 +191,17 @@ async function pulse(): Promise<void> {
               (session.pid ? ` pid=${session.pid}` : ` kind=${session.kind ?? "-"}`),
           );
         })
-        .catch((err) => console.error("[heartbeat] send failed", session.sessionId, err)),
-    ),
+        .catch((err) => {
+          failed++;
+          console.error("[heartbeat] send failed", session.sessionId, err);
+        });
+    }),
   );
+  if (attempted > 0 && failed === attempted) {
+    consecutiveFailures++;
+  } else if (attempted > 0) {
+    consecutiveFailures = 0;
+  }
 }
 
 function schedulePulse(): void {
@@ -212,8 +236,23 @@ export async function start(): Promise<void> {
   watchRoot(CLAUDE_SESSIONS_DIR);
   watchRoot(CODEX_SESSIONS_DIR);
   watchRoot(CURSOR_PROJECTS_DIR);
-  timer = setInterval(() => void pulse(), FALLBACK_MS);
+  scheduleNextPulse();
   await pulse();
+}
+
+// Self-rescheduling so the cadence reflects the live failure state — a stable
+// 15s setInterval would hammer a down server for hours.
+function scheduleNextPulse(): void {
+  if (!running) return;
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(async () => {
+    timer = null;
+    try {
+      await pulse();
+    } finally {
+      scheduleNextPulse();
+    }
+  }, nextPulseDelay());
 }
 
 export function stop(): void {
@@ -222,9 +261,10 @@ export function stop(): void {
   for (const watcher of watchers) watcher.close();
   watchers = [];
   if (timer) {
-    clearInterval(timer);
+    clearTimeout(timer);
     timer = null;
   }
+  consecutiveFailures = 0;
   if (pendingTimer) {
     clearTimeout(pendingTimer);
     pendingTimer = null;

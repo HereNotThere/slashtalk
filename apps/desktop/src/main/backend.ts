@@ -29,8 +29,24 @@ import type { BackendAuthState, BackendUser, RepoSummary, TeammateSummary } from
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 import { apiBaseUrl } from "./config";
+import {
+  PermanentHttpError,
+  TransientHttpError,
+  fetchWithTimeout,
+  isTransientStatus,
+  withRetry,
+} from "./httpRetry";
 
 const CREDS_KEY = "backendCredsEnc";
+
+// Default budgets. JSON RPC-style requests are bounded tighter than ingest
+// uploads, which can include large NDJSON tails.
+const DEFAULT_FETCH_TIMEOUT_MS = 20_000;
+const INGEST_FETCH_TIMEOUT_MS = 45_000;
+const REFRESH_FETCH_TIMEOUT_MS = 10_000;
+const INGEST_RETRY_ATTEMPTS = 4;
+const INGEST_RETRY_BASE_MS = 500;
+const INGEST_RETRY_MAX_MS = 4_000;
 
 interface StoredCreds {
   jwt: string;
@@ -453,7 +469,11 @@ async function doJsonFetch<T>(path: string, opts: FetchOpts, retried: boolean): 
   const started = Date.now();
   let res: Response;
   try {
-    res = await fetch(url, { method: opts.method, headers, body });
+    res = await fetchWithTimeout(
+      url,
+      { method: opts.method, headers, body },
+      { timeoutMs: DEFAULT_FETCH_TIMEOUT_MS },
+    );
   } catch (err) {
     logHttp("error", opts.method, path, "network-error", Date.now() - started, err);
     throw err;
@@ -514,14 +534,18 @@ async function doRefresh(): Promise<boolean> {
   const started = Date.now();
   let res: Response;
   try {
-    res = await fetch(`${apiBaseUrl()}/auth/refresh`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
+    res = await fetchWithTimeout(
+      `${apiBaseUrl()}/auth/refresh`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ refreshToken: current.refreshToken }),
       },
-      body: JSON.stringify({ refreshToken: current.refreshToken }),
-    });
+      { timeoutMs: REFRESH_FETCH_TIMEOUT_MS },
+    );
   } catch (err) {
     logHttp("warn", "POST", "/auth/refresh", "network-error", Date.now() - started, err);
     return false; // transient — keep creds, retry on next 401
@@ -685,6 +709,7 @@ export async function ingestChunk(args: {
   body: string;
 }): Promise<IngestResponse> {
   if (!creds) throw new Error("Not signed in");
+  const apiKey = creds.apiKey;
   const qs = new URLSearchParams({
     project: args.project,
     session: args.session,
@@ -692,20 +717,49 @@ export async function ingestChunk(args: {
     prefixHash: args.prefixHash,
     source: args.source ?? "claude",
   });
-  const res = await fetch(`${apiBaseUrl()}/v1/ingest?${qs.toString()}`, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${creds.apiKey}`,
-      "Content-Type": "application/x-ndjson",
+  const url = `${apiBaseUrl()}/v1/ingest?${qs.toString()}`;
+
+  // Server dedups on (session, lineSeq, prefixHash), so re-sending the same
+  // chunk after a 5xx or network blip is idempotent. 4xx (except 408/429) is
+  // a client-shape problem and bubbles immediately so the uploader doesn't
+  // burn its budget against a permanent error.
+  return withRetry(
+    async () => {
+      const res = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/x-ndjson",
+          },
+          body: args.body,
+        },
+        { timeoutMs: INGEST_FETCH_TIMEOUT_MS },
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        if (isTransientStatus(res.status)) throw new TransientHttpError(res.status, text);
+        throw new PermanentHttpError(res.status, text);
+      }
+      return (await res.json()) as IngestResponse;
     },
-    body: args.body,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`POST /v1/ingest failed (${res.status}): ${text}`);
-  }
-  return (await res.json()) as IngestResponse;
+    {
+      attempts: INGEST_RETRY_ATTEMPTS,
+      baseDelayMs: INGEST_RETRY_BASE_MS,
+      maxDelayMs: INGEST_RETRY_MAX_MS,
+      onRetry: (attempt, delayMs, reason) =>
+        logHttp(
+          "warn",
+          "POST",
+          "/v1/ingest",
+          "retry",
+          0,
+          `attempt ${attempt} in ${delayMs}ms: ${reason}`,
+        ),
+    },
+  );
 }
 
 export function fetchSyncState(): Promise<Record<string, SyncStateEntry>> {

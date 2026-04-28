@@ -7,7 +7,10 @@
 import type { ManagedAgentSessionRow } from "@slashtalk/shared";
 import * as chatheadsAuth from "./chatheadsAuth";
 import { apiBaseUrl } from "./config";
+import { fetchWithTimeout } from "./httpRetry";
 import type { LocalAgent } from "./agentStore";
+
+const AGENT_INGEST_TIMEOUT_MS = 15_000;
 
 let loggedUnauthorized = false;
 
@@ -42,14 +45,18 @@ export async function upsertSession(p: UpsertSessionPayload): Promise<void> {
     return;
   }
   try {
-    const res = await fetch(`${base}/v1/managed-agent-sessions`, {
-      method: "PUT",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
+    const res = await fetchWithTimeout(
+      `${base}/v1/managed-agent-sessions`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(p),
       },
-      body: JSON.stringify(p),
-    });
+      { timeoutMs: AGENT_INGEST_TIMEOUT_MS },
+    );
     if (!res.ok) {
       if (res.status === 401) {
         logUnauthorizedOnce();
@@ -77,10 +84,14 @@ async function listSessions(params: {
     const url = new URL(`${base}/v1/managed-agent-sessions`);
     if (params.userLogin) url.searchParams.set("userLogin", params.userLogin);
     if (params.agentId) url.searchParams.set("agentId", params.agentId);
-    const res = await fetch(url, {
-      method: "GET",
-      headers: { authorization: `Bearer ${token}` },
-    });
+    const res = await fetchWithTimeout(
+      url.toString(),
+      {
+        method: "GET",
+        headers: { authorization: `Bearer ${token}` },
+      },
+      { timeoutMs: AGENT_INGEST_TIMEOUT_MS },
+    );
     if (!res.ok) {
       if (res.status === 401) {
         logUnauthorizedOnce();

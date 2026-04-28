@@ -58,7 +58,9 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
         query: t.Object({
           project: t.String(),
           session: t.String(),
-          fromLineSeq: t.String(),
+          // Numeric: bare Number("abc") returned NaN and downstream Drizzle
+          // comparisons silently failed open.
+          fromLineSeq: t.Numeric({ minimum: 0 }),
           prefixHash: t.Optional(t.String()),
           source: t.Optional(t.Union(SOURCES.map((s) => t.Literal(s)))),
         }),
@@ -177,7 +179,7 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
 interface IngestQuery {
   project: string;
   session: string;
-  fromLineSeq: string;
+  fromLineSeq: number;
   prefixHash?: string;
   source?: EventSource;
 }
@@ -205,7 +207,7 @@ async function handleIngest(
   set: { status?: number | string },
 ): Promise<IngestResponse | IngestError> {
   const source: EventSource = query.source ?? "claude";
-  const fromLineSeq = Number(query.fromLineSeq);
+  const fromLineSeq = query.fromLineSeq;
 
   // Ensure the parent session row exists so the events FK is satisfied.
   // Use onConflictDoNothing so we don't clobber serverLineSeq mid-stream;

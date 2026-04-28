@@ -39,6 +39,8 @@ export const users = pgTable("users", {
   credentialsRevokedAt: timestamp("credentials_revoked_at", {
     withTimezone: true,
   }),
+  timezone: text("timezone"),
+  city: text("city"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

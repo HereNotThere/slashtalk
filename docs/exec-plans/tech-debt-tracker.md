@@ -121,6 +121,8 @@ Source: [`harness-readiness-audit-2026-04-25.md`](./harness-readiness-audit-2026
 
 **30. Runbooks for known failure modes.** Analyzer crash recovery, ingest backlog drain, schema migration rollback, etc. None exist today.
 
+**31. Move user-location resolution from renderer to main.** Today every renderer mounts [`useLocationWeather`](../../apps/desktop/src/renderer/shared/useLocationWeather.ts) and IPC-pushes `{timezone, city}` to main, where dedup catches the duplicates. Resolving in main once and broadcasting `user-location:update` to renderers would eliminate the 3 wasted IPCs per app session and consolidate the IP-fallback fetch (ipapi) on a single network identity. Defer until a second consumer needs the value (e.g. weather card outside the renderer).
+
 ### Open question — decide before item 22
 
 **39. Server-vs-desktop ESLint asymmetry — intentional or sequencing artifact?** [`apps/desktop`](../../apps/desktop/eslint.config.js) has ESLint; [`apps/server`](../../apps/server/) does not, despite server being the security-critical path. If intentional culture choice (human review preference), record it in `core-beliefs.md` and close item 22 as won't-do. If sequencing artifact, ship item 22.

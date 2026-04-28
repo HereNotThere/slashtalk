@@ -421,7 +421,7 @@ describe("sign-in issues session + refresh cookies", () => {
   });
 
   it("scopes the refresh cookie to /auth with SameSite=strict", async () => {
-    const res = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const res = await signInAs(baseUrl, "bob_code");
     expect(res.status).toBe(200);
     const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
     const refreshAttrs = setCookies.find((c) => c.startsWith("refresh="));
@@ -435,7 +435,7 @@ describe("sign-in issues session + refresh cookies", () => {
   });
 
   it("keeps the session cookie SameSite=lax so deep links arrive signed in", async () => {
-    const res = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const res = await signInAs(baseUrl, "bob_code");
     const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
     const sessionAttrs = setCookies.find((c) => c.startsWith("session="));
     expect(sessionAttrs).toBeTruthy();

@@ -7,12 +7,14 @@ export const FENCE_CLOSE = "</untrusted>";
  * Wrap a user-supplied string in markers so the LLM can be told to treat the
  * contents as data, never as instructions. Inner occurrences of the closing
  * marker are defanged so the author of a session title / prompt can't escape
- * the fence and start issuing directives. The system prompt for any analyzer
- * that consumes these inputs must explain the contract — see
- * `UNTRUSTED_INPUT_CONTRACT_ANALYZER`.
+ * the fence and start issuing directives. We also defang whitespace variants
+ * (`</untrusted >`, `</untrusted\n>`, etc.) — XML treats those as valid end
+ * tags and an LLM trained on web text will recognize them the same way.
+ * The system prompt for any analyzer that consumes these inputs must explain
+ * the contract — see `UNTRUSTED_INPUT_CONTRACT_ANALYZER`.
  */
 export function fenceUntrusted(value: string): string {
-  const escaped = value.replace(/<\/untrusted>/gi, "</untrusted_>");
+  const escaped = value.replace(/<\/untrusted\s*>/gi, "</untrusted_>");
   return `${FENCE_OPEN}\n${escaped}\n${FENCE_CLOSE}`;
 }
 

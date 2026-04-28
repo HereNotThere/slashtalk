@@ -74,6 +74,13 @@ function SlashtalkSpinner(): JSX.Element {
 const DEFAULT_GERUNDS = ["Thinking"];
 const GERUND_CYCLE_MS = 2200;
 
+const SAMPLE_PROMPTS = [
+  "What did the team ship this week?",
+  "Summarize the open PRs across our repos",
+  "What's blocking the team right now?",
+  "Roast my team based on their PRs",
+];
+
 const MARKDOWN_CLASSES =
   "break-words text-fg text-md leading-relaxed " +
   "[&_p]:my-3 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
@@ -306,6 +313,16 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     void ask(next, trimmed, threadId);
   }
 
+  function handleSamplePrompt(prompt: string): void {
+    if (loading) return;
+    const initial: ChatMessage[] = [{ role: "user", content: prompt }];
+    setMessages(initial);
+    setThreadId(undefined);
+    setError(null);
+    setFollowUp("");
+    void ask(initial, prompt, undefined);
+  }
+
   function loadThread(thread: ChatThread): void {
     // Invalidate any in-flight ask before swapping context — see askTokenRef.
     askTokenRef.current++;
@@ -338,6 +355,9 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
       )}
       <div ref={scrollRef} className="flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-[720px] px-6 py-8 space-y-7">
+          {messages.length === 0 && !loading && !error && (
+            <SamplePrompts onPick={handleSamplePrompt} />
+          )}
           {messages.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
@@ -403,6 +423,26 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
             />
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SamplePrompts({ onPick }: { onPick: (prompt: string) => void }): JSX.Element {
+  return (
+    <div className="space-y-3 pt-4">
+      <div className="text-sm text-subtle">Try asking:</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {SAMPLE_PROMPTS.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onPick(p)}
+            className="text-left px-4 py-3 rounded-xl bg-surface-alt hover:bg-surface-alt-hover text-fg text-sm leading-snug transition-colors"
+          >
+            {p}
+          </button>
+        ))}
       </div>
     </div>
   );

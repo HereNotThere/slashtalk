@@ -305,6 +305,63 @@ describe("chat tool: get_team_activity", () => {
     expect(result.teammates).toEqual([]);
   });
 
+  it("resolves a partial login or display-name fragment to the right peer", async () => {
+    // Seed a peer with a long login + a multi-word display name. The model
+    // commonly receives the user's first name ("ryan") rather than the exact
+    // GitHub login ("ryancooley") — exact-match would silently return empty.
+    const [ryan] = await db
+      .insert(users)
+      .values({
+        githubId: 9100,
+        githubLogin: "ryancooley",
+        displayName: "Ryan Cooley",
+        githubToken: "aa:bb",
+      })
+      .returning();
+    await db
+      .insert(userRepos)
+      .values({ userId: ryan.id, repoId: commonRepoId, permission: "push" });
+    const RYAN_SESSION = "b0000000-0000-0000-0000-000000000099";
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    await db.insert(sessions).values({
+      sessionId: RYAN_SESSION,
+      userId: ryan.id,
+      source: "claude",
+      project: "slashtalk",
+      repoId: commonRepoId,
+      firstTs: fiveMinAgo,
+      lastTs: fiveMinAgo,
+    });
+
+    // First-name prefix → login match
+    const byFirstName = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "ryan",
+    });
+    expect(byFirstName.teammates.map((t) => t.login)).toEqual(["ryancooley"]);
+
+    // Display-name substring → still resolves
+    const byDisplay = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "Cooley",
+    });
+    expect(byDisplay.teammates.map((t) => t.login)).toEqual(["ryancooley"]);
+
+    // Leading @ from a sloppy model call is tolerated
+    const withAt = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "@ryan",
+    });
+    expect(withAt.teammates.map((t) => t.login)).toEqual(["ryancooley"]);
+
+    // Exact match still wins (existing behavior preserved)
+    const exact = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "ryancooley",
+    });
+    expect(exact.teammates.map((t) => t.login)).toEqual(["ryancooley"]);
+  });
+
   it("scopes to a single repo via repoFullName filter", async () => {
     const result = await getTeamActivityImpl(db, aliceId, {
       sinceHours: 24,

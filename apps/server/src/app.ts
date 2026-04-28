@@ -12,6 +12,7 @@ import { orgsRoutes } from "./user/orgs";
 import { chatRoutes } from "./chat/routes";
 import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
 import { managedAgentSessionRoutes } from "./managed-agent-sessions/routes";
+import { roomsRoutes } from "./rooms";
 import { mcpRoutes } from "./mcp/routes";
 import { mcpOAuthRoutes } from "./oauth/mcp";
 import { wsHandler } from "./ws/handler";
@@ -53,6 +54,7 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(deviceReposRoutes(db))
     .use(chatRoutes(db))
     .use(managedAgentSessionRoutes(db))
+    .use(roomsRoutes(db, redis))
     .use(mcpOAuthRoutes(db))
     .use(mcpRoutes())
     .use(spotifyPresenceRoutes(db, redis))

@@ -23,6 +23,16 @@ export const config = Object.freeze({
     process.env.MCP_MAX_CONCURRENT_SESSIONS_PER_USER || "20",
     10,
   ),
+  // Rooms prototype (microVM agent rooms). Disabled unless ROOMS_ENABLED=true,
+  // in which case E2B_API_KEY is required.
+  roomsEnabled: process.env.ROOMS_ENABLED === "true",
+  e2bApiKey:
+    process.env.ROOMS_ENABLED === "true"
+      ? required("E2B_API_KEY")
+      : (process.env.E2B_API_KEY ?? null),
+  roomsIdlePauseMs: parseInt(process.env.ROOMS_IDLE_PAUSE_MS || "600000", 10), // 10 min
+  roomsHardReapMs: parseInt(process.env.ROOMS_HARD_REAP_MS || "86400000", 10), // 24 h
+  orgMembershipRefreshMs: parseInt(process.env.ORG_MEMBERSHIP_REFRESH_MS || "900000", 10), // 15 min
 });
 
 export type Config = typeof config;

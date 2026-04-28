@@ -378,6 +378,97 @@ export const pullRequests = pgTable(
   ],
 );
 
+// ── Rooms (microVM agent rooms — org-scoped) ───────────────
+
+// Materialized GitHub org membership. Refreshed on sign-in and every 15min by
+// the org-membership refresher. Org-wide analog of user_repos: this is the
+// authorization gate for room visibility/membership.
+export const userOrgs = pgTable(
+  "user_orgs",
+  {
+    userId: integer("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    orgLogin: text("org_login").notNull(),
+    role: text("role"),
+    refreshedAt: timestamp("refreshed_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.orgLogin] }),
+    index("user_orgs_org_login_idx").on(t.orgLogin),
+  ],
+);
+
+export const rooms = pgTable(
+  "rooms",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgLogin: text("org_login").notNull(),
+    repoId: integer("repo_id")
+      .references(() => repos.id, { onDelete: "cascade" })
+      .notNull(),
+    createdBy: integer("created_by")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    // jsonb shape kept loose during prototype — promote to columns once stable.
+    agentDef: jsonb("agent_def")
+      .$type<{
+        systemPrompt: string;
+        model: string;
+        mcpServers?: Array<{ name: string; url: string }>;
+      }>()
+      .notNull(),
+    sandboxProvider: text("sandbox_provider").notNull(),
+    sandboxId: text("sandbox_id"),
+    status: text("status").notNull().default("provisioning"),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    destroyedAt: timestamp("destroyed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("rooms_org_login_idx").on(t.orgLogin),
+    index("rooms_repo_id_idx").on(t.repoId),
+    index("rooms_status_last_activity_idx").on(t.status, t.lastActivityAt),
+  ],
+);
+
+export const roomMembers = pgTable(
+  "room_members",
+  {
+    roomId: uuid("room_id")
+      .references(() => rooms.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: integer("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    role: text("role").notNull().default("member"),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.roomId, t.userId] }),
+    index("room_members_user_id_idx").on(t.userId),
+  ],
+);
+
+export const roomMessages = pgTable(
+  "room_messages",
+  {
+    seq: serial("seq").primaryKey(),
+    roomId: uuid("room_id")
+      .references(() => rooms.id, { onDelete: "cascade" })
+      .notNull(),
+    authorUserId: integer("author_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    body: jsonb("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [index("room_messages_room_seq_idx").on(t.roomId, t.seq)],
+);
+
 // ── Session Insights (LLM-derived) ──────────────────────────
 
 export const sessionInsights = pgTable(

@@ -4,6 +4,7 @@ import { RedisBridge } from "./ws/redis-bridge";
 import { createApp } from "./app";
 import { startScheduler } from "./analyzers";
 import { startPrPoller } from "./social/pr-poller";
+import { startIdleReaper } from "./rooms/idle-reaper";
 
 const redis = new RedisBridge();
 await redis.connect();
@@ -12,6 +13,7 @@ const app = createApp(db, redis).listen(config.port);
 
 startPrPoller(db, redis);
 startScheduler(db, redis);
+startIdleReaper(db, redis);
 
 console.log(`slashtalk server running on port ${config.port}`);
 

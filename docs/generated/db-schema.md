@@ -2,7 +2,7 @@
 
 > Auto-generated from [`apps/server/src/db/schema.ts`](../../apps/server/src/db/schema.ts). Do not edit by hand. Regenerate with `bun run gen:db-schema` from `apps/server/`.
 
-Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `oauth_authorization_codes`, `oauth_clients`, `oauth_tokens`, `pull_requests`, `refresh_tokens`, `repos`, `session_insights`, `sessions`, `setup_tokens`, `user_repos`, `users`
+Tables: `agent_sessions`, `api_keys`, `device_excluded_repos`, `device_repo_paths`, `devices`, `events`, `heartbeats`, `oauth_authorization_codes`, `oauth_clients`, `oauth_tokens`, `pull_requests`, `refresh_tokens`, `repos`, `room_members`, `room_messages`, `rooms`, `session_insights`, `sessions`, `setup_tokens`, `user_orgs`, `user_repos`, `users`
 
 ## `agent_sessions`
 
@@ -239,6 +239,63 @@ Drizzle export: `repos`.
 | `private` | `PgBoolean` | has default |
 | `created_at` | `PgTimestamp` | has default |
 
+## `room_members`
+
+Drizzle export: `roomMembers`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `room_id` | `PgUUID` | not null |
+| `user_id` | `PgInteger` | not null |
+| `role` | `PgText` | not null, has default |
+| `joined_at` | `PgTimestamp` | has default |
+
+**Primary key:** `(room_id, user_id)`
+
+**Indexes:**
+- `room_members_user_id_idx` (index) on `(user_id)`
+
+## `room_messages`
+
+Drizzle export: `roomMessages`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `seq` | `PgSerial` | pk, not null, has default |
+| `room_id` | `PgUUID` | not null |
+| `author_user_id` | `PgInteger` | — |
+| `kind` | `PgText` | not null |
+| `body` | `PgJsonb` | not null |
+| `created_at` | `PgTimestamp` | has default |
+
+**Indexes:**
+- `room_messages_room_seq_idx` (index) on `(room_id, seq)`
+
+## `rooms`
+
+Drizzle export: `rooms`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `PgUUID` | pk, not null, has default |
+| `org_login` | `PgText` | not null |
+| `repo_id` | `PgInteger` | not null |
+| `created_by` | `PgInteger` | not null |
+| `name` | `PgText` | not null |
+| `description` | `PgText` | — |
+| `agent_def` | `PgJsonb` | not null |
+| `sandbox_provider` | `PgText` | not null |
+| `sandbox_id` | `PgText` | — |
+| `status` | `PgText` | not null, has default |
+| `last_activity_at` | `PgTimestamp` | has default |
+| `created_at` | `PgTimestamp` | has default |
+| `destroyed_at` | `PgTimestamp` | — |
+
+**Indexes:**
+- `rooms_org_login_idx` (index) on `(org_login)`
+- `rooms_repo_id_idx` (index) on `(repo_id)`
+- `rooms_status_last_activity_idx` (index) on `(status, last_activity_at)`
+
 ## `session_insights`
 
 Drizzle export: `sessionInsights`.
@@ -324,6 +381,22 @@ Drizzle export: `setupTokens`.
 | `expires_at` | `PgTimestamp` | not null |
 | `redeemed` | `PgBoolean` | has default |
 | `created_at` | `PgTimestamp` | has default |
+
+## `user_orgs`
+
+Drizzle export: `userOrgs`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `user_id` | `PgInteger` | not null |
+| `org_login` | `PgText` | not null |
+| `role` | `PgText` | — |
+| `refreshed_at` | `PgTimestamp` | has default |
+
+**Primary key:** `(user_id, org_login)`
+
+**Indexes:**
+- `user_orgs_org_login_idx` (index) on `(org_login)`
 
 ## `user_repos`
 

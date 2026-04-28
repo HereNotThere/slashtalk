@@ -1,0 +1,43 @@
+# Throwaway stack for the microVM "rooms" prototype.
+# Fully isolated from docker-compose.yml — different ports, container names, volume.
+#
+# Bring up:
+#   docker compose -f docker-compose.rooms.yml up -d
+# Tear down (and wipe the volume when you're done with the experiment):
+#   docker compose -f docker-compose.rooms.yml down -v
+#
+# Point the prototype server at it via:
+#   DATABASE_URL=postgres://slashtalk:slashtalk@localhost:5452/slashtalk_rooms_dev
+#   REDIS_URL=redis://localhost:6399
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: slashtalk-rooms-postgres
+    environment:
+      POSTGRES_USER: slashtalk
+      POSTGRES_PASSWORD: slashtalk
+      POSTGRES_DB: slashtalk_rooms_dev
+    ports:
+      - "5452:5432"
+    volumes:
+      - slashtalk_rooms_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slashtalk -d slashtalk_rooms_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: slashtalk-rooms-redis
+    ports:
+      - "6399:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  slashtalk_rooms_pg:

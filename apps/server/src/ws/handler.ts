@@ -3,7 +3,7 @@ import { jwt } from "@elysiajs/jwt";
 import { eq } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import { users, apiKeys, userRepos } from "../db/schema";
+import { users, apiKeys, userRepos, roomMembers } from "../db/schema";
 import { hashToken } from "../auth/tokens";
 import type { RedisBridge } from "./redis-bridge";
 
@@ -65,6 +65,17 @@ export const wsHandler = (db: Database, redis: RedisBridge) =>
       }
       // Also subscribe to personal channel
       await redis.subscribe(`user:${userId}`, handler);
+
+      // Rooms prototype: subscribe to room:<id> for every room this user is in.
+      // Snapshot at connect time — joining a new room mid-connection won't push
+      // updates until the client reconnects (acceptable for v1).
+      const roomRows = await db
+        .select({ roomId: roomMembers.roomId })
+        .from(roomMembers)
+        .where(eq(roomMembers.userId, userId));
+      for (const row of roomRows) {
+        await redis.subscribe(`room:${row.roomId}`, handler);
+      }
 
       // Start ping keepalive
       const pingTimer = setInterval(() => {

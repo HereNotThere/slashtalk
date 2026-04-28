@@ -130,13 +130,21 @@ export function effectiveOverlayLength(
 export function ensureOverlay(): BrowserWindow {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
 
-  // Recenter when displays change — resolution change, monitor connect or
-  // disconnect, scaling change. resizeOverlay re-derives the display from the
-  // overlay's current bounds (Electron has already moved it to a valid display
-  // on removal) and recenters on the main axis. Attached here (post app.ready)
-  // because `screen` can't be used before then.
+  // Recenter when displays change — resolution, monitor connect/disconnect,
+  // scaling. Debounced because unplugging a multi-display Thunderbolt dock
+  // bursts 5-10 events in <50ms (per-display metrics-changed + per-display
+  // removed), and back-to-back setBounds calls interrupt macOS's in-flight
+  // NSWindow animator. Attached here (post app.ready) because `screen` can't
+  // be used before then.
   if (!screenListenersAttached) {
-    const onDisplayChange = (): void => resizeOverlay();
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const onDisplayChange = (): void => {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => {
+        pending = null;
+        resizeOverlay();
+      }, 100);
+    };
     screen.on("display-metrics-changed", onDisplayChange);
     screen.on("display-added", onDisplayChange);
     screen.on("display-removed", onDisplayChange);

@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ClockIcon, PaperAirplaneIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import {
+  Bars3Icon,
+  PaperAirplaneIcon,
+  PencilSquareIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
 import type {
   ChatAssistantMessage,
   ChatMessage,
@@ -82,7 +87,7 @@ const SAMPLE_PROMPTS = [
 ];
 
 const MARKDOWN_CLASSES =
-  "break-words text-fg text-md leading-relaxed " +
+  "break-words text-fg text-base leading-relaxed " +
   "[&_p]:my-3 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
   "[&_ul]:my-3 [&_ol]:my-3 [&_ul]:pl-5 [&_ol]:pl-5 [&_ul]:list-disc [&_ol]:list-decimal " +
   "[&_li]:my-1 [&_li]:pl-1 " +
@@ -90,9 +95,9 @@ const MARKDOWN_CLASSES =
   "[&_code]:font-mono [&_code]:text-[0.88em] [&_code]:font-medium " +
   "[&_pre]:bg-code [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:overflow-auto [&_pre]:my-4 " +
   "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:font-normal " +
-  "[&_h1]:text-xl [&_h1]:font-semibold [&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:tracking-tight " +
-  "[&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:tracking-tight " +
-  "[&_h3]:text-md [&_h3]:font-semibold [&_h3]:mt-4 [&_h3]:mb-2 " +
+  "[&_h1]:text-lg [&_h1]:font-semibold [&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:tracking-tight " +
+  "[&_h2]:text-md [&_h2]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:tracking-tight " +
+  "[&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-4 [&_h3]:mb-2 " +
   "[&_strong]:font-semibold [&_strong]:text-fg " +
   "[&_em]:italic " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-divider [&_blockquote]:pl-4 [&_blockquote]:text-muted [&_blockquote]:my-3 " +
@@ -333,26 +338,36 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     setHistoryOpen(false);
   }
 
+  function startNewChat(): void {
+    askTokenRef.current++;
+    setMessages([]);
+    setThreadId(undefined);
+    setError(null);
+    setFollowUp("");
+    setLoading(false);
+    setHistoryOpen(false);
+  }
+
   return (
-    <div className="flex flex-col h-screen bg-bg relative">
-      <div className="flex-none flex items-center justify-end px-3 py-2 border-b border-divider">
+    <div className="flex flex-col h-screen bg-surface-2 relative overflow-hidden">
+      <div className="flex-none flex items-center justify-center px-3 py-2 border-b border-divider bg-surface-2 relative z-30">
         <button
           type="button"
           onClick={() => setHistoryOpen((v) => !v)}
-          aria-label={historyOpen ? "Close history" : "Open history"}
-          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-subtle hover:text-fg hover:bg-surface-alt-hover transition-colors"
+          aria-label={historyOpen ? "Close menu" : "Open menu"}
+          className="absolute left-3 inline-flex items-center justify-center p-1.5 rounded-md text-subtle hover:text-fg hover:bg-surface-alt-hover transition-colors"
         >
-          <ClockIcon className="w-4 h-4" />
-          <span>History</span>
+          {historyOpen ? <XMarkIcon className="w-5 h-5" /> : <Bars3Icon className="w-5 h-5" />}
         </button>
+        <span className="text-sm text-muted truncate">Ask anything about your team</span>
       </div>
-      {historyOpen && (
-        <HistoryDrawer
-          activeThreadId={threadId}
-          onPick={loadThread}
-          onClose={() => setHistoryOpen(false)}
-        />
-      )}
+      <HistorySideNav
+        open={historyOpen}
+        activeThreadId={threadId}
+        onPick={loadThread}
+        onNewChat={startNewChat}
+        onClose={() => setHistoryOpen(false)}
+      />
       <div ref={scrollRef} className="flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-[720px] px-6 py-8 space-y-7">
           {messages.length === 0 && !loading && !error && (
@@ -361,7 +376,7 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
           {messages.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
-                <div className="px-4 py-3 rounded-2xl max-w-[85%] bg-surface-alt text-fg text-md leading-snug whitespace-pre-wrap break-words">
+                <div className="px-4 py-3 rounded-2xl max-w-[85%] bg-surface-alt text-fg text-base leading-snug whitespace-pre-wrap break-words">
                   {m.content}
                 </div>
               </div>
@@ -408,9 +423,9 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
                   handleFollowUpSend();
                 }
               }}
-              placeholder={loading ? "Waiting for reply..." : "Reply to Slashtalk..."}
+              placeholder={loading ? "Waiting for reply..." : "Ask anything"}
               disabled={loading}
-              className="flex-1 min-w-0 bg-transparent border-none outline-none py-2 text-fg text-md leading-snug placeholder:text-subtle disabled:opacity-60"
+              className="flex-1 min-w-0 bg-transparent border-none outline-none py-2 text-fg text-base leading-snug placeholder:text-subtle disabled:opacity-60"
             />
             <Button
               variant="primary"
@@ -580,19 +595,29 @@ function relativeTime(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function HistoryDrawer({
+function HistorySideNav({
+  open,
   activeThreadId,
   onPick,
+  onNewChat,
   onClose,
 }: {
+  open: boolean;
   activeThreadId: string | undefined;
   onPick: (thread: ChatThread) => void;
+  onNewChat: () => void;
   onClose: () => void;
 }): JSX.Element {
   const [threads, setThreads] = useState<ChatThread[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!open) return;
+    // Reset before each refetch — the component is now always mounted, so
+    // state from a prior open lingers. Without this, a previous error +
+    // a subsequent successful fetch would render both at once.
+    setError(null);
+    setThreads(null);
     let cancelled = false;
     window.chatheads
       .fetchChatHistory()
@@ -605,52 +630,70 @@ function HistoryDrawer({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [open]);
 
   return (
-    <div className="absolute inset-x-0 top-[37px] bottom-0 z-10 bg-bg border-t border-divider flex flex-col">
-      <div className="flex-none flex items-center justify-between px-4 py-2 border-b border-divider">
-        <span className="text-sm font-medium text-fg">Recent questions</span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close history"
-          className="p-1 rounded-md text-subtle hover:text-fg hover:bg-surface-alt-hover transition-colors"
-        >
-          <XMarkIcon className="w-4 h-4" />
-        </button>
+    <>
+      <button
+        type="button"
+        aria-label="Close menu"
+        onClick={onClose}
+        tabIndex={open ? 0 : -1}
+        className={`absolute inset-0 z-10 bg-black/30 transition-opacity duration-200 ease-out ${
+          open ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      />
+      <div
+        aria-hidden={!open}
+        className={`absolute left-0 top-0 bottom-0 z-20 w-[280px] bg-surface-2 border-r border-divider flex flex-col pt-[37px] transition-[transform,box-shadow] duration-200 ease-out ${
+          open ? "translate-x-0 shadow-card" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex-none px-3 pt-4 pb-3">
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-alt hover:bg-surface-alt-hover text-fg text-base font-medium transition-colors"
+          >
+            <PencilSquareIcon className="w-4 h-4" />
+            <span>New chat</span>
+          </button>
+        </div>
+        <div className="px-4 pb-2">
+          <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Recent</span>
+        </div>
+        <div className="flex-1 overflow-auto px-2 pb-2">
+          {threads === null && !error && (
+            <div className="px-3 py-2 text-xs text-subtle">Loading…</div>
+          )}
+          {error && <div className="px-3 py-2 text-xs text-danger">{error}</div>}
+          {threads && threads.length === 0 && (
+            <div className="px-3 py-2 text-xs text-subtle">
+              No questions yet. Anything you ask shows up here.
+            </div>
+          )}
+          {threads?.map((t) => {
+            const isActive = t.threadId === activeThreadId;
+            const turnCount = t.turns.length;
+            return (
+              <button
+                key={t.threadId}
+                type="button"
+                onClick={() => onPick(t)}
+                className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
+                  isActive ? "bg-surface-alt" : "hover:bg-surface-alt-hover"
+                }`}
+              >
+                <div className="text-sm text-fg line-clamp-2">{t.title}</div>
+                <div className="text-xs text-subtle mt-0.5">
+                  {relativeTime(t.updatedAt)}
+                  {turnCount > 1 ? ` · ${turnCount} turns` : ""}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div className="flex-1 overflow-auto px-2 py-2">
-        {threads === null && !error && (
-          <div className="px-3 py-2 text-xs text-subtle">Loading…</div>
-        )}
-        {error && <div className="px-3 py-2 text-xs text-danger">{error}</div>}
-        {threads && threads.length === 0 && (
-          <div className="px-3 py-2 text-xs text-subtle">
-            No questions yet. Anything you ask shows up here.
-          </div>
-        )}
-        {threads?.map((t) => {
-          const isActive = t.threadId === activeThreadId;
-          const turnCount = t.turns.length;
-          return (
-            <button
-              key={t.threadId}
-              type="button"
-              onClick={() => onPick(t)}
-              className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                isActive ? "bg-surface-alt" : "hover:bg-surface-alt-hover"
-              }`}
-            >
-              <div className="text-sm text-fg line-clamp-2">{t.title}</div>
-              <div className="text-xs text-subtle mt-0.5">
-                {relativeTime(t.updatedAt)}
-                {turnCount > 1 ? ` · ${turnCount} turns` : ""}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    </>
   );
 }

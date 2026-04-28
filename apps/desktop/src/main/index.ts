@@ -165,6 +165,10 @@ ipcMain.handle("response:open", (_e, message: string): void => {
   showResponse({ kind: "message", message });
 });
 
+ipcMain.handle("ask:show", (): void => {
+  showResponse();
+});
+
 ipcMain.handle(
   "response:openThread",
   (_e, thread: Extract<ResponseOpenPayload, { kind: "thread" }>["thread"]): void => {

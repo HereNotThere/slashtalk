@@ -1,23 +1,41 @@
-// Polls /api/presence/peers and caches the latest Spotify "now playing"
-// presence for the signed-in user and every peer who shares a claimed repo.
-// The info-card renderer reads this via an IPC handler in index.ts.
+// Polls /api/presence/peers and caches the latest spotify "now playing" and
+// per-source quota presence for the signed-in user and every peer who shares
+// a claimed repo. The info-card renderer reads this via IPC handlers in
+// index.ts.
 
-import type { SpotifyPresence } from "@slashtalk/shared";
+import type {
+  PeerPresenceEntry,
+  QuotaByLogin,
+  QuotaSource,
+  SpotifyPresence,
+} from "@slashtalk/shared";
 import * as backend from "./backend";
 import { createEmitter } from "./emitter";
-import { diffPresence, type PresenceMap } from "./peerPresenceDiff";
+import { diffPresence, type PresenceChange, type PresenceMap } from "./peerPresenceDiff";
 
 const POLL_MS = 15_000;
 
 let map: PresenceMap = {};
 let running = false;
 let timer: NodeJS.Timeout | null = null;
-const changes = createEmitter<{ login: string; presence: SpotifyPresence | null }>();
+const changes = createEmitter<PresenceChange>();
 
 export const onChange = changes.on;
 
-export function get(login: string): SpotifyPresence | null {
+export function getEntry(login: string): PeerPresenceEntry | null {
   return map[login] ?? null;
+}
+
+export function getSpotify(login: string): SpotifyPresence | null {
+  return map[login]?.spotify ?? null;
+}
+
+export function getQuota(login: string): QuotaByLogin | null {
+  return map[login]?.quota ?? null;
+}
+
+export function getQuotaForSource(login: string, source: QuotaSource) {
+  return map[login]?.quota?.[source] ?? null;
 }
 
 async function refresh(): Promise<void> {

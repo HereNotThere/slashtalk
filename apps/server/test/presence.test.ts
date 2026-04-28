@@ -113,15 +113,15 @@ describe("spotify presence", () => {
       headers: { Cookie: bobCookie },
     });
     expect(bobRes.status).toBe(200);
-    const body = (await bobRes.json()) as Record<string, Record<string, unknown>>;
-    expect(body.alice).toBeTruthy();
-    expect(body.alice.trackId).toBe(aliceTrack.trackId);
-    expect(body.alice.name).toBe(aliceTrack.name);
-    expect(body.alice.artist).toBe(aliceTrack.artist);
-    expect(body.alice.url).toBe(aliceTrack.url);
-    expect(body.alice.isPlaying).toBe(true);
+    const body = (await bobRes.json()) as Record<string, { spotify?: Record<string, unknown> }>;
+    expect(body.alice?.spotify).toBeTruthy();
+    expect(body.alice!.spotify!.trackId).toBe(aliceTrack.trackId);
+    expect(body.alice!.spotify!.name).toBe(aliceTrack.name);
+    expect(body.alice!.spotify!.artist).toBe(aliceTrack.artist);
+    expect(body.alice!.spotify!.url).toBe(aliceTrack.url);
+    expect(body.alice!.spotify!.isPlaying).toBe(true);
     // updatedAt is server-stamped — don't compare a value, just confirm shape.
-    expect(typeof body.alice.updatedAt).toBe("string");
+    expect(typeof body.alice!.spotify!.updatedAt).toBe("string");
   });
 
   it("also returns the caller's own presence in /api/presence/peers", async () => {
@@ -194,5 +194,92 @@ describe("spotify presence", () => {
       body: JSON.stringify({ track: { trackId: "x" } }), // missing fields
     });
     expect(res.status).toBe(422);
+  });
+
+  // Codex quota arrives via JSONL ingest, not /v1/presence/quota — covered by
+  // the upload tests. These tests cover the desktop-pushed path used for Claude.
+  describe("claude quota presence", () => {
+    const claudeQuota = {
+      plan: "Max 5x",
+      windows: [] as Array<{
+        label: string;
+        usedPercent: number | null;
+        resetsAt: string | null;
+      }>,
+    };
+
+    it("rejects POST /v1/presence/quota without an API key", async () => {
+      const res = await fetch(`${baseUrl}/v1/presence/quota`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "claude", presence: claudeQuota }),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("rejects an unregistered source with 422", async () => {
+      const res = await fetch(`${baseUrl}/v1/presence/quota`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${aliceApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ source: "cursor", presence: claudeQuota }),
+      });
+      expect(res.status).toBe(422);
+    });
+
+    it("accepts a Claude quota POST and exposes it to peers via /api/presence/peers", async () => {
+      const postRes = await fetch(`${baseUrl}/v1/presence/quota`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${aliceApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ source: "claude", presence: claudeQuota }),
+      });
+      expect(postRes.status).toBe(200);
+
+      const bobRes = await fetch(`${baseUrl}/api/presence/peers`, {
+        headers: { Cookie: bobCookie },
+      });
+      expect(bobRes.status).toBe(200);
+      const body = (await bobRes.json()) as Record<
+        string,
+        {
+          quota?: {
+            claude?: {
+              source: string;
+              plan: string | null;
+              windows: unknown[];
+              updatedAt: string;
+            };
+          };
+        }
+      >;
+      expect(body.alice?.quota?.claude).toBeTruthy();
+      expect(body.alice!.quota!.claude!.source).toBe("claude");
+      expect(body.alice!.quota!.claude!.plan).toBe("Max 5x");
+      expect(body.alice!.quota!.claude!.windows).toEqual([]);
+      expect(typeof body.alice!.quota!.claude!.updatedAt).toBe("string");
+    });
+
+    it("clears Claude quota when presence: null is posted", async () => {
+      const postRes = await fetch(`${baseUrl}/v1/presence/quota`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${aliceApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ source: "claude", presence: null }),
+      });
+      expect(postRes.status).toBe(200);
+
+      const bobRes = await fetch(`${baseUrl}/api/presence/peers`, {
+        headers: { Cookie: bobCookie },
+      });
+      const body = (await bobRes.json()) as Record<string, { quota?: { claude?: unknown } }>;
+      expect(body.alice?.quota?.claude).toBeUndefined();
+    });
   });
 });

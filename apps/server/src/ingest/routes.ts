@@ -19,6 +19,8 @@ import { classifySessionState } from "../sessions/state";
 import { detectCollisions } from "../correlate/file-index";
 import { config } from "../config";
 import { makeSemaphore } from "../util/semaphore";
+import { extractCodexQuotaFromBatch, writeQuotaPresence } from "../presence/quota";
+import type { QuotaPresence } from "@slashtalk/shared";
 
 function topFilesKeys(field: unknown): string[] {
   if (!field || typeof field !== "object") return [];
@@ -248,6 +250,12 @@ async function handleIngest(
   let currentLineSeq = fromLineSeq;
   let acceptedEvents = 0;
   let attemptedRows = 0;
+  // Track the freshest Codex quota seen across all batches in this ingest. We
+  // do one Redis write after the stream finishes rather than per-batch — most
+  // batches won't contain a token_count event, and `extractCodexQuotaFromBatch`
+  // already takes the latest within a single batch, so chaining the latest
+  // across batches preserves "freshest wins" with one round-trip.
+  let latestCodexQuota: QuotaPresence | null = null;
 
   const BATCH_SIZE = config.ingestBatchSize;
   let batch: Array<{ lineSeq: number; event: unknown }> = [];
@@ -278,6 +286,19 @@ async function handleIngest(
       .onConflictDoNothing({ target: [events.sessionId, events.lineSeq] })
       .returning({ lineSeq: events.lineSeq });
     acceptedEvents += inserted.length;
+
+    // Pluck the latest Codex rate-limit signal out of *this* batch's accepted
+    // payloads before we drop them. Source is constant for the whole stream
+    // so the source check is a no-op for non-Codex sessions.
+    if (source === "codex" && inserted.length > 0) {
+      const acceptedSet = new Set(inserted.map((r) => r.lineSeq));
+      const acceptedPayloads = batch
+        .filter(({ lineSeq }) => acceptedSet.has(lineSeq))
+        .map((b) => b.event);
+      const q = extractCodexQuotaFromBatch(acceptedPayloads);
+      if (q) latestCodexQuota = q;
+    }
+
     batch = [];
   };
 
@@ -352,6 +373,13 @@ async function handleIngest(
     consumeLine(pending);
   }
   await flushBatch();
+
+  // One Redis write per ingest with whichever quota was freshest across all
+  // batches. Soft-fail inside writeQuotaPresence — a Redis blip must never
+  // break ingest itself.
+  if (latestCodexQuota) {
+    await writeQuotaPresence(redis, user.id, latestCodexQuota);
+  }
 
   if (totalLines === 0) {
     return { acceptedEvents: 0, duplicateEvents: 0, serverLineSeq: fromLineSeq };

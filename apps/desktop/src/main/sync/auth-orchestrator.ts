@@ -1,6 +1,7 @@
 import * as anthropic from "../anthropic";
 import * as backend from "../backend";
 import * as chatheadsAuth from "../chatheadsAuth";
+import * as claudeQuota from "../claudeQuota";
 import * as githubAuth from "../githubDeviceAuth";
 import * as heartbeat from "../heartbeat";
 import * as localRepos from "../localRepos";
@@ -27,6 +28,7 @@ function applySyncForAuth(signedIn: boolean): void {
     void peerPresence.start().catch((err) => console.warn("peerPresence.start failed:", err));
     void peerLocations.start().catch((err) => console.warn("peerLocations.start failed:", err));
     void prIngest.start().catch((err) => console.warn("prIngest.start failed:", err));
+    void claudeQuota.start().catch((err) => console.warn("claudeQuota.start failed:", err));
     ws.start();
   } else {
     heartbeat.stop();
@@ -35,6 +37,7 @@ function applySyncForAuth(signedIn: boolean): void {
     peerPresence.stop();
     peerLocations.stop();
     prIngest.stop();
+    claudeQuota.stop();
     ws.stop();
     // Drop the per-user dashboard cache so a sign-out → different-user
     // sign-in doesn't briefly serve the prior user's PRs/standup. The

@@ -25,7 +25,10 @@ import type {
   IngestSelfPrEntry,
   IngestSelfPrsRequest,
   IngestSelfPrsResponse,
+  PeerPresenceResponse,
   ProjectOverviewResponse,
+  QuotaPresence,
+  QuotaSource,
   SessionSnapshot,
   SpotifyPresence,
   StandupResponse,
@@ -865,8 +868,8 @@ export function postSpotifyPresence(
   });
 }
 
-export function listPeerPresence(): Promise<Record<string, SpotifyPresence>> {
-  return jsonFetch<Record<string, SpotifyPresence>>("/api/presence/peers", {
+export function listPeerPresence(): Promise<PeerPresenceResponse> {
+  return jsonFetch<PeerPresenceResponse>("/api/presence/peers", {
     method: "GET",
   });
 }
@@ -884,5 +887,17 @@ export function postUserLocation(body: UserLocation): Promise<{ ok: true }> {
 export function listPeerLocations(): Promise<Record<string, UserLocation>> {
   return jsonFetch<Record<string, UserLocation>>("/api/presence/locations", {
     method: "GET",
+  });
+}
+
+/** POST a fresh per-source quota snapshot. Pass `presence: null` to clear. */
+export function postQuotaPresence(
+  source: QuotaSource,
+  presence: Pick<QuotaPresence, "plan" | "windows"> | null,
+): Promise<{ ok: true }> {
+  return jsonFetch("/v1/presence/quota", {
+    method: "POST",
+    body: { source, presence },
+    auth: "apiKey",
   });
 }

@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ChatAskResponse, ChatMessage, SpotifyPresence } from "@slashtalk/shared";
+import type {
+  ChatAskResponse,
+  ChatMessage,
+  QuotaByLogin,
+  SpotifyPresence,
+} from "@slashtalk/shared";
 import type {
   AgentHistoryPage,
   ManagedAgentSessionRow,
@@ -189,7 +194,11 @@ const bridge: ChatHeadsBridge = {
     return () => ipcRenderer.off("info:hide", handler);
   },
   onInfoPresence: (cb) =>
-    subscribe<{ login: string; spotify: SpotifyPresence | null }>("info:presence", cb),
+    subscribe<{
+      login: string;
+      spotify: SpotifyPresence | null;
+      quota: QuotaByLogin | null;
+    }>("info:presence", cb),
   hideInfo: () => ipcRenderer.invoke("info:hide") as Promise<void>,
 
   listSessionsForHead: (headId) =>
@@ -202,6 +211,9 @@ const bridge: ChatHeadsBridge = {
 
   getSpotifyForLogin: (login) =>
     ipcRenderer.invoke("spotify:forLogin", login) as Promise<SpotifyPresence | null>,
+
+  getQuotaForLogin: (login) =>
+    ipcRenderer.invoke("quota:forLogin", login) as Promise<QuotaByLogin | null>,
 
   openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,

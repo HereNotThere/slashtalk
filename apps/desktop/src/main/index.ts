@@ -344,7 +344,8 @@ ipcMain.handle("chatheads:signIn", () => chatheadsAuth.signIn());
 ipcMain.handle("chatheads:cancelSignIn", () => chatheadsAuth.cancelSignIn());
 ipcMain.handle("chatheads:signOut", () => chatheadsAuth.signOut());
 
-ipcMain.handle("spotify:forLogin", (_e, login: string) => peerPresence.get(login));
+ipcMain.handle("spotify:forLogin", (_e, login: string) => peerPresence.getSpotify(login));
+ipcMain.handle("quota:forLogin", (_e, login: string) => peerPresence.getQuota(login));
 
 // slashtalk backend
 ipcMain.handle("backend:getAuthState", () => backend.getAuthState());

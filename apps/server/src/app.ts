@@ -13,7 +13,7 @@ import { orgsRoutes } from "./user/orgs";
 import { dashboardRoutes } from "./user/dashboard";
 import { repoOverviewRoutes } from "./repo/overview";
 import { chatRoutes } from "./chat/routes";
-import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
+import { spotifyPresenceRoutes, quotaPresenceRoutes, presenceReadRoutes } from "./presence/routes";
 import { managedAgentSessionRoutes } from "./managed-agent-sessions/routes";
 import { mcpRoutes } from "./mcp/routes";
 import { mcpOAuthRoutes } from "./oauth/mcp";
@@ -65,6 +65,7 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(mcpOAuthRoutes(db))
     .use(mcpRoutes())
     .use(spotifyPresenceRoutes(db, redis))
+    .use(quotaPresenceRoutes(db, redis))
     .use(presenceReadRoutes(db, redis))
     .use(wsHandler(db, redis));
 }

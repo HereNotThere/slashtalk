@@ -518,3 +518,39 @@ export function shortRepoName(fullName: string): string {
   const slash = fullName.lastIndexOf("/");
   return slash >= 0 ? fullName.slice(slash + 1) : fullName;
 }
+
+/** Which CLI's quota this row describes. */
+export type QuotaSource = EventSource;
+
+/** A single rate-limit window (e.g. Codex 5h, Codex weekly). */
+export interface QuotaWindow {
+  /** Short label rendered to the user: "5h", "week". Vendor-defined. */
+  label: string;
+  /** 0..100 percent used. Null = vendor reported the window but no value yet. */
+  usedPercent: number | null;
+  /** ISO-8601 when this window resets. Null = unknown. */
+  resetsAt: string | null;
+}
+
+/** Per-source quota presence cached in Redis, mirrors SpotifyPresence. */
+export interface QuotaPresence {
+  source: QuotaSource;
+  /** Plan name if the vendor exposes one ("team", "pro", "max"). */
+  plan: string | null;
+  windows: QuotaWindow[];
+  /** ISO-8601. Server stamps on extraction. */
+  updatedAt: string;
+}
+
+/** Per-login map of quota by source — null/missing means no data for that source. */
+export type QuotaByLogin = Partial<Record<QuotaSource, QuotaPresence>>;
+
+/** One peer's presence row. Either field may be missing; an entry exists at all
+ *  only when at least one is populated. */
+export interface PeerPresenceEntry {
+  spotify?: SpotifyPresence;
+  quota?: QuotaByLogin;
+}
+
+/** GET /api/presence/peers — keyed by github_login, includes self. */
+export type PeerPresenceResponse = Record<string, PeerPresenceEntry>;

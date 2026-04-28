@@ -55,7 +55,6 @@ import {
   computeDockBoundsOn,
   dockFromPoint,
   overlayLength,
-  overlaySize,
   screenIdOf,
 } from "./windows/dock-geometry";
 import {
@@ -85,7 +84,6 @@ import {
   startHoverPolling,
   stopHoverPolling,
 } from "./windows/hover-polling";
-import { animateOverlayTo, cancelOverlayAnimation } from "./windows/overlay-animation";
 import { appState, loadRenderer, preloadPath } from "./windows/lib";
 import {
   bumpActivity,
@@ -96,6 +94,12 @@ import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
 import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
 import { broadcast, liveWindows, sendWhenLoaded } from "./windows/broadcast";
+import {
+  configureDockDrag,
+  currentDock,
+  getIsDragging,
+  registerDockDrag,
+} from "./windows/dock-drag";
 import * as spotifyToggle from "./sync/spotify-toggle";
 import * as userLocation from "./sync/user-location";
 
@@ -265,18 +269,6 @@ const streamingAgents = new Set<string>();
 function findHead(id: string): ChatHead | undefined {
   return heads.find((h) => h.id === id);
 }
-
-let dragOffset: { dx: number; dy: number } | null = null;
-let dragTicker: ReturnType<typeof setInterval> | null = null;
-// While the stack is being dragged, bubble hovers still fire (the cursor sits
-// over bubbles as the window moves under it), which would pop the info card
-// repeatedly. Suppress showInfo for the duration of the drag + dock animation.
-let isDraggingStack = false;
-
-// Dock-to-edge feature. During drag we show a dashed ghost at the nearest dock
-// slot (center-left / center-right); on release the overlay tweens to it.
-const DOCK_ANIM_MS = 180;
-let dockPlaceholderWindow: BrowserWindow | null = null;
 
 // -------- Overlay (bubbles) --------
 
@@ -571,7 +563,7 @@ async function showInfo(
   bubbleScreen?: { x: number; y: number },
   expandSessionId?: string,
 ): Promise<void> {
-  if (isDraggingStack) return;
+  if (getIsDragging()) return;
   const head = findHead(headId);
   if (!head) return;
 
@@ -1003,142 +995,18 @@ ipcMain.handle("chat:questionsForLogin", async (_e, login: string) => {
 
 ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));
 
-// -------- Dock to edge (drag → release → snap) --------
-
-function overlayDisplay(): Electron.Display {
-  if (!overlayWindow || overlayWindow.isDestroyed()) {
-    return screen.getPrimaryDisplay();
-  }
-  return screen.getDisplayMatching(overlayWindow.getBounds());
-}
-
-function currentDock(): DockConfig {
-  if (!overlayWindow || overlayWindow.isDestroyed()) {
-    return { orientation: "vertical", side: "end" };
-  }
-  const b = overlayWindow.getBounds();
-  const center = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-  return dockFromPoint(center, overlayDisplay());
-}
-
-function computeDockBounds(dock: DockConfig): Electron.Rectangle {
-  const display = overlayDisplay();
-  return computeDockBoundsOn(display, dock, effectiveOverlayLength(dock.orientation, display));
-}
-
-function ensureDockPlaceholder(): BrowserWindow {
-  if (dockPlaceholderWindow && !dockPlaceholderWindow.isDestroyed()) {
-    return dockPlaceholderWindow;
-  }
-  // Radius matches the overlay's pill cap (half the short axis = OVERLAY_WIDTH/2).
-  // Both orientations share the same short axis, so the same radius gives
-  // perfect semi-circle caps whether the placeholder is tall or wide.
-  const radius = Math.round(OVERLAY_WIDTH / 2);
-  const html = `<!doctype html><html><head><style>
-    html,body{margin:0;padding:0;background:transparent;overflow:hidden;height:100%;}
-    .pill{
-      position:fixed;inset:0;box-sizing:border-box;
-      border:2px dashed rgba(255,255,255,0.55);
-      border-radius:${radius}px;
-      background:rgba(255,255,255,0.05);
-    }
-  </style></head><body><div class="pill"></div></body></html>`;
-  const initialSize = overlaySize(heads.length, "vertical");
-  dockPlaceholderWindow = new BrowserWindow({
-    width: initialSize.width,
-    height: initialSize.height,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    resizable: false,
-    movable: false,
-    focusable: false,
-    skipTaskbar: true,
-    hasShadow: false,
-    show: false,
-    backgroundColor: "#00000000",
-    webPreferences: {
-      contextIsolation: true,
-    },
-  });
-  dockPlaceholderWindow.setAlwaysOnTop(true, "floating");
-  dockPlaceholderWindow.setVisibleOnAllWorkspaces(true, {
-    visibleOnFullScreen: true,
-  });
-  dockPlaceholderWindow.setIgnoreMouseEvents(true);
-  void dockPlaceholderWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
-  dockPlaceholderWindow.on("closed", () => {
-    dockPlaceholderWindow = null;
-  });
-  return dockPlaceholderWindow;
-}
-
-function updateDockPlaceholder(): void {
-  const ph = ensureDockPlaceholder();
-  ph.setBounds(computeDockBounds(currentDock()));
-  if (!ph.isVisible()) ph.showInactive();
-}
-
-function hideDockPlaceholder(): void {
-  if (!dockPlaceholderWindow || dockPlaceholderWindow.isDestroyed()) return;
-  if (dockPlaceholderWindow.isVisible()) dockPlaceholderWindow.hide();
-}
-
-ipcMain.handle("drag:start", (): void => {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  // A new drag cancels any in-flight dock tween.
-  cancelOverlayAnimation();
-
-  const cursor = screen.getCursorScreenPoint();
-  const win = overlayWindow.getBounds();
-  dragOffset = { dx: cursor.x - win.x, dy: cursor.y - win.y };
-  isDraggingStack = true;
-  // Kill any visible/pending info card so it doesn't trail the stack.
-  hideInfoNow();
-  updateDockPlaceholder();
-
-  if (dragTicker) clearInterval(dragTicker);
-  dragTicker = setInterval(() => {
-    if (!overlayWindow || overlayWindow.isDestroyed() || !dragOffset) return;
-    const p = screen.getCursorScreenPoint();
-    overlayWindow.setPosition(p.x - dragOffset.dx, p.y - dragOffset.dy);
+configureDockDrag({
+  getOverlay: () => overlayWindow,
+  effectiveOverlayLength,
+  onTick: () => {
     repositionInfoIfVisible();
     repositionChatIfVisible();
-    updateDockPlaceholder();
-  }, 16);
+  },
+  onHideInfoNow: hideInfoNow,
+  onSendOverlayConfig: sendOverlayConfig,
+  onSavePosition: saveOverlayPosition,
 });
-
-ipcMain.handle("drag:end", (): void => {
-  if (dragTicker) clearInterval(dragTicker);
-  dragTicker = null;
-  dragOffset = null;
-  hideDockPlaceholder();
-
-  if (!overlayWindow || overlayWindow.isDestroyed()) {
-    isDraggingStack = false;
-    saveOverlayPosition();
-    return;
-  }
-
-  const target = computeDockBounds(currentDock());
-  // Push the new dock to the overlay renderer first so flex direction + FLIP
-  // tracking swap before the window resizes. The renderer will see the new
-  // size via its resize event during the animation, but with the right flex
-  // orientation already in place.
-  sendOverlayConfig();
-  // Keep isDraggingStack on through the slide so bubble hovers under the
-  // moving window don't pop the info card mid-tween.
-  animateOverlayTo(overlayWindow, target, DOCK_ANIM_MS, {
-    onTick: () => {
-      repositionInfoIfVisible();
-      repositionChatIfVisible();
-    },
-    onDone: () => {
-      isDraggingStack = false;
-      saveOverlayPosition();
-    },
-  });
-});
+registerDockDrag();
 
 ipcMain.handle("app:openMain", (): void => {
   showMainWindow();

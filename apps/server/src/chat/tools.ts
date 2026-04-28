@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, or, sql } from "drizzle-orm";
 import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { loadInsightsForSessions, loadPrsForSessions, toSnapshot } from "../sessions/snapshot";
@@ -70,6 +70,9 @@ const LAST_PROMPT_MAX_CHARS = 240;
 const TOP_FILES_IN_ROLLUP = 3;
 const DEFAULT_LOOKBACK_HOURS = 48;
 const MAX_LOOKBACK_HOURS = 168;
+// Cap fuzzy login matches so a 1-letter query can't fan out to the whole org.
+// Real first-name queries collide with at most a handful of teammates.
+const FUZZY_LOGIN_MATCH_CAP = 5;
 
 export interface ChatToolContext {
   /** Caller's visible repo IDs, if the runner already fetched them. Skips
@@ -127,23 +130,17 @@ export async function getTeamActivityImpl(
     repoIdScope = [repoRow.id];
   }
 
+  const peerRows = await db
+    .selectDistinct({ userId: userRepos.userId })
+    .from(userRepos)
+    .where(inArray(userRepos.repoId, repoIdScope));
+  const peerIds = peerRows.map((r) => r.userId);
+
   let userIdScope: number[];
   if (args.login) {
-    const [userRow] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.githubLogin, args.login))
-      .limit(1);
-    if (!userRow) {
-      return { teammates: [], since: since.toISOString() };
-    }
-    userIdScope = [userRow.id];
+    userIdScope = await resolveLoginToPeerIds(db, args.login, peerIds);
   } else {
-    const peerRows = await db
-      .selectDistinct({ userId: userRepos.userId })
-      .from(userRepos)
-      .where(inArray(userRepos.repoId, repoIdScope));
-    userIdScope = peerRows.map((r) => r.userId);
+    userIdScope = peerIds;
   }
   if (userIdScope.length === 0) {
     return { teammates: [], since: since.toISOString() };
@@ -296,6 +293,49 @@ export async function getTeamActivityImpl(
   return result;
 }
 
+/** Resolve the model-supplied `login` (e.g. "ryan", "Ryan", "@ryancooley") to
+ *  one or more peer user IDs. Order: exact case-insensitive `github_login`
+ *  match → prefix match on `github_login` → substring match on `display_name`.
+ *  All lookups are restricted to the caller's peer set so the result is always
+ *  scoped to people whose sessions the caller can already see. */
+async function resolveLoginToPeerIds(
+  db: Database,
+  rawLogin: string,
+  peerIds: number[],
+): Promise<number[]> {
+  const q = rawLogin.trim().replace(/^@+/, "").toLowerCase();
+  if (!q || peerIds.length === 0) return [];
+
+  const exact = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(inArray(users.id, peerIds), sql`lower(${users.githubLogin}) = ${q}`))
+    .limit(1);
+  if (exact.length > 0) return [exact[0].id];
+
+  const pat = escapeIlikeLiteral(q);
+  const fuzzy = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        inArray(users.id, peerIds),
+        or(
+          sql`${users.githubLogin} ilike ${pat + "%"}`,
+          sql`coalesce(${users.displayName}, '') ilike ${"%" + pat + "%"}`,
+        ),
+      ),
+    )
+    .limit(FUZZY_LOGIN_MATCH_CAP);
+  return fuzzy.map((r) => r.id);
+}
+
+/** Escape `%` and `_` so they're treated as literals inside an ILIKE pattern.
+ *  Without this, `a_b` matches any single character between a and b. */
+function escapeIlikeLiteral(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/[%_]/g, (c) => `\\${c}`);
+}
+
 function pathMatches(a: string, b: string): boolean {
   if (a === b) return true;
   if (a.endsWith("/" + b)) return true;
@@ -424,7 +464,7 @@ export function buildChatTools(
           login: {
             type: "string",
             description:
-              "GitHub login to scope the answer to a single teammate. Pass the bare login, not `@login`.",
+              "Scope to one teammate. Accepts a GitHub login (`ryancooley`), a first name or fragment that prefix-matches a login (`ryan` → ryancooley), or a fragment of a display name. Match is case-insensitive and scoped to the caller's visible peers, so an unknown name returns empty rather than guessing.",
           },
           repoFullName: {
             type: "string",

@@ -488,4 +488,29 @@ describe("social feed integration", () => {
     );
     expect(res.status).toBe(422);
   });
+
+  // Regression-detect a future drop of the user_repos join in
+  // loadAccessibleSession() — without these, every session would leak to any
+  // valid JWT.
+  it("/api/session/:id leaks no sessions outside the caller's user_repos", async () => {
+    const sessionStatus = (id: string, cookie: string): Promise<number> =>
+      fetch(`${baseUrl}/api/session/${id}`, { headers: { Cookie: cookie } }).then((r) => r.status);
+
+    expect(await sessionStatus(COMMON_SESSION_ID, bobCookie)).toBe(200);
+    expect(await sessionStatus(REPO_A_SESSION_ID, bobCookie)).toBe(404);
+    expect(await sessionStatus(COMMON_SESSION_ID, aliceCookie)).toBe(200);
+    expect(await sessionStatus(REPO_A_SESSION_ID, aliceCookie)).toBe(200);
+  });
+
+  it("/api/session/:id/events enforces the same user_repos gate", async () => {
+    const eventsStatus = (id: string, cookie: string): Promise<number> =>
+      fetch(`${baseUrl}/api/session/${id}/events`, {
+        headers: { Cookie: cookie },
+      }).then((r) => r.status);
+
+    expect(await eventsStatus(COMMON_SESSION_ID, bobCookie)).toBe(200);
+    expect(await eventsStatus(REPO_A_SESSION_ID, bobCookie)).toBe(404);
+    expect(await eventsStatus(COMMON_SESSION_ID, aliceCookie)).toBe(200);
+    expect(await eventsStatus(REPO_A_SESSION_ID, aliceCookie)).toBe(200);
+  });
 });

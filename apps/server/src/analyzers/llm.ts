@@ -1,19 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { config } from "../config";
 import { calculateCostUsd, type ModelId } from "../models";
 import type { RedisBridge } from "../ws/redis-bridge";
+import { getAnthropicClient } from "./anthropic-client";
 import { LlmBudgetExceededError, checkLlmBudget, recordLlmSpend } from "./llm-budget";
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) {
-    if (!config.anthropicApiKey) {
-      throw new Error("ANTHROPIC_API_KEY not set");
-    }
-    _client = new Anthropic({ apiKey: config.anthropicApiKey });
-  }
-  return _client;
-}
 
 export interface StructuredCallParams {
   model: ModelId;
@@ -44,7 +32,7 @@ export async function callStructured<T>(
   if (!budget.allowed) {
     throw new LlmBudgetExceededError(params.budget.userId, budget.spentUsd, budget.capUsd);
   }
-  const resp = await client().messages.create({
+  const resp = await getAnthropicClient().messages.create({
     model: params.model,
     max_tokens: params.maxTokens ?? 1024,
     system: [

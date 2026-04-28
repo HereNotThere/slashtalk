@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, nativeTheme } from "electron";
 import type { ResponseOpenPayload } from "../../shared/types";
 import { loadRenderer, preloadPath } from "./lib";
 
@@ -13,6 +13,17 @@ export function configureResponse(opts: { onClose: () => void }): void {
   onClose = opts.onClose;
 }
 
+// Match `--color-surface-2` per theme so the OS-painted frame before the
+// first React paint matches the renderer's background — no light/dark flash.
+function responseBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors ? "#2c2c2c" : "#ffffff";
+}
+
+nativeTheme.on("updated", () => {
+  if (!responseWindow || responseWindow.isDestroyed()) return;
+  responseWindow.setBackgroundColor(responseBackgroundColor());
+});
+
 function ensureResponseWindow(): BrowserWindow {
   if (responseWindow && !responseWindow.isDestroyed()) return responseWindow;
 
@@ -23,10 +34,7 @@ function ensureResponseWindow(): BrowserWindow {
     minHeight: 360,
     frame: true,
     transparent: false,
-    // Matches `--color-bg` (dark theme) so the OS-painted background before
-    // first React paint isn't a bright white flash. Light-theme users see a
-    // dark frame for one paint, which is much less jarring than white.
-    backgroundColor: "#1a1a1a",
+    backgroundColor: responseBackgroundColor(),
     alwaysOnTop: true,
     show: false,
     webPreferences: {

@@ -1,14 +1,4 @@
-import {
-  app,
-  BrowserWindow,
-  nativeTheme,
-  ipcMain,
-  screen,
-  clipboard,
-  shell,
-  dialog,
-  globalShortcut,
-} from "electron";
+import { app, BrowserWindow, nativeTheme, ipcMain, screen, globalShortcut } from "electron";
 import type {
   ChatHead,
   DockConfig,
@@ -21,7 +11,6 @@ import type { ChatThread } from "@slashtalk/shared";
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
-import { isSafeExternalUrl } from "./safeUrl";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
@@ -81,7 +70,7 @@ import {
 } from "./windows/rail-visibility";
 import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, showResponse } from "./windows/response";
-import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
+import { createTray, getTrayPopup, toggleTrayPopup } from "./windows/tray";
 import { broadcast, sendWhenLoaded } from "./windows/broadcast";
 import {
   configureDockDrag,
@@ -92,6 +81,8 @@ import {
 import * as spotifyToggle from "./sync/spotify-toggle";
 import * as userLocation from "./sync/user-location";
 import { configureAgents, registerAgents } from "./ipc/agents";
+import { configureDebug, registerDebug, registerDebugShortcuts } from "./ipc/debug";
+import { registerShellIpc } from "./ipc/shell";
 
 installMcp.configureInstaller({
   localProxySecret: getLocalMcpProxySecret,
@@ -740,112 +731,14 @@ spotifyToggle.register();
 
 userLocation.register();
 
-ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
-ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
-ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());
-ipcMain.handle("debug:addFakeTeammate", () => rail.debugAddFakeTeammate());
-ipcMain.handle("debug:removeFakeTeammate", () => rail.debugRemoveFakeTeammate());
-ipcMain.handle("debug:replayEnterAnimation", () => replayEnterAnimation());
-ipcMain.handle("debug:fireCollision", () => runDebugFireCollision());
-ipcMain.handle("debug:fireCollisionOnFake", () => runDebugFireCollisionOnFake());
-ipcMain.handle("collision:dismiss", (_e, login: string) => {
-  if (typeof login === "string" && login.length > 0) rail.dismissCollision(login);
+configureDebug({
+  getOverlay: () => overlayWindow,
+  getSelectedHeadId: () => selectedHeadId,
+  getCachedSessions: (headId) => sessionCache.get(headId),
+  fetchSessionsForHead,
+  verifyAndMarkCollision,
 });
-
-// DEV ONLY — fire a synthetic collision against a peer in the rail, picking
-// a real file from one of their live sessions so the in-row banner has
-// something to attach to. Both ring + popover banner are guaranteed to
-// appear together (or neither does — see verifyAndMarkCollision).
-
-async function runDebugFireCollision(): Promise<void> {
-  const heads = rail.list();
-  // Prefer the head whose popover is currently open — that way the warning
-  // shows up in the popover you're already looking at. Fall back to other
-  // peers if the selected one has no usable sessions.
-  const selfHead = heads[0];
-  const ordered = selectedHeadId
-    ? [
-        ...heads.filter((h) => h.id === selectedHeadId),
-        ...heads.filter((h) => h.id !== selectedHeadId),
-      ]
-    : heads;
-  console.log(
-    `[debug] runDebugFireCollision invoked, rail=${heads.length} selected=${selectedHeadId ?? "(none)"}`,
-  );
-
-  // Find the first peer whose live (non-ENDED) sessions contain a real file
-  // we can collide on. Routes through the same verify-and-mark helper used
-  // by the WS path so debug + production produce identical UI guarantees.
-  for (const head of ordered) {
-    if (head === selfHead) continue;
-    const login = rail.parseUserHeadId(head.id);
-    if (!login) continue;
-    if (!sessionCache.has(head.id)) {
-      try {
-        await fetchSessionsForHead(head.id);
-      } catch {
-        continue;
-      }
-    }
-    const sessions = sessionCache.get(head.id);
-    const realFile = pickRealFileFromSessions(sessions);
-    if (realFile == null) continue;
-    console.log(`[debug] fireCollision → ${login} on ${realFile}`);
-    await verifyAndMarkCollision(login, realFile);
-    return;
-  }
-  console.warn(
-    "[debug] fireCollision: no peer in rail has a live session with edited/written files — try opening Cmd+Shift+' (collision-on-fake) instead, or wait for a teammate to start editing.",
-  );
-}
-
-/**
- * Returns the first real file path appearing in any of the peer's *live*
- * (non-ENDED) sessions' topFilesEdited/Written. Returns null when none
- * found — the caller should try the next peer rather than fall back to a
- * hardcoded path that won't match any session predicate.
- */
-function pickRealFileFromSessions(sessions: InfoSession[] | undefined): string | null {
-  if (!sessions) return null;
-  const fields: Array<keyof Pick<InfoSession, "topFilesEdited" | "topFilesWritten">> = [
-    "topFilesEdited",
-    "topFilesWritten",
-  ];
-  for (const field of fields) {
-    for (const s of sessions) {
-      if (s.state === "ended") continue;
-      const top = s[field];
-      if (!Array.isArray(top) || top.length === 0) continue;
-      for (const entry of top) {
-        if (Array.isArray(entry) && typeof entry[0] === "string" && entry[0].length > 0) {
-          return entry[0];
-        }
-      }
-    }
-  }
-  return null;
-}
-
-async function runDebugFireCollisionOnFake(): Promise<void> {
-  console.log(`[debug] runDebugFireCollisionOnFake invoked`);
-  rail.debugAddFakeTeammate();
-  // Fakes have no backend sessions to attach a popover banner to, so we
-  // bypass verification and stamp the ring directly. Hovering the fake
-  // bubble shows nothing useful — this path is only for testing the
-  // ring/halo animation in isolation.
-  const heads = rail.list();
-  for (let i = heads.length - 1; i > 0; i--) {
-    const login = rail.parseUserHeadId(heads[i].id);
-    if (!login || !login.startsWith("debug_")) continue;
-    rail.markCollision(login, "src/example.ts");
-    return;
-  }
-}
-
-function replayEnterAnimation(): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("debug:replayEnter");
-}
+registerDebug();
 
 rail.onChange((next) => {
   heads = next;
@@ -977,40 +870,7 @@ configureDockDrag({
 });
 registerDockDrag();
 
-ipcMain.handle("app:openMain", (): void => {
-  showMainWindow();
-  hideTrayPopup();
-});
-
-ipcMain.handle("app:openAgentCreator", (): void => {
-  const win = showMainWindow();
-  hideTrayPopup();
-  sendWhenLoaded(win, "agents:openCreator", null);
-});
-
-ipcMain.handle("app:quit", (): void => app.quit());
-
-ipcMain.handle("clipboard:writeText", (_e, text: string): void => clipboard.writeText(text ?? ""));
-ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
-  if (!isSafeExternalUrl(url)) {
-    console.warn(`[shell:openExternal] refusing url: ${url}`);
-    return;
-  }
-  await shell.openExternal(url);
-});
-
-ipcMain.handle(
-  "dialog:selectDirectory",
-  async (_e, defaultPath?: string): Promise<string | null> => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory"],
-      title: "Choose working directory",
-      ...(defaultPath ? { defaultPath } : {}),
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0] ?? null;
-  },
-);
+registerShellIpc();
 
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
@@ -1417,27 +1277,7 @@ app.whenReady().then(async () => {
   selfSession.start();
   applySyncForAuth(backend.getAuthState().signedIn);
 
-  // DEV ONLY — rail test shortcuts. Remove before shipping.
-  if (!app.isPackaged) {
-    const bindings: Array<[string, () => void]> = [
-      ["CommandOrControl+Shift+R", () => rail.debugShuffleRail()],
-      ["CommandOrControl+Shift+J", () => rail.debugAddFakeTeammate()],
-      ["CommandOrControl+Shift+L", () => rail.debugRemoveFakeTeammate()],
-      ["CommandOrControl+Shift+K", () => replayEnterAnimation()],
-      // Fire a synthetic collision against the first peer (or do nothing if
-      // the rail is empty). Picks a real file from the peer's cached sessions
-      // so the in-row banner attaches. Using semicolon to avoid OS-level
-      // bindings that capture Cmd+Shift+letter combos.
-      ["CommandOrControl+Shift+;", () => void runDebugFireCollision()],
-      // Same, but spawns a fake teammate first so a single shortcut on an
-      // empty rail still produces a visible rail-ring animation.
-      ["CommandOrControl+Shift+'", () => void runDebugFireCollisionOnFake()],
-    ];
-    for (const [accel, fn] of bindings) {
-      const ok = globalShortcut.register(accel, fn);
-      console.log(`[debug] shortcut ${accel}: ${ok ? "registered" : "FAILED"}`);
-    }
-  }
+  registerDebugShortcuts();
 });
 
 app.on("before-quit", () => {

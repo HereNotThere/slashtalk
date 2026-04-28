@@ -11,6 +11,11 @@ export default defineConfig({
     // built-ins, npm deps) stays external.
     plugins: [externalizeDepsPlugin({ exclude: ["@slashtalk/shared"] })],
     build: {
+      // Defining build.rollupOptions below shadows electron-vite's automatic
+      // dev-mode watch injection, leaving main as a one-shot build. Setting
+      // watch:{} re-enables Rollup's watcher so edits trigger a rebuild +
+      // electron app restart instead of needing a manual `bun run dev`.
+      watch: {},
       rollupOptions: {
         input: { index: resolve(__dirname, "src/main/index.ts") },
       },
@@ -19,6 +24,7 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      watch: {},
       rollupOptions: {
         input: { index: resolve(__dirname, "src/preload/index.ts") },
         // Emit as .cjs so Node always parses as CommonJS, independent of the

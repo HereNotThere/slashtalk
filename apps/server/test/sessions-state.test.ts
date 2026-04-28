@@ -80,7 +80,7 @@ describe("classifySessionState", () => {
       classifySessionState({
         heartbeatUpdatedAt: sec(5),
         inTurn: true,
-        lastTs: sec(86400), // 1 day ago — the benrbn case
+        lastTs: sec(86400), // 1 day ago
         now: NOW,
       }),
     ).toBe(SessionState.IDLE);

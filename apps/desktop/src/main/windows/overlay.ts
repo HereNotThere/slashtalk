@@ -241,6 +241,10 @@ export function resizeOverlay(): void {
   // display changes (resolution / monitor connect / disconnect).
   const nextBounds = computeDockBoundsOn(display, dock, length);
   const bounds = overlayWindow.getBounds();
+  // Push dock to the renderer first so flex direction swaps before the resize
+  // (matches drag:end). No-op when the dock hasn't changed; only matters when a
+  // display change flips the overlay's classified edge across orientations.
+  sendOverlayConfig();
   // `animate: true` uses macOS's native NSWindow animator (~200ms ease), which
   // reads as a fluid grow/shrink alongside the renderer's bubble enter/exit
   // animations. No-op on other platforms.

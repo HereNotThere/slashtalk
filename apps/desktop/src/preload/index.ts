@@ -15,6 +15,7 @@ import type {
   GithubConnectState,
   GithubPendingConnect,
   InfoSession,
+  InfoShowPayload,
   McpInstallStatus,
   McpInstallOptions,
   McpPresenceDetail,
@@ -127,6 +128,8 @@ const bridge: ChatHeadsBridge = {
     onEnabledChange: (cb) => subscribe<boolean>("spotify:shareEnabled", cb),
   },
 
+  setUserLocation: (payload) => ipcRenderer.invoke("user:setLocation", payload) as Promise<void>,
+
   showInfo: (headId, bubbleScreen) =>
     ipcRenderer.invoke("heads:showInfo", headId, bubbleScreen) as Promise<void>,
   infoHoverEnter: () => ipcRenderer.invoke("info:hoverEnter") as Promise<void>,
@@ -170,13 +173,7 @@ const bridge: ChatHeadsBridge = {
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 
-  onInfoShow: (cb) =>
-    subscribe<{
-      head: ChatHead;
-      sessions: InfoSession[] | null;
-      expandSessionId?: string | null;
-      spotify: SpotifyPresence | null;
-    }>("info:show", cb),
+  onInfoShow: (cb) => subscribe<InfoShowPayload>("info:show", cb),
   onInfoHide: (cb) => {
     const handler = (): void => cb();
     ipcRenderer.on("info:hide", handler);

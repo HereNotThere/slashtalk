@@ -22,6 +22,7 @@ import type {
   McpTarget,
   ResponseOpenPayload,
   UpdateAgentInput,
+  UserLocation,
 } from "../shared/types";
 import * as store from "./store";
 import * as backend from "./backend";
@@ -45,6 +46,7 @@ import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
 import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
+import * as peerLocations from "./peerLocations";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
 import {
   BUBBLE_PAD,
@@ -554,12 +556,13 @@ async function showInfo(
   // handles the `null` cases by loading on its own effect.
   const cached = sessionCache.get(head.id) ?? null;
   const login = rail.parseUserHeadId(head.id);
-  const spotifyPresence = login ? peerPresence.get(login) : null;
   win.webContents.send("info:show", {
     head,
     sessions: cached,
     expandSessionId: expandSessionId ?? null,
-    spotify: spotifyPresence,
+    spotify: login ? peerPresence.get(login) : null,
+    location: login ? peerLocations.get(login) : null,
+    isSelf: backend.isSelf(login),
   });
 
   // Animate position/size when switching heads on an already-visible window;
@@ -584,6 +587,8 @@ async function showInfo(
         sessions: loaded,
         expandSessionId: expandSessionId ?? null,
         spotify: refreshedLogin ? peerPresence.get(refreshedLogin) : null,
+        location: refreshedLogin ? peerLocations.get(refreshedLogin) : null,
+        isSelf: backend.isSelf(refreshedLogin),
       });
     });
   }
@@ -725,6 +730,64 @@ ipcMain.handle("spotify:setShareEnabled", async (_e, enabled: boolean): Promise<
     }
   }
   updateSpotifyRunning();
+});
+
+// User location — renderer reports IANA tz + resolved city. We cache the
+// latest payload so a sign-in can re-post when the renderer reported it while
+// signed out, and dedup so concurrent renderers don't each fire a POST.
+// lastSent is keyed by login so an account switch doesn't dedup against the
+// previous account's value (and a sign-out racing the POST can't restore a
+// stale lastSent that hides the next account's flush).
+let lastKnownUserLocation: UserLocation | null = null;
+let lastSentUserLocation: { login: string; location: UserLocation } | null = null;
+let userLocationFlush: Promise<void> | null = null;
+
+async function flushUserLocation(): Promise<void> {
+  if (userLocationFlush) return userLocationFlush;
+  userLocationFlush = (async () => {
+    try {
+      // Loop so a setLocation arriving while the POST is in flight still
+      // gets sent — otherwise the new value would land in lastKnown but
+      // never trigger a follow-up flush.
+      while (true) {
+        const auth = backend.getAuthState();
+        if (!auth.signedIn) return;
+        const next = lastKnownUserLocation;
+        if (!next) return;
+        const login = auth.user.githubLogin;
+        if (
+          lastSentUserLocation &&
+          lastSentUserLocation.login === login &&
+          lastSentUserLocation.location.timezone === next.timezone &&
+          lastSentUserLocation.location.city === next.city
+        ) {
+          return;
+        }
+        await backend.postUserLocation(next);
+        // Re-check after await: if we signed out or switched accounts during
+        // the POST, dropping the write keeps lastSent from masking the next
+        // account's flush.
+        const after = backend.getAuthState();
+        if (after.signedIn && after.user.githubLogin === login) {
+          lastSentUserLocation = { login, location: next };
+        }
+      }
+    } catch (err) {
+      console.warn("[user-location] post failed", err);
+    } finally {
+      userLocationFlush = null;
+    }
+  })();
+  return userLocationFlush;
+}
+
+ipcMain.handle("user:setLocation", async (_e, payload: UserLocation): Promise<void> => {
+  lastKnownUserLocation = payload;
+  await flushUserLocation();
+});
+
+backend.onChange((state) => {
+  if (state.signedIn) void flushUserLocation();
 });
 
 ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
@@ -1562,6 +1625,7 @@ function applySyncForAuth(signedIn: boolean): void {
     void heartbeat.start();
     updateSpotifyRunning();
     void peerPresence.start();
+    void peerLocations.start();
     ws.start();
     for (const target of ["claude-code", "codex"] as const) {
       void installMcp
@@ -1573,6 +1637,7 @@ function applySyncForAuth(signedIn: boolean): void {
     uploader.reset();
     updateSpotifyRunning();
     peerPresence.stop();
+    peerLocations.stop();
     ws.stop();
     for (const target of ["claude-code", "codex"] as const) {
       void installMcp
@@ -1722,6 +1787,8 @@ async function refreshInfoNow(): Promise<void> {
       head,
       sessions,
       spotify: refreshLogin ? peerPresence.get(refreshLogin) : null,
+      location: refreshLogin ? peerLocations.get(refreshLogin) : null,
+      isSelf: backend.isSelf(refreshLogin),
     });
   } catch (e) {
     console.warn("[ws] refreshInfoNow failed:", e);

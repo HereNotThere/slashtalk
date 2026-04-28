@@ -9,7 +9,7 @@ import type {
   SpotifyPresence,
   TokenUsage,
 } from "@slashtalk/shared";
-import type { ChatHead, InfoSession } from "../../shared/types";
+import type { ChatHead, InfoSession, UserLocation } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
@@ -35,6 +35,8 @@ export function App(): JSX.Element {
     nonce: number;
   } | null>(null);
   const [spotify, setSpotify] = useState<SpotifyPresence | null>(null);
+  const [location, setLocation] = useState<UserLocation | null>(null);
+  const [isSelf, setIsSelf] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Measure the inner content, not the card: the card is capped at max-h-screen
@@ -46,6 +48,8 @@ export function App(): JSX.Element {
       setHead(p.head);
       setSessions(p.sessions);
       setSpotify(p.spotify);
+      setLocation(p.location);
+      setIsSelf(p.isSelf);
       setVisible(true);
       // Re-request even when id matches a prior request — clicking the same
       // card twice should re-expand if the user collapsed it in between.
@@ -155,7 +159,7 @@ export function App(): JSX.Element {
           <AgentPanel head={head} />
         ) : (
           <>
-            <UserHeader head={head} sessions={sessions} />
+            <UserHeader head={head} sessions={sessions} location={location} isSelf={isSelf} />
             {spotify && <NowPlaying track={spotify} />}
             <Divider />
             <SessionsSection
@@ -205,35 +209,66 @@ function Divider(): JSX.Element {
   return <div className="mx-4 h-px bg-divider" />;
 }
 
+function formatHeaderTime(timeZone: string | null | undefined): string | null {
+  try {
+    return new Date().toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timeZone ?? undefined,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function UserHeader({
   head,
   sessions,
+  location,
+  isSelf,
 }: {
   head: ChatHead | null;
   sessions: InfoSession[] | null;
+  location: UserLocation | null;
+  isSelf: boolean;
 }): JSX.Element {
   const name = head?.label ?? "—";
-  const time = new Date().toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  const { city, icon } = useLocationWeather();
+  // Self: resolve locally as before. Peer with data: show their tz/city.
+  // Peer with no server data yet: render only name + avatar — falling back
+  // to local would mislabel the peer's card with our clock.
+  const { city, icon } = useLocationWeather(isSelf ? undefined : location);
+  const showLocationRow = isSelf || location !== null;
+  // Self: device's local tz (stale peer-poll cache could otherwise lock the
+  // clock to the previously-persisted tz across travel).
+  // Peer with no tz: skip the clock — falling back to undefined would render
+  // the viewer's local tz and mislabel it as the peer's.
+  // Peer with tz: wrap in try/catch (formatHeaderTime) so a malformed value
+  // drops the clock instead of crashing the card subtree.
+  const time = !showLocationRow
+    ? null
+    : isSelf
+      ? formatHeaderTime(null)
+      : location?.timezone
+        ? formatHeaderTime(location.timezone)
+        : null;
   const totalTokensLabel = fmtTokens(sumSessionTokens(sessions));
   return (
     <div className="flex items-start gap-3 px-4 pt-4 pb-3">
       <Avatar head={head} />
       <div className="flex-1 min-w-0">
         <div className="text-lg font-bold leading-tight truncate">{name}</div>
-        <div className="mt-1 flex items-center gap-1.5 text-sm text-muted whitespace-nowrap min-w-0">
-          {city && (
-            <>
-              {icon && <span className="shrink-0">{icon}</span>}
-              <span className="truncate">{city}</span>
-              <span className="text-subtle shrink-0">·</span>
-            </>
-          )}
-          <span className="shrink-0">{time}</span>
-        </div>
+        {showLocationRow && (
+          <div className="mt-1 flex items-center gap-1.5 text-sm text-muted whitespace-nowrap min-w-0">
+            {city && (
+              <>
+                {icon && <span className="shrink-0">{icon}</span>}
+                <span className="truncate">{city}</span>
+                {time && <span className="text-subtle shrink-0">·</span>}
+              </>
+            )}
+            {time && <span className="shrink-0">{time}</span>}
+          </div>
+        )}
         {totalTokensLabel && (
           <div className="mt-1 flex items-center gap-1.5 text-sm text-muted">
             <ClaudeIcon />

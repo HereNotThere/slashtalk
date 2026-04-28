@@ -134,6 +134,22 @@ async function resolveLocationCached(): Promise<ResolvedLocation | null> {
   return loc;
 }
 
+const peerLocationCache = new Map<string, ResolvedLocation>();
+
+async function resolvePeerCity(city: string): Promise<ResolvedLocation | null> {
+  const hit = peerLocationCache.get(city);
+  if (hit) return hit;
+  const loc = await geocodeCity(city);
+  if (loc) peerLocationCache.set(city, loc);
+  return loc;
+}
+
+function reportLocationToMain(city: string | null): void {
+  // Tests import this module without an electron bridge — guard.
+  if (typeof window === "undefined" || !window.chatheads?.setUserLocation) return;
+  void window.chatheads.setUserLocation({ timezone: currentTimezone(), city });
+}
+
 async function fetchWeatherIconCached(lat: number, lon: number): Promise<string | null> {
   const now = Date.now();
   if (
@@ -149,18 +165,50 @@ async function fetchWeatherIconCached(lat: number, lon: number): Promise<string 
   return icon;
 }
 
-export function useLocationWeather(): LocationWeather {
-  const [state, setState] = useState<LocationWeather>({
-    city: cachedLocation?.city ?? null,
-    icon: cachedWeather?.icon ?? null,
+/** Calling without arguments runs the existing self path: resolve via local
+ *  timezone, IP fallback, and report back to main.
+ *
+ *  Passing `override` (even `null` or `{city: null}`) switches to peer mode:
+ *  no local resolve, no server report. If `override.city` is set we geocode
+ *  it for the weather icon; otherwise the hook returns empty state so the
+ *  caller can render nothing for a peer we don't have data on yet. */
+export function useLocationWeather(
+  override?: { timezone: string | null; city: string | null } | null,
+): LocationWeather {
+  const isPeerMode = override !== undefined;
+  const overrideCity = override?.city ?? null;
+
+  const [state, setState] = useState<LocationWeather>(() => {
+    if (isPeerMode) return { city: overrideCity, icon: null };
+    return {
+      city: cachedLocation?.city ?? null,
+      icon: cachedWeather?.icon ?? null,
+    };
   });
 
   useEffect(() => {
     let cancelled = false;
+
+    if (isPeerMode) {
+      setState({ city: overrideCity, icon: null });
+      if (!overrideCity) return;
+      void resolvePeerCity(overrideCity).then(async (loc) => {
+        if (cancelled || !loc) return;
+        setState((s) => (s.city === loc.city ? s : { ...s, city: loc.city }));
+        const icon = await fetchWeatherIconCached(loc.lat, loc.lon);
+        if (cancelled || !icon) return;
+        setState((s) => (s.icon === icon ? s : { ...s, icon }));
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const run = async (): Promise<void> => {
       const loc = await resolveLocationCached();
       if (cancelled || !loc) return;
       setState((s) => (s.city === loc.city ? s : { ...s, city: loc.city }));
+      reportLocationToMain(loc.city);
       const icon = await fetchWeatherIconCached(loc.lat, loc.lon);
       if (cancelled || !icon) return;
       setState((s) => (s.icon === icon ? s : { ...s, icon }));
@@ -184,7 +232,7 @@ export function useLocationWeather(): LocationWeather {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isPeerMode, overrideCity]);
 
   return state;
 }

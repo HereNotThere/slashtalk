@@ -378,6 +378,8 @@ Drizzle export: `users`.
 | `github_app_refresh_token_expires_at` | `PgTimestamp` | — |
 | `github_app_connected_at` | `PgTimestamp` | — |
 | `credentials_revoked_at` | `PgTimestamp` | — |
+| `timezone` | `PgText` | — |
+| `city` | `PgText` | — |
 | `created_at` | `PgTimestamp` | has default |
 | `updated_at` | `PgTimestamp` | has default |
 

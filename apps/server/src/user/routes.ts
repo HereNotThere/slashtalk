@@ -12,7 +12,7 @@ import {
   deviceRepoPaths,
   sessions,
 } from "../db/schema";
-import { jwtAuth } from "../auth/middleware";
+import { jwtAuth, apiKeyAuth } from "../auth/middleware";
 import { authAudit } from "../auth/audit";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
@@ -352,3 +352,41 @@ export const deviceReposRoutes = (db: Database) =>
         }),
       },
     );
+
+// Reject anything Intl doesn't know — otherwise a malicious client could
+// store "lol" and crash every peer's info-card render via toLocaleTimeString.
+function isValidIanaTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// apiKey-authed (lives on /v1) so the desktop's device key authorizes this.
+export const userLocationRoutes = (db: Database) =>
+  new Elysia({ prefix: "/v1/me", name: "user-location" }).use(apiKeyAuth).post(
+    "/location",
+    async ({ body, user, set }) => {
+      if (body.timezone !== null && !isValidIanaTimezone(body.timezone)) {
+        set.status = 400;
+        return { ok: false as const, error: "invalid_timezone" };
+      }
+      await db
+        .update(users)
+        .set({
+          timezone: body.timezone,
+          city: body.city,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
+      return { ok: true as const };
+    },
+    {
+      body: t.Object({
+        timezone: t.Union([t.String({ maxLength: 64 }), t.Null()]),
+        city: t.Union([t.String({ maxLength: 128 }), t.Null()]),
+      }),
+    },
+  );

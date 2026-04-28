@@ -4,7 +4,12 @@ import { ROLLING_SUMMARY_ANALYZER } from "./names";
 import type { events } from "../db/schema";
 import { compactEvent, isNarrativeEvent } from "./event-compact";
 import { MODELS } from "../models";
-import { promptHistoryLines, topJsonbEntries } from "./session-context";
+import {
+  UNTRUSTED_INPUT_CONTRACT_ANALYZER,
+  fenceUntrusted,
+  promptHistoryLines,
+  topJsonbEntries,
+} from "./session-context";
 
 const VERSION = "3";
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -35,7 +40,7 @@ const SCHEMA = {
   required: ["summary", "highlights"],
 };
 
-const SYSTEM = `You narrate a coding session so a teammate glancing at a sidebar instantly gets the *point* of the work — the feature, fix, or refactor at the heart of the session, not the most recent keystroke.
+export const ROLLING_SUMMARY_SYSTEM = `You narrate a coding session so a teammate glancing at a sidebar instantly gets the *point* of the work — the feature, fix, or refactor at the heart of the session, not the most recent keystroke.
 
 summary: 3-5 present-tense sentences. Punchy verbs, concrete nouns. Name the file, the function, the bug, the approach being tried. Anchor on the session's goal — what is the developer building or fixing? — and use recent activity to flesh out *how* they're doing it, not to redirect the narrative.
 
@@ -55,7 +60,9 @@ Do NOT highlight any of the following:
 - idle time, paused state, "awaiting next task"
 - routine edits already obvious from the summary
 
-If you can't find 3 substantive code/product changes, return fewer bullets — or none. Empty highlights are better than filler.`;
+If you can't find 3 substantive code/product changes, return fewer bullets — or none. Empty highlights are better than filler.
+
+${UNTRUSTED_INPUT_CONTRACT_ANALYZER}`;
 
 export function buildPrompt(
   ctx: AnalyzerContext,
@@ -64,32 +71,36 @@ export function buildPrompt(
 ): string {
   const s = ctx.session;
   const parts: string[] = [];
-  if (prior) parts.push(`prior summary:\n${prior.summary}`);
-  parts.push(`project: ${s.project}`);
-  if (s.cwd) parts.push(`cwd: ${s.cwd}`);
+  if (prior) parts.push(`prior summary:\n${fenceUntrusted(prior.summary)}`);
+  parts.push(`project: ${fenceUntrusted(s.project)}`);
+  if (s.cwd) parts.push(`cwd: ${fenceUntrusted(s.cwd)}`);
   if (s.title) {
     parts.push(
-      `original task anchor (first real user prompt; prefer this over late subtasks unless the session clearly pivoted):\n${s.title}`,
+      `original task anchor (first real user prompt; prefer this over late subtasks unless the session clearly pivoted):\n${fenceUntrusted(s.title)}`,
     );
   }
   const prompts = promptHistoryLines(s.recentPrompts, s.lastUserPrompt);
   if (prompts.length) {
     parts.push(
-      `recent user prompts (oldest first; later entries may be subtasks or acknowledgements, not necessarily a new task):\n${prompts.join("\n")}`,
+      `recent user prompts (oldest first; later entries may be subtasks or acknowledgements, not necessarily a new task):\n${fenceUntrusted(prompts.join("\n"))}`,
     );
   }
 
   const edited = topJsonbEntries(s.topFilesEdited, 5);
   const written = topJsonbEntries(s.topFilesWritten, 5);
-  if (edited.length) parts.push(`top files edited (all-time): ${JSON.stringify(edited)}`);
-  if (written.length) parts.push(`top files written (all-time): ${JSON.stringify(written)}`);
+  if (edited.length)
+    parts.push(`top files edited (all-time):\n${fenceUntrusted(JSON.stringify(edited))}`);
+  if (written.length)
+    parts.push(`top files written (all-time):\n${fenceUntrusted(JSON.stringify(written))}`);
 
   const narrative = recent.filter(isNarrativeEvent);
   if (narrative.length) {
     const compact = narrative.map(compactEvent).join("\n");
-    parts.push(`recent events (oldest first):\n${compact}`);
+    parts.push(`recent events (oldest first):\n${fenceUntrusted(compact)}`);
   } else if (Array.isArray(s.recentEvents) && s.recentEvents.length) {
-    parts.push(`recent events (ring buffer):\n${JSON.stringify(s.recentEvents).slice(0, 4000)}`);
+    parts.push(
+      `recent events (ring buffer):\n${fenceUntrusted(JSON.stringify(s.recentEvents).slice(0, 4000))}`,
+    );
   }
 
   return parts.join("\n\n");
@@ -124,7 +135,7 @@ export const rollingSummaryAnalyzer: Analyzer<RollingSummaryOutput> = {
     const prompt = buildPrompt(ctx, recent, prior);
     const result = await callStructured<RollingSummaryOutput>({
       model: MODELS.haiku,
-      system: SYSTEM,
+      system: ROLLING_SUMMARY_SYSTEM,
       prompt,
       toolName: "emit_rolling_summary",
       toolDescription: "Emit a rolling narrative summary for this live session.",

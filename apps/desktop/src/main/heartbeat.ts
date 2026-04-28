@@ -7,10 +7,10 @@ import os from "node:os";
 import path from "node:path";
 import type { FSWatcher } from "node:fs";
 import * as backend from "./backend";
+import { CLAUDE_SESSIONS_DIR, listSessionMeta } from "./claudeSessionMeta";
 import * as localRepos from "./localRepos";
 import * as uploader from "./uploader";
 
-const CLAUDE_SESSIONS_DIR = path.join(os.homedir(), ".claude", "sessions");
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), ".codex", "sessions");
 const CURSOR_PROJECTS_DIR = path.join(os.homedir(), ".cursor", "projects");
 
@@ -46,68 +46,21 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-async function readClaudeLiveSession(filePath: string): Promise<LiveSession | null> {
-  let text: string;
-  try {
-    text = await fsp.readFile(filePath, "utf8");
-  } catch (err) {
-    console.error("[heartbeat] readFile failed", filePath, err);
-    return null;
-  }
-
-  let parsed: {
-    pid?: unknown;
-    sessionId?: unknown;
-    kind?: unknown;
-    cwd?: unknown;
-    version?: unknown;
-    startedAt?: unknown;
-  };
-  try {
-    parsed = JSON.parse(text);
-  } catch (err) {
-    console.error("[heartbeat] malformed session file", filePath, err);
-    return null;
-  }
-
-  const pid = typeof parsed.pid === "number" ? parsed.pid : null;
-  const sessionId = typeof parsed.sessionId === "string" ? parsed.sessionId : null;
-  if (pid === null || !sessionId) return null;
-
-  let startedAt: string | undefined;
-  if (typeof parsed.startedAt === "number") {
-    startedAt = new Date(parsed.startedAt).toISOString();
-  } else if (typeof parsed.startedAt === "string") {
-    startedAt = parsed.startedAt;
-  }
-
-  return {
-    pid,
-    sessionId,
-    kind: typeof parsed.kind === "string" ? parsed.kind : undefined,
-    cwd: typeof parsed.cwd === "string" ? parsed.cwd : undefined,
-    version: typeof parsed.version === "string" ? parsed.version : undefined,
-    startedAt,
-  };
-}
-
 async function enumerateClaudeLive(): Promise<LiveSession[]> {
-  let entries: string[];
-  try {
-    entries = await fsp.readdir(CLAUDE_SESSIONS_DIR);
-  } catch (err) {
-    console.error("[heartbeat] readdir sessions failed", err);
-    return [];
-  }
-
+  const metas = await listSessionMeta();
   const out: LiveSession[] = [];
-  for (const name of entries) {
-    if (!name.endsWith(".json")) continue;
-    const session = await readClaudeLiveSession(path.join(CLAUDE_SESSIONS_DIR, name));
-    if (!session?.pid || !pidAlive(session.pid)) continue;
-    if (!localRepos.isPathTracked(session.cwd)) continue;
-    if (!uploader.hasIngested(session.sessionId)) continue;
-    out.push(session);
+  for (const meta of metas) {
+    if (!pidAlive(meta.pid)) continue;
+    if (!localRepos.isPathTracked(meta.cwd)) continue;
+    if (!uploader.hasIngested(meta.sessionId)) continue;
+    out.push({
+      pid: meta.pid,
+      sessionId: meta.sessionId,
+      kind: meta.kind,
+      cwd: meta.cwd,
+      version: meta.version,
+      startedAt: meta.startedAt,
+    });
   }
   return out;
 }

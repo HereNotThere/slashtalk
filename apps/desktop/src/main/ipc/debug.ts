@@ -14,14 +14,12 @@ interface DebugDeps {
   verifyAndMarkCollision: (login: string, filePath: string) => Promise<void>;
 }
 
-let deps: DebugDeps | null = null;
-function getDeps(): DebugDeps {
-  if (!deps) throw new Error("debug: configureDebug() must be called before use");
-  return deps;
-}
+// Set on register. registerDebug must run before any of the IPC handlers or
+// shortcut bindings can fire, so non-null access inside helpers is safe.
+let deps: DebugDeps;
 
 function replayEnterAnimation(): void {
-  const overlay = getDeps().getOverlay();
+  const overlay = deps.getOverlay();
   if (!overlay || overlay.isDestroyed()) return;
   overlay.webContents.send("debug:replayEnter");
 }
@@ -32,7 +30,7 @@ function replayEnterAnimation(): void {
 // appear together (or neither does — see verifyAndMarkCollision).
 async function runDebugFireCollision(): Promise<void> {
   const heads = rail.list();
-  const selectedHeadId = getDeps().getSelectedHeadId();
+  const selectedHeadId = deps.getSelectedHeadId();
   // Prefer the head whose popover is currently open — that way the warning
   // shows up in the popover you're already looking at. Fall back to other
   // peers if the selected one has no usable sessions.
@@ -54,18 +52,18 @@ async function runDebugFireCollision(): Promise<void> {
     if (head === selfHead) continue;
     const login = rail.parseUserHeadId(head.id);
     if (!login) continue;
-    if (!getDeps().getCachedSessions(head.id)) {
+    if (!deps.getCachedSessions(head.id)) {
       try {
-        await getDeps().fetchSessionsForHead(head.id);
+        await deps.fetchSessionsForHead(head.id);
       } catch {
         continue;
       }
     }
-    const sessions = getDeps().getCachedSessions(head.id);
+    const sessions = deps.getCachedSessions(head.id);
     const realFile = pickRealFileFromSessions(sessions);
     if (realFile == null) continue;
     console.log(`[debug] fireCollision → ${login} on ${realFile}`);
-    await getDeps().verifyAndMarkCollision(login, realFile);
+    await deps.verifyAndMarkCollision(login, realFile);
     return;
   }
   console.warn(
@@ -116,11 +114,9 @@ async function runDebugFireCollisionOnFake(): Promise<void> {
   }
 }
 
-export function configureDebug(d: DebugDeps): void {
+export function registerDebug(d: DebugDeps): void {
   deps = d;
-}
 
-export function registerDebug(): void {
   ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
   ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
   ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());

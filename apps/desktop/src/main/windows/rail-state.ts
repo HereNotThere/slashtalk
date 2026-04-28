@@ -10,6 +10,7 @@
 
 import type { BrowserWindow } from "electron";
 import * as store from "../store";
+import { broadcast } from "./broadcast";
 
 const PINNED_KEY = "railPinned";
 const SESSION_ONLY_KEY = "railSessionOnlyMode";
@@ -94,10 +95,7 @@ export function setSpotifyShareEnabled(value: boolean): void {
  *  overlay (the rail itself), main (settings UI), tray popup (toggles). */
 function broadcastToRailTargets<T>(channel: string, payload: T): void {
   if (!deps) return;
-  const targets = [deps.getOverlay(), deps.getMainWindow(), deps.getTrayPopup()].filter(
-    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
-  );
-  for (const w of targets) w.webContents.send(channel, payload);
+  broadcast(channel, payload, deps.getOverlay(), deps.getMainWindow(), deps.getTrayPopup());
 }
 
 export function broadcastRailPinned(): void {

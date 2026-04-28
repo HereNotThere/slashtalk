@@ -23,17 +23,11 @@ interface AgentsDeps {
   getInfoWindow: () => BrowserWindow | null;
 }
 
-let deps: AgentsDeps | null = null;
-function getDeps(): AgentsDeps {
-  if (!deps) throw new Error("agents: configureAgents() must be called before use");
-  return deps;
-}
-
 const streamingAgents = new Set<string>();
 const pendingArchive = new Set<string>();
 const PENDING_ARCHIVE_TTL_MS = 30_000;
 
-export function toAgentSummary(a: LocalAgent): AgentSummary {
+function toAgentSummary(a: LocalAgent): AgentSummary {
   return {
     id: a.id,
     name: a.name,
@@ -57,8 +51,12 @@ function truncateTitle(text: string): string {
   return clean.length <= 60 ? clean : clean.slice(0, 57) + "...";
 }
 
+// Set on register; safe to `!` since the only callers are inside IPC handlers
+// installed by register itself.
+let getInfoWindow: () => BrowserWindow | null = () => null;
+
 function consumerWindows(): BrowserWindow[] {
-  return liveWindows(getMainWindow(), getDeps().getInfoWindow(), getResponseWindow());
+  return liveWindows(getMainWindow(), getInfoWindow(), getResponseWindow());
 }
 
 function emitSessionsChange(agentId: string): void {
@@ -118,11 +116,9 @@ async function finalizeTeamSession(
   }
 }
 
-export function configureAgents(d: AgentsDeps): void {
-  deps = d;
-}
+export function registerAgents(deps: AgentsDeps): void {
+  getInfoWindow = deps.getInfoWindow;
 
-export function registerAgents(): void {
   ipcMain.handle("agents:isConfigured", () => anthropic.isConfigured());
   ipcMain.handle("agents:setApiKey", async (_e, key: string): Promise<void> => {
     await anthropic.setApiKey(key);
@@ -406,9 +402,6 @@ export function registerAgents(): void {
     agentIngest.listForAgent(agentId),
   );
 
-  // List-change push. Mirrors the agent store into the main window so the
-  // chat-heads / agent picker UIs reflect creates, updates, removes without
-  // each consumer needing its own polling.
   agentStore.onChange((agents) =>
     broadcast("agents:listChange", agents.map(toAgentSummary), getMainWindow()),
   );

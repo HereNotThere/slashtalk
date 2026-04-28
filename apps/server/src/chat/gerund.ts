@@ -1,6 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config";
 import { MODELS } from "../models";
+import { getAnthropicClient } from "../analyzers/anthropic-client";
 
 const MAX_TOKENS = 400;
 const COUNT = 6;
@@ -31,17 +31,6 @@ Strict rules:
 - NEVER use potentially offensive or derogatory verbs: penetrating, probing, exploiting, hacking, stalking.
 
 Output format: exactly ${COUNT} lines, each one short phrase, nothing else.`;
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) {
-    if (!config.anthropicApiKey) {
-      throw new Error("ANTHROPIC_API_KEY not set");
-    }
-    _client = new Anthropic({ apiKey: config.anthropicApiKey });
-  }
-  return _client;
-}
 
 const BANNED_TOKENS = [
   "connecting",
@@ -120,7 +109,7 @@ function sanitizeList(raw: string): string[] {
 export async function generateGerunds(prompt: string): Promise<string[]> {
   if (!config.anthropicApiKey) return FALLBACK;
   try {
-    const resp = await client().messages.create({
+    const resp = await getAnthropicClient().messages.create({
       model: MODELS.haiku,
       max_tokens: MAX_TOKENS,
       system: [

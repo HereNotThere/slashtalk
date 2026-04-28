@@ -1,7 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "../src/db";
-import { users, repos, userRepos, sessions, sessionInsights, heartbeats } from "../src/db/schema";
+import {
+  users,
+  repos,
+  userRepos,
+  sessions,
+  sessionInsights,
+  heartbeats,
+  pullRequests,
+} from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { mockGitHubAuth, resetDatabase, getCookie } from "./helpers";
@@ -464,5 +472,131 @@ describe("chat cards: loadSessionCards", () => {
   it("returns empty for an empty or all-invisible input", async () => {
     expect(await loadSessionCards(db, aliceId, [])).toEqual([]);
     expect(await loadSessionCards(db, aliceId, [OUTSIDER_SESSION])).toEqual([]);
+  });
+});
+
+describe("chat tool: get_team_activity — PR enrichment", () => {
+  const BOB_BRANCH = "feat/ws-reconnect";
+
+  beforeAll(async () => {
+    await db
+      .update(sessions)
+      .set({ branch: BOB_BRANCH })
+      .where(eq(sessions.sessionId, BOB_SESSION));
+
+    await db.insert(pullRequests).values({
+      repoId: commonRepoId,
+      number: 4242,
+      headRef: BOB_BRANCH,
+      title: "WS reconnect: backoff + jitter",
+      url: "https://github.com/team/slashtalk/pull/4242",
+      state: "open",
+      authorLogin: "bob",
+      updatedAt: new Date(),
+    });
+  });
+
+  it("populates session.pr in get_team_activity when a PR matches the branch", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
+    const bob = result.teammates.find((t) => t.login === "bob")!;
+    expect(bob.sessions[0].pr).toMatchObject({
+      number: 4242,
+      state: "open",
+      authorLogin: "bob",
+      url: "https://github.com/team/slashtalk/pull/4242",
+    });
+  });
+
+  it("populates session.pr in get_session", async () => {
+    const result = await getSessionImpl(db, aliceId, { sessionId: BOB_SESSION });
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(result.session.pr).toMatchObject({
+      number: 4242,
+      state: "open",
+    });
+  });
+});
+
+describe("chat tool: get_team_activity — default-exclude ended", () => {
+  const ENDED_SESSION = "b0000000-0000-0000-0000-0000000000ee";
+  const ENDED_BRANCH = "fix/old-typo";
+  const ENDED_FILE = "/Users/dev/team/slashtalk/apps/server/src/old/fix.ts";
+
+  beforeAll(async () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await db.insert(sessions).values({
+      sessionId: ENDED_SESSION,
+      userId: bobId,
+      source: "claude",
+      project: "slashtalk",
+      repoId: commonRepoId,
+      branch: ENDED_BRANCH,
+      firstTs: twoHoursAgo,
+      lastTs: twoHoursAgo,
+      topFilesEdited: { [ENDED_FILE]: 1 },
+    });
+    await db.insert(pullRequests).values({
+      repoId: commonRepoId,
+      number: 4243,
+      headRef: ENDED_BRANCH,
+      title: "Fix old typo",
+      url: "https://github.com/team/slashtalk/pull/4243",
+      state: "open",
+      authorLogin: "bob",
+      updatedAt: new Date(),
+    });
+  });
+
+  it("omits ended sessions from teammates by default", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
+    const ids = result.teammates.flatMap((t) => t.sessions.map((s) => s.id));
+    expect(ids).not.toContain(ENDED_SESSION);
+  });
+
+  it("includes ended sessions when includeEnded=true", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      includeEnded: true,
+    });
+    const bob = result.teammates.find((t) => t.login === "bob")!;
+    expect(bob.sessions.map((s) => s.id)).toContain(ENDED_SESSION);
+  });
+
+  it("includes ended sessions when state=ended", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      state: "ended",
+    });
+    const bob = result.teammates.find((t) => t.login === "bob")!;
+    expect(bob.sessions.map((s) => s.id)).toEqual([ENDED_SESSION]);
+  });
+
+  it("openPrs[] surfaces an open PR even when the matching session is ended", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "apps/server/src/old/fix.ts",
+    });
+    expect(result.openPrs).toHaveLength(1);
+    expect(result.openPrs![0]).toMatchObject({
+      prNumber: 4243,
+      branch: ENDED_BRANCH,
+      authorLogin: "bob",
+      sessionId: ENDED_SESSION,
+    });
+  });
+
+  it("openPrs[] honors an explicit state filter", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      filePath: "apps/server/src/old/fix.ts",
+      state: "busy",
+    });
+    expect(result.openPrs).toEqual([]);
+  });
+
+  it("openPrs is omitted when filePath is unset", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
+    expect(result.openPrs).toBeUndefined();
   });
 });

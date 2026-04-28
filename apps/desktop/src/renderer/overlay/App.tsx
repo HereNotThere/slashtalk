@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
-import { MagnifyingGlassIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 const DRAG_THRESHOLD = 4;
 const REORDER_ANIM_MS = 280;
@@ -183,18 +183,14 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     let downPos: { x: number; y: number } | null = null;
-    let downAction: "search" | "create" | null = null;
+    let downAction: "search" | null = null;
     let dragging = false;
 
     const onDown = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       downPos = { x: e.screenX, y: e.screenY };
       const target = e.target instanceof Element ? e.target.closest("[data-bubble]") : null;
-      downAction = target?.hasAttribute("data-search")
-        ? "search"
-        : target?.hasAttribute("data-create")
-          ? "create"
-          : null;
+      downAction = target?.hasAttribute("data-search") ? "search" : null;
       dragging = false;
     };
 
@@ -212,7 +208,6 @@ export function App(): JSX.Element {
       if (e.button !== 0) return;
       if (dragging) void window.chatheads.dragEnd();
       else if (downAction === "search") void window.chatheads.toggleChat();
-      else if (downAction === "create") void window.chatheads.openAgentCreator();
       downPos = null;
       downAction = null;
       dragging = false;
@@ -310,7 +305,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (!headsLoaded) return;
     const RAIL_OUTER_PAD_PX = 16; // py-4 / px-4 main-axis padding on the rail
-    const wrapperCount = 3 + activeCount; // search + self + active + create
+    const wrapperCount = 2 + activeCount; // search + self + active
     let length = wrapperCount * STACK_WRAPPER_PX;
     if (inactiveCount > 0) {
       length += stackVisuallyExpanded
@@ -439,9 +434,6 @@ export function App(): JSX.Element {
           )}
         </div>
       )}
-      <div className={bubblePadClass}>
-        <CreateBubble />
-      </div>
     </div>
   );
 }
@@ -463,28 +455,6 @@ function SearchBubble({ open }: { open: boolean }): JSX.Element {
     >
       <div className="pointer-events-none">
         {open ? <XMarkIcon className="w-5 h-5" /> : <MagnifyingGlassIcon className="w-5 h-5" />}
-      </div>
-    </div>
-  );
-}
-
-function CreateBubble(): JSX.Element {
-  return (
-    <div
-      data-bubble
-      data-create
-      title="Create an agent"
-      className="
-        relative w-11.25 h-11.25 rounded-full cursor-pointer
-        flex items-center justify-center
-        bg-black/15 text-white
-        outline-1 -outline-offset-1 outline-bubble-outline
-        transition-transform duration-150 ease-out
-        hover:scale-[1.03] hover:bg-black/20
-      "
-    >
-      <div className="pointer-events-none">
-        <PlusIcon className="w-5 h-5" />
       </div>
     </div>
   );

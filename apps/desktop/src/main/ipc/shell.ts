@@ -1,6 +1,5 @@
 import { app, clipboard, dialog, ipcMain, shell } from "electron";
 import { isSafeExternalUrl } from "../safeUrl";
-import { sendWhenLoaded } from "../windows/broadcast";
 import { hideTrayPopup } from "../windows/tray";
 import { showMainWindow } from "../windows/main";
 
@@ -8,12 +7,6 @@ export function registerShellIpc(): void {
   ipcMain.handle("app:openMain", (): void => {
     showMainWindow();
     hideTrayPopup();
-  });
-
-  ipcMain.handle("app:openAgentCreator", (): void => {
-    const win = showMainWindow();
-    hideTrayPopup();
-    sendWhenLoaded(win, "agents:openCreator", null);
   });
 
   ipcMain.handle("app:quit", (): void => app.quit());

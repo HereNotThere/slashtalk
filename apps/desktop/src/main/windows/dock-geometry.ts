@@ -5,7 +5,7 @@
 // file owns the geometry.
 //
 // Constants must stay in sync with the overlay renderer's Tailwind classes:
-// - BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/SearchBubble/CreateBubble
+// - BUBBLE_SIZE ↔ `w-[45px] h-[45px]` on Bubble/SearchBubble
 // - BUBBLE_PAD ↔ `py-[7px]` (vertical) / `px-[7px]` (horizontal) on each
 //   bubble's wrapper. Adjacent wrappers touch — no flex gap — so adjacent
 //   paddings sum to a visual 14px stride between bubbles.
@@ -24,9 +24,9 @@ export const OVERLAY_WIDTH = BUBBLE_SIZE + PADDING_X * 2;
 export const DOCK_EDGE_MARGIN = 6;
 
 /** Main-axis length of the overlay rail for `count` chat heads, plus the
- *  two control bubbles (search + agent-create). Cross-axis is OVERLAY_WIDTH. */
+ *  search control bubble. Cross-axis is OVERLAY_WIDTH. */
 export function overlayLength(count: number): number {
-  const n = count + 2;
+  const n = count + 1;
   return n * (BUBBLE_SIZE + BUBBLE_PAD * 2) + PADDING_Y * 2;
 }
 

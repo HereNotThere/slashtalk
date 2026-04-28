@@ -3,7 +3,6 @@ import * as backend from "../backend";
 import * as chatheadsAuth from "../chatheadsAuth";
 import * as githubAuth from "../githubDeviceAuth";
 import * as heartbeat from "../heartbeat";
-import * as installMcp from "../installMcp";
 import * as localRepos from "../localRepos";
 import * as peerLocations from "../peerLocations";
 import * as peerPresence from "../peerPresence";
@@ -27,11 +26,6 @@ function applySyncForAuth(signedIn: boolean): void {
     void peerPresence.start().catch((err) => console.warn("peerPresence.start failed:", err));
     void peerLocations.start().catch((err) => console.warn("peerLocations.start failed:", err));
     ws.start();
-    for (const target of ["claude-code", "codex"] as const) {
-      void installMcp
-        .install(target)
-        .catch((err) => console.warn(`installMcp.install ${target} failed:`, err));
-    }
   } else {
     heartbeat.stop();
     uploader.reset();
@@ -40,11 +34,6 @@ function applySyncForAuth(signedIn: boolean): void {
     peerLocations.stop();
     ws.stop();
     info.clearQuestionsCache();
-    for (const target of ["claude-code", "codex"] as const) {
-      void installMcp
-        .uninstall(target)
-        .catch((err) => console.warn(`installMcp.uninstall ${target} failed:`, err));
-    }
   }
 }
 

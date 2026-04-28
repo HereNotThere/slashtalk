@@ -4,8 +4,9 @@ import { SUMMARY_ANALYZER } from "./names";
 import type { events } from "../db/schema";
 import { compactEvent, isNarrativeEvent } from "./event-compact";
 import { MODELS } from "../models";
+import { promptHistoryLines, topJsonbEntries } from "./session-context";
 
-const VERSION = "3";
+const VERSION = "4";
 const LINE_SEQ_REFRESH_DELTA = 50;
 const REFRESH_MIN_MS = 10 * 60 * 1000;
 const MIN_EVENTS_FOR_FIRST_SUMMARY = 3;
@@ -43,6 +44,8 @@ Good examples:
 
 Avoid vague labels like "Coding session" or "Software development session".
 
+Use the original task anchor and the prompt arc to identify the goal. A late prompt is often a subtask, acknowledgement, review comment, or wrap-up request; do not promote it to the title unless it clearly starts a new substantive task. All-time edited/written files usually describe the real work better than the last prompt.
+
 What is *not* the goal — treat these as coda, never as the title:
 - merging main, fast-forwarding commits, deleting branches
 - running tests, type-checks, dev servers
@@ -51,7 +54,7 @@ What is *not* the goal — treat these as coda, never as the title:
 
 If the only signals you have are coda activity, infer the goal from the work that *led* to the merge — the user prompts that originally drove the session, the files that were actually edited, the prior title if one exists. The prior title is usually right; only replace it when the user has clearly pivoted to a *new substantive task*, not when they've finished one and moved into wrap-up.`;
 
-function buildPrompt(
+export function buildPrompt(
   ctx: AnalyzerContext,
   recent: Array<typeof events.$inferSelect>,
   prior: SummaryOutput | null,
@@ -66,12 +69,20 @@ function buildPrompt(
   parts.push(`project: ${s.project}`);
   if (s.cwd) parts.push(`cwd: ${s.cwd}`);
   if (s.branch) parts.push(`branch: ${s.branch}`);
-  if (s.lastUserPrompt) {
-    parts.push(`most recent user prompt:\n${s.lastUserPrompt}`);
+  if (s.title) {
+    parts.push(
+      `original task anchor (first real user prompt; prefer this over late subtasks unless the session clearly pivoted):\n${s.title}`,
+    );
+  }
+  const prompts = promptHistoryLines(s.recentPrompts, s.lastUserPrompt);
+  if (prompts.length) {
+    parts.push(
+      `recent user prompts (oldest first; later entries may be subtasks or acknowledgements, not necessarily a new task):\n${prompts.join("\n")}`,
+    );
   }
 
-  const edited = Array.isArray(s.topFilesEdited) ? s.topFilesEdited.slice(0, 5) : [];
-  const written = Array.isArray(s.topFilesWritten) ? s.topFilesWritten.slice(0, 5) : [];
+  const edited = topJsonbEntries(s.topFilesEdited, 5);
+  const written = topJsonbEntries(s.topFilesWritten, 5);
   if (edited.length) parts.push(`top files edited (all-time): ${JSON.stringify(edited)}`);
   if (written.length) parts.push(`top files written (all-time): ${JSON.stringify(written)}`);
 

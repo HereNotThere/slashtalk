@@ -4,8 +4,9 @@ import { ROLLING_SUMMARY_ANALYZER } from "./names";
 import type { events } from "../db/schema";
 import { compactEvent, isNarrativeEvent } from "./event-compact";
 import { MODELS } from "../models";
+import { promptHistoryLines, topJsonbEntries } from "./session-context";
 
-const VERSION = "2";
+const VERSION = "3";
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const LINE_SEQ_DELTA = 50;
 const MIN_EVENTS_FOR_FIRST_SUMMARY = 5;
@@ -44,6 +45,7 @@ Hard rules:
 - Do not count tool calls, tokens, files, or messages — those stats live elsewhere.
 - Treat coda activity as backdrop, not headline: merging main, fast-forwarding commits, deleting branches, running tests, dev-server status, idling, "awaiting next task". The summary should still be about the substantive work.
 - If a prior summary is given, evolve it — carry forward open threads. Only pivot when the developer has clearly moved on to a new substantive task.
+- A late prompt is often a subtask, acknowledgement, review comment, or wrap-up request. Use the original task anchor and all-time file evidence to keep the narrative on the overall goal unless the prompt arc clearly starts something new.
 
 highlights: up to 3 short bullets naming *substantive code or product changes* — a new module/component, a refactor, a behavior change, a file added or deleted, a design decision, a surprising finding, a failing test, an open question. Each bullet should describe *what changed in the codebase or product*, not what happened in git.
 
@@ -55,7 +57,7 @@ Do NOT highlight any of the following:
 
 If you can't find 3 substantive code/product changes, return fewer bullets — or none. Empty highlights are better than filler.`;
 
-function buildPrompt(
+export function buildPrompt(
   ctx: AnalyzerContext,
   recent: Array<typeof events.$inferSelect>,
   prior: RollingSummaryOutput | null,
@@ -65,12 +67,22 @@ function buildPrompt(
   if (prior) parts.push(`prior summary:\n${prior.summary}`);
   parts.push(`project: ${s.project}`);
   if (s.cwd) parts.push(`cwd: ${s.cwd}`);
-  if (s.lastUserPrompt) {
-    parts.push(`most recent user prompt:\n${s.lastUserPrompt}`);
+  if (s.title) {
+    parts.push(
+      `original task anchor (first real user prompt; prefer this over late subtasks unless the session clearly pivoted):\n${s.title}`,
+    );
+  }
+  const prompts = promptHistoryLines(s.recentPrompts, s.lastUserPrompt);
+  if (prompts.length) {
+    parts.push(
+      `recent user prompts (oldest first; later entries may be subtasks or acknowledgements, not necessarily a new task):\n${prompts.join("\n")}`,
+    );
   }
 
-  const edited = Array.isArray(s.topFilesEdited) ? s.topFilesEdited.slice(0, 5) : [];
-  if (edited.length) parts.push(`top files edited: ${JSON.stringify(edited)}`);
+  const edited = topJsonbEntries(s.topFilesEdited, 5);
+  const written = topJsonbEntries(s.topFilesWritten, 5);
+  if (edited.length) parts.push(`top files edited (all-time): ${JSON.stringify(edited)}`);
+  if (written.length) parts.push(`top files written (all-time): ${JSON.stringify(written)}`);
 
   const narrative = recent.filter(isNarrativeEvent);
   if (narrative.length) {

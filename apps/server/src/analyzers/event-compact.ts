@@ -10,6 +10,21 @@ export function snippet(s: unknown, max = MAX_SNIPPET): string {
 
 type JsonObj = Record<string, unknown>;
 
+function isObj(v: unknown): v is JsonObj {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function parseJsonObject(v: unknown): JsonObj | null {
+  if (isObj(v)) return v;
+  if (typeof v !== "string") return null;
+  try {
+    const parsed = JSON.parse(v);
+    return isObj(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function extractText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -60,17 +75,23 @@ export function describeToolResult(block: JsonObj): string {
 
 export function compactEvent(e: typeof events.$inferSelect): string {
   const ts = e.ts ? new Date(e.ts).toISOString().slice(11, 19) : "";
-  const payload = (e.payload ?? {}) as JsonObj;
-  const message = (payload.message ?? {}) as JsonObj;
+  const payload = isObj(e.payload) ? e.payload : {};
+  const inner = isObj(payload.payload) ? payload.payload : {};
+  const message = isObj(payload.message) ? payload.message : {};
   const content = message.content;
 
   switch (e.kind) {
     case "user_msg": {
-      const text = typeof content === "string" ? content : extractText(content);
+      const text =
+        typeof inner.message === "string"
+          ? inner.message
+          : typeof content === "string"
+            ? content
+            : extractText(content);
       return `[${ts}] prompt: ${snippet(text, 240) || "(empty)"}`;
     }
     case "assistant_msg": {
-      const text = extractText(content);
+      const text = typeof inner.message === "string" ? inner.message : extractText(content);
       const toolUse = findBlock(content, "tool_use");
       if (toolUse) {
         const toolDesc = describeToolCall(toolUse);
@@ -82,11 +103,23 @@ export function compactEvent(e: typeof events.$inferSelect): string {
     }
     case "tool_result": {
       const block = findBlock(content, "tool_result");
+      if (!block && typeof inner.output === "string") {
+        return `[${ts}] result: ${snippet(inner.output, 140) || "(ok)"}`;
+      }
+      if (!block && typeof inner.call_id === "string") {
+        return `[${ts}] result: ${inner.call_id}`;
+      }
       return block ? `[${ts}] result: ${describeToolResult(block)}` : `[${ts}] result`;
     }
     case "tool_call": {
-      const name = typeof payload.name === "string" ? payload.name : "tool";
-      return `[${ts}] → ${name}`;
+      const name =
+        typeof inner.name === "string"
+          ? inner.name
+          : typeof payload.name === "string"
+            ? payload.name
+            : "tool";
+      const input = parseJsonObject(inner.arguments) ?? parseJsonObject(inner.input);
+      return `[${ts}] → ${describeToolCall({ name, input })}`;
     }
     case "reasoning":
       return `[${ts}] (thinking)`;

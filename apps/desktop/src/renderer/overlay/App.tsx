@@ -207,7 +207,7 @@ export function App(): JSX.Element {
     const onUp = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       if (dragging) void window.chatheads.dragEnd();
-      else if (downAction === "search") void window.chatheads.toggleChat();
+      else if (downAction === "search") void window.chatheads.showAsk();
       downPos = null;
       downAction = null;
       dragging = false;

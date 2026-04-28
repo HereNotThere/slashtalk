@@ -23,6 +23,10 @@ function ensureResponseWindow(): BrowserWindow {
     minHeight: 360,
     frame: true,
     transparent: false,
+    // Matches `--color-bg` (dark theme) so the OS-painted background before
+    // first React paint isn't a bright white flash. Light-theme users see a
+    // dark frame for one paint, which is much less jarring than white.
+    backgroundColor: "#1a1a1a",
     alwaysOnTop: true,
     show: false,
     webPreferences: {
@@ -45,6 +49,10 @@ function ensureResponseWindow(): BrowserWindow {
 }
 
 export function showResponse(payload?: ResponseOpenPayload): void {
+  // First open creates the window with `show: false`. Calling show() before
+  // the renderer has painted produces a one-frame white flash; defer to
+  // `ready-to-show` instead. Subsequent opens (already painted) show immediately.
+  const isFirstOpen = !responseWindow || responseWindow.isDestroyed();
   const win = ensureResponseWindow();
   if (payload) {
     const send = (): void => {
@@ -57,6 +65,14 @@ export function showResponse(payload?: ResponseOpenPayload): void {
       send();
     }
   }
-  win.show();
-  win.focus();
+  const present = (): void => {
+    if (win.isDestroyed()) return;
+    win.show();
+    win.focus();
+  };
+  if (isFirstOpen) {
+    win.once("ready-to-show", present);
+  } else {
+    present();
+  }
 }

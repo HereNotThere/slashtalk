@@ -144,6 +144,7 @@ const bridge: ChatHeadsBridge = {
   onOverlayConfig: (cb) => subscribe<DockConfig>("overlay:config", cb),
 
   openResponse: (message) => ipcRenderer.invoke("response:open", message) as Promise<void>,
+  showAsk: () => ipcRenderer.invoke("ask:show") as Promise<void>,
   onResponseOpen: (cb) => subscribe<ResponseOpenPayload>("response:open", cb),
 
   askChat: (messages: ChatMessage[], threadId?: string) =>

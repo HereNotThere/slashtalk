@@ -432,6 +432,8 @@ export interface ChatHeadsBridge {
 
   // Response window (chat/agent pop-out → main → response)
   openResponse: (message: string) => Promise<void>;
+  /** Open the Ask window with no seed — used by the dock search bubble. */
+  showAsk: () => Promise<void>;
   onResponseOpen: (cb: (payload: ResponseOpenPayload) => void) => Unsubscribe;
 
   // Ask the backend chat endpoint. Client owns the full history. Pass the

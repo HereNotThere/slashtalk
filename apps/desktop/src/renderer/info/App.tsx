@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
+import { FolderIcon } from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, RecentPrompt, SpotifyPresence, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
@@ -7,7 +8,7 @@ import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
 import { Markdown } from "../shared/Markdown";
-import { BranchIcon, ClaudeIcon, OpenAIIcon, SpotifyIcon } from "../shared/icons";
+import { ClaudeIcon, OpenAIIcon, SpotifyIcon } from "../shared/icons";
 
 const REFRESH_MS = 15_000;
 
@@ -127,7 +128,7 @@ export function App(): JSX.Element {
           <AgentPanel head={head} />
         ) : (
           <>
-            <UserHeader head={head} />
+            <UserHeader head={head} sessions={sessions} />
             {spotify && <NowPlaying track={spotify} />}
             <Divider />
             <SessionsSection
@@ -171,13 +172,20 @@ function Divider(): JSX.Element {
   return <div className="mx-4 h-px bg-divider" />;
 }
 
-function UserHeader({ head }: { head: ChatHead | null }): JSX.Element {
+function UserHeader({
+  head,
+  sessions,
+}: {
+  head: ChatHead | null;
+  sessions: InfoSession[] | null;
+}): JSX.Element {
   const name = head?.label ?? "—";
   const time = new Date().toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
   });
   const { city, icon } = useLocationWeather();
+  const totalTokensLabel = fmtTokens(sumSessionTokens(sessions));
   return (
     <div className="flex items-start gap-3 px-4 pt-4 pb-3">
       <Avatar head={head} />
@@ -193,9 +201,32 @@ function UserHeader({ head }: { head: ChatHead | null }): JSX.Element {
           )}
           <span className="shrink-0">{time}</span>
         </div>
+        {totalTokensLabel && (
+          <div className="mt-1 flex items-center gap-1.5 text-sm text-muted">
+            <ClaudeIcon />
+            <span>{totalTokensLabel} tokens</span>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function sumSessionTokens(sessions: InfoSession[] | null): TokenUsage | undefined {
+  if (!sessions || sessions.length === 0) return undefined;
+  const total: TokenUsage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+  let any = false;
+  for (const s of sessions) {
+    const t = s.tokens;
+    if (!t) continue;
+    any = true;
+    total.in += t.in;
+    total.out += t.out;
+    total.cacheRead += t.cacheRead;
+    total.cacheWrite += t.cacheWrite;
+    total.reasoning += t.reasoning;
+  }
+  return any ? total : undefined;
 }
 
 function Avatar({ head }: { head: ChatHead | null }): JSX.Element {
@@ -398,7 +429,6 @@ function SessionRow({
   const tokenStr = fmtTokens(session.tokens);
   const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
   const status = statusLabel(session);
-  const hasLocator = Boolean(repo) || Boolean(session.branch);
   // Only flag collisions on sessions that aren't already wrapped — an ENDED
   // session touching the same file is just historical, not a real conflict.
   const sessionLive = session.state !== SessionState.ENDED;
@@ -425,27 +455,11 @@ function SessionRow({
           {session.description && (
             <div className="mt-1 text-sm text-muted line-clamp-2">{session.description}</div>
           )}
-          {hasLocator && (
-            <div className="mt-1 flex min-w-0">
-              <span className="inline-flex items-center gap-1 font-mono text-xs leading-none px-1.5 py-0.5 rounded bg-surface-alt/70 text-fg/75 min-w-0 max-w-full">
-                {repo && <span className="truncate">{repo}</span>}
-                {repo && session.branch && <span className="text-subtle shrink-0 px-0.5">·</span>}
-                {session.branch && (
-                  <>
-                    <span className="text-subtle shrink-0">
-                      <BranchIcon />
-                    </span>
-                    <span className="truncate">{session.branch}</span>
-                  </>
-                )}
-              </span>
-            </div>
-          )}
           {colliding && collisionFile && (
-            // Sits between the repo/branch chip and the tokens row — reads as
-            // another piece of "where this session is" metadata. Subtle danger
-            // tint (no border), explicit Also-editing prefix, full path that
-            // wraps if long, dedicated × dismiss top-right.
+            // Sits above the tokens row — reads as another piece of "where this
+            // session is" metadata. Subtle danger tint (no border), explicit
+            // Also-editing prefix, full path that wraps if long, dedicated ×
+            // dismiss top-right.
             <div className="mt-1.5 flex items-start gap-1.5 px-2 py-1 rounded bg-danger/10">
               {/* mt-[5px] aligns the 8px dot's center with the first text line. */}
               <span
@@ -474,10 +488,20 @@ function SessionRow({
               )}
             </div>
           )}
-          {(status !== null || tokensLabel !== null) && (
-            <div className="mt-1 flex items-center gap-2 text-xs text-subtle min-w-0">
-              <ProviderIcon source={session.source} />
-              {tokensLabel && <span className="shrink-0">{tokensLabel}</span>}
+          {(status !== null || tokensLabel !== null || repo !== null) && (
+            <div className="mt-1 flex items-center gap-3 text-xs text-subtle min-w-0">
+              {repo && (
+                <span className="inline-flex items-center gap-1 min-w-0">
+                  <FolderIcon className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                  <span className="font-mono truncate text-fg/75">{repo}</span>
+                </span>
+              )}
+              {tokensLabel && (
+                <span className="inline-flex items-center gap-1 shrink-0">
+                  <ProviderIcon source={session.source} />
+                  <span>{tokensLabel}</span>
+                </span>
+              )}
               {status && (
                 <span className={`shrink-0 ml-auto ${status.isLive ? "text-info" : ""}`}>
                   {status.isLive ? <WorkingIndicator /> : status.text}

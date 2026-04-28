@@ -236,9 +236,14 @@ export async function start(): Promise<void> {
   watchRoot(CLAUDE_SESSIONS_DIR);
   watchRoot(CODEX_SESSIONS_DIR);
   watchRoot(CURSOR_PROJECTS_DIR);
-  // Schedule after the initial pulse so failure backoff reflects its outcome.
-  await pulse();
-  scheduleNextPulse();
+  // Schedule after the initial pulse so failure backoff reflects its outcome,
+  // but inside finally so a thrown initial pulse can't permanently disable the
+  // periodic timer (start() is fire-and-forget from index.ts).
+  try {
+    await pulse();
+  } finally {
+    scheduleNextPulse();
+  }
 }
 
 // Self-rescheduling so the cadence reflects the live failure state — a stable

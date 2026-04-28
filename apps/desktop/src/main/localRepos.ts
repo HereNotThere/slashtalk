@@ -11,56 +11,18 @@ import type { TrackedRepo } from "../shared/types";
 import * as backend from "./backend";
 import * as store from "./store";
 import { createEmitter } from "./emitter";
+import { isPathTrackedAgainst } from "./pathTracking";
 
 const execFileAsync = promisify(execFile);
 
 /** True if `cwd` lives under any tracked local repo path, or under a git
- *  linked worktree whose main repo is tracked. */
+ *  linked worktree whose main repo is tracked. Symlink-aware (see
+ *  `isPathTrackedAgainst` in `./pathTracking`). */
 export function isPathTracked(cwd: string | null | undefined): boolean {
-  if (!cwd) return false;
-  const abs = path.resolve(cwd);
-  const absWithSep = abs + path.sep;
-  for (const r of tracked) {
-    const root = path.resolve(r.localPath);
-    const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-    if (absWithSep.startsWith(prefix)) return true;
-  }
-  const mainRepo = resolveWorktreeMainRepo(abs);
-  if (!mainRepo) return false;
-  return tracked.some((r) => path.resolve(r.localPath) === mainRepo);
-}
-
-// A linked worktree's `.git` is a file: `gitdir: <main>/.git/worktrees/<name>`.
-// Walk up from cwd, and if we find that shape, return <main>.
-function resolveWorktreeMainRepo(startDir: string): string | null {
-  let dir = startDir;
-  while (true) {
-    const gitPath = path.join(dir, ".git");
-    let stat: fs.Stats | null = null;
-    try {
-      stat = fs.statSync(gitPath);
-    } catch {
-      // no .git at this level; keep walking up
-    }
-    if (stat?.isDirectory()) return null; // plain repo, not a worktree
-    if (stat?.isFile()) {
-      let contents: string;
-      try {
-        contents = fs.readFileSync(gitPath, "utf8");
-      } catch {
-        return null;
-      }
-      const m = contents.match(/^gitdir:\s*(.+?)\s*$/m);
-      if (!m) return null;
-      const gitdir = path.resolve(dir, m[1]);
-      const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
-      const idx = gitdir.indexOf(marker);
-      return idx === -1 ? null : gitdir.slice(0, idx);
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
+  return isPathTrackedAgainst(
+    cwd,
+    tracked.map((r) => r.localPath),
+  );
 }
 
 const TRACKED_KEY = "trackedRepos";

@@ -3,9 +3,6 @@ import type { ChatHead, McpTarget, ResponseOpenPayload } from "../shared/types";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import * as rail from "./rail";
-import * as uploader from "./uploader";
-import * as heartbeat from "./heartbeat";
-import * as ws from "./ws";
 import * as installMcp from "./installMcp";
 import * as chatheadsAuth from "./chatheadsAuth";
 import * as selfSession from "./selfSession";
@@ -14,7 +11,6 @@ import { getLocalMcpProxySecret } from "./localMcpProxySecret";
 import * as anthropic from "./anthropic";
 import * as githubAuth from "./githubDeviceAuth";
 import * as peerPresence from "./peerPresence";
-import * as peerLocations from "./peerLocations";
 import {
   broadcastRailCollapseInactive,
   broadcastRailPinned,
@@ -54,6 +50,7 @@ import * as overlay from "./windows/overlay";
 import * as spotifyToggle from "./sync/spotify-toggle";
 import * as userLocation from "./sync/user-location";
 import { registerWsHandlers, verifyAndMarkCollision } from "./sync/ws-handlers";
+import { applyInitialSync, registerAuthOrchestrator } from "./sync/auth-orchestrator";
 import { registerAgents } from "./ipc/agents";
 import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
@@ -263,42 +260,8 @@ ipcMain.handle("backend:signOutEverywhere", async () => {
   localRepos.clearOnSignOut();
 });
 
-function applySyncForAuth(signedIn: boolean): void {
-  if (signedIn) {
-    // Without these catches a thrown start() (e.g. fs.mkdir EACCES on
-    // ~/.claude/projects, or an fs.watch that fails on a quirky filesystem)
-    // is swallowed and the UI flips to "signed in" while nothing is actually
-    // running — same shape the cursor-bot caught on heartbeat.
-    void uploader.start().catch((err) => console.warn("uploader.start failed:", err));
-    void heartbeat.start().catch((err) => console.warn("heartbeat.start failed:", err));
-    spotifyToggle.updateSpotifyRunning();
-    void peerPresence.start().catch((err) => console.warn("peerPresence.start failed:", err));
-    void peerLocations.start().catch((err) => console.warn("peerLocations.start failed:", err));
-    ws.start();
-    for (const target of ["claude-code", "codex"] as const) {
-      void installMcp
-        .install(target)
-        .catch((err) => console.warn(`installMcp.install ${target} failed:`, err));
-    }
-  } else {
-    heartbeat.stop();
-    uploader.reset();
-    spotifyToggle.updateSpotifyRunning();
-    peerPresence.stop();
-    peerLocations.stop();
-    ws.stop();
-    info.clearQuestionsCache();
-    for (const target of ["claude-code", "codex"] as const) {
-      void installMcp
-        .uninstall(target)
-        .catch((err) => console.warn(`installMcp.uninstall ${target} failed:`, err));
-    }
-  }
-}
-
 registerWsHandlers();
-
-backend.onChange((state) => applySyncForAuth(state.signedIn));
+registerAuthOrchestrator();
 
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());
 ipcMain.handle("backend:addLocalRepo", () => localRepos.addLocalRepo());
@@ -312,28 +275,6 @@ ipcMain.handle("trackedRepos:selection", () => [...localRepos.selectedRepoIds()]
 ipcMain.handle("trackedRepos:toggle", (_e, repoId: number) => [
   ...localRepos.toggleSelected(repoId),
 ]);
-
-function broadcastToMain(channel: string, payload: unknown): void {
-  broadcast(channel, payload, getMainWindow());
-}
-
-// Tray popup (statusbar renderer) is the primary consumer of orgs:* /
-// repos:* push channels. We still broadcast to main so any future settings
-// UI on the main window stays in sync without extra plumbing.
-function broadcastToTrayAndMain(channel: string, payload: unknown): void {
-  broadcast(channel, payload, getMainWindow(), getTrayPopup());
-}
-
-backend.onChange((state) => broadcastToMain("backend:authState", state));
-// Tray popup shows sign-in state too — mirror to it so the CTA flips live.
-backend.onChange((state) => broadcast("backend:authState", state, getTrayPopup()));
-localRepos.onChange((repos) => broadcastToTrayAndMain("backend:trackedRepos", repos));
-localRepos.onSelectionChange((ids) =>
-  broadcastToTrayAndMain("trackedRepos:selectionChange", [...ids]),
-);
-chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
-githubAuth.onChange((state) => broadcastToMain("github:state", state));
-anthropic.onConfiguredChange((configured) => broadcastToMain("agents:configured", configured));
 
 // -------- Lifecycle --------
 
@@ -396,7 +337,7 @@ app.whenReady().then(async () => {
   });
   rail.start();
   selfSession.start();
-  applySyncForAuth(backend.getAuthState().signedIn);
+  applyInitialSync();
 
   registerDebugShortcuts();
 });

@@ -1,19 +1,8 @@
-import { app, BrowserWindow, nativeTheme, ipcMain, screen, globalShortcut } from "electron";
-import type {
-  ChatHead,
-  DockConfig,
-  DockOrientation,
-  InfoSession,
-  McpTarget,
-  ResponseOpenPayload,
-} from "../shared/types";
-import * as store from "./store";
+import { app, BrowserWindow, ipcMain, globalShortcut } from "electron";
+import type { ChatHead, McpTarget, ResponseOpenPayload } from "../shared/types";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import * as rail from "./rail";
-import * as uploader from "./uploader";
-import * as heartbeat from "./heartbeat";
-import * as ws from "./ws";
 import * as installMcp from "./installMcp";
 import * as chatheadsAuth from "./chatheadsAuth";
 import * as selfSession from "./selfSession";
@@ -22,15 +11,6 @@ import { getLocalMcpProxySecret } from "./localMcpProxySecret";
 import * as anthropic from "./anthropic";
 import * as githubAuth from "./githubDeviceAuth";
 import * as peerPresence from "./peerPresence";
-import * as peerLocations from "./peerLocations";
-import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
-import {
-  OVERLAY_WIDTH,
-  computeDockBoundsOn,
-  dockFromPoint,
-  overlayLength,
-  screenIdOf,
-} from "./windows/dock-geometry";
 import {
   broadcastRailCollapseInactive,
   broadcastRailPinned,
@@ -53,12 +33,8 @@ import {
   repositionChatIfVisible,
   toggleChat,
 } from "./windows/chat";
-import {
-  configureHoverPolling,
-  startHoverPolling,
-  stopHoverPolling,
-} from "./windows/hover-polling";
-import { appState, loadRenderer, preloadPath } from "./windows/lib";
+import { configureHoverPolling } from "./windows/hover-polling";
+import { appState } from "./windows/lib";
 import {
   bumpActivity,
   configureRailVisibility,
@@ -67,11 +43,14 @@ import {
 import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, showResponse } from "./windows/response";
 import { createTray, getTrayPopup, toggleTrayPopup } from "./windows/tray";
-import { broadcast, sendWhenLoaded } from "./windows/broadcast";
+import { broadcast } from "./windows/broadcast";
 import { currentDock, registerDockDrag } from "./windows/dock-drag";
 import * as info from "./windows/info";
+import * as overlay from "./windows/overlay";
 import * as spotifyToggle from "./sync/spotify-toggle";
 import * as userLocation from "./sync/user-location";
+import { registerWsHandlers, verifyAndMarkCollision } from "./sync/ws-handlers";
+import { applyInitialSync, registerAuthOrchestrator } from "./sync/auth-orchestrator";
 import { registerAgents } from "./ipc/agents";
 import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
@@ -89,257 +68,21 @@ const mcpProxy = createLocalMcpProxy({
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
 
-const POSITION_KEY = "overlayPosition";
-
-function applyRailPinned(): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const pinned = getRailPinned();
-  console.log(`[pin] applyRailPinned: target=${pinned} focused=${appIsFocused()}`);
-  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  // Rail floats when pinned always, or when unpinned-and-focused. Otherwise
-  // drops to normal so it sits behind frontmost app windows.
-  const shouldFloat = pinned || appIsFocused();
-  overlayWindow.setAlwaysOnTop(shouldFloat, "floating");
-  if (shouldFloat) overlayWindow.moveTop();
-  if (process.platform === "darwin") {
-    app.setActivationPolicy("regular");
-    void app.dock?.show();
-  }
-  // Cursor polling runs in unpinned mode so the rail pops to floating when
-  // the cursor approaches it while Slashtalk is blurred — otherwise hover
-  // never fires cross-app.
-  if (pinned) stopHoverPolling();
-  else startHoverPolling();
-  const native = debugMacWindowState(overlayWindow);
-  console.log(`[pin] after aot=${overlayWindow.isAlwaysOnTop()} nativeLevel=${native?.level}`);
-}
-
-function appIsFocused(): boolean {
-  return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused());
-}
-
-let overlayWindow: BrowserWindow | null = null;
-
 let heads: ChatHead[] = [];
-
-// -------- Overlay (bubbles) --------
-
-// Persisted overlay origin — the screen and the relative position within it.
-// Restored on launch so the rail comes back where the user left it.
-interface SavedPosition {
-  screenId: string;
-  xPercent: number;
-  topPercent: number;
-}
-
-function restoredOrigin(): { x: number; y: number } | null {
-  const pos = store.get<SavedPosition>(POSITION_KEY);
-  if (!pos) return null;
-  const match =
-    screen.getAllDisplays().find((d) => screenIdOf(d) === pos.screenId) ??
-    screen.getPrimaryDisplay();
-  const f = match.bounds;
-  return {
-    x: Math.round(f.x + pos.xPercent * f.width),
-    y: Math.round(f.y + pos.topPercent * f.height),
-  };
-}
-
-function saveOverlayPosition(): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const bounds = overlayWindow.getBounds();
-  const display = screen.getDisplayMatching(bounds);
-  const f = display.bounds;
-  const payload: SavedPosition = {
-    screenId: screenIdOf(display),
-    xPercent: (bounds.x - f.x) / f.width,
-    topPercent: (bounds.y - f.y) / f.height,
-  };
-  store.set(POSITION_KEY, payload);
-}
-
-// White rim over the `hud` vibrancy. In dark mode the stroke reads as a bright
-// hairline, so keep it faint; in light mode the same stroke gets buried by the
-// material and needs more alpha to remain visible.
-function applyOverlayRim(): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  setMacCornerRadius(overlayWindow, OVERLAY_WIDTH / 2, {
-    width: 1.5,
-    white: 1,
-    alpha: nativeTheme.shouldUseDarkColors ? 0.12 : 0.33,
-  });
-}
-
-function ensureOverlay(): BrowserWindow {
-  if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
-
-  const display = screen.getPrimaryDisplay();
-  const restored = restoredOrigin();
-  // Classify the restored origin against the primary display's work area to
-  // pick the initial dock. First-run default: right edge (vertical+end).
-  const initialDock: DockConfig = restored
-    ? dockFromPoint(restored, display)
-    : { orientation: "vertical", side: "end" };
-  const bounds = computeDockBoundsOn(
-    display,
-    initialDock,
-    effectiveOverlayLength(initialDock.orientation, display),
-  );
-
-  overlayWindow = new BrowserWindow({
-    width: bounds.width,
-    height: bounds.height,
-    x: bounds.x,
-    y: bounds.y,
-    frame: false,
-    transparent: false,
-    // Never let the rail become key — macOS deepens the system shadow on
-    // focused windows, so without this the drop shadow visibly darkens
-    // whenever the user clicks the rail. Clicks still work for drag and
-    // bubble toggles.
-    focusable: false,
-    // System shadow — macOS derives it from the window's alpha mask, so
-    // with the rounded contentView + cleared NSWindow background the
-    // shadow follows the pill. Re-invalidated in setMacCornerRadius so
-    // macOS recomputes against the pill mask instead of the original
-    // rectangle.
-    hasShadow: true,
-    alwaysOnTop: getRailPinned(),
-    resizable: false,
-    movable: false, // we drive drag manually via IPC + setPosition
-    skipTaskbar: true,
-    backgroundColor: "#00000000",
-    // Start hidden so session-only mode can keep us that way without a flash
-    // on first poll. resolveRailVisibility() below decides the initial state.
-    show: false,
-    // Real macOS frost. CSS backdrop-filter is a no-op on non-vibrancy Electron
-    // windows, so the rail uses NSVisualEffectView as its single background.
-    // Vibrancy is a sibling NSView of the webContents, so CSS can't clip it —
-    // we reshape to a pill via `setMacCornerRadius` below instead.
-    // `hud` reads heavily translucent over arbitrary app windows, unlike
-    // `under-window` which only blurs the desktop wallpaper.
-    vibrancy: "hud",
-    visualEffectState: "active",
-    webPreferences: {
-      preload: preloadPath,
-      contextIsolation: true,
-    },
-  });
-
-  applyRailPinned();
-  resolveRailVisibility();
-
-  // Pill ends — half the window width gives perfect semicircle caps at top
-  // and bottom. Safe to call synchronously: getNativeWindowHandle is valid
-  // as soon as the BrowserWindow constructor returns.
-  applyOverlayRim();
-  nativeTheme.on("updated", applyOverlayRim);
-
-  loadRenderer(overlayWindow, "overlay");
-
-  overlayWindow.on("closed", () => {
-    overlayWindow = null;
-    lastSentDock = null;
-    info.hideNow();
-    hideChat();
-  });
-
-  // Tell the overlay renderer which dock it was born into so first paint uses
-  // the correct flex direction.
-  sendOverlayConfig();
-
-  return overlayWindow;
-}
-
-const OVERLAY_SCREEN_MARGIN = 40;
-
-let desiredOverlayLength: number | null = null;
-
-// Renderer-reported length wins when present — it knows about the inactive
-// stack's collapsed/expanded state, which main can't infer from heads alone.
-// Clamped to the work-area axis so the rail can't outgrow the screen.
-//
-// Pre-renderer fallback is the 3-wrapper minimum (search + self + create) so
-// the window opens at its smallest plausible size and grows once the renderer
-// reports the real length. Sizing to `heads.length` instead would briefly
-// render the rail at full-expanded width before the renderer collapsed it,
-// which read as a wide-to-narrow yoyo on first open.
-function effectiveOverlayLength(orientation: DockOrientation, display: Electron.Display): number {
-  const wa = display.workArea;
-  const axisExtent = orientation === "vertical" ? wa.height : wa.width;
-  const maxLength = Math.max(overlayLength(0), axisExtent - OVERLAY_SCREEN_MARGIN * 2);
-  const baseLength = desiredOverlayLength ?? overlayLength(1);
-  return Math.min(baseLength, maxLength);
-}
-
-function resizeOverlay(): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const display = screen.getDisplayMatching(overlayWindow.getBounds());
-  const dock = currentDock();
-  const wa = display.workArea;
-  const length = effectiveOverlayLength(dock.orientation, display);
-  const size =
-    dock.orientation === "vertical"
-      ? { width: OVERLAY_WIDTH, height: length }
-      : { width: length, height: OVERLAY_WIDTH };
-  const bounds = overlayWindow.getBounds();
-  // Keep the rail inside the work area after a size change so the chat bubble
-  // never clips past the edge.
-  const axisPos = dock.orientation === "vertical" ? bounds.y : bounds.x;
-  const axisMin = (dock.orientation === "vertical" ? wa.y : wa.x) + OVERLAY_SCREEN_MARGIN;
-  const axisMax =
-    (dock.orientation === "vertical" ? wa.y + wa.height - length : wa.x + wa.width - length) -
-    OVERLAY_SCREEN_MARGIN;
-  const clamped = Math.max(axisMin, Math.min(axisPos, axisMax));
-  const nextBounds =
-    dock.orientation === "vertical"
-      ? { x: bounds.x, y: clamped, width: size.width, height: size.height }
-      : { x: clamped, y: bounds.y, width: size.width, height: size.height };
-  // `animate: true` uses macOS's native NSWindow animator (~200ms ease), which
-  // reads as a fluid grow/shrink alongside the renderer's bubble enter/exit
-  // animations. No-op on other platforms.
-  const animate =
-    bounds.width !== nextBounds.width ||
-    bounds.height !== nextBounds.height ||
-    bounds.x !== nextBounds.x ||
-    bounds.y !== nextBounds.y;
-  overlayWindow.setBounds(nextBounds, animate);
-}
 
 function broadcastHeads(): void {
   broadcast(
     "heads:update",
     heads,
-    overlayWindow,
+    overlay.getOverlayWindow(),
     getMainWindow(),
     getTrayPopup(),
     info.getInfoWindow(),
   );
 }
 
-// -------- Overlay-renderer notifications --------
-
-let lastSentDock: DockConfig | null = null;
-
 function broadcastChatVisible(visible: boolean): void {
-  broadcast("chat:state", { visible }, overlayWindow);
-}
-
-// Tell the overlay renderer which dock it's in so it can pick flex direction,
-// scroll axis, and FLIP-tracking axis. Only sent on change to avoid redundant
-// layout passes.
-function sendOverlayConfig(): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const dock = currentDock();
-  if (
-    lastSentDock &&
-    lastSentDock.orientation === dock.orientation &&
-    lastSentDock.side === dock.side
-  ) {
-    return;
-  }
-  lastSentDock = dock;
-  sendWhenLoaded(overlayWindow, "overlay:config", dock);
+  broadcast("chat:state", { visible }, overlay.getOverlayWindow());
 }
 
 // -------- IPC --------
@@ -354,7 +97,7 @@ ipcMain.handle("rail:getPinned", (): boolean => {
 ipcMain.handle("rail:setPinned", (_e, pinned: boolean): void => {
   console.log(`[pin] ipc setPinned(${pinned})`);
   setRailPinned(pinned);
-  applyRailPinned();
+  overlay.applyRailPinned();
   resolveRailVisibility();
   broadcastRailPinned();
 });
@@ -383,7 +126,7 @@ spotifyToggle.register();
 userLocation.register();
 
 registerDebug({
-  getOverlay: () => overlayWindow,
+  getOverlay: overlay.getOverlayWindow,
   getSelectedHeadId: info.getSelectedHeadId,
   getCachedSessions: info.getCachedSessions,
   fetchSessionsForHead: info.fetchSessionsForHead,
@@ -391,9 +134,11 @@ registerDebug({
 });
 
 info.registerInfo({
-  getOverlay: () => overlayWindow,
+  getOverlay: overlay.getOverlayWindow,
   getHeads: () => heads,
 });
+
+overlay.registerOverlay();
 
 rail.onChange((next) => {
   heads = next;
@@ -402,24 +147,15 @@ rail.onChange((next) => {
   // after the last session ended" measures from the most recent live poll.
   if (rail.isSelfLive()) bumpActivity();
   if (heads.length === 0) {
-    overlayWindow?.close();
-    overlayWindow = null;
+    overlay.closeOverlay();
   } else {
-    ensureOverlay();
-    resizeOverlay();
+    overlay.ensureOverlay();
+    overlay.resizeOverlay();
     resolveRailVisibility();
     repositionChatIfVisible();
   }
   info.onHeadsChanged(heads);
   broadcastHeads();
-});
-
-ipcMain.handle("overlay:setLength", (_e, length: number): void => {
-  if (typeof length !== "number" || !Number.isFinite(length) || length <= 0) return;
-  const next = Math.round(length);
-  if (next === desiredOverlayLength) return;
-  desiredOverlayLength = next;
-  resizeOverlay();
 });
 
 ipcMain.handle("chat:toggle", (): void => toggleChat());
@@ -457,15 +193,15 @@ ipcMain.handle("chat:history", () => backend.fetchChatHistory());
 ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));
 
 registerDockDrag({
-  getOverlay: () => overlayWindow,
-  effectiveOverlayLength,
+  getOverlay: overlay.getOverlayWindow,
+  effectiveOverlayLength: overlay.effectiveOverlayLength,
   onTick: () => {
     info.repositionIfVisible();
     repositionChatIfVisible();
   },
   onHideInfoNow: info.hideNow,
-  onSendOverlayConfig: sendOverlayConfig,
-  onSavePosition: saveOverlayPosition,
+  onSendOverlayConfig: overlay.sendOverlayConfig,
+  onSavePosition: overlay.saveOverlayPosition,
 });
 
 registerShellIpc();
@@ -524,136 +260,9 @@ ipcMain.handle("backend:signOutEverywhere", async () => {
   localRepos.clearOnSignOut();
 });
 
-function applySyncForAuth(signedIn: boolean): void {
-  if (signedIn) {
-    // Without these catches a thrown start() (e.g. fs.mkdir EACCES on
-    // ~/.claude/projects, or an fs.watch that fails on a quirky filesystem)
-    // is swallowed and the UI flips to "signed in" while nothing is actually
-    // running — same shape the cursor-bot caught on heartbeat.
-    void uploader.start().catch((err) => console.warn("uploader.start failed:", err));
-    void heartbeat.start().catch((err) => console.warn("heartbeat.start failed:", err));
-    spotifyToggle.updateSpotifyRunning();
-    void peerPresence.start().catch((err) => console.warn("peerPresence.start failed:", err));
-    void peerLocations.start().catch((err) => console.warn("peerLocations.start failed:", err));
-    ws.start();
-    for (const target of ["claude-code", "codex"] as const) {
-      void installMcp
-        .install(target)
-        .catch((err) => console.warn(`installMcp.install ${target} failed:`, err));
-    }
-  } else {
-    heartbeat.stop();
-    uploader.reset();
-    spotifyToggle.updateSpotifyRunning();
-    peerPresence.stop();
-    peerLocations.stop();
-    ws.stop();
-    info.clearQuestionsCache();
-    for (const target of ["claude-code", "codex"] as const) {
-      void installMcp
-        .uninstall(target)
-        .catch((err) => console.warn(`installMcp.uninstall ${target} failed:`, err));
-    }
-  }
-}
+registerWsHandlers();
+registerAuthOrchestrator();
 
-ws.onPrActivity((msg) => {
-  console.log(
-    `[ws] pr_activity ${msg.action} by ${msg.login} on ${msg.repoFullName}#${msg.number}`,
-  );
-  rail.markPrActivity(msg.login);
-});
-
-ws.onCollisionDetected((msg) => {
-  console.log(
-    `[ws] collision_detected on ${msg.file_path} (trigger=${msg.trigger.githubLogin} others=${msg.others.map((o) => o.githubLogin).join(",")})`,
-  );
-  const state = backend.getAuthState();
-  const selfLogin = state.signedIn ? state.user.githubLogin : null;
-  // Stamp every involved peer (trigger + others) — but verify each one's
-  // session data actually contains the file before painting the ring. This
-  // is what keeps ring + popover warning in lockstep: if no live session
-  // for a peer touches the file (stale cache, races, weird edge cases),
-  // we don't paint a ring with no explanation.
-  if (msg.trigger.githubLogin !== selfLogin) {
-    void verifyAndMarkCollision(msg.trigger.githubLogin, msg.file_path);
-  }
-  for (const other of msg.others) {
-    if (other.githubLogin === selfLogin) continue;
-    void verifyAndMarkCollision(other.githubLogin, msg.file_path);
-  }
-});
-
-/** Refresh the peer's session cache, then mark a collision only if at least
- *  one live (non-ENDED) session of theirs has the file in topFilesEdited or
- *  topFilesWritten — the same predicate the popover uses to render the
- *  in-row warning. Single source of truth: ring + warning live and die
- *  together. Used by both the WS path (production) and the debug picker. */
-async function verifyAndMarkCollision(login: string, filePath: string): Promise<void> {
-  const headId = rail.userHeadId(login);
-  // Drop the cache so we re-fetch with the latest topFiles. The server fires
-  // collision_detected after session_updated but the WS messages can arrive
-  // out of order or before our fetch completes; an explicit refresh
-  // guarantees we see the post-update aggregates.
-  info.invalidateSessionCache(headId);
-  let sessions: InfoSession[];
-  try {
-    sessions = await info.fetchSessionsForHead(headId);
-  } catch (err) {
-    console.warn(`[collision] verify failed to fetch sessions for ${login}:`, err);
-    return;
-  }
-  if (!anyLiveSessionTouchesFile(sessions, filePath)) {
-    console.warn(
-      `[collision] verify: no live session of ${login} contains ${filePath} — skipping ring`,
-    );
-    return;
-  }
-  rail.markCollision(login, filePath);
-}
-
-function anyLiveSessionTouchesFile(sessions: InfoSession[], filePath: string): boolean {
-  for (const s of sessions) {
-    if (s.state === "ended") continue;
-    const sets = [s.topFilesEdited, s.topFilesWritten];
-    for (const set of sets) {
-      if (!Array.isArray(set)) continue;
-      for (const entry of set) {
-        if (Array.isArray(entry) && entry[0] === filePath) return true;
-      }
-    }
-  }
-  return false;
-}
-
-// Local uploader ingestion invalidates the self-head cache synchronously —
-// faster than waiting for the server-side WS echo for your own sessions.
-uploader.onIngested(() => {
-  const state = backend.getAuthState();
-  if (!state.signedIn) return;
-  info.invalidateSessionCache(rail.userHeadId(state.user.githubLogin));
-});
-
-backend.onChange((state) => applySyncForAuth(state.signedIn));
-
-ws.onSessionInsightsUpdated((msg) => {
-  console.log(
-    `[insights] ${msg.analyzer} ready for session ${msg.session_id.slice(0, 8)} (repo=${msg.repo_id})`,
-    msg.output,
-  );
-  info.scheduleRefresh(msg.session_id);
-  broadcastToMain("ws:sessionInsightsUpdated", msg);
-});
-
-ws.onSessionUpdated((msg) => {
-  // Drop the owner's cache so a non-selected head goes stale-free on next
-  // hover. info.scheduleRefresh then coalesces any UI refresh for the
-  // currently-selected head across bursty events.
-  info.invalidateSessionCache(rail.userHeadId(msg.github_login));
-  rail.refreshSoon();
-  info.scheduleRefresh(msg.session_id);
-  broadcastToMain("ws:sessionUpdated", msg);
-});
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());
 ipcMain.handle("backend:addLocalRepo", () => localRepos.addLocalRepo());
 ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>
@@ -667,28 +276,6 @@ ipcMain.handle("trackedRepos:toggle", (_e, repoId: number) => [
   ...localRepos.toggleSelected(repoId),
 ]);
 
-function broadcastToMain(channel: string, payload: unknown): void {
-  broadcast(channel, payload, getMainWindow());
-}
-
-// Tray popup (statusbar renderer) is the primary consumer of orgs:* /
-// repos:* push channels. We still broadcast to main so any future settings
-// UI on the main window stays in sync without extra plumbing.
-function broadcastToTrayAndMain(channel: string, payload: unknown): void {
-  broadcast(channel, payload, getMainWindow(), getTrayPopup());
-}
-
-backend.onChange((state) => broadcastToMain("backend:authState", state));
-// Tray popup shows sign-in state too — mirror to it so the CTA flips live.
-backend.onChange((state) => broadcast("backend:authState", state, getTrayPopup()));
-localRepos.onChange((repos) => broadcastToTrayAndMain("backend:trackedRepos", repos));
-localRepos.onSelectionChange((ids) =>
-  broadcastToTrayAndMain("trackedRepos:selectionChange", [...ids]),
-);
-chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
-githubAuth.onChange((state) => broadcastToMain("github:state", state));
-anthropic.onConfiguredChange((configured) => broadcastToMain("agents:configured", configured));
-
 // -------- Lifecycle --------
 
 // Rail derives lastActivityAt from /api/feed sessions directly, no backfill needed.
@@ -697,24 +284,24 @@ function debugBackfillTimestamps(): void {
 }
 
 configureRailState({
-  getOverlay: () => overlayWindow,
+  getOverlay: overlay.getOverlayWindow,
   getMainWindow,
   getTrayPopup,
 });
 configureChat({
-  getOverlay: () => overlayWindow,
+  getOverlay: overlay.getOverlayWindow,
   getCurrentDock: currentDock,
   onVisibilityChange: broadcastChatVisible,
   resolveRailVisibility,
 });
 configureResponse({ onClose: hideChat });
 configureHoverPolling({
-  getOverlay: () => overlayWindow,
+  getOverlay: overlay.getOverlayWindow,
   isRailPinned: getRailPinned,
-  isAppFocused: appIsFocused,
+  isAppFocused: overlay.appIsFocused,
 });
 configureRailVisibility({
-  getOverlay: () => overlayWindow,
+  getOverlay: overlay.getOverlayWindow,
   isRailPinned: getRailPinned,
   isSessionOnlyMode: getRailSessionOnlyMode,
   isSelfLive: () => rail.isSelfLive(),
@@ -750,7 +337,7 @@ app.whenReady().then(async () => {
   });
   rail.start();
   selfSession.start();
-  applySyncForAuth(backend.getAuthState().signedIn);
+  applyInitialSync();
 
   registerDebugShortcuts();
 });
@@ -778,13 +365,8 @@ app.on("activate", () => {
   showMainWindow();
 });
 
-// Unpinned mode: rail follows app focus. Float when active so hover works,
-// drop to normal when blurred so it sits behind other apps.
 app.on("did-become-active", () => {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  if (getRailPinned()) return;
-  overlayWindow.setAlwaysOnTop(true, "floating");
-  overlayWindow.moveTop();
+  overlay.onAppDidBecomeActive();
 });
 
 app.on("did-resign-active", () => {
@@ -795,7 +377,5 @@ app.on("did-resign-active", () => {
     app.setActivationPolicy("regular");
     void app.dock?.show();
   }
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  if (getRailPinned()) return;
-  overlayWindow.setAlwaysOnTop(false);
+  overlay.onAppDidResignActive();
 });

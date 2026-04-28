@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config";
-import { PRICING, type ModelId } from "../models";
+import { calculateCostUsd, type ModelId } from "../models";
+import type { RedisBridge } from "../ws/redis-bridge";
+import { LlmBudgetExceededError, checkLlmBudget, recordLlmSpend } from "./llm-budget";
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -21,6 +23,10 @@ export interface StructuredCallParams {
   toolDescription: string;
   schema: object;
   maxTokens?: number;
+  /** Required for budget enforcement. The session owner pays for analyzer
+   *  calls; the chat caller pays for chat-agent calls. Pass the Redis bridge
+   *  so we can read/write the per-day counter. */
+  budget: { redis: RedisBridge; userId: number };
 }
 
 export interface StructuredCallResult<T> {
@@ -34,6 +40,10 @@ export interface StructuredCallResult<T> {
 export async function callStructured<T>(
   params: StructuredCallParams,
 ): Promise<StructuredCallResult<T>> {
+  const budget = await checkLlmBudget(params.budget.redis, params.budget.userId);
+  if (!budget.allowed) {
+    throw new LlmBudgetExceededError(params.budget.userId, budget.spentUsd, budget.capUsd);
+  }
   const resp = await client().messages.create({
     model: params.model,
     max_tokens: params.maxTokens ?? 1024,
@@ -66,14 +76,9 @@ export async function callStructured<T>(
   const tokensIn = usage.input_tokens ?? 0;
   const tokensOut = usage.output_tokens ?? 0;
   const tokensCacheRead = usage.cache_read_input_tokens ?? 0;
-  const tokensCacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const costUsd = calculateCostUsd(params.model, usage);
 
-  const pricing = PRICING[params.model];
-  const costUsd =
-    (tokensIn * pricing.in) / 1_000_000 +
-    (tokensOut * pricing.out) / 1_000_000 +
-    (tokensCacheRead * pricing.cacheRead) / 1_000_000 +
-    (tokensCacheWrite * pricing.in * 1.25) / 1_000_000;
+  await recordLlmSpend(params.budget.redis, params.budget.userId, costUsd);
 
   return { output, tokensIn, tokensOut, tokensCacheRead, costUsd };
 }

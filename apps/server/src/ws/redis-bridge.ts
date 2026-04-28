@@ -77,6 +77,36 @@ export class RedisBridge {
     await this.pub.del(key);
   }
 
+  /** Read a numeric counter as a float. Returns 0 on miss, malformed value,
+   *  or when Redis is down — for budget counters callers should treat this
+   *  as "no spend recorded" only when paired with an `incrFloat` write
+   *  on the success path; if writes also no-op, the budget is effectively
+   *  off until Redis recovers. */
+  async getFloat(key: string): Promise<number> {
+    if (!this.connected) return 0;
+    const raw = await this.pub.get(key);
+    if (!raw) return 0;
+    const n = Number.parseFloat(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  /** INCRBYFLOAT a counter and ensure it has a TTL. Pipelined so the EXPIRE
+   *  rides the same round-trip. Returns the new value, or null when Redis
+   *  is down or the increment failed. */
+  async incrFloat(key: string, by: number, ttlSeconds: number): Promise<number | null> {
+    if (!this.connected) return null;
+    const pipe = this.pub.pipeline();
+    pipe.incrbyfloat(key, by);
+    pipe.expire(key, ttlSeconds);
+    const results = await pipe.exec();
+    const incr = results?.[0];
+    if (!incr || incr[0]) return null;
+    const raw = incr[1];
+    if (typeof raw !== "string") return null;
+    const n = Number.parseFloat(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
   /** Atomic GETDEL — read a JSON-encoded value and remove it in one
    *  round-trip. Returns null on miss, malformed JSON, or when Redis is
    *  down. Use when single-use semantics matter (e.g. OAuth state nonces),

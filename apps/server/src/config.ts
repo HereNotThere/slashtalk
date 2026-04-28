@@ -25,6 +25,11 @@ export const config = Object.freeze({
   ),
   ingestConcurrency: parseInt(process.env.INGEST_CONCURRENCY || "4", 10),
   ingestBatchSize: parseInt(process.env.INGEST_BATCH_SIZE || "200", 10),
+  // Per-user, per-calendar-day USD ceiling on Anthropic spend (analyzers +
+  // chat agent combined). 0 disables the cap. The cost is logged after every
+  // call, so without this a runaway analyzer or hostile session could rack
+  // up unbounded spend before anyone notices.
+  llmDailyBudgetUsd: parseFloat(process.env.LLM_DAILY_BUDGET_USD || "5"),
 });
 
 export type Config = typeof config;

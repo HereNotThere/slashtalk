@@ -140,6 +140,7 @@ async function runOne(
 
   const ctx: AnalyzerContext = {
     db,
+    redis,
     session,
     existingInsight: existing ?? null,
     recentEvents: async () => {

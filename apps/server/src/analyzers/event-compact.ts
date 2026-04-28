@@ -14,6 +14,17 @@ function isObj(v: unknown): v is JsonObj {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+function parseJsonObject(v: unknown): JsonObj | null {
+  if (isObj(v)) return v;
+  if (typeof v !== "string") return null;
+  try {
+    const parsed = JSON.parse(v);
+    return isObj(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function extractText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -107,7 +118,8 @@ export function compactEvent(e: typeof events.$inferSelect): string {
           : typeof payload.name === "string"
             ? payload.name
             : "tool";
-      return `[${ts}] → ${describeToolCall({ name, input: inner.arguments })}`;
+      const input = parseJsonObject(inner.arguments) ?? parseJsonObject(inner.input);
+      return `[${ts}] → ${describeToolCall({ name, input })}`;
     }
     case "reasoning":
       return `[${ts}] (thinking)`;

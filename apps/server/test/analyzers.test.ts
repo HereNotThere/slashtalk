@@ -117,13 +117,17 @@ describe("event compaction", () => {
       ts: new Date("2026-04-27T20:00:02.000Z"),
       payload: {
         type: "response_item",
-        payload: { type: "function_call", name: "apply_patch", arguments: "{}" },
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: JSON.stringify({ command: "bun test test/analyzers.test.ts" }),
+        },
       },
     } as never);
 
     expect(user).toContain("prompt: Fix server OOM crashes");
     expect(assistant).toContain("reply: I will inspect ingest memory use.");
-    expect(tool).toContain("apply_patch");
+    expect(tool).toContain("exec_command: bun test test/analyzers.test.ts");
   });
 });
 

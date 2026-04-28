@@ -638,12 +638,15 @@ async function showInfo(
 
   // Fetch any cache misses in parallel and push the merged snapshot once
   // both settle, so the renderer doesn't ping-pong through two resize cycles.
+  // Drop expandSessionId on the follow-up: the initial push already carried
+  // it, and re-sending bumps expandRequest.nonce in the renderer, which
+  // re-expands a session the user may have manually collapsed mid-fetch.
   const pending: Promise<unknown>[] = [];
   if (!sessionCache.has(head.id)) pending.push(fetchSessionsForHead(head.id));
   if (login && !questionsCache.has(login)) pending.push(fetchQuestionsForLoginCached(login));
   if (pending.length > 0) {
     void Promise.all(pending).then(() => {
-      pushInfoShowSnapshot(infoWindow, head, expandSessionId);
+      pushInfoShowSnapshot(infoWindow, head, undefined);
     });
   }
 }

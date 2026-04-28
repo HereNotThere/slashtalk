@@ -581,7 +581,7 @@ describe("NDJSON ingest", () => {
 
 describe("ingest authorization", () => {
   it("rejects ingest for a session owned by another user", async () => {
-    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobRes = await signInAs(baseUrl, "bob_code");
     const bobCookie = getCookie(bobRes, "session")!;
 
     const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
@@ -761,7 +761,7 @@ describe("heartbeat", () => {
   });
 
   it("rejects a heartbeat for a session owned by another user", async () => {
-    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobRes = await signInAs(baseUrl, "bob_code");
     const bobCookie = getCookie(bobRes, "session")!;
     const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
       method: "POST",

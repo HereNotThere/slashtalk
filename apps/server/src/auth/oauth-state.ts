@@ -32,14 +32,13 @@ export async function issueOAuthState(
 /**
  * Look up and atomically consume the payload for a state nonce. Returns
  * null if missing/expired/already-consumed — callers must treat that as
- * an unauthenticated callback and refuse to issue tokens.
+ * an unauthenticated callback and refuse to issue tokens. Uses Redis
+ * GETDEL so two concurrent callbacks presenting the same nonce can't
+ * both succeed.
  */
 export async function consumeOAuthState(
   redis: RedisBridge,
   nonce: string,
 ): Promise<OAuthStatePayload | null> {
-  const payload = await redis.getJson<OAuthStatePayload>(key(nonce));
-  if (!payload) return null;
-  await redis.del(key(nonce));
-  return payload;
+  return redis.getJsonAndDel<OAuthStatePayload>(key(nonce));
 }

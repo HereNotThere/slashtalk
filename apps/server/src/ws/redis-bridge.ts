@@ -77,6 +77,21 @@ export class RedisBridge {
     await this.pub.del(key);
   }
 
+  /** Atomic GETDEL — read a JSON-encoded value and remove it in one
+   *  round-trip. Returns null on miss, malformed JSON, or when Redis is
+   *  down. Use when single-use semantics matter (e.g. OAuth state nonces),
+   *  since `getJson` + `del` is racy under concurrent consumers. */
+  async getJsonAndDel<T>(key: string): Promise<T | null> {
+    if (!this.connected) return null;
+    const raw = await this.pub.getdel(key);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
   /** Subscribe a handler to a channel */
   async subscribe(channel: string, handler: MessageHandler): Promise<void> {
     if (!this.connected) return;

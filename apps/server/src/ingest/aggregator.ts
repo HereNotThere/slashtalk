@@ -43,7 +43,10 @@ interface ClaudeEventPayload {
   };
   attachment?: {
     type?: string;
-    prompt?: string;
+    // `unknown` because real Claude Code JSONLs sometimes carry a non-string
+    // value here (e.g. an object) — typing it as `string` is what allowed the
+    // .startsWith crash to ship.
+    prompt?: unknown;
     commandMode?: string;
   };
   prNumber?: number;
@@ -162,6 +165,33 @@ function topN(map: Record<string, number>, n: number): Record<string, number> {
 
 function truncate(text: string, limit: number): string {
   return text.length > limit ? text.slice(0, limit) : text;
+}
+
+/** Claude Code's queued-command `prompt` field is either a string (plain
+ *  text command) or an array of Anthropic-shape content blocks (text + image
+ *  when the user pastes media). Flatten to a string preview so downstream
+ *  storage and rendering — both of which assume a string — keep working.
+ *  Returns null when there's no usable text (empty/whitespace string, empty
+ *  array, malformed object), so callers can skip-queue cleanly with a single
+ *  `=== null` check. */
+function extractPromptText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? value : null;
+  }
+  if (!Array.isArray(value)) return null;
+  const parts: string[] = [];
+  for (const block of value) {
+    if (typeof block === "string") {
+      parts.push(block);
+    } else if (block && typeof block === "object") {
+      const b = block as { type?: unknown; text?: unknown };
+      if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
+      else if (b.type === "image") parts.push("[image]");
+    }
+  }
+  const joined = parts.join(" ").trim();
+  return joined.length > 0 ? joined : null;
 }
 
 function initState(current: CurrentSession): SessionUpdates {
@@ -355,7 +385,7 @@ function summarizeClaudeEvent(event: ClaudeEventPayload): string | null {
     return null;
   }
   if (event.type === "attachment" && event.attachment?.type === "queued_command") {
-    return `queued: ${truncate(event.attachment.prompt ?? "", 60)}`;
+    return `queued: ${truncate(extractPromptText(event.attachment.prompt) ?? "", 60)}`;
   }
   if (event.type === "pr-link") {
     if (event.prRepository && typeof event.prNumber === "number") {
@@ -467,17 +497,22 @@ function processClaudeEvents(current: CurrentSession, newEvents: unknown[]): Ses
     }
 
     if (event.type === "attachment") {
-      if (
-        event.attachment?.type === "queued_command" &&
-        event.attachment.prompt &&
-        !event.attachment.prompt.startsWith("<task-notification")
-      ) {
-        state.queued.push({
-          prompt: event.attachment.prompt,
-          ts: event.timestamp,
-          mode: event.attachment.commandMode ?? null,
-        });
-        state.inTurn = true;
+      // Claude Code stores a queued command's `prompt` as either a string
+      // (plain text) or an array of Anthropic-shape content blocks (when the
+      // user pasted an image). Both reach `state.queued` as a string preview;
+      // image blocks are flattened to "[image]" so the user still sees that
+      // something was queued. `<task-notification>` strings are system events,
+      // not user-typed commands — skip those.
+      if (event.attachment?.type === "queued_command") {
+        const text = extractPromptText(event.attachment.prompt);
+        if (text !== null && !text.startsWith("<task-notification")) {
+          state.queued.push({
+            prompt: text,
+            ts: event.timestamp,
+            mode: event.attachment.commandMode ?? null,
+          });
+          state.inTurn = true;
+        }
       }
     }
   }

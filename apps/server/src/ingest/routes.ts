@@ -42,10 +42,10 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
     // an earlier failed retry are still picked up exactly once.
     .post(
       "/ingest",
-      async ({ request, query, user, device }): Promise<IngestResponse> => {
+      async ({ request, query, user, device, set }): Promise<IngestResponse | IngestError> => {
         const release = await ingestGate();
         try {
-          return await handleIngest(db, redis, request, query, user, device);
+          return await handleIngest(db, redis, request, query, user, device, set);
         } finally {
           release();
         }
@@ -185,6 +185,10 @@ interface AuthedDevice {
   id: number;
 }
 
+interface IngestError {
+  error: string;
+}
+
 async function handleIngest(
   db: Database,
   redis: RedisBridge,
@@ -192,7 +196,8 @@ async function handleIngest(
   query: IngestQuery,
   user: AuthedUser,
   device: AuthedDevice | null | undefined,
-): Promise<IngestResponse> {
+  set: { status?: number | string },
+): Promise<IngestResponse | IngestError> {
   const source: EventSource = query.source ?? "claude";
   const fromLineSeq = Number(query.fromLineSeq);
 
@@ -211,6 +216,21 @@ async function handleIngest(
       prefixHash: query.prefixHash ?? null,
     })
     .onConflictDoNothing({ target: sessions.sessionId });
+
+  // Authorize: the row above either was just inserted (owned by us) or already
+  // existed. Verify ownership before writing any events — without this, a
+  // device API key could append events tagged with the caller's userId into
+  // any session whose UUID they know, corrupting another user's transcript
+  // and spoofing attribution on the live feed.
+  const [owner] = await db
+    .select({ userId: sessions.userId })
+    .from(sessions)
+    .where(eq(sessions.sessionId, query.session))
+    .limit(1);
+  if (!owner || owner.userId !== user.id) {
+    set.status = 403;
+    return { error: "session_not_owned" };
+  }
 
   const body = request.body;
   if (!body) {

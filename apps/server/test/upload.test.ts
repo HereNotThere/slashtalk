@@ -572,6 +572,50 @@ describe("NDJSON ingest", () => {
   });
 });
 
+describe("ingest authorization", () => {
+  it("rejects ingest for a session owned by another user", async () => {
+    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobCookie = getCookie(bobRes, "session")!;
+
+    const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: bobCookie },
+    });
+    const { token: bobSetupToken } = (await setupRes.json()) as { token: string };
+
+    const exchangeRes = await fetch(`${baseUrl}/v1/auth/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: bobSetupToken, deviceName: "bob-device", os: "darwin" }),
+    });
+    const { apiKey: bobApiKey } = (await exchangeRes.json()) as { apiKey: string };
+
+    // Alice's session from earlier (created in NDJSON ingest beforeAll).
+    const aliceSessionId = "b0000000-0000-0000-0000-000000000001";
+
+    const res = await fetch(
+      `${baseUrl}/v1/ingest?project=other&session=${aliceSessionId}&fromLineSeq=999`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          Authorization: `Bearer ${bobApiKey}`,
+        },
+        body: makeNdjson([makeEvent({ sessionId: aliceSessionId })]),
+      },
+    );
+    expect(res.status).toBe(403);
+
+    // No event row should have been written under Bob's userId.
+    const stray = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.sessionId, aliceSessionId));
+    expect(stray).toHaveLength(1);
+    expect(stray[0].userId).toBe(aliceUserId);
+  });
+});
+
 // ── Sync State ───────────────────────────────────────────────
 
 describe("sync state", () => {

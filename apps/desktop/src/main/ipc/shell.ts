@@ -4,8 +4,6 @@ import { sendWhenLoaded } from "../windows/broadcast";
 import { hideTrayPopup } from "../windows/tray";
 import { showMainWindow } from "../windows/main";
 
-// Generic shell/dialog/clipboard bridges + the two app:* convenience IPCs.
-// No private state — pure passthrough.
 export function registerShellIpc(): void {
   ipcMain.handle("app:openMain", (): void => {
     showMainWindow();

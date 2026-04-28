@@ -72,16 +72,11 @@ import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, showResponse } from "./windows/response";
 import { createTray, getTrayPopup, toggleTrayPopup } from "./windows/tray";
 import { broadcast, sendWhenLoaded } from "./windows/broadcast";
-import {
-  configureDockDrag,
-  currentDock,
-  getIsDragging,
-  registerDockDrag,
-} from "./windows/dock-drag";
+import { currentDock, getIsDragging, registerDockDrag } from "./windows/dock-drag";
 import * as spotifyToggle from "./sync/spotify-toggle";
 import * as userLocation from "./sync/user-location";
-import { configureAgents, registerAgents } from "./ipc/agents";
-import { configureDebug, registerDebug, registerDebugShortcuts } from "./ipc/debug";
+import { registerAgents } from "./ipc/agents";
+import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
 
 installMcp.configureInstaller({
@@ -731,14 +726,13 @@ spotifyToggle.register();
 
 userLocation.register();
 
-configureDebug({
+registerDebug({
   getOverlay: () => overlayWindow,
   getSelectedHeadId: () => selectedHeadId,
   getCachedSessions: (headId) => sessionCache.get(headId),
   fetchSessionsForHead,
   verifyAndMarkCollision,
 });
-registerDebug();
 
 rail.onChange((next) => {
   heads = next;
@@ -857,7 +851,7 @@ ipcMain.handle("chat:questionsForLogin", async (_e, login: string) => {
 
 ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));
 
-configureDockDrag({
+registerDockDrag({
   getOverlay: () => overlayWindow,
   effectiveOverlayLength,
   onTick: () => {
@@ -868,7 +862,6 @@ configureDockDrag({
   onSendOverlayConfig: sendOverlayConfig,
   onSavePosition: saveOverlayPosition,
 });
-registerDockDrag();
 
 registerShellIpc();
 
@@ -976,8 +969,7 @@ ipcMain.handle("github:connect", () => githubAuth.startConnect());
 ipcMain.handle("github:cancelConnect", () => githubAuth.cancelConnect());
 ipcMain.handle("github:disconnect", () => githubAuth.disconnect());
 
-configureAgents({ getInfoWindow: () => infoWindow });
-registerAgents();
+registerAgents({ getInfoWindow: () => infoWindow });
 
 ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
 ipcMain.handle("chatheads:signIn", () => chatheadsAuth.signIn());

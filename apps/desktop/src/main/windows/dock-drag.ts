@@ -15,37 +15,28 @@ interface DockDragDeps {
 
 const DOCK_ANIM_MS = 180;
 
+// Set on register; the exported `currentDock` / `getIsDragging` callers are
+// only reached after registration so we use `!` rather than a runtime guard.
 let deps: DockDragDeps | null = null;
 let dragOffset: { dx: number; dy: number } | null = null;
 let dragTicker: ReturnType<typeof setInterval> | null = null;
-// While the stack is being dragged, bubble hovers still fire (the cursor sits
-// over bubbles as the window moves under it), which would pop the info card
-// repeatedly. showInfo reads getIsDragging() to suppress for the duration of
-// the drag + dock animation.
+// showInfo reads getIsDragging() so a hover under the moving rail doesn't
+// pop the popover mid-drag/snap.
 let isDraggingStack = false;
 let dockPlaceholderWindow: BrowserWindow | null = null;
-
-function getDeps(): DockDragDeps {
-  if (!deps) throw new Error("dock-drag: configure() must be called before use");
-  return deps;
-}
-
-export function configureDockDrag(d: DockDragDeps): void {
-  deps = d;
-}
 
 export function getIsDragging(): boolean {
   return isDraggingStack;
 }
 
 function overlayDisplay(): Electron.Display {
-  const overlay = getDeps().getOverlay();
+  const overlay = deps!.getOverlay();
   if (!overlay || overlay.isDestroyed()) return screen.getPrimaryDisplay();
   return screen.getDisplayMatching(overlay.getBounds());
 }
 
 export function currentDock(): DockConfig {
-  const overlay = getDeps().getOverlay();
+  const overlay = deps!.getOverlay();
   if (!overlay || overlay.isDestroyed()) {
     return { orientation: "vertical", side: "end" };
   }
@@ -59,7 +50,7 @@ function computeDockBounds(dock: DockConfig): Electron.Rectangle {
   return computeDockBoundsOn(
     display,
     dock,
-    getDeps().effectiveOverlayLength(dock.orientation, display),
+    deps!.effectiveOverlayLength(dock.orientation, display),
   );
 }
 
@@ -124,9 +115,12 @@ function hideDockPlaceholder(): void {
   if (dockPlaceholderWindow.isVisible()) dockPlaceholderWindow.hide();
 }
 
-export function registerDockDrag(): void {
+export function registerDockDrag(d: DockDragDeps): void {
+  deps = d;
+  const { getOverlay, onTick, onHideInfoNow, onSendOverlayConfig, onSavePosition } = d;
+
   ipcMain.handle("drag:start", (): void => {
-    const overlay = getDeps().getOverlay();
+    const overlay = getOverlay();
     if (!overlay || overlay.isDestroyed()) return;
     // A new drag cancels any in-flight dock tween.
     cancelOverlayAnimation();
@@ -136,16 +130,16 @@ export function registerDockDrag(): void {
     dragOffset = { dx: cursor.x - win.x, dy: cursor.y - win.y };
     isDraggingStack = true;
     // Kill any visible/pending info card so it doesn't trail the stack.
-    getDeps().onHideInfoNow();
+    onHideInfoNow();
     updateDockPlaceholder();
 
     if (dragTicker) clearInterval(dragTicker);
     dragTicker = setInterval(() => {
-      const o = getDeps().getOverlay();
+      const o = getOverlay();
       if (!o || o.isDestroyed() || !dragOffset) return;
       const p = screen.getCursorScreenPoint();
       o.setPosition(p.x - dragOffset.dx, p.y - dragOffset.dy);
-      getDeps().onTick();
+      onTick();
       updateDockPlaceholder();
     }, 16);
   });
@@ -156,10 +150,10 @@ export function registerDockDrag(): void {
     dragOffset = null;
     hideDockPlaceholder();
 
-    const overlay = getDeps().getOverlay();
+    const overlay = getOverlay();
     if (!overlay || overlay.isDestroyed()) {
       isDraggingStack = false;
-      getDeps().onSavePosition();
+      onSavePosition();
       return;
     }
 
@@ -168,14 +162,14 @@ export function registerDockDrag(): void {
     // tracking swap before the window resizes. The renderer will see the new
     // size via its resize event during the animation, but with the right flex
     // orientation already in place.
-    getDeps().onSendOverlayConfig();
+    onSendOverlayConfig();
     // Keep isDraggingStack on through the slide so bubble hovers under the
     // moving window don't pop the info card mid-tween.
     animateOverlayTo(overlay, target, DOCK_ANIM_MS, {
-      onTick: () => getDeps().onTick(),
+      onTick: () => onTick(),
       onDone: () => {
         isDraggingStack = false;
-        getDeps().onSavePosition();
+        onSavePosition();
       },
     });
   });

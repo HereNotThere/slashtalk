@@ -43,7 +43,10 @@ interface ClaudeEventPayload {
   };
   attachment?: {
     type?: string;
-    prompt?: string;
+    // `unknown` because real Claude Code JSONLs sometimes carry a non-string
+    // value here (e.g. an object) — typing it as `string` is what allowed the
+    // .startsWith crash to ship.
+    prompt?: unknown;
     commandMode?: string;
   };
   prNumber?: number;
@@ -355,7 +358,8 @@ function summarizeClaudeEvent(event: ClaudeEventPayload): string | null {
     return null;
   }
   if (event.type === "attachment" && event.attachment?.type === "queued_command") {
-    return `queued: ${truncate(event.attachment.prompt ?? "", 60)}`;
+    const prompt = typeof event.attachment.prompt === "string" ? event.attachment.prompt : "";
+    return `queued: ${truncate(prompt, 60)}`;
   }
   if (event.type === "pr-link") {
     if (event.prRepository && typeof event.prNumber === "number") {
@@ -467,13 +471,18 @@ function processClaudeEvents(current: CurrentSession, newEvents: unknown[]): Ses
     }
 
     if (event.type === "attachment") {
+      // Real Claude Code JSONLs sometimes carry a non-string prompt (e.g.
+      // an object) on queued_command attachments. Truthy-check + .startsWith
+      // would throw "startsWith is not a function" and surface as a 500 from
+      // /v1/ingest, killing the whole batch.
+      const prompt = event.attachment?.prompt;
       if (
         event.attachment?.type === "queued_command" &&
-        event.attachment.prompt &&
-        !event.attachment.prompt.startsWith("<task-notification")
+        typeof prompt === "string" &&
+        !prompt.startsWith("<task-notification")
       ) {
         state.queued.push({
-          prompt: event.attachment.prompt,
+          prompt,
           ts: event.timestamp,
           mode: event.attachment.commandMode ?? null,
         });

@@ -77,12 +77,16 @@ async function tick(): Promise<void> {
   } else if (lastSent !== null) {
     try {
       await backend.postQuotaPresence("claude", null);
+      // Only mark as cleared after the server confirms — otherwise a transient
+      // POST failure would suppress every subsequent retry until the user's
+      // plan actually changes, leaving stale presence visible for up to 24h
+      // (the Redis TTL).
+      lastSent = null;
+      lastSentAt = now;
       console.log("[claudeQuota] cleared");
     } catch (err) {
       console.warn("[claudeQuota] clear failed:", (err as Error).message);
     }
-    lastSent = null;
-    lastSentAt = now;
   }
 }
 

@@ -3,12 +3,7 @@
 // a claimed repo. The info-card renderer reads this via IPC handlers in
 // index.ts.
 
-import type {
-  PeerPresenceEntry,
-  QuotaByLogin,
-  QuotaSource,
-  SpotifyPresence,
-} from "@slashtalk/shared";
+import type { QuotaByLogin, SpotifyPresence } from "@slashtalk/shared";
 import * as backend from "./backend";
 import { createEmitter } from "./emitter";
 import { diffPresence, type PresenceChange, type PresenceMap } from "./peerPresenceDiff";
@@ -22,20 +17,12 @@ const changes = createEmitter<PresenceChange>();
 
 export const onChange = changes.on;
 
-export function getEntry(login: string): PeerPresenceEntry | null {
-  return map[login] ?? null;
-}
-
 export function getSpotify(login: string): SpotifyPresence | null {
   return map[login]?.spotify ?? null;
 }
 
 export function getQuota(login: string): QuotaByLogin | null {
   return map[login]?.quota ?? null;
-}
-
-export function getQuotaForSource(login: string, source: QuotaSource) {
-  return map[login]?.quota?.[source] ?? null;
 }
 
 async function refresh(): Promise<void> {

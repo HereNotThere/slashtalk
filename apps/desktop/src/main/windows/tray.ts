@@ -3,7 +3,11 @@ import path from "node:path";
 import { loadRenderer, preloadPath } from "./lib";
 
 const TRAY_POPUP_WIDTH = 320;
-const TRAY_POPUP_INITIAL_HEIGHT = 80;
+// Start tall enough to fit the signed-in popup with all toggles before the
+// renderer's auto-resize fires. On macOS, frameless windows created at small
+// heights can occasionally refuse to grow via programmatic setBounds, so
+// erring large + letting the renderer shrink down is the safer default.
+const TRAY_POPUP_INITIAL_HEIGHT = 560;
 
 let tray: Tray | null = null;
 let trayPopup: BrowserWindow | null = null;
@@ -19,7 +23,10 @@ function ensureTrayPopup(): BrowserWindow {
     width: TRAY_POPUP_WIDTH,
     height: TRAY_POPUP_INITIAL_HEIGHT,
     frame: false,
-    resizable: false,
+    // Keep programmatic resize working — `resizable: false` blocks the
+    // renderer's auto-resize on some macOS versions. The window is frameless
+    // so the user has no drag handle either way.
+    resizable: true,
     movable: false,
     skipTaskbar: true,
     alwaysOnTop: true,

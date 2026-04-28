@@ -28,11 +28,20 @@ import {
 } from "./windows/rail-state";
 import {
   configureChat,
+  getChatWindow,
   hideChat,
   isChatVisible,
   repositionChatIfVisible,
   toggleChat,
 } from "./windows/chat";
+import {
+  broadcastThemeMode,
+  configureTheme,
+  getThemeMode,
+  initThemeMain,
+  setThemeMode,
+  type ThemeMode,
+} from "./windows/theme";
 import { configureHoverPolling } from "./windows/hover-polling";
 import { appState } from "./windows/lib";
 import {
@@ -41,7 +50,7 @@ import {
   resolveRailVisibility,
 } from "./windows/rail-visibility";
 import { getMainWindow, showMainWindow } from "./windows/main";
-import { configureResponse, showResponse } from "./windows/response";
+import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
 import { createTray, getTrayPopup, toggleTrayPopup } from "./windows/tray";
 import { broadcast } from "./windows/broadcast";
 import { currentDock, registerDockDrag } from "./windows/dock-drag";
@@ -66,7 +75,7 @@ const mcpProxy = createLocalMcpProxy({
 });
 
 const RESIZE_MIN = 60;
-const RESIZE_MAX = 900;
+const RESIZE_MAX = 1200;
 
 let heads: ChatHead[] = [];
 
@@ -119,6 +128,12 @@ ipcMain.handle("rail:getShowActivityTimestamps", (): boolean => getShowActivityT
 ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
   setShowActivityTimestamps(shown);
   broadcastShowActivityTimestamps();
+});
+
+ipcMain.handle("theme:getMode", (): ThemeMode => getThemeMode());
+ipcMain.handle("theme:setMode", (_e, mode: ThemeMode): void => {
+  setThemeMode(mode);
+  broadcastThemeMode();
 });
 
 spotifyToggle.register();
@@ -292,6 +307,17 @@ configureRailState({
   getMainWindow,
   getTrayPopup,
 });
+configureTheme({
+  windows: () => [
+    overlay.getOverlayWindow(),
+    getMainWindow(),
+    getTrayPopup(),
+    info.getInfoWindow(),
+    getChatWindow(),
+    getResponseWindow(),
+  ],
+});
+initThemeMain();
 configureChat({
   getOverlay: overlay.getOverlayWindow,
   getCurrentDock: currentDock,

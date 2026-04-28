@@ -297,6 +297,8 @@ export type ResponseOpenPayload =
   | { kind: "agent"; agentId: string; sessionId: string }
   | { kind: "thread"; thread: import("@slashtalk/shared").ChatThread };
 
+export type ThemeMode = "system" | "light" | "dark";
+
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
 export interface ChatHeadsBridge {
@@ -395,6 +397,14 @@ export interface ChatHeadsBridge {
     getEnabled: () => Promise<boolean>;
     setEnabled: (enabled: boolean) => Promise<void>;
     onEnabledChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+  };
+
+  // Light/dark theme. "system" (default) follows the OS appearance; "light"
+  // and "dark" force a specific palette across every Slashtalk window.
+  theme: {
+    getMode: () => Promise<ThemeMode>;
+    setMode: (mode: ThemeMode) => Promise<void>;
+    onModeChange: (cb: (mode: ThemeMode) => void) => Unsubscribe;
   };
 
   setUserLocation: (payload: UserLocation) => Promise<void>;

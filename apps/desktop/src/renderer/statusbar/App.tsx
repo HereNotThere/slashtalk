@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BackendAuthState, TrackedRepo } from "../../shared/types";
+import type { BackendAuthState, ThemeMode, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 
 export function App(): JSX.Element {
@@ -10,6 +10,7 @@ export function App(): JSX.Element {
   const [showActivityTimestamps, setShowActivityTimestamps] = useState<boolean>(true);
   const [spotifySupported, setSpotifySupported] = useState<boolean>(false);
   const [spotifyShare, setSpotifyShare] = useState<boolean>(false);
+  const [theme, setTheme] = useState<ThemeMode>("system");
 
   useEffect(() => {
     let alive = true;
@@ -102,6 +103,23 @@ export function App(): JSX.Element {
     void window.chatheads.rail.setShowActivityTimestamps(v);
   };
 
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.theme.getMode().then((v) => {
+      if (alive) setTheme(v);
+    });
+    const off = window.chatheads.theme.onModeChange((v) => setTheme(v));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  const onThemeChange = (mode: ThemeMode): void => {
+    setTheme(mode);
+    void window.chatheads.theme.setMode(mode);
+  };
+
   if (!auth.signedIn) {
     return (
       <Shell>
@@ -123,6 +141,7 @@ export function App(): JSX.Element {
         {spotifySupported ? (
           <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
         ) : null}
+        <ThemeRow value={theme} onChange={onThemeChange} />
         <Divider />
         <Footer />
       </Shell>
@@ -170,6 +189,7 @@ export function App(): JSX.Element {
       {spotifySupported ? (
         <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
       ) : null}
+      <ThemeRow value={theme} onChange={onThemeChange} />
       <Divider />
       <Footer />
     </Shell>
@@ -427,6 +447,44 @@ function ShowActivityTimestampsRow({
       <Checkbox checked={shown} />
       <span className="flex-1 text-base">Show activity timestamps</span>
     </button>
+  );
+}
+
+function ThemeRow({
+  value,
+  onChange,
+}: {
+  value: ThemeMode;
+  onChange: (mode: ThemeMode) => void;
+}): JSX.Element {
+  const opts: { mode: ThemeMode; label: string }[] = [
+    { mode: "system", label: "System" },
+    { mode: "light", label: "Light" },
+    { mode: "dark", label: "Dark" },
+  ];
+  return (
+    <div className="flex items-center gap-2 px-1.5 py-1">
+      <span className="flex-1 text-base text-fg">Theme</span>
+      <div className="flex rounded-md bg-surface-alt p-0.5 gap-0.5">
+        {opts.map((o) => {
+          const active = value === o.mode;
+          return (
+            <button
+              key={o.mode}
+              type="button"
+              onClick={() => onChange(o.mode)}
+              aria-pressed={active}
+              className={`
+                px-2 py-0.5 rounded text-xs [font:inherit] cursor-pointer border-none
+                ${active ? "bg-bg text-fg" : "bg-transparent text-fg/60 hover:text-fg"}
+              `}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

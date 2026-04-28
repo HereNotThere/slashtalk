@@ -41,6 +41,10 @@ export function isChatVisible(): boolean {
   return !!chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible();
 }
 
+export function getChatWindow(): BrowserWindow | null {
+  return chatWindow;
+}
+
 function applyChatRim(): void {
   if (!chatWindow || chatWindow.isDestroyed()) return;
   setMacCornerRadius(chatWindow, CHAT_HEIGHT / 2, {

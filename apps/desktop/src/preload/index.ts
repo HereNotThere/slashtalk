@@ -128,6 +128,14 @@ const bridge: ChatHeadsBridge = {
     onEnabledChange: (cb) => subscribe<boolean>("spotify:shareEnabled", cb),
   },
 
+  theme: {
+    getMode: () =>
+      ipcRenderer.invoke("theme:getMode") as Promise<import("../shared/types").ThemeMode>,
+    setMode: (mode: import("../shared/types").ThemeMode) =>
+      ipcRenderer.invoke("theme:setMode", mode) as Promise<void>,
+    onModeChange: (cb) => subscribe<import("../shared/types").ThemeMode>("theme:mode", cb),
+  },
+
   setUserLocation: (payload) => ipcRenderer.invoke("user:setLocation", payload) as Promise<void>,
 
   showInfo: (headId, bubbleScreen) =>

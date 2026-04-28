@@ -2,15 +2,14 @@ export type ThemeMode = "dark" | "light" | "system";
 
 const KEY = "chatheads.theme";
 
-export function getThemeMode(): ThemeMode {
+function readCache(): ThemeMode {
   const v = localStorage.getItem(KEY);
   return v === "dark" || v === "light" ? v : "system";
 }
 
-export function setThemeMode(mode: ThemeMode): void {
+function writeCache(mode: ThemeMode): void {
   if (mode === "system") localStorage.removeItem(KEY);
   else localStorage.setItem(KEY, mode);
-  applyThemeMode(mode);
 }
 
 export function applyThemeMode(mode: ThemeMode): void {
@@ -21,7 +20,24 @@ export function applyThemeMode(mode: ThemeMode): void {
   // mode === 'system' → no class, CSS media query takes over
 }
 
-/** Call once at renderer startup. */
+/**
+ * Apply the cached mode synchronously (no flash on cold start), then sync
+ * with the main process — main is the source of truth and broadcasts
+ * changes from any window. localStorage stays as a cache so the next launch
+ * paints the correct palette before IPC has resolved.
+ */
 export function initTheme(): void {
-  applyThemeMode(getThemeMode());
+  applyThemeMode(readCache());
+  const bridge = window.chatheads?.theme;
+  if (!bridge) return;
+  void bridge.getMode().then((mode) => {
+    if (mode !== readCache()) {
+      writeCache(mode);
+      applyThemeMode(mode);
+    }
+  });
+  bridge.onModeChange((mode) => {
+    writeCache(mode);
+    applyThemeMode(mode);
+  });
 }

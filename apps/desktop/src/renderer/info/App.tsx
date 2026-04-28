@@ -206,8 +206,13 @@ export function App(): JSX.Element {
           </>
         ) : (
           <>
-            <UserHeader head={head} sessions={sessions} location={location} isSelf={isSelf} />
-            {spotify && <NowPlaying track={spotify} />}
+            <UserHeader
+              head={head}
+              sessions={sessions}
+              location={location}
+              isSelf={isSelf}
+              spotify={spotify}
+            />
             <Divider />
             <SessionsSection
               key={head?.id ?? "no-head"}
@@ -229,7 +234,7 @@ export function App(): JSX.Element {
   );
 }
 
-function NowPlaying({ track }: { track: SpotifyPresence }): JSX.Element {
+function NowPlayingRow({ track }: { track: SpotifyPresence }): JSX.Element {
   const open = (): void => {
     void window.chatheads.openExternal(track.url);
   };
@@ -238,16 +243,15 @@ function NowPlaying({ track }: { track: SpotifyPresence }): JSX.Element {
       type="button"
       onClick={open}
       title={`Open on Spotify: ${track.name} — ${track.artist}`}
-      className="w-full text-left px-4 pb-3 flex items-center gap-2 min-w-0 group cursor-pointer"
+      className="mt-1 flex items-center gap-1.5 text-sm text-muted min-w-0 group cursor-pointer w-full text-left"
     >
-      <SpotifyIcon />
-      <div className="flex-1 min-w-0 text-sm leading-tight truncate">
-        <span className="text-fg font-medium">{track.name}</span>
+      <span className="shrink-0">
+        <SpotifyIcon />
+      </span>
+      <span className="truncate min-w-0">
+        <span className="text-fg">{track.name}</span>
         <span className="text-subtle"> — </span>
-        <span className="text-muted">{track.artist}</span>
-      </div>
-      <span className="text-subtle text-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        open ↗
+        <span>{track.artist}</span>
       </span>
     </button>
   );
@@ -274,11 +278,13 @@ function UserHeader({
   sessions,
   location,
   isSelf,
+  spotify,
 }: {
   head: ChatHead | null;
   sessions: InfoSession[] | null;
   location: UserLocation | null;
   isSelf: boolean;
+  spotify?: SpotifyPresence | null;
 }): JSX.Element {
   const name = head?.label ?? "—";
   // Self: resolve locally as before. Peer with data: show their tz/city.
@@ -323,6 +329,7 @@ function UserHeader({
             <span>{totalTokensLabel} tokens</span>
           </div>
         )}
+        {spotify && <NowPlayingRow track={spotify} />}
       </div>
     </div>
   );

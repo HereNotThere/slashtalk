@@ -26,6 +26,7 @@ import type {
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
+import { isSafeExternalUrl } from "./safeUrl";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
@@ -1080,6 +1081,10 @@ ipcMain.handle("app:quit", (): void => app.quit());
 
 ipcMain.handle("clipboard:writeText", (_e, text: string): void => clipboard.writeText(text ?? ""));
 ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
+  if (!isSafeExternalUrl(url)) {
+    console.warn(`[shell:openExternal] refusing url: ${url}`);
+    return;
+  }
   await shell.openExternal(url);
 });
 

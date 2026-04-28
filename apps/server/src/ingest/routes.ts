@@ -287,15 +287,17 @@ async function handleIngest(
       .returning({ lineSeq: events.lineSeq });
     acceptedEvents += inserted.length;
 
-    // Pluck the latest Codex rate-limit signal out of *this* batch's accepted
-    // payloads before we drop them. Source is constant for the whole stream
-    // so the source check is a no-op for non-Codex sessions.
-    if (source === "codex" && inserted.length > 0) {
-      const acceptedSet = new Set(inserted.map((r) => r.lineSeq));
-      const acceptedPayloads = batch
-        .filter(({ lineSeq }) => acceptedSet.has(lineSeq))
-        .map((b) => b.event);
-      const q = extractCodexQuotaFromBatch(acceptedPayloads);
+    // Pluck the latest Codex rate-limit signal out of *every* row the client
+    // sent over the wire — not just the ones that just inserted. A retry
+    // after a partial commit re-streams the same chunk; `onConflictDoNothing`
+    // returns zero rows for batches that already committed, so filtering by
+    // `inserted` would drop a token_count event that happens to land on a
+    // duplicate line_seq and silently lose the quota update across the
+    // failure boundary. The wire payload is authoritative regardless of
+    // whether the row pre-existed; Redis writes are idempotent so picking up
+    // the same quota twice is harmless.
+    if (source === "codex") {
+      const q = extractCodexQuotaFromBatch(batch.map((b) => b.event));
       if (q) latestCodexQuota = q;
     }
 

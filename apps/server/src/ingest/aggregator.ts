@@ -216,9 +216,15 @@ function pushRecent(state: SessionUpdates, ts: string, type: string, summary: st
   }
 }
 
+function isSyntheticPromptText(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.startsWith("<task-notification") || trimmed === "[Request interrupted by user]";
+}
+
 function recordUserPrompt(state: SessionUpdates, ts: string, text: string): void {
   const trimmed = text.trim();
   if (!trimmed) return;
+  if (isSyntheticPromptText(trimmed)) return;
   state.title ??= truncate(trimmed.split("\n")[0] ?? trimmed, 80);
   state.lastUserPrompt = truncate(trimmed, 800);
   state.recentPrompts.push({ ts, text: truncate(trimmed, 280) });
@@ -242,7 +248,10 @@ function isRealClaudeUserMessage(event: ClaudeEventPayload): boolean {
     if (content.startsWith("<local-command") || content.startsWith("<command")) {
       return false;
     }
+    if (isSyntheticPromptText(content)) return false;
   }
+  const promptText = extractClaudeUserPromptText(event);
+  if (promptText && isSyntheticPromptText(promptText)) return false;
   return true;
 }
 
@@ -323,7 +332,7 @@ function isOnlyToolResultUserEvent(event: ClaudeEventPayload): boolean {
 function summarizeClaudeEvent(event: ClaudeEventPayload): string | null {
   if (event.type === "user") {
     const text = extractClaudeUserPromptText(event);
-    if (text) return truncate(text, 80);
+    if (text) return isSyntheticPromptText(text) ? null : truncate(text, 80);
     // Tool-result echoes are plumbing, not activity — drop them so the feed
     // stays legible instead of every turn showing "(user message)".
     if (isOnlyToolResultUserEvent(event)) return null;

@@ -419,6 +419,29 @@ describe("sign-in issues session + refresh cookies", () => {
     const rows = await db.select().from(refreshTokens).where(eq(refreshTokens.userId, bob.id));
     expect(rows.length).toBeGreaterThan(0);
   });
+
+  it("scopes the refresh cookie to /auth with SameSite=strict", async () => {
+    const res = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    expect(res.status).toBe(200);
+    const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
+    const refreshAttrs = setCookies.find((c) => c.startsWith("refresh="));
+    expect(refreshAttrs).toBeTruthy();
+    // SameSite=strict — the refresh cookie is only consumed by same-site
+    // POST /auth/refresh; lax would needlessly admit cross-site top-level
+    // GET to that path.
+    expect(refreshAttrs!.toLowerCase()).toContain("samesite=strict");
+    expect(refreshAttrs!.toLowerCase()).toContain("path=/auth");
+    expect(refreshAttrs!.toLowerCase()).toContain("httponly");
+  });
+
+  it("keeps the session cookie SameSite=lax so deep links arrive signed in", async () => {
+    const res = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
+    const sessionAttrs = setCookies.find((c) => c.startsWith("session="));
+    expect(sessionAttrs).toBeTruthy();
+    expect(sessionAttrs!.toLowerCase()).toContain("samesite=lax");
+    expect(sessionAttrs!.toLowerCase()).toContain("path=/");
+  });
 });
 
 async function insertCredentialBundle(userId: number, label: string) {

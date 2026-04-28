@@ -156,11 +156,17 @@ export function setSessionCookies(
     maxAge: JWT_TTL_SECONDS,
     path: "/",
   });
+  // Strict, not lax: the refresh cookie is only ever consumed by a same-site
+  // POST from our own renderer to /auth/refresh, so the looser cross-site
+  // top-level-GET window that lax permits has no legitimate use here. The
+  // session cookie stays lax so deep-links from email/Slack still arrive
+  // signed-in. Desktop (non-browser) clients refresh via the body-based
+  // path and don't depend on this cookie.
   cookies.refresh.set({
     value: tokens.refreshToken,
     httpOnly: true,
     secure: isSecure,
-    sameSite: "lax",
+    sameSite: "strict",
     maxAge: REFRESH_TTL_SECONDS,
     path: "/auth",
   });

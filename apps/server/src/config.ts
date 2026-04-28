@@ -23,6 +23,8 @@ export const config = Object.freeze({
     process.env.MCP_MAX_CONCURRENT_SESSIONS_PER_USER || "20",
     10,
   ),
+  ingestConcurrency: parseInt(process.env.INGEST_CONCURRENCY || "4", 10),
+  ingestBatchSize: parseInt(process.env.INGEST_BATCH_SIZE || "200", 10),
 });
 
 export type Config = typeof config;

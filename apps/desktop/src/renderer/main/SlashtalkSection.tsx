@@ -195,10 +195,7 @@ function SignedInBody({
   );
 }
 
-const MCP_TARGETS: Array<{ target: McpTarget; label: string }> = [
-  { target: "claude-code", label: "Claude Code" },
-  { target: "codex", label: "Codex" },
-];
+const MCP_TARGETS: McpTarget[] = ["claude-code", "codex"];
 
 function McpAccessSettings(): JSX.Element {
   const [status, setStatus] = useState<McpInstallStatus | null>(null);
@@ -224,28 +221,29 @@ function McpAccessSettings(): JSX.Element {
     setBusy(true);
     setMessage(null);
     let operationError: Error | null = null;
-    try {
-      for (const { target } of MCP_TARGETS) {
+
+    for (const target of MCP_TARGETS) {
+      try {
         if (enabled) {
           await window.chatheads.mcp.install(target);
         } else {
           await window.chatheads.mcp.uninstall(target);
         }
-      }
-    } catch (err) {
-      operationError = err as Error;
-    } finally {
-      try {
-        const next = await window.chatheads.mcp.status();
-        setStatus(next);
       } catch (err) {
         operationError ??= err as Error;
       }
-      if (operationError) {
-        setMessage({ kind: "err", text: operationError.message });
-      }
-      setBusy(false);
     }
+
+    try {
+      const next = await window.chatheads.mcp.status();
+      setStatus(next);
+    } catch (err) {
+      operationError ??= err as Error;
+    }
+    if (operationError) {
+      setMessage({ kind: "err", text: operationError.message });
+    }
+    setBusy(false);
   };
 
   const connected = status ? hasAnyInstalled(status) : false;

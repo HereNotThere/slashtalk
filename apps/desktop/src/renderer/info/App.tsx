@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
 import { ChatBubbleLeftIcon, FolderIcon } from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
@@ -37,6 +37,9 @@ export function App(): JSX.Element {
   const [spotify, setSpotify] = useState<SpotifyPresence | null>(null);
   const [location, setLocation] = useState<UserLocation | null>(null);
   const [isSelf, setIsSelf] = useState(false);
+  // Bumped on every `info:show` to drive the post-commit ack effect. Lets us
+  // ack same-head re-shows (e.g. expand-on-click) where head?.id is unchanged.
+  const [showNonce, setShowNonce] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Measure the inner content, not the card: the card is capped at max-h-screen
@@ -50,6 +53,10 @@ export function App(): JSX.Element {
       setSpotify(p.spotify);
       setLocation(p.location);
       setIsSelf(p.isSelf);
+      // Apply main's question cache snapshot. Null means "main hasn't cached
+      // yet" — the load effect below will fetch and the 15s timer keeps it
+      // fresh thereafter.
+      setQuestions(p.questions);
       setVisible(true);
       // Re-request even when id matches a prior request — clicking the same
       // card twice should re-expand if the user collapsed it in between.
@@ -59,6 +66,7 @@ export function App(): JSX.Element {
           nonce: (cur?.nonce ?? 0) + 1,
         }));
       }
+      setShowNonce((n) => n + 1);
     });
     // Keep head/sessions/spotify on hide so the last content fades out instead
     // of collapsing; next show replaces them wholesale.
@@ -143,6 +151,18 @@ export function App(): JSX.Element {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Ack each `info:show` synchronously after React commits the new content,
+  // before the browser paints. Includes the measured inner-content height so
+  // main can size + place the window correctly on the first setBounds — no
+  // overflow-then-snap when the new card is taller than the previous one.
+  // Measures the same inner ref `useAutoResize` does, so the height we ack
+  // matches the value `requestResize` would otherwise send a frame later.
+  useLayoutEffect(() => {
+    if (showNonce === 0) return;
+    const h = contentRef.current?.getBoundingClientRect().height ?? 0;
+    window.chatheads.notifyInfoShowReady(Math.ceil(h));
+  }, [showNonce]);
+
   return (
     <div
       ref={rootRef}
@@ -163,6 +183,7 @@ export function App(): JSX.Element {
             {spotify && <NowPlaying track={spotify} />}
             <Divider />
             <SessionsSection
+              key={head?.id ?? "no-head"}
               sessions={sessions}
               expandRequest={expandRequest}
               collisionFile={head?.collisionAt != null ? (head.collisionFile ?? null) : null}
@@ -171,7 +192,7 @@ export function App(): JSX.Element {
             {questions && questions.login === head?.label && questions.threads.length > 0 && (
               <>
                 <Divider />
-                <QuestionsSection threads={questions.threads} />
+                <QuestionsSection key={head.id} threads={questions.threads} />
               </>
             )}
           </>
@@ -368,16 +389,13 @@ function SessionsSection({
         collisionLogin={collisionLogin}
       />
       {hasMore && (
-        <>
-          <div className="mx-4 h-px bg-divider" />
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            className="w-full px-4 py-3 text-center text-sm font-medium text-muted hover:text-fg hover:bg-surface-alt/60 transition-colors cursor-pointer"
-          >
-            {showAll ? "Show less" : `Show all (${sessions.length})`}
-          </button>
-        </>
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="w-full px-4 pt-1 pb-3 text-center text-xs font-medium text-muted hover:text-fg hover:bg-surface-alt/60 transition-colors cursor-pointer"
+        >
+          {showAll ? "Show less" : `Show all (${sessions.length})`}
+        </button>
       )}
     </div>
   );
@@ -406,7 +424,7 @@ function QuestionsSection({ threads }: { threads: ChatThread[] }): JSX.Element {
           <button
             type="button"
             onClick={() => setShowAll((v) => !v)}
-            className="w-full px-4 py-3 text-center text-sm font-medium text-muted hover:text-fg hover:bg-surface-alt/60 transition-colors cursor-pointer"
+            className="w-full px-4 pt-1 pb-3 text-center text-xs font-medium text-muted hover:text-fg hover:bg-surface-alt/60 transition-colors cursor-pointer"
           >
             {showAll ? "Show less" : `Show all (${threads.length})`}
           </button>

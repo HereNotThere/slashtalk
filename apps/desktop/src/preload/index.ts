@@ -134,6 +134,7 @@ const bridge: ChatHeadsBridge = {
     ipcRenderer.invoke("heads:showInfo", headId, bubbleScreen) as Promise<void>,
   infoHoverEnter: () => ipcRenderer.invoke("info:hoverEnter") as Promise<void>,
   infoHoverLeave: () => ipcRenderer.invoke("info:hoverLeave") as Promise<void>,
+  notifyInfoShowReady: (height) => ipcRenderer.send("info:show:ready", height),
   onInfoState: (cb) => subscribe<{ visible: boolean; headId: string | null }>("info:state", cb),
   setOverlayLength: (length) => ipcRenderer.invoke("overlay:setLength", length) as Promise<void>,
 

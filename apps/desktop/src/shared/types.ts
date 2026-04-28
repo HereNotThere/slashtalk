@@ -2,6 +2,7 @@
 // Any IPC contract lives here, so changes are caught by the compiler on both sides.
 
 import type {
+  ChatThread,
   ManagedAgentSessionRow,
   FeedSessionSnapshot,
   SessionSnapshot,
@@ -78,6 +79,10 @@ export interface InfoShowPayload {
   spotify: SpotifyPresence | null;
   location: UserLocation | null;
   isSelf: boolean;
+  /** Cached "Asked Slashtalk" threads for this user (or null when main's
+   *  cache is cold; renderer paints loading then a follow-up info:show
+   *  fills it in). */
+  questions: { login: string; threads: ChatThread[] } | null;
 }
 
 // Signed-in identity for the MCP/agents shim. Token stays main-side.
@@ -403,6 +408,11 @@ export interface ChatHeadsBridge {
   showInfo: (headId: string, bubbleScreen?: { x: number; y: number }) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
+  /** Renderer ack: the latest `info:show` payload has been committed and
+   *  the inner content measured. `height` is the natural content height in
+   *  CSS pixels. Main awaits this before repositioning the window so size +
+   *  position land correctly on the first setBounds (no overflow-then-snap). */
+  notifyInfoShowReady: (height: number) => void;
   /** Overlay subscribes so the inactive-peer stack can stay expanded while the
    *  info card is open even if the cursor leaves the rail. */
   onInfoState: (cb: (state: { visible: boolean; headId: string | null }) => void) => Unsubscribe;

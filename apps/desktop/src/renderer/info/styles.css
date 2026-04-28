@@ -1,17 +1,12 @@
 @import "../shared/tailwind.css";
 
-/* In light theme the macOS popover vibrancy goes washed-out grey over a bright
- * desktop. Force an opaque background that matches our token palette so the
- * panel reads cleanly. Dark theme keeps vibrancy. */
+/* The info window has no vibrancy (dropped to avoid edge tearing during fast
+ * head-switches — the NSVisualEffectView desynced from the web-contents
+ * layer). Force an opaque body in both themes so any sub-pixel gap in the
+ * inner content reveals the right token color, not the BrowserWindow default. */
 @layer base {
-  :root.theme-light body {
+  body {
     background: var(--color-card);
-  }
-
-  @media (prefers-color-scheme: light) {
-    :root:not(.theme-dark):not(.theme-light) body {
-      background: var(--color-card);
-    }
   }
 
   /* Tailwind v4 dropped the default `cursor: pointer` on buttons, and our

@@ -429,6 +429,19 @@ describe("chat tool: get_team_activity", () => {
     expect(result.teammates).toEqual([]);
   });
 
+  it("surfaces resolvedLogins even when repoFullName names a repo the caller can't see", async () => {
+    // Bug: previously this path returned `resolvedLogins: []` despite a
+    // successful login resolution, so the model reported "no teammate named
+    // ryan" — the exact misleading answer this PR set out to eliminate.
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "ryan",
+      repoFullName: "other/secret",
+    });
+    expect(result.resolvedLogins).toEqual(["ryancooley"]);
+    expect(result.teammates).toEqual([]);
+  });
+
   it("includes enriched payload fields (source, topFilesEdited, toolErrors, truncated lastUserPrompt)", async () => {
     const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
     const bob = result.teammates.find((t) => t.login === "bob")!;

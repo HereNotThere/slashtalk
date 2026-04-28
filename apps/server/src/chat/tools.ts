@@ -137,21 +137,19 @@ export async function getTeamActivityImpl(
     .where(inArray(userRepos.repoId, fullVisibleRepoIds));
   const fullVisiblePeerIds = fullVisiblePeerRows.map((r) => r.userId);
 
-  let userIdScope: number[];
-  if (args.login) {
-    userIdScope = await resolveLoginToPeerIds(db, args.login, fullVisiblePeerIds);
-  } else {
-    userIdScope = fullVisiblePeerIds;
-  }
-  // If login was supplied but matched nothing, return early with an empty
-  // `resolvedLogins` so the model can tell "name didn't resolve" apart from
-  // "resolved but no sessions in scope."
+  // `resolvedLogins` lets the model distinguish "name didn't match any peer"
+  // (empty) from "matched but no sessions in scope" (non-empty + empty
+  // teammates) — the latter wants `sinceHours` widened, not "no such teammate."
+  const resolvedPeers = args.login
+    ? await resolveLoginToPeers(db, args.login, fullVisiblePeerIds)
+    : null;
+  const userIdScope = resolvedPeers ? resolvedPeers.map((p) => p.id) : fullVisiblePeerIds;
+  const resolvedLoginsField = resolvedPeers
+    ? { resolvedLogins: resolvedPeers.map((p) => p.login) }
+    : {};
+
   if (userIdScope.length === 0) {
-    return {
-      teammates: [],
-      since: since.toISOString(),
-      ...(args.login ? { resolvedLogins: [] } : {}),
-    };
+    return { teammates: [], since: since.toISOString(), ...resolvedLoginsField };
   }
 
   if (args.repoFullName) {
@@ -161,11 +159,7 @@ export async function getTeamActivityImpl(
       .where(eq(repos.fullName, normalizeFullName(args.repoFullName)))
       .limit(1);
     if (!repoRow || !repoIdScope.includes(repoRow.id)) {
-      return {
-        teammates: [],
-        since: since.toISOString(),
-        ...(args.login ? { resolvedLogins: [] } : {}),
-      };
+      return { teammates: [], since: since.toISOString(), ...resolvedLoginsField };
     }
     repoIdScope = [repoRow.id];
   }
@@ -287,14 +281,8 @@ export async function getTeamActivityImpl(
   const result: TeamActivityResult = {
     teammates: finalTeammates,
     since: since.toISOString(),
+    ...resolvedLoginsField,
   };
-
-  if (args.login) {
-    // Surface what the fuzzy resolver matched even when the session window
-    // returned nothing — userRows is keyed by userIdScope (the resolved set),
-    // so its logins are the resolution verbatim.
-    result.resolvedLogins = userRows.map((u) => u.login);
-  }
 
   if (args.filePath) {
     // Open PRs are stronger conflict signal than "is anyone typing right now".
@@ -329,24 +317,24 @@ export async function getTeamActivityImpl(
  *  match → prefix match on `github_login` → substring match on `display_name`.
  *  All lookups are restricted to the caller's peer set so the result is always
  *  scoped to people whose sessions the caller can already see. */
-async function resolveLoginToPeerIds(
+async function resolveLoginToPeers(
   db: Database,
   rawLogin: string,
   peerIds: number[],
-): Promise<number[]> {
+): Promise<Array<{ id: number; login: string }>> {
   const q = rawLogin.trim().replace(/^@+/, "").toLowerCase();
   if (!q || peerIds.length === 0) return [];
 
   const exact = await db
-    .select({ id: users.id })
+    .select({ id: users.id, login: users.githubLogin })
     .from(users)
     .where(and(inArray(users.id, peerIds), sql`lower(${users.githubLogin}) = ${q}`))
     .limit(1);
-  if (exact.length > 0) return [exact[0].id];
+  if (exact.length > 0) return [exact[0]];
 
   const pat = escapeIlikeLiteral(q);
-  const fuzzy = await db
-    .select({ id: users.id })
+  return db
+    .select({ id: users.id, login: users.githubLogin })
     .from(users)
     .where(
       and(
@@ -358,7 +346,6 @@ async function resolveLoginToPeerIds(
       ),
     )
     .limit(FUZZY_LOGIN_MATCH_CAP);
-  return fuzzy.map((r) => r.id);
 }
 
 /** Escape `%` and `_` so they're treated as literals inside an ILIKE pattern.

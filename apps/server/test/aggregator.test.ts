@@ -70,48 +70,17 @@ describe("processEvents — pr-link summary", () => {
   });
 });
 
-describe("processEvents — queued_command attachment robustness", () => {
-  // Regression: real Claude Code JSONLs were shipping queued_command
-  // attachments whose `prompt` is a non-string truthy value (e.g. an object).
-  // The previous truthy-then-`.startsWith` threw a 500 from /v1/ingest and
-  // killed the whole batch on every retry.
-  it("does not throw when prompt is a non-string truthy value", () => {
-    expect(() =>
-      processEvents("claude", EMPTY_SESSION, [
-        {
-          type: "attachment",
-          uuid: "00000000-0000-0000-0000-000000000010",
-          timestamp: "2026-04-27T19:00:20.673Z",
-          attachment: {
-            type: "queued_command",
-            prompt: { text: "what now" } as unknown as string,
-          },
-        },
-      ]),
-    ).not.toThrow();
-  });
+describe("processEvents — queued_command attachment shapes", () => {
+  // Real Claude Code stores `attachment.prompt` as either a string OR an
+  // Anthropic-shape array of content blocks (when the user pastes an image).
+  // Earlier code did `truthy && prompt.startsWith(...)`, which threw on the
+  // array case and surfaced as a 500 from /v1/ingest, wedging the session.
 
-  it("ignores queued_command with non-string prompt — never adds to state.queued", () => {
+  it("queues a plain string prompt", () => {
     const updates = processEvents("claude", EMPTY_SESSION, [
       {
         type: "attachment",
-        uuid: "00000000-0000-0000-0000-000000000011",
-        timestamp: "2026-04-27T19:00:20.673Z",
-        attachment: {
-          type: "queued_command",
-          prompt: 42 as unknown as string,
-        },
-      },
-    ]);
-    expect(updates.queued).toEqual([]);
-    expect(updates.inTurn).toBe(false);
-  });
-
-  it("still queues a string prompt that isn't a task-notification", () => {
-    const updates = processEvents("claude", EMPTY_SESSION, [
-      {
-        type: "attachment",
-        uuid: "00000000-0000-0000-0000-000000000012",
+        uuid: "00000000-0000-0000-0000-000000000010",
         timestamp: "2026-04-27T19:00:20.673Z",
         attachment: {
           type: "queued_command",
@@ -126,11 +95,88 @@ describe("processEvents — queued_command attachment robustness", () => {
     expect(updates.inTurn).toBe(true);
   });
 
+  it("flattens a content-block array prompt (image-paste case) instead of dropping it", () => {
+    const updates = processEvents("claude", EMPTY_SESSION, [
+      {
+        type: "attachment",
+        uuid: "00000000-0000-0000-0000-000000000011",
+        timestamp: "2026-04-27T19:00:20.673Z",
+        attachment: {
+          type: "queued_command",
+          // Real-world payload from a Claude Code JSONL
+          prompt: [
+            { type: "text", text: "[Image #4] fix this please" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "..." } },
+          ] as unknown as string,
+          commandMode: "prompt",
+        },
+      },
+    ]);
+    expect(updates.queued).toEqual([
+      {
+        prompt: "[Image #4] fix this please [image]",
+        ts: "2026-04-27T19:00:20.673Z",
+        mode: "prompt",
+      },
+    ]);
+    expect(updates.inTurn).toBe(true);
+  });
+
+  it("ignores queued_command whose prompt has no usable text", () => {
+    const updates = processEvents("claude", EMPTY_SESSION, [
+      {
+        type: "attachment",
+        uuid: "00000000-0000-0000-0000-000000000012",
+        timestamp: "2026-04-27T19:00:20.673Z",
+        attachment: {
+          type: "queued_command",
+          prompt: 42 as unknown as string,
+        },
+      },
+    ]);
+    expect(updates.queued).toEqual([]);
+    expect(updates.inTurn).toBe(false);
+  });
+
+  it("does not throw on a malformed object prompt", () => {
+    expect(() =>
+      processEvents("claude", EMPTY_SESSION, [
+        {
+          type: "attachment",
+          uuid: "00000000-0000-0000-0000-000000000013",
+          timestamp: "2026-04-27T19:00:20.673Z",
+          attachment: {
+            type: "queued_command",
+            prompt: { text: "what now" } as unknown as string,
+          },
+        },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("ignores empty or whitespace-only string prompts (was queueing prompt='')", () => {
+    const updates = processEvents("claude", EMPTY_SESSION, [
+      {
+        type: "attachment",
+        uuid: "00000000-0000-0000-0000-000000000015",
+        timestamp: "2026-04-27T19:00:20.673Z",
+        attachment: { type: "queued_command", prompt: "" },
+      },
+      {
+        type: "attachment",
+        uuid: "00000000-0000-0000-0000-000000000016",
+        timestamp: "2026-04-27T19:00:20.674Z",
+        attachment: { type: "queued_command", prompt: "   \n\t  " },
+      },
+    ]);
+    expect(updates.queued).toEqual([]);
+  });
+
   it("skips a task-notification prompt (system event, not user-queued)", () => {
     const updates = processEvents("claude", EMPTY_SESSION, [
       {
         type: "attachment",
-        uuid: "00000000-0000-0000-0000-000000000013",
+        uuid: "00000000-0000-0000-0000-000000000014",
         timestamp: "2026-04-27T19:00:20.673Z",
         attachment: {
           type: "queued_command",

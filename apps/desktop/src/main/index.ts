@@ -24,6 +24,7 @@ import type {
   UpdateAgentInput,
   UserLocation,
 } from "../shared/types";
+import type { ChatThread } from "@slashtalk/shared";
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
@@ -122,7 +123,11 @@ const RESIZE_MIN = 60;
 const RESIZE_MAX = 900;
 // Info window caps at whichever is smaller: a hard ceiling, or 2/3 of the
 // screen's work area. Computed per-resize so a display change just works.
-const INFO_MAX_ABSOLUTE = 650;
+// Absolute cap is set high enough to fit a UserHeader + 5-session preview +
+// "Show all" button + the "Asked Slashtalk" section without scrolling on
+// typical 1080p+ displays. The 2/3 screen fraction stays as the binding
+// constraint on shorter screens so the popover never dominates the desktop.
+const INFO_MAX_ABSOLUTE = 900;
 const INFO_MAX_SCREEN_FRACTION = 2 / 3;
 
 // Tracked dynamically — renderer reports its content height via IPC and we
@@ -142,6 +147,41 @@ const INFO_HIDE_GRACE_MS = 180;
 // Matches the renderer's CSS fade-out duration. After the opacity transition,
 // the NSWindow is hidden so it doesn't intercept events while invisible.
 const INFO_FADE_OUT_MS = 90;
+
+// Cap on how long showInfo waits for the renderer to commit new content and
+// report its measured height before repositioning the window. Without this,
+// positionInfo runs against the previous head's height — too-tall content
+// then lands at a desiredY that overflows the bottom of the screen and snaps
+// up only after `requestResize` arrives a frame later. The renderer dispatches
+// the ack synchronously in a layout effect (before paint), so a single paint
+// frame of slack (60Hz ≈ 17ms) is plenty; 80ms is a safety net for slower
+// frames and never strands the popover if the renderer doesn't ack.
+const INFO_SHOW_READY_TIMEOUT_MS = 80;
+type InfoShowReadyResolver = (height: number | null) => void;
+const infoShowReadyResolvers: InfoShowReadyResolver[] = [];
+
+function waitForInfoShowReady(timeoutMs: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (h: number | null): void => {
+      if (settled) return;
+      settled = true;
+      resolve(h);
+    };
+    infoShowReadyResolvers.push(finish);
+    setTimeout(() => finish(null), timeoutMs);
+  });
+}
+
+function clampInfoHeight(height: number): number {
+  const rounded = Math.round(height);
+  if (!infoWindow || infoWindow.isDestroyed()) {
+    return Math.max(RESIZE_MIN, rounded);
+  }
+  const { height: screenH } = screen.getDisplayMatching(infoWindow.getBounds()).workAreaSize;
+  const maxForWin = Math.min(INFO_MAX_ABSOLUTE, Math.floor(screenH * INFO_MAX_SCREEN_FRACTION));
+  return Math.max(RESIZE_MIN, Math.min(maxForWin, rounded));
+}
 
 // Pending "user left the rail" hide. Cancelled if the cursor enters the info
 // panel or re-enters a bubble within INFO_HIDE_GRACE_MS.
@@ -192,7 +232,21 @@ let infoWindow: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
 let selectedHeadId: string | null = null;
+// Last bubble screen-coords reported by the overlay for the currently
+// selected head. positionInfo's fallback math (rail.stackBounds + idx * cell)
+// doesn't account for inactive-stack peek collapsing, so a resize-driven
+// reposition would otherwise snap the popover to the wrong slot. Cleared on
+// hide; refreshed by every showInfo. Dock flips / rail slides deliberately
+// reposition without the stash because the rail itself has moved.
+let selectedBubbleScreen: { x: number; y: number } | null = null;
 const sessionCache = new Map<string, InfoSession[]>();
+// Mirrors sessionCache but for the "Asked Slashtalk" panel, keyed by github
+// login (not head id, because peer questions are scoped per user across all
+// repos). Populated lazily on the first hover for a user and re-populated by
+// the renderer's 15s refresh through `chat:questionsForLogin`. Without this,
+// every hover refetched the same threads end-to-end and a section visibly
+// popped in mid-show.
+const questionsCache = new Map<string, ChatThread[]>();
 
 function toAgentSummary(a: LocalAgent): AgentSummary {
   return {
@@ -537,6 +591,7 @@ async function showInfo(
 
   const win = ensureInfoWindow();
   selectedHeadId = head.id;
+  selectedBubbleScreen = bubbleScreen ?? null;
 
   if (win.webContents.isLoading()) {
     await new Promise<void>((resolve) => {
@@ -552,46 +607,69 @@ async function showInfo(
   const cachedHeight = infoHeightByHead.get(head.id);
   if (cachedHeight) infoCurrentHeight = cachedHeight;
 
-  // Send cached sessions + current Spotify presence immediately; renderer
-  // handles the `null` cases by loading on its own effect.
-  const cached = sessionCache.get(head.id) ?? null;
   const login = rail.parseUserHeadId(head.id);
-  win.webContents.send("info:show", {
-    head,
-    sessions: cached,
-    expandSessionId: expandSessionId ?? null,
-    spotify: login ? peerPresence.get(login) : null,
-    location: login ? peerLocations.get(login) : null,
-    isSelf: backend.isSelf(login),
-  });
-
-  // Animate position/size when switching heads on an already-visible window;
-  // land-in-place on first appearance.
   const firstShow = !win.isVisible();
+  // Send the current cache snapshot immediately. Cache misses surface as null
+  // and the renderer paints loading placeholders; the background fetches
+  // below resolve and re-push with the same snapshot helper.
+  pushInfoShowSnapshot(win, head, expandSessionId);
+
+  // Wait for the renderer to commit the new content and report its measured
+  // height. This serves two glitches at once:
+  //   1. Position lands with the right height, so a too-tall card doesn't
+  //      first appear clamped to the bottom and then snap up on resize.
+  //   2. The window move and the content swap land on the same paint frame
+  //      instead of move-then-swap.
+  // The ack is dispatched in a renderer-side useLayoutEffect (synchronous,
+  // before paint), so the round-trip is well under one frame in practice.
+  const ackedHeight = await waitForInfoShowReady(INFO_SHOW_READY_TIMEOUT_MS);
+  if (selectedHeadId !== head.id) return;
+  if (!infoWindow || infoWindow.isDestroyed()) return;
+  if (ackedHeight != null) {
+    const clamped = clampInfoHeight(ackedHeight);
+    infoCurrentHeight = clamped;
+    infoHeightByHead.set(head.id, clamped);
+  }
   positionInfo(head.id, bubbleScreen);
   if (firstShow) win.showInactive();
   broadcastInfoState(true, head.id);
 
-  // Cache miss: fetch in the background and push the result to the renderer.
-  // The renderer's load-effect is keyed on head.id, so a re-hover of the same
-  // head after the cache was cleared (e.g. by uploader.onIngested) won't
-  // re-fire it — without this push the renderer sits on "Loading…" (and any
-  // expanded row is hidden) until the 15s poll ticks.
-  if (!cached) {
-    void fetchSessionsForHead(head.id).then((loaded) => {
-      if (selectedHeadId !== head.id) return;
-      if (!infoWindow || infoWindow.isDestroyed()) return;
-      const refreshedLogin = rail.parseUserHeadId(head.id);
-      infoWindow.webContents.send("info:show", {
-        head,
-        sessions: loaded,
-        expandSessionId: expandSessionId ?? null,
-        spotify: refreshedLogin ? peerPresence.get(refreshedLogin) : null,
-        location: refreshedLogin ? peerLocations.get(refreshedLogin) : null,
-        isSelf: backend.isSelf(refreshedLogin),
-      });
+  // Cache misses: fetch in the background and re-push the current snapshot
+  // when each completes. Each push triggers a fresh useAutoResize cycle in
+  // the renderer, so the window grows naturally as data fills in.
+  if (!sessionCache.has(head.id)) {
+    void fetchSessionsForHead(head.id).then(() => {
+      pushInfoShowSnapshot(infoWindow, head, expandSessionId);
     });
   }
+  if (login && !questionsCache.has(login)) {
+    void fetchQuestionsForLoginCached(login).then(() => {
+      pushInfoShowSnapshot(infoWindow, head, expandSessionId);
+    });
+  }
+}
+
+// Sends a single info:show carrying whatever sessions, spotify presence, and
+// asked-questions are currently in main's caches. Bails if the head we're
+// pushing for is no longer the selected one (a newer hover took over).
+function pushInfoShowSnapshot(
+  win: BrowserWindow | null,
+  head: ChatHead,
+  expandSessionId?: string,
+): void {
+  if (!win || win.isDestroyed()) return;
+  if (selectedHeadId !== head.id) return;
+  const login = rail.parseUserHeadId(head.id);
+  const cachedQuestions = login ? questionsCache.get(login) : null;
+  win.webContents.send("info:show", {
+    head,
+    sessions: sessionCache.get(head.id) ?? null,
+    expandSessionId: expandSessionId ?? null,
+    spotify: login ? (peerPresence.get(login) ?? null) : null,
+    location: login ? (peerLocations.get(login) ?? null) : null,
+    isSelf: backend.isSelf(login),
+    questions: login && cachedQuestions ? { login, threads: cachedQuestions } : null,
+  });
 }
 
 function scheduleHideInfo(): void {
@@ -616,6 +694,7 @@ function cancelHideInfo(): void {
 
 function hideInfoNow(): void {
   selectedHeadId = null;
+  selectedBubbleScreen = null;
   broadcastInfoState(false, null);
   if (infoWindow && !infoWindow.isDestroyed()) {
     infoWindow.webContents.send("info:hide");
@@ -631,10 +710,17 @@ function hideInfoNow(): void {
   }
 }
 
-function repositionInfoIfVisible(): void {
+// Re-anchor the info window. By default uses the rail-derived fallback so dock
+// flips and rail slides reposition relative to the rail's new layout. Resize-
+// driven reflows pass `useStashedBubble=true` so the popover stays anchored to
+// the bubble's actual screen Y instead of snapping to the fallback math (which
+// doesn't account for inactive-stack peek collapsing and would jump up by one
+// slot for some bubbles).
+function repositionInfoIfVisible(useStashedBubble = false): void {
   if (!selectedHeadId) return;
   if (!findHead(selectedHeadId)) return;
-  positionInfo(selectedHeadId);
+  const bubble = useStashedBubble ? (selectedBubbleScreen ?? undefined) : undefined;
+  positionInfo(selectedHeadId, bubble);
 }
 
 // -------- Overlay-renderer notifications --------
@@ -936,6 +1022,18 @@ ipcMain.handle("info:hide", (): void => scheduleHideInfo());
 ipcMain.handle("info:hoverEnter", (): void => cancelHideInfo());
 ipcMain.handle("info:hoverLeave", (): void => scheduleHideInfo());
 
+// Renderer signals it has committed the latest info:show payload and reports
+// its measured content height. showInfo awaits this so it can size + place
+// the window correctly on the first setBounds, instead of positioning with
+// the previous head's height and then snapping up on the next requestResize.
+// Use `on` (fire-and-forget) — the renderer doesn't need a reply.
+ipcMain.on("info:show:ready", (_e, height?: unknown): void => {
+  const safeHeight =
+    typeof height === "number" && Number.isFinite(height) && height > 0 ? Math.round(height) : null;
+  const pending = infoShowReadyResolvers.splice(0, infoShowReadyResolvers.length);
+  for (const resolve of pending) resolve(safeHeight);
+});
+
 ipcMain.handle("overlay:setLength", (_e, length: number): void => {
   if (typeof length !== "number" || !Number.isFinite(length) || length <= 0) return;
   const next = Math.round(length);
@@ -969,18 +1067,29 @@ ipcMain.handle(
 
 ipcMain.handle(
   "chat:ask",
-  (
+  async (
     _e,
     messages: Parameters<typeof backend.askChat>[0],
     threadId?: Parameters<typeof backend.askChat>[1],
-  ) => backend.askChat(messages, threadId),
+  ) => {
+    const result = await backend.askChat(messages, threadId);
+    // The asker's question list just changed — drop the cache so the next
+    // hover on their bubble (or rail self-bubble) refetches.
+    const state = backend.getAuthState();
+    if (state.signedIn) questionsCache.delete(state.user.githubLogin);
+    return result;
+  },
 );
 
 ipcMain.handle("chat:history", () => backend.fetchChatHistory());
 
-ipcMain.handle("chat:questionsForLogin", (_e, login: string) =>
-  backend.fetchQuestionsForLogin(login),
-);
+// Renderer's 15s refresh: bypass cache (always fresh) but write through so
+// the next showInfo for this login lands with up-to-date threads.
+ipcMain.handle("chat:questionsForLogin", async (_e, login: string) => {
+  const res = await backend.fetchQuestionsForLogin(login);
+  questionsCache.set(login, res.threads);
+  return res;
+});
 
 ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));
 
@@ -1182,8 +1291,11 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
     if (selectedHeadId) infoHeightByHead.set(selectedHeadId, h);
 
     if (selectedHeadId) {
-      // Smoothly retween the open panel to the new height.
-      repositionInfoIfVisible();
+      // Smoothly retween the open panel to the new height. Use the stashed
+      // bubble screen-coords so a height change re-anchors against the same
+      // bubble — the rail-derived fallback can disagree by a slot for
+      // inactive peers in a peek-collapsed stack.
+      repositionInfoIfVisible(true);
     } else {
       // Nothing selected (renderer sending a resize during fade-out or
       // initial load) — apply the height so the next show lands correctly.
@@ -1225,6 +1337,18 @@ async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
 ipcMain.handle("sessions:forHead", async (_e, headId: string): Promise<InfoSession[]> => {
   return fetchSessionsForHead(headId);
 });
+
+async function fetchQuestionsForLoginCached(login: string): Promise<ChatThread[]> {
+  const cached = questionsCache.get(login);
+  if (cached) return cached;
+  try {
+    const res = await backend.fetchQuestionsForLogin(login);
+    questionsCache.set(login, res.threads);
+    return res.threads;
+  } catch {
+    return [];
+  }
+}
 
 // Preload sessions for a head on hover to avoid flicker when opening info window
 ipcMain.handle("sessions:preload", async (_e, headId: string): Promise<void> => {
@@ -1639,6 +1763,7 @@ function applySyncForAuth(signedIn: boolean): void {
     peerPresence.stop();
     peerLocations.stop();
     ws.stop();
+    questionsCache.clear();
     for (const target of ["claude-code", "codex"] as const) {
       void installMcp
         .uninstall(target)
@@ -1779,17 +1904,8 @@ async function refreshInfoNow(): Promise<void> {
   // Only drop the selected head's cache; other heads stay warm until clicked.
   sessionCache.delete(head.id);
   try {
-    const sessions = await fetchSessionsForHead(head.id);
-    if (selectedHeadId !== head.id) return;
-    if (!infoWindow || infoWindow.isDestroyed()) return;
-    const refreshLogin = rail.parseUserHeadId(head.id);
-    infoWindow.webContents.send("info:show", {
-      head,
-      sessions,
-      spotify: refreshLogin ? peerPresence.get(refreshLogin) : null,
-      location: refreshLogin ? peerLocations.get(refreshLogin) : null,
-      isSelf: backend.isSelf(refreshLogin),
-    });
+    await fetchSessionsForHead(head.id);
+    pushInfoShowSnapshot(infoWindow, head, undefined);
   } catch (e) {
     console.warn("[ws] refreshInfoNow failed:", e);
   }

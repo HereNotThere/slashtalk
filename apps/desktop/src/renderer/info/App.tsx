@@ -1,20 +1,34 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
-import { FolderIcon } from "@heroicons/react/24/outline";
+import { ChatBubbleLeftIcon, FolderIcon } from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
-import type { EventSource, RecentPrompt, SpotifyPresence, TokenUsage } from "@slashtalk/shared";
+import type {
+  ChatThread,
+  EventSource,
+  RecentPrompt,
+  SpotifyPresence,
+  TokenUsage,
+} from "@slashtalk/shared";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
 import { Markdown } from "../shared/Markdown";
 import { ClaudeIcon, OpenAIIcon, SpotifyIcon } from "../shared/icons";
+import { relativeTime } from "../shared/relativeTime";
 
 const REFRESH_MS = 15_000;
 
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
+  // Questions are keyed by the login they belong to. The render guard checks
+  // `login === head.label` so a head switch can never momentarily attribute
+  // one user's questions to another while the next fetch is in flight.
+  const [questions, setQuestions] = useState<{
+    login: string;
+    threads: ChatThread[];
+  } | null>(null);
   const [visible, setVisible] = useState(false);
   const [expandRequest, setExpandRequest] = useState<{
     id: string;
@@ -76,23 +90,36 @@ export function App(): JSX.Element {
     if (!head) return;
     if (head.kind === "agent") {
       setSessions([]);
+      setQuestions({ login: head.label, threads: [] });
       return;
     }
     let cancelled = false;
+    const headLogin = head.label;
     const load = async (): Promise<void> => {
       try {
-        const [rows, sp] = await Promise.all([
+        const [rows, sp, qs] = await Promise.all([
           window.chatheads.listSessionsForHead(head.id),
-          window.chatheads.getSpotifyForLogin(head.label),
+          window.chatheads.getSpotifyForLogin(headLogin),
+          // Soft-fail: a 403 (no shared repo) shouldn't break the panel.
+          window.chatheads.fetchQuestionsForLogin(headLogin).catch(() => ({ threads: [] })),
         ]);
         if (cancelled) return;
         setSessions(rows);
         setSpotify(sp);
+        setQuestions({ login: headLogin, threads: qs.threads });
       } catch {
-        if (!cancelled) setSessions([]);
+        if (!cancelled) {
+          setSessions([]);
+          setQuestions({ login: headLogin, threads: [] });
+        }
       }
     };
-    if (sessions === null) void load();
+    // Sessions may be preloaded by main via onInfoShow — skip the redundant
+    // refetch in that case. Questions are never preloaded, so any time the
+    // head changes (or first-mount), kick off an immediate load. Without
+    // this, switching heads leaves the previous user's questions on screen
+    // for up to REFRESH_MS until the interval fires.
+    if (sessions === null || questions?.login !== headLogin) void load();
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
       cancelled = true;
@@ -137,6 +164,12 @@ export function App(): JSX.Element {
               collisionFile={head?.collisionAt != null ? (head.collisionFile ?? null) : null}
               collisionLogin={head?.label ?? null}
             />
+            {questions && questions.login === head?.label && questions.threads.length > 0 && (
+              <>
+                <Divider />
+                <QuestionsSection threads={questions.threads} />
+              </>
+            )}
           </>
         )}
       </div>
@@ -312,6 +345,62 @@ function SessionsSection({
         </>
       )}
     </div>
+  );
+}
+
+const DEFAULT_QUESTIONS_LIMIT = 5;
+
+function QuestionsSection({ threads }: { threads: ChatThread[] }): JSX.Element {
+  const [showAll, setShowAll] = useState(false);
+  const visible =
+    showAll || threads.length <= DEFAULT_QUESTIONS_LIMIT
+      ? threads
+      : threads.slice(0, DEFAULT_QUESTIONS_LIMIT);
+  const hasMore = threads.length > DEFAULT_QUESTIONS_LIMIT;
+  return (
+    <div>
+      <div className="px-4 pt-3 pb-2">
+        <SubHeader>Asked Slashtalk</SubHeader>
+      </div>
+      {visible.map((t) => (
+        <QuestionRow key={t.threadId} thread={t} />
+      ))}
+      {hasMore && (
+        <>
+          <div className="mx-4 h-px bg-divider" />
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="w-full px-4 py-3 text-center text-sm font-medium text-muted hover:text-fg hover:bg-surface-alt/60 transition-colors cursor-pointer"
+          >
+            {showAll ? "Show less" : `Show all (${threads.length})`}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function QuestionRow({ thread }: { thread: ChatThread }): JSX.Element {
+  const open = (): void => {
+    void window.chatheads.openThread(thread);
+  };
+  const turnSuffix = thread.turns.length > 1 ? ` · ${thread.turns.length} turns` : "";
+  return (
+    <button
+      type="button"
+      onClick={open}
+      className="w-full text-left px-4 py-3 hover:bg-surface-alt/60 transition-colors flex items-start gap-2.5"
+    >
+      <ChatBubbleLeftIcon className="w-4 h-4 mt-0.5 shrink-0 text-subtle" aria-hidden />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-fg line-clamp-2">{thread.title}</div>
+        <div className="text-xs text-subtle mt-0.5">
+          {relativeTime(thread.updatedAt)}
+          {turnSuffix}
+        </div>
+      </div>
+    </button>
   );
 }
 

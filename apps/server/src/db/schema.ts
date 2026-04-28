@@ -378,6 +378,38 @@ export const pullRequests = pgTable(
   ],
 );
 
+// ── Chat (Q&A history) ──────────────────────────────────────
+
+/** One row per assistant turn produced by /api/chat/ask. Each turn stores the
+ *  user prompt that drove it and the assistant answer (with [session:...]
+ *  citation tokens preserved). Follow-ups within one conversation share a
+ *  thread_id and increment turn_index. Tool turns are not persisted — only
+ *  the final user-visible exchange. */
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    threadId: uuid("thread_id").notNull(),
+    userId: integer("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    turnIndex: integer("turn_index").notNull(),
+    prompt: text("prompt").notNull(),
+    answer: text("answer").notNull(),
+    citations: jsonb("citations")
+      .$type<Array<{ sessionId: string; reason: string }>>()
+      .notNull()
+      .default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    index("chat_messages_user_created_idx").on(t.userId, t.createdAt),
+    index("chat_messages_thread_idx").on(t.threadId, t.turnIndex),
+  ],
+);
+
 // ── Session Insights (LLM-derived) ──────────────────────────
 
 export const sessionInsights = pgTable(

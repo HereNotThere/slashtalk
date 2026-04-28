@@ -92,6 +92,13 @@
       "when": 1777317775411,
       "tag": "0012_lean_arclight",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777330159624,
+      "tag": "0013_new_franklin_storm",
+      "breakpoints": true
     }
   ]
 }

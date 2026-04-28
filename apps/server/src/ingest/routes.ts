@@ -303,12 +303,16 @@ async function handleIngest(
   // truth: this picks up rows orphaned by an earlier failed retry (committed
   // by one batch flush, abandoned when a later batch threw) so they're
   // included in the aggregate exactly once on the next successful retry.
-  // Without this, those rows would dedup-skip on retry and never reach
-  // processEvents — silently dropping their contribution to userMsgs,
-  // token counts, topFilesEdited, cwd/repoId resolution, etc.
   //
-  // Lower bound = max(fromLineSeq, currentSession.serverLineSeq) so we don't
-  // double-count events already folded by a concurrent ingest.
+  // Range = [currentSession.serverLineSeq, currentLineSeq). The lower bound
+  // is the actual aggregate boundary on the session row, NOT the client's
+  // fromLineSeq. Two concurrent ingests with disjoint fromLineSeq ranges
+  // (T1 sends [100,150), T2 sends [150,200)) both read the same baseline
+  // pre-update; if we used max(fromLineSeq, ...) here, T2's fold would
+  // start at 150 and miss T1's events 100–149 entirely after T1's update
+  // is overwritten. Reading from the DB-stored aggregate boundary makes
+  // the fold range self-correcting under races — whichever request wins
+  // the CAS includes everything since the last committed aggregate.
   const [currentSession] = await db
     .select()
     .from(sessions)
@@ -317,29 +321,16 @@ async function handleIngest(
 
   let priorFiles: string[] = [];
   let currentFiles: string[] = [];
-  // Tracks whether *our* update wrote the row. The WHERE clause is a
-  // compare-and-set on serverLineSeq, so a stale retry or a concurrent ingest
-  // that already advanced past us silently no-ops here. We use this to (a)
-  // never regress serverLineSeq/prefixHash, (b) skip WS notifications we
-  // didn't earn — the race winner already published.
+  // Tracks whether *our* update wrote the aggregate row. The WHERE clause
+  // is a compare-and-set on serverLineSeq, so a stale retry or a concurrent
+  // ingest that already advanced past us silently no-ops here. We use this
+  // to (a) never regress serverLineSeq/prefixHash, (b) skip WS notifications
+  // we didn't earn — the race winner already published. Pure watermark
+  // bumps (no aggregate change) intentionally do NOT set this true.
   let updateApplied = false;
 
   if (currentSession) {
-    const aggregateFrom = Math.max(fromLineSeq, currentSession.serverLineSeq ?? 0);
-    const eventsToFold =
-      aggregateFrom < currentLineSeq
-        ? await db
-            .select({ payload: events.payload })
-            .from(events)
-            .where(
-              and(
-                eq(events.sessionId, query.session),
-                gte(events.lineSeq, aggregateFrom),
-                lt(events.lineSeq, currentLineSeq),
-              ),
-            )
-            .orderBy(events.lineSeq)
-        : [];
+    const aggregateFrom = currentSession.serverLineSeq ?? 0;
 
     priorFiles = [
       ...topFilesKeys(currentSession.topFilesEdited),
@@ -347,9 +338,40 @@ async function handleIngest(
     ];
     currentFiles = priorFiles;
 
-    if (eventsToFold.length > 0) {
-      const payloads = eventsToFold.map((e) => e.payload);
-      const updates = processEvents(source, currentSession, payloads);
+    // Page through the fold range so a large resync doesn't load every
+    // event payload at once — that's the OOM the streaming refactor was
+    // trying to prevent. Each page is fed to processEvents and the result
+    // is chained as the next page's baseline. processEvents' `topN` clip
+    // means files that rank below the cutoff in early pages but climb in
+    // later pages may rank slightly off, but token counts, msg counts and
+    // tool-call counts are additive so they stay accurate.
+    let workingState: typeof currentSession = currentSession;
+    let updates: ReturnType<typeof processEvents> | null = null;
+    let foldedAny = false;
+    let cursor = aggregateFrom;
+
+    while (cursor < currentLineSeq) {
+      const page = await db
+        .select({ lineSeq: events.lineSeq, payload: events.payload })
+        .from(events)
+        .where(
+          and(
+            eq(events.sessionId, query.session),
+            gte(events.lineSeq, cursor),
+            lt(events.lineSeq, currentLineSeq),
+          ),
+        )
+        .orderBy(events.lineSeq)
+        .limit(BATCH_SIZE);
+      if (page.length === 0) break;
+      foldedAny = true;
+      const payloads = page.map((e) => e.payload);
+      updates = processEvents(source, workingState, payloads);
+      workingState = { ...workingState, ...updates } as typeof currentSession;
+      cursor = page[page.length - 1]!.lineSeq + 1;
+    }
+
+    if (foldedAny && updates) {
       currentFiles = [
         ...Object.keys(updates.topFilesEdited),
         ...Object.keys(updates.topFilesWritten),
@@ -383,12 +405,17 @@ async function handleIngest(
             .where(and(eq(sessions.sessionId, query.session), isNull(sessions.repoId)));
         }
       }
-    } else {
-      // Stream advanced but nothing new to fold (all blanks, or already
-      // covered by a concurrent ingest). Try to write the seq forward, but
-      // only if it's actually moving forward — the CAS guard prevents a
-      // stale retry from regressing serverLineSeq.
-      const result = await db
+    }
+
+    if (!updateApplied) {
+      // Either the fold range was empty (all-blank/all-malformed body, or
+      // already covered by a concurrent ingest) or our aggregate update lost
+      // the CAS race. Either way, no aggregate field changed — only the
+      // watermark might still need to advance. Try a CAS-guarded watermark
+      // update but DON'T touch updateApplied: clients render aggregates,
+      // not serverLineSeq, so a pure watermark bump isn't worth the
+      // session_updated fan-out across the repo channel.
+      await db
         .update(sessions)
         .set({
           serverLineSeq: currentLineSeq,
@@ -396,9 +423,7 @@ async function handleIngest(
         })
         .where(
           and(eq(sessions.sessionId, query.session), lt(sessions.serverLineSeq, currentLineSeq)),
-        )
-        .returning({ sessionId: sessions.sessionId });
-      updateApplied = result.length > 0;
+        );
     }
   }
 

@@ -45,7 +45,6 @@ import * as agentIngest from "./agentIngest";
 import * as summarize from "./summarize";
 import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
-import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
 import * as peerLocations from "./peerLocations";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
@@ -70,12 +69,10 @@ import {
   getRailPinned,
   getRailSessionOnlyMode,
   getShowActivityTimestamps,
-  getSpotifyShareEnabled,
   setRailCollapseInactive,
   setRailPinned,
   setRailSessionOnlyMode,
   setShowActivityTimestamps,
-  setSpotifyShareEnabled,
 } from "./windows/rail-state";
 import {
   configureChat,
@@ -100,6 +97,7 @@ import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
 import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
 import { broadcast, liveWindows, sendWhenLoaded } from "./windows/broadcast";
+import * as spotifyToggle from "./sync/spotify-toggle";
 
 installMcp.configureInstaller({
   localProxySecret: getLocalMcpProxySecret,
@@ -195,13 +193,6 @@ let infoHideGraceTimer: NodeJS.Timeout | null = null;
 let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
-
-function updateSpotifyRunning(): void {
-  const shouldRun =
-    backend.getAuthState().signedIn && getSpotifyShareEnabled() && process.platform === "darwin";
-  if (shouldRun) void spotify.start().catch((err) => console.warn("spotify.start failed:", err));
-  else spotify.stop();
-}
 
 function applyRailPinned(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
@@ -784,25 +775,7 @@ ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
   broadcastShowActivityTimestamps();
 });
 
-ipcMain.handle("spotify:isSupported", (): boolean => process.platform === "darwin");
-ipcMain.handle("spotify:getShareEnabled", (): boolean => getSpotifyShareEnabled());
-ipcMain.handle("spotify:setShareEnabled", async (_e, enabled: boolean): Promise<void> => {
-  const next = !!enabled;
-  const prev = getSpotifyShareEnabled();
-  if (prev === next) return;
-  setSpotifyShareEnabled(next);
-  broadcastToTrayAndMain("spotify:shareEnabled", next);
-  // Turning off while signed in: clear peers immediately so the card
-  // disappears in seconds instead of waiting for the 120s Redis TTL.
-  if (prev && !next && backend.getAuthState().signedIn) {
-    try {
-      await backend.postSpotifyPresence(null);
-    } catch (err) {
-      console.warn("[spotify] clear on disable failed", err);
-    }
-  }
-  updateSpotifyRunning();
-});
+spotifyToggle.register();
 
 // User location — renderer reports IANA tz + resolved city. We cache the
 // latest payload so a sign-in can re-post when the renderer reported it while
@@ -1737,7 +1710,7 @@ function applySyncForAuth(signedIn: boolean): void {
     // running — same shape the cursor-bot caught on heartbeat.
     void uploader.start().catch((err) => console.warn("uploader.start failed:", err));
     void heartbeat.start().catch((err) => console.warn("heartbeat.start failed:", err));
-    updateSpotifyRunning();
+    spotifyToggle.updateSpotifyRunning();
     void peerPresence.start().catch((err) => console.warn("peerPresence.start failed:", err));
     void peerLocations.start().catch((err) => console.warn("peerLocations.start failed:", err));
     ws.start();
@@ -1749,7 +1722,7 @@ function applySyncForAuth(signedIn: boolean): void {
   } else {
     heartbeat.stop();
     uploader.reset();
-    updateSpotifyRunning();
+    spotifyToggle.updateSpotifyRunning();
     peerPresence.stop();
     peerLocations.stop();
     ws.stop();

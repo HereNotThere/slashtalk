@@ -223,6 +223,7 @@ function McpAccessSettings(): JSX.Element {
   const setAgentsEnabled = async (enabled: boolean): Promise<void> => {
     setBusy(true);
     setMessage(null);
+    let operationError: Error | null = null;
     try {
       for (const { target } of MCP_TARGETS) {
         if (enabled) {
@@ -231,11 +232,18 @@ function McpAccessSettings(): JSX.Element {
           await window.chatheads.mcp.uninstall(target);
         }
       }
-      const next = await window.chatheads.mcp.status();
-      setStatus(next);
     } catch (err) {
-      setMessage({ kind: "err", text: (err as Error).message });
+      operationError = err as Error;
     } finally {
+      try {
+        const next = await window.chatheads.mcp.status();
+        setStatus(next);
+      } catch (err) {
+        operationError ??= err as Error;
+      }
+      if (operationError) {
+        setMessage({ kind: "err", text: operationError.message });
+      }
       setBusy(false);
     }
   };

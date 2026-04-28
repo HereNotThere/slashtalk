@@ -24,6 +24,7 @@ const OVERLAY_SCREEN_MARGIN = 40;
 let overlayWindow: BrowserWindow | null = null;
 let lastSentDock: DockConfig | null = null;
 let desiredOverlayLength: number | null = null;
+let screenListenersAttached = false;
 
 interface SavedPosition {
   screenId: string;
@@ -39,16 +40,22 @@ export function appIsFocused(): boolean {
   return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused());
 }
 
-function restoredOrigin(): { x: number; y: number } | null {
+function restoredPosition(): {
+  origin: { x: number; y: number };
+  display: Electron.Display;
+} | null {
   const pos = store.get<SavedPosition>(POSITION_KEY);
   if (!pos) return null;
-  const match =
+  const display =
     screen.getAllDisplays().find((d) => screenIdOf(d) === pos.screenId) ??
     screen.getPrimaryDisplay();
-  const f = match.bounds;
+  const f = display.bounds;
   return {
-    x: Math.round(f.x + pos.xPercent * f.width),
-    y: Math.round(f.y + pos.topPercent * f.height),
+    origin: {
+      x: Math.round(f.x + pos.xPercent * f.width),
+      y: Math.round(f.y + pos.topPercent * f.height),
+    },
+    display,
   };
 }
 
@@ -123,12 +130,33 @@ export function effectiveOverlayLength(
 export function ensureOverlay(): BrowserWindow {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
 
-  const display = screen.getPrimaryDisplay();
-  const restored = restoredOrigin();
-  // Classify the restored origin against the primary display's work area to
-  // pick the initial dock. First-run default: right edge (vertical+end).
+  // Recenter when displays change — resolution, monitor connect/disconnect,
+  // scaling. Debounced because unplugging a multi-display Thunderbolt dock
+  // bursts 5-10 events in <50ms (per-display metrics-changed + per-display
+  // removed), and back-to-back setBounds calls interrupt macOS's in-flight
+  // NSWindow animator. Attached here (post app.ready) because `screen` can't
+  // be used before then.
+  if (!screenListenersAttached) {
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const onDisplayChange = (): void => {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => {
+        pending = null;
+        resizeOverlay();
+      }, 100);
+    };
+    screen.on("display-metrics-changed", onDisplayChange);
+    screen.on("display-added", onDisplayChange);
+    screen.on("display-removed", onDisplayChange);
+    screenListenersAttached = true;
+  }
+
+  const restored = restoredPosition();
+  const display = restored?.display ?? screen.getPrimaryDisplay();
+  // Classify the restored origin against its own display's work area to pick
+  // the initial dock. First-run default: right edge (vertical+end).
   const initialDock: DockConfig = restored
-    ? dockFromPoint(restored, display)
+    ? dockFromPoint(restored.origin, display)
     : { orientation: "vertical", side: "end" };
   const bounds = computeDockBoundsOn(
     display,
@@ -205,25 +233,18 @@ export function resizeOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const display = screen.getDisplayMatching(overlayWindow.getBounds());
   const dock = currentDock();
-  const wa = display.workArea;
   const length = effectiveOverlayLength(dock.orientation, display);
-  const size =
-    dock.orientation === "vertical"
-      ? { width: OVERLAY_WIDTH, height: length }
-      : { width: length, height: OVERLAY_WIDTH };
+  // Recenter on the main axis on every resize. The rail is always meant to be
+  // centered — drag:end snaps back to centered too — so don't try to preserve
+  // an offset the user can't actually create. This also handles relaunch
+  // (renderer reports the real length after the small fallback opens) and
+  // display changes (resolution / monitor connect / disconnect).
+  const nextBounds = computeDockBoundsOn(display, dock, length);
   const bounds = overlayWindow.getBounds();
-  // Keep the rail inside the work area after a size change so the chat bubble
-  // never clips past the edge.
-  const axisPos = dock.orientation === "vertical" ? bounds.y : bounds.x;
-  const axisMin = (dock.orientation === "vertical" ? wa.y : wa.x) + OVERLAY_SCREEN_MARGIN;
-  const axisMax =
-    (dock.orientation === "vertical" ? wa.y + wa.height - length : wa.x + wa.width - length) -
-    OVERLAY_SCREEN_MARGIN;
-  const clamped = Math.max(axisMin, Math.min(axisPos, axisMax));
-  const nextBounds =
-    dock.orientation === "vertical"
-      ? { x: bounds.x, y: clamped, width: size.width, height: size.height }
-      : { x: clamped, y: bounds.y, width: size.width, height: size.height };
+  // Push dock to the renderer first so flex direction swaps before the resize
+  // (matches drag:end). No-op when the dock hasn't changed; only matters when a
+  // display change flips the overlay's classified edge across orientations.
+  sendOverlayConfig();
   // `animate: true` uses macOS's native NSWindow animator (~200ms ease), which
   // reads as a fluid grow/shrink alongside the renderer's bubble enter/exit
   // animations. No-op on other platforms.

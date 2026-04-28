@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type {
   MessageParam,
   TextBlockParam,
@@ -10,8 +9,8 @@ import { eq } from "drizzle-orm";
 import type { ChatAssistantMessage, ChatCitation, ChatMessage } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { chatMessages, repos, userRepos } from "../db/schema";
-import { config } from "../config";
 import { MODELS } from "../models";
+import { getAnthropicClient } from "../analyzers/anthropic-client";
 import { buildChatTools, type ChatToolDefinition } from "./tools";
 import { loadSessionCards, MAX_CARDS_PER_MESSAGE } from "./cards";
 
@@ -42,17 +41,6 @@ const MAX_TOKENS = 4096;
 // block survives a 5-minute prompt-cache TTL across back-to-back turns.
 const TIMESTAMP_BUCKET_MS = 10 * 60 * 1000;
 const MAX_REPOS_IN_PROMPT = 50;
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) {
-    if (!config.anthropicApiKey) {
-      throw new Error("ANTHROPIC_API_KEY not set");
-    }
-    _client = new Anthropic({ apiKey: config.anthropicApiKey });
-  }
-  return _client;
-}
 
 export interface ChatCaller {
   id: number;
@@ -114,7 +102,7 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
   let finalText = "";
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    const resp = await client().messages.create({
+    const resp = await getAnthropicClient().messages.create({
       model: MODELS.sonnet,
       max_tokens: MAX_TOKENS,
       system,

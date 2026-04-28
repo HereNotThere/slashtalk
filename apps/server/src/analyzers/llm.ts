@@ -1,17 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { config } from "../config";
 import { PRICING, type ModelId } from "../models";
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) {
-    if (!config.anthropicApiKey) {
-      throw new Error("ANTHROPIC_API_KEY not set");
-    }
-    _client = new Anthropic({ apiKey: config.anthropicApiKey });
-  }
-  return _client;
-}
+import { getAnthropicClient } from "./anthropic-client";
 
 export interface StructuredCallParams {
   model: ModelId;
@@ -34,7 +22,7 @@ export interface StructuredCallResult<T> {
 export async function callStructured<T>(
   params: StructuredCallParams,
 ): Promise<StructuredCallResult<T>> {
-  const resp = await client().messages.create({
+  const resp = await getAnthropicClient().messages.create({
     model: params.model,
     max_tokens: params.maxTokens ?? 1024,
     system: [

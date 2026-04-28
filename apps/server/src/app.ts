@@ -52,7 +52,7 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(orgsRoutes(db))
     .use(deviceReposRoutes(db))
     .use(userLocationRoutes(db))
-    .use(chatRoutes(db))
+    .use(chatRoutes(db, redis))
     .use(managedAgentSessionRoutes(db))
     .use(mcpOAuthRoutes(db))
     .use(mcpRoutes())

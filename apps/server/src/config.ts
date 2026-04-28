@@ -41,6 +41,11 @@ export const config = Object.freeze({
   // either exhaust memory or hold a slot for hours. Defaults: 50 MB / 60 s.
   ingestMaxBytes: parseInt(process.env.INGEST_MAX_BYTES || String(50 * 1024 * 1024), 10),
   ingestDeadlineMs: parseInt(process.env.INGEST_DEADLINE_MS || "60000", 10),
+  // Per-user, per-calendar-day USD ceiling on Anthropic spend (analyzers +
+  // chat agent combined). 0 disables the cap. The cost is logged after every
+  // call, so without this a runaway analyzer or hostile session could rack
+  // up unbounded spend before anyone notices.
+  llmDailyBudgetUsd: parseFloat(process.env.LLM_DAILY_BUDGET_USD || "5"),
 });
 
 export type Config = typeof config;

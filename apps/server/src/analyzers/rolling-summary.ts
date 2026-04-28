@@ -141,6 +141,7 @@ export const rollingSummaryAnalyzer: Analyzer<RollingSummaryOutput> = {
       toolDescription: "Emit a rolling narrative summary for this live session.",
       schema: SCHEMA,
       maxTokens: 600,
+      budget: { redis: ctx.redis, userId: ctx.session.userId },
     });
     return {
       output: result.output,

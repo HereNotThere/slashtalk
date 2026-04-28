@@ -148,6 +148,7 @@ export const summaryAnalyzer: Analyzer<SummaryOutput> = {
       toolDescription: "Emit the title and 1-2 sentence description for this coding session.",
       schema: SCHEMA,
       maxTokens: 300,
+      budget: { redis: ctx.redis, userId: ctx.session.userId },
     });
     return {
       output: result.output,

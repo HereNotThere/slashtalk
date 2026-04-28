@@ -9,10 +9,12 @@ import { eq } from "drizzle-orm";
 import type { ChatAssistantMessage, ChatCitation, ChatMessage } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { chatMessages, repos, userRepos } from "../db/schema";
-import { MODELS } from "../models";
+import { MODELS, calculateCostUsd } from "../models";
 import { getAnthropicClient } from "../analyzers/anthropic-client";
 import { buildChatTools, type ChatToolDefinition } from "./tools";
 import { loadSessionCards, MAX_CARDS_PER_MESSAGE } from "./cards";
+import { LlmBudgetExceededError, checkLlmBudget, recordLlmSpend } from "../analyzers/llm-budget";
+import type { RedisBridge } from "../ws/redis-bridge";
 
 const SYSTEM_PROMPT = `You are the slashtalk team-presence assistant. You answer questions about what the user's teammates are working on in Claude Code right now, using only the tools provided.
 
@@ -50,6 +52,7 @@ export interface ChatCaller {
 
 export interface RunChatParams {
   db: Database;
+  redis: RedisBridge;
   user: ChatCaller;
   messages: ChatMessage[];
   /** If provided, persisted turns extend this thread; otherwise a new one is
@@ -63,7 +66,12 @@ export interface RunChatResult {
 }
 
 export async function runChatAgent(params: RunChatParams): Promise<RunChatResult> {
-  const { db, user } = params;
+  const { db, redis, user } = params;
+
+  const budget = await checkLlmBudget(redis, user.id);
+  if (!budget.allowed) {
+    throw new LlmBudgetExceededError(user.id, budget.spentUsd, budget.capUsd);
+  }
 
   const visibleRepos = await db
     .select({ id: repos.id, fullName: repos.fullName })
@@ -102,6 +110,18 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
   let finalText = "";
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    // Re-check after the first iteration — the agent can loop up to
+    // MAX_ITERATIONS, debiting the cap each time. Without this gate a
+    // chain-of-tool-calls would keep running long after the budget is
+    // exhausted; the initial pre-loop check only catches users who
+    // arrived already over.
+    if (iter > 0) {
+      const stillAllowed = await checkLlmBudget(redis, user.id);
+      if (!stillAllowed.allowed) {
+        throw new LlmBudgetExceededError(user.id, stillAllowed.spentUsd, stillAllowed.capUsd);
+      }
+    }
+
     const resp = await getAnthropicClient().messages.create({
       model: MODELS.sonnet,
       max_tokens: MAX_TOKENS,
@@ -109,6 +129,10 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
       tools: toolDefs,
       messages,
     });
+
+    // Record spend per round-trip — see the re-check above; the two go
+    // together so the next loop iteration sees this iteration's cost.
+    await recordLlmSpend(redis, user.id, calculateCostUsd(MODELS.sonnet, resp.usage));
 
     const textBlocks = resp.content
       .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")

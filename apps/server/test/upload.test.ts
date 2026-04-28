@@ -614,10 +614,7 @@ describe("ingest authorization", () => {
     expect(res.status).toBe(403);
 
     // No event row should have been written under Bob's userId.
-    const stray = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.sessionId, aliceSessionId));
+    const stray = await db.select().from(sessions).where(eq(sessions.sessionId, aliceSessionId));
     expect(stray).toHaveLength(1);
     expect(stray[0].userId).toBe(aliceUserId);
   });
@@ -825,10 +822,7 @@ describe("heartbeat", () => {
     });
     expect(res.status).toBe(404);
 
-    const after = await db
-      .select()
-      .from(heartbeats)
-      .where(eq(heartbeats.sessionId, HB_SESSION_ID));
+    const after = await db.select().from(heartbeats).where(eq(heartbeats.sessionId, HB_SESSION_ID));
     expect(after).toHaveLength(1);
     expect(after[0].pid).toBe(beforePid);
     expect(after[0].userId).toBe(aliceUserId);

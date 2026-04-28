@@ -4,6 +4,8 @@ import { jwtAuth } from "../auth/middleware";
 import { runChatAgent } from "./runner";
 import { generateGerunds } from "./gerund";
 import { loadChatHistory } from "./history";
+import { LlmBudgetExceededError } from "../analyzers/llm-budget";
+import type { RedisBridge } from "../ws/redis-bridge";
 
 const MAX_MESSAGES = 20;
 const MAX_CONTENT_CHARS = 8000;
@@ -14,7 +16,7 @@ const MAX_GERUND_PROMPT_CHARS = 2000;
 const UUID_PATTERN =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 
-export const chatRoutes = (db: Database) =>
+export const chatRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ name: "chat", prefix: "/api/chat" })
     .use(jwtAuth)
     .post(
@@ -45,6 +47,7 @@ export const chatRoutes = (db: Database) =>
         try {
           const result = await runChatAgent({
             db,
+            redis,
             user: {
               id: user.id,
               githubLogin: user.githubLogin,
@@ -55,6 +58,15 @@ export const chatRoutes = (db: Database) =>
           });
           return { message: result.message, threadId: result.threadId };
         } catch (err) {
+          if (err instanceof LlmBudgetExceededError) {
+            set.status = 429;
+            return {
+              error: err.code,
+              message: `You've used your daily LLM allowance ($${err.spentUsd.toFixed(2)} of $${err.capUsd.toFixed(2)}). It resets at the next UTC day.`,
+              spentUsd: err.spentUsd,
+              capUsd: err.capUsd,
+            };
+          }
           console.error("[chat] /api/chat/ask failed:", err);
           set.status = 500;
           return { error: "chat request failed" };

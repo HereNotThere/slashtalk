@@ -233,65 +233,71 @@ export const socialRoutes = (db: Database) =>
     .get(
       "/users/:login/questions",
       async ({ user, params, set }) => {
-        const [target] = await db
-          .select({
-            id: users.id,
-            githubLogin: users.githubLogin,
-            displayName: users.displayName,
-            avatarUrl: users.avatarUrl,
-          })
-          .from(users)
-          .where(eq(users.githubLogin, params.login))
-          .limit(1);
-        if (!target) {
-          set.status = 404;
-          return { error: "user not found" };
-        }
-
-        if (target.id !== user.id) {
-          // Author gate: callers can only see questions from teammates they
-          // share a repo with. The query is symmetric to /api/feed/users.
-          const [overlap] = await db
-            .select({ repoId: userRepos.repoId })
-            .from(userRepos)
-            .where(
-              and(
-                eq(userRepos.userId, target.id),
-                inArray(
-                  userRepos.repoId,
-                  db
-                    .select({ repoId: userRepos.repoId })
-                    .from(userRepos)
-                    .where(eq(userRepos.userId, user.id)),
-                ),
-              ),
-            )
+        try {
+          const [target] = await db
+            .select({
+              id: users.id,
+              githubLogin: users.githubLogin,
+              displayName: users.displayName,
+              avatarUrl: users.avatarUrl,
+            })
+            .from(users)
+            .where(eq(users.githubLogin, params.login))
             .limit(1);
-          if (!overlap) {
-            set.status = 403;
-            return { error: "no_access" };
+          if (!target) {
+            set.status = 404;
+            return { error: "user not found" };
           }
+
+          if (target.id !== user.id) {
+            // Author gate: callers can only see questions from teammates they
+            // share a repo with. The query is symmetric to /api/feed/users.
+            const [overlap] = await db
+              .select({ repoId: userRepos.repoId })
+              .from(userRepos)
+              .where(
+                and(
+                  eq(userRepos.userId, target.id),
+                  inArray(
+                    userRepos.repoId,
+                    db
+                      .select({ repoId: userRepos.repoId })
+                      .from(userRepos)
+                      .where(eq(userRepos.userId, user.id)),
+                  ),
+                ),
+              )
+              .limit(1);
+            if (!overlap) {
+              set.status = 403;
+              return { error: "no_access" };
+            }
+          }
+
+          const threads = await loadChatHistory(db, {
+            viewerId: user.id,
+            authorId: target.id,
+            asker: {
+              login: target.githubLogin,
+              displayName: target.displayName,
+              avatarUrl: target.avatarUrl,
+            },
+          });
+
+          const filtered = threads.filter((thread) => {
+            const hadCitations = thread.turns.some((t) => t.citations.length > 0);
+            if (!hadCitations) return true;
+            // Had citations originally — keep only if at least one survived
+            // the viewer's user_repos gate inside loadSessionCards.
+            return thread.cards.length > 0;
+          });
+
+          return { threads: filtered };
+        } catch (err) {
+          console.error("[social] /api/users/:login/questions failed:", err);
+          set.status = 500;
+          return { error: "questions request failed" };
         }
-
-        const threads = await loadChatHistory(db, {
-          viewerId: user.id,
-          authorId: target.id,
-          asker: {
-            login: target.githubLogin,
-            displayName: target.displayName,
-            avatarUrl: target.avatarUrl,
-          },
-        });
-
-        const filtered = threads.filter((thread) => {
-          const hadCitations = thread.turns.some((t) => t.citations.length > 0);
-          if (!hadCitations) return true;
-          // Had citations originally — keep only if at least one survived
-          // the viewer's user_repos gate inside loadSessionCards.
-          return thread.cards.length > 0;
-        });
-
-        return { threads: filtered };
       },
       {
         params: t.Object({ login: t.String() }),

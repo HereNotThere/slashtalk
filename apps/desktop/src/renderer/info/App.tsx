@@ -263,7 +263,7 @@ function UserHeader({
               <>
                 {icon && <span className="shrink-0">{icon}</span>}
                 <span className="truncate">{city}</span>
-                <span className="text-subtle shrink-0">·</span>
+                {time && <span className="text-subtle shrink-0">·</span>}
               </>
             )}
             {time && <span className="shrink-0">{time}</span>}

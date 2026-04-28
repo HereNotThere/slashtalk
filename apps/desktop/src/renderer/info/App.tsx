@@ -11,6 +11,7 @@ import type {
 } from "@slashtalk/shared";
 import type { ChatHead, InfoSession, UserLocation } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
+import { HierarchyDashboard } from "./HierarchyDashboard";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
 import { Markdown } from "../shared/Markdown";
@@ -105,6 +106,25 @@ export function App(): JSX.Element {
       setQuestions({ login: head.label, threads: [] });
       return;
     }
+    if (head.kind === "demo") {
+      // Demo head has no real GitHub login, so spotify/questions endpoints
+      // would 404. Pull sessions only — main routes the demo id to listOwn.
+      let cancelled = false;
+      const load = async (): Promise<void> => {
+        try {
+          const rows = await window.chatheads.listSessionsForHead(head.id);
+          if (!cancelled) setSessions(rows);
+        } catch {
+          if (!cancelled) setSessions([]);
+        }
+      };
+      void load();
+      const timer = setInterval(() => void load(), REFRESH_MS);
+      return () => {
+        cancelled = true;
+        clearInterval(timer);
+      };
+    }
     let cancelled = false;
     const headLogin = head.label;
     const load = async (): Promise<void> => {
@@ -177,6 +197,11 @@ export function App(): JSX.Element {
       <div ref={contentRef}>
         {head?.kind === "agent" ? (
           <AgentPanel head={head} />
+        ) : head?.kind === "demo" ? (
+          <>
+            <UserHeader head={head} sessions={sessions} location={location} isSelf={false} />
+            <HierarchyDashboard sessions={sessions} />
+          </>
         ) : (
           <>
             <UserHeader head={head} sessions={sessions} location={location} isSelf={isSelf} />

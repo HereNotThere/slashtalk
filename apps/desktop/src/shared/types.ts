@@ -22,7 +22,7 @@ export type Avatar = { type: "emoji"; value: string } | { type: "remote"; value:
 export interface ChatHead {
   id: string;
   /** Picks the info-popover layout and routes session fetches. */
-  kind: "user" | "agent";
+  kind: "user" | "agent" | "demo";
   label: string;
   tint: string;
   avatar: Avatar;

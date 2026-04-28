@@ -1315,6 +1315,18 @@ async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
   const state = backend.getAuthState();
   if (!state.signedIn) return [];
 
+  // Demo head previews the new hierarchy against the viewer's own data so the
+  // "Now" section can light up when they actually have a live session.
+  if (rail.isDemoHeadId(headId)) {
+    try {
+      const sessions = await backend.listOwnSessions();
+      sessionCache.set(headId, sessions);
+      return sessions;
+    } catch {
+      return [];
+    }
+  }
+
   const login = rail.parseUserHeadId(headId);
   if (login) {
     try {

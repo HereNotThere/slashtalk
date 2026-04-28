@@ -5,8 +5,10 @@
 // with you. Refreshed on auth changes, on local-repo changes, and on a 30s
 // poll as a fallback until WebSocket user_updated events are wired.
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { SessionState } from "@slashtalk/shared";
-import type { ChatHead, RailDebugSnapshot } from "../shared/types";
+import type { Avatar, ChatHead, RailDebugSnapshot } from "../shared/types";
 import * as backend from "./backend";
 import * as agentStore from "./agentStore";
 import * as localRepos from "./localRepos";
@@ -93,6 +95,7 @@ export const isSelfLive = (): boolean => heads[0]?.live === true;
 
 const USER_HEAD_PREFIX = "user:";
 const AGENT_HEAD_PREFIX = "agent:";
+const DEMO_HEAD_PREFIX = "demo:";
 
 export function userHeadId(login: string): string {
   return `${USER_HEAD_PREFIX}${login}`;
@@ -109,6 +112,38 @@ export function agentHeadId(agentId: string): string {
 export function parseAgentHeadId(headId: string): string | null {
   return headId.startsWith(AGENT_HEAD_PREFIX) ? headId.slice(AGENT_HEAD_PREFIX.length) : null;
 }
+
+export function isDemoHeadId(headId: string): boolean {
+  return headId.startsWith(DEMO_HEAD_PREFIX);
+}
+
+// Single persistent demo entry on the rail used to preview the new info-window
+// hierarchy. Wired client-side so the next engineer can swap the avatar / data
+// sources without touching the server. Reads the avatar PNG from resources/
+// once at startup; falls back to an emoji if the file isn't there yet.
+const DEMO_HEAD_ID = `${DEMO_HEAD_PREFIX}info-hierarchy`;
+const DEMO_HEAD_LABEL = "Hierarchy Demo";
+
+function loadDemoAvatar(): Avatar {
+  try {
+    const photoPath = path.join(__dirname, "../../resources/info-hierarchy-demo-avatar.png");
+    if (fs.existsSync(photoPath)) {
+      const data = fs.readFileSync(photoPath).toString("base64");
+      return { type: "remote", value: `data:image/png;base64,${data}` };
+    }
+  } catch (err) {
+    console.warn("[rail] failed to load demo avatar:", err);
+  }
+  return { type: "emoji", value: "✨" };
+}
+
+const demoHead: ChatHead = {
+  id: DEMO_HEAD_ID,
+  kind: "demo",
+  label: DEMO_HEAD_LABEL,
+  tint: "transparent",
+  avatar: loadDemoAvatar(),
+};
 
 function headForUser(
   login: string,
@@ -239,14 +274,16 @@ async function refresh(): Promise<void> {
     );
     // Merge debug fakes into the peer list so they survive the poll refresh.
     for (const fake of debugFakes) peerHeads.push(fake);
+    // Persistent demo head — sandboxed preview of the redesigned info window.
+    peerHeads.push(demoHead);
     const sortedPeers = sortByBucket(peerHeads, heads, now);
     apply([self, ...agentHeads, ...sortedPeers]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     lastSnapshot = { at: Date.now(), peers: null, error: message };
     console.error("[rail] listTeammates failed:", err);
-    // Keep showing self + agents so the rail doesn't flash.
-    apply([initialSelf, ...agentHeads]);
+    // Keep showing self + agents + demo so the rail doesn't flash.
+    apply([initialSelf, ...agentHeads, demoHead]);
   }
 }
 

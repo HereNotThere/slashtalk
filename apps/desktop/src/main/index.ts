@@ -998,7 +998,10 @@ rail.onChange((next) => {
     ensureOverlay();
     resizeOverlay();
     resolveRailVisibility();
-    repositionInfoIfVisible();
+    // rail.onChange is data-driven (presence, session state, collisions);
+    // the rail itself doesn't move, so the stashed bubble coords are valid
+    // and avoid the fallback's slot-off error for peek-collapsed peers.
+    repositionInfoIfVisible(selectedBubbleScreen ?? undefined);
     repositionChatIfVisible();
   }
   // Pre-warm the session cache so hover-to-show is instant.

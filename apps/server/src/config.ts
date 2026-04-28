@@ -31,6 +31,19 @@ export const config = Object.freeze({
   // either exhaust memory or hold a slot for hours. Defaults: 50 MB / 60 s.
   ingestMaxBytes: parseInt(process.env.INGEST_MAX_BYTES || String(50 * 1024 * 1024), 10),
   ingestDeadlineMs: parseInt(process.env.INGEST_DEADLINE_MS || "60000", 10),
+  // Postgres pool sizing. Without explicit limits the postgres.js default of
+  // max=10/idle_timeout=0 means a deployment under load slowly accumulates
+  // idle connections until the database refuses new ones. Production should
+  // tune dbPoolMax against the Postgres `max_connections` budget divided by
+  // replica count.
+  dbPoolMax: parseInt(process.env.DB_POOL_MAX || "10", 10),
+  dbIdleTimeoutSec: parseInt(process.env.DB_IDLE_TIMEOUT_SEC || "30", 10),
+  dbConnectTimeoutSec: parseInt(process.env.DB_CONNECT_TIMEOUT_SEC || "10", 10),
+  dbMaxLifetimeSec: parseInt(process.env.DB_MAX_LIFETIME_SEC || "1800", 10),
+  // Hard ceiling on a single query's wall-clock — kills runaway analyzer or
+  // feed queries before they drain the pool. Set on every new connection via
+  // postgres.js `connection.statement_timeout`.
+  dbStatementTimeoutMs: parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || "30000", 10),
 });
 
 export type Config = typeof config;

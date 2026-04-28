@@ -130,4 +130,22 @@ export class RedisBridge {
     this.sub.disconnect();
     this.pub.disconnect();
   }
+
+  /** Liveness ping for `/ready`. Short-bounded so a hung Redis can't pin the
+   *  readiness probe. Returns true on PONG; false on any error or timeout. */
+  async ping(timeoutMs = 2_000): Promise<boolean> {
+    if (!this.connected) return false;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("redis ping timeout")), timeoutMs);
+      });
+      const result = await Promise.race([this.pub.ping(), timeout]);
+      return result === "PONG";
+    } catch {
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
 }

@@ -122,6 +122,36 @@ describe("processEvents — queued_command attachment shapes", () => {
     expect(updates.inTurn).toBe(true);
   });
 
+  it("never copies base64 image bytes into the queued prompt", () => {
+    // Image attachments arrive with megabytes of base64 in `block.source.data`.
+    // The flattened prompt is rendered into UI and persisted on the session
+    // row — bloating it with the image payload would balloon the row size and
+    // leak binary content into a column that's supposed to hold a preview.
+    const base64Marker = "BASE64_PAYLOAD_MUST_NOT_LEAK_DEADBEEFCAFE";
+    const updates = processEvents("claude", EMPTY_SESSION, [
+      {
+        type: "attachment",
+        uuid: "00000000-0000-0000-0000-000000000017",
+        timestamp: "2026-04-27T19:00:20.673Z",
+        attachment: {
+          type: "queued_command",
+          prompt: [
+            { type: "text", text: "look at this" },
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/png", data: base64Marker },
+            },
+          ] as unknown as string,
+          commandMode: "prompt",
+        },
+      },
+    ]);
+    const queuedPrompt = updates.queued[0]?.prompt ?? "";
+    expect(queuedPrompt).not.toContain(base64Marker);
+    expect(queuedPrompt).not.toContain("base64");
+    expect(queuedPrompt).toBe("look at this [image]");
+  });
+
   it("ignores queued_command whose prompt has no usable text", () => {
     const updates = processEvents("claude", EMPTY_SESSION, [
       {

@@ -360,26 +360,19 @@ app.on("will-quit", () => {
 app.on("window-all-closed", () => {});
 
 app.on("activate", () => {
-  void showAskOrSettings();
+  showAskOrSettings();
 });
 
-// macOS reopen (dock click, Cmd+Tab, first launch) lands the user on the Ask
-// window seeded with their most recent thread — settings is reachable via the
-// tray. Signed-out users still see settings so they can sign in.
-async function showAskOrSettings(): Promise<void> {
+// macOS reopen (dock click, Cmd+Tab, first launch) lands the user on a fresh
+// Ask window — past threads are reachable via the in-window History drawer,
+// settings via the tray. Signed-out users still see settings so they can sign in.
+function showAskOrSettings(): void {
   const auth = backend.getAuthState();
   if (!auth.signedIn) {
     showMainWindow();
     return;
   }
   showResponse();
-  try {
-    const { threads } = await backend.fetchChatHistory();
-    const latest = threads[0];
-    if (latest) showResponse({ kind: "thread", thread: latest });
-  } catch (err) {
-    console.warn("[activate] fetchChatHistory failed:", err);
-  }
 }
 
 app.on("did-become-active", () => {

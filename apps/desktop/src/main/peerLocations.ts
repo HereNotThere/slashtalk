@@ -29,11 +29,14 @@ export async function start(): Promise<void> {
   if (running) return;
   running = true;
   await refresh();
+  // stop() may have flipped running while we awaited — bail out instead of
+  // installing an interval that would leak (subsequent stop() short-circuits
+  // on !running and never clears it).
+  if (!running) return;
   timer = setInterval(() => void refresh(), POLL_MS);
 }
 
 export function stop(): void {
-  if (!running) return;
   running = false;
   if (timer) {
     clearInterval(timer);

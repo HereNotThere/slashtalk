@@ -44,16 +44,18 @@ function ensureResponseWindow(): BrowserWindow {
   return responseWindow;
 }
 
-export function showResponse(payload: ResponseOpenPayload): void {
+export function showResponse(payload?: ResponseOpenPayload): void {
   const win = ensureResponseWindow();
-  const send = (): void => {
-    if (win.isDestroyed()) return;
-    win.webContents.send("response:open", payload);
-  };
-  if (win.webContents.isLoading()) {
-    win.webContents.once("did-finish-load", send);
-  } else {
-    send();
+  if (payload) {
+    const send = (): void => {
+      if (win.isDestroyed()) return;
+      win.webContents.send("response:open", payload);
+    };
+    if (win.webContents.isLoading()) {
+      win.webContents.once("did-finish-load", send);
+    } else {
+      send();
+    }
   }
   win.show();
   win.focus();

@@ -360,10 +360,27 @@ app.on("will-quit", () => {
 app.on("window-all-closed", () => {});
 
 app.on("activate", () => {
-  // Standard macOS reopen semantics: clicking the dock icon re-shows the
-  // main window — covering the (now-rare) case where it was actually destroyed.
-  showMainWindow();
+  void showAskOrSettings();
 });
+
+// macOS reopen (dock click, Cmd+Tab, first launch) lands the user on the Ask
+// window seeded with their most recent thread — settings is reachable via the
+// tray. Signed-out users still see settings so they can sign in.
+async function showAskOrSettings(): Promise<void> {
+  const auth = backend.getAuthState();
+  if (!auth.signedIn) {
+    showMainWindow();
+    return;
+  }
+  showResponse();
+  try {
+    const { threads } = await backend.fetchChatHistory();
+    const latest = threads[0];
+    if (latest) showResponse({ kind: "thread", thread: latest });
+  } catch (err) {
+    console.warn("[activate] fetchChatHistory failed:", err);
+  }
+}
 
 app.on("did-become-active", () => {
   overlay.onAppDidBecomeActive();

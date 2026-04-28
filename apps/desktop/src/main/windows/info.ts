@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, screen } from "electron";
+import { BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
 import type { ChatHead, InfoSession } from "../../shared/types";
 import type { ChatThread } from "@slashtalk/shared";
 import * as backend from "../backend";
@@ -136,6 +136,21 @@ export function clearQuestionsCache(): void {
 
 // ---------- Window plumbing ----------
 
+// Match `--color-surface-2` per theme so the window background doesn't flash
+// the wrong color before the renderer paints (and so light mode never shows a
+// dark NSWindow behind any sub-pixel gap on the body).
+function infoBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors ? "#2c2c2c" : "#ffffff";
+}
+
+// Module-level listener: applies to whichever infoWindow exists when the
+// system theme flips. Registered once so re-creating the window doesn't leak
+// listeners.
+nativeTheme.on("updated", () => {
+  if (!infoWindow || infoWindow.isDestroyed()) return;
+  infoWindow.setBackgroundColor(infoBackgroundColor());
+});
+
 function ensureInfoWindow(): BrowserWindow {
   if (infoWindow && !infoWindow.isDestroyed()) return infoWindow;
 
@@ -152,10 +167,8 @@ function ensureInfoWindow(): BrowserWindow {
     // anyway, but the NSVisualEffectView still re-rendered every setBounds
     // and could desync from the web-contents layer during fast head-switches,
     // showing as edge tearing. Drop it; the renderer fully owns the painted
-    // surface. backgroundColor matches dark mode `--color-surface-2`; light-
-    // mode body forces `--color-card` over the top via info/styles.css so
-    // a brief window-level color flash on theme load isn't an issue.
-    backgroundColor: "#2c2c2c",
+    // surface.
+    backgroundColor: infoBackgroundColor(),
     hasShadow: true,
     webPreferences: {
       preload: preloadPath,

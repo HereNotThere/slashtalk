@@ -11,11 +11,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import * as backend from "./backend";
-import {
-  parseClaudeQuotaFromConfig,
-  sameClaudeQuota,
-  type ParsedClaudeQuota,
-} from "./claudeQuotaParse";
+import { parseClaudeQuotaFromConfig, type ParsedClaudeQuota } from "./claudeQuotaParse";
+import { quotaContentEquals } from "./quotaEquals";
 
 // Plan tier moves on the order of weeks (subscription changes), not seconds.
 // Poll modestly so a fresh sign-in is reflected within a couple of minutes
@@ -84,7 +81,7 @@ async function tick(): Promise<void> {
   const now = Date.now();
   if (result.kind === "present") {
     const next = result.quota;
-    const changed = !sameClaudeQuota(lastSent, next);
+    const changed = !quotaContentEquals(lastSent, next);
     const stale = now - lastSentAt > KEEPALIVE_MS;
     if (!changed && !stale) return;
     try {

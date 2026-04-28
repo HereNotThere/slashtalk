@@ -1,9 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import {
-  parseClaudeQuotaFromConfig,
-  prettifyTier,
-  sameClaudeQuota,
-} from "../src/main/claudeQuotaParse";
+import { parseClaudeQuotaFromConfig, prettifyTier } from "../src/main/claudeQuotaParse";
 
 describe("prettifyTier", () => {
   it("returns null for nullish or empty input", () => {
@@ -93,38 +89,5 @@ describe("parseClaudeQuotaFromConfig", () => {
       },
     });
     expect(out?.plan).toBe("Max 5x");
-  });
-});
-
-describe("sameClaudeQuota", () => {
-  const base = { source: "claude" as const, plan: "Max 5x", windows: [] };
-
-  it("considers two nulls equal", () => {
-    expect(sameClaudeQuota(null, null)).toBe(true);
-  });
-
-  it("considers null vs non-null different", () => {
-    expect(sameClaudeQuota(null, base)).toBe(false);
-    expect(sameClaudeQuota(base, null)).toBe(false);
-  });
-
-  it("considers identical plan/windows equal", () => {
-    expect(sameClaudeQuota(base, { ...base })).toBe(true);
-  });
-
-  it("considers differing plans different", () => {
-    expect(sameClaudeQuota(base, { ...base, plan: "Pro" })).toBe(false);
-  });
-
-  it("compares windows by label/usedPercent/resetsAt", () => {
-    const a = {
-      ...base,
-      windows: [{ label: "5h", usedPercent: 50, resetsAt: null }],
-    };
-    const b = {
-      ...base,
-      windows: [{ label: "5h", usedPercent: 51, resetsAt: null }],
-    };
-    expect(sameClaudeQuota(a, b)).toBe(false);
   });
 });

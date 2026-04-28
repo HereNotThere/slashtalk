@@ -92,23 +92,3 @@ export function parseClaudeQuotaFromConfig(raw: unknown): ParsedClaudeQuota | nu
 
   return { source: "claude", plan, windows };
 }
-
-/**
- * Returns true when two parsed quotas are equivalent for the purpose of
- * skipping a no-op POST. Used by the collector to avoid hammering the server
- * with identical payloads on every poll tick.
- */
-export function sameClaudeQuota(a: ParsedClaudeQuota | null, b: ParsedClaudeQuota | null): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  if (a.plan !== b.plan) return false;
-  if (a.windows.length !== b.windows.length) return false;
-  for (let i = 0; i < a.windows.length; i++) {
-    const x = a.windows[i]!;
-    const y = b.windows[i]!;
-    if (x.label !== y.label || x.usedPercent !== y.usedPercent || x.resetsAt !== y.resetsAt) {
-      return false;
-    }
-  }
-  return true;
-}

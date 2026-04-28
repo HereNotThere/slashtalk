@@ -238,12 +238,19 @@ function UserHeader({
   // to local would mislabel the peer's card with our clock.
   const { city, icon } = useLocationWeather(isSelf ? undefined : location);
   const showLocationRow = isSelf || location !== null;
-  // For self, always use the device's local tz: a stale peer-poll cache could
-  // otherwise lock the clock to the previously-persisted tz across travel.
-  // Peer tz comes from the server; wrap in try/catch so a malformed value
-  // (platform quirk, future code change) drops the clock instead of crashing
-  // the card subtree.
-  const time = showLocationRow ? formatHeaderTime(isSelf ? null : location?.timezone) : null;
+  // Self: device's local tz (stale peer-poll cache could otherwise lock the
+  // clock to the previously-persisted tz across travel).
+  // Peer with no tz: skip the clock — falling back to undefined would render
+  // the viewer's local tz and mislabel it as the peer's.
+  // Peer with tz: wrap in try/catch (formatHeaderTime) so a malformed value
+  // drops the clock instead of crashing the card subtree.
+  const time = !showLocationRow
+    ? null
+    : isSelf
+      ? formatHeaderTime(null)
+      : location?.timezone
+        ? formatHeaderTime(location.timezone)
+        : null;
   const totalTokensLabel = fmtTokens(sumSessionTokens(sessions));
   return (
     <div className="flex items-start gap-3 px-4 pt-4 pb-3">

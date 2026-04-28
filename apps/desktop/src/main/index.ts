@@ -740,21 +740,25 @@ let lastSentUserLocation: UserLocation | null = null;
 let userLocationFlush: Promise<void> | null = null;
 
 async function flushUserLocation(): Promise<void> {
-  if (!backend.getAuthState().signedIn) return;
-  const next = lastKnownUserLocation;
-  if (!next) return;
-  if (
-    lastSentUserLocation &&
-    lastSentUserLocation.timezone === next.timezone &&
-    lastSentUserLocation.city === next.city
-  ) {
-    return;
-  }
   if (userLocationFlush) return userLocationFlush;
   userLocationFlush = (async () => {
     try {
-      await backend.postUserLocation(next);
-      lastSentUserLocation = next;
+      // Loop so a setLocation arriving while the POST is in flight still
+      // gets sent — otherwise the new value would land in lastKnown but
+      // never trigger a follow-up flush.
+      while (backend.getAuthState().signedIn) {
+        const next = lastKnownUserLocation;
+        if (!next) return;
+        if (
+          lastSentUserLocation &&
+          lastSentUserLocation.timezone === next.timezone &&
+          lastSentUserLocation.city === next.city
+        ) {
+          return;
+        }
+        await backend.postUserLocation(next);
+        lastSentUserLocation = next;
+      }
     } catch (err) {
       console.warn("[user-location] post failed", err);
     } finally {

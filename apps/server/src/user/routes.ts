@@ -353,11 +353,26 @@ export const deviceReposRoutes = (db: Database) =>
       },
     );
 
+// Reject anything Intl doesn't know — otherwise a malicious client could
+// store "lol" and crash every peer's info-card render via toLocaleTimeString.
+function isValidIanaTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // apiKey-authed (lives on /v1) so the desktop's device key authorizes this.
 export const userLocationRoutes = (db: Database) =>
   new Elysia({ prefix: "/v1/me", name: "user-location" }).use(apiKeyAuth).post(
     "/location",
-    async ({ body, user }) => {
+    async ({ body, user, set }) => {
+      if (body.timezone !== null && !isValidIanaTimezone(body.timezone)) {
+        set.status = 400;
+        return { ok: false as const, error: "invalid_timezone" };
+      }
       await db
         .update(users)
         .set({

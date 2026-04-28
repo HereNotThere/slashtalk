@@ -5,6 +5,8 @@ import { config } from "../config";
 import type { Database } from "../db";
 import { users, setupTokens, devices, apiKeys } from "../db/schema";
 import { generateApiKey, hashToken, encryptGithubToken } from "./tokens";
+import { issueOAuthState, consumeOAuthState } from "./oauth-state";
+import type { RedisBridge } from "../ws/redis-bridge";
 import {
   issueSessionTokens,
   rotateSessionTokens,
@@ -25,7 +27,7 @@ const GITHUB_USER_URL = "https://api.github.com/user";
 const SCOPES = "read:user read:org";
 
 /** OAuth + session routes under /auth */
-export const githubAuth = (db: Database) =>
+export const githubAuth = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/auth", name: "auth/github" })
     .use(jwt({ name: "jwt", secret: config.jwtSecret }))
 
@@ -35,20 +37,28 @@ export const githubAuth = (db: Database) =>
     // Optional ?return_to=/path lets browser flows resume after sign-in.
     .get(
       "/github",
-      ({ query, redirect }) => {
+      async ({ query, redirect }) => {
         const params = new URLSearchParams({
           client_id: config.githubClientId,
           redirect_uri: `${config.baseUrl}/auth/github/callback`,
           scope: SCOPES,
         });
+        let port: number | null = null;
         if (query.desktop_port) {
-          const port = Number(query.desktop_port);
-          if (Number.isInteger(port) && port > 0 && port < 65536) {
-            params.set("state", `desktop:${port}`);
+          const candidate = Number(query.desktop_port);
+          if (Number.isInteger(candidate) && candidate > 0 && candidate < 65536) {
+            port = candidate;
           }
-        } else if (query.return_to && isSafeReturnTo(query.return_to)) {
-          params.set("state", `web:${encodeReturnTo(query.return_to)}`);
         }
+        const nonce =
+          port !== null
+            ? await issueOAuthState(redis, { kind: "desktop", port })
+            : await issueOAuthState(redis, {
+                kind: "web",
+                returnTo:
+                  query.return_to && isSafeReturnTo(query.return_to) ? query.return_to : undefined,
+              });
+        params.set("state", nonce);
         return redirect(`${GITHUB_AUTHORIZE_URL}?${params}`);
       },
       {
@@ -63,6 +73,18 @@ export const githubAuth = (db: Database) =>
     .get(
       "/github/callback",
       async ({ query, jwt, cookie: { session, refresh: refreshCookie }, redirect, set }) => {
+        // Reject the callback if we don't recognize the state nonce: a missing,
+        // forged, or replayed state means the inbound `code` did not originate
+        // from a flow we initiated. Without this, an attacker could trick a
+        // signed-in browser into completing OAuth with a code they obtained
+        // separately — and steer the desktop loopback redirect at any port.
+        const stateValue = query.state;
+        const statePayload = stateValue ? await consumeOAuthState(redis, stateValue) : null;
+        if (!statePayload) {
+          set.status = 400;
+          return { error: "invalid_state" };
+        }
+
         const tokenRes = await fetch(GITHUB_TOKEN_URL, {
           method: "POST",
           headers: {
@@ -124,25 +146,21 @@ export const githubAuth = (db: Database) =>
         const tokens = await issueSessionTokens(db, jwt, user.id);
 
         // Desktop (loopback) branch: redirect credentials to 127.0.0.1:<port>.
-        // Restricted to loopback to keep raw tokens off arbitrary hosts.
-        const desktopMatch = query.state?.match(/^desktop:(\d+)$/);
-        if (desktopMatch) {
-          const port = Number(desktopMatch[1]);
+        // Restricted to loopback to keep raw tokens off arbitrary hosts. The
+        // port came from the original /auth/github call and was bound to this
+        // nonce server-side, so a forged callback can't steer it.
+        if (statePayload.kind === "desktop") {
           const params = new URLSearchParams({
             jwt: tokens.jwt,
             refreshToken: tokens.refreshToken,
             login: user.githubLogin,
           });
-          return redirect(`http://127.0.0.1:${port}/callback?${params}`);
+          return redirect(`http://127.0.0.1:${statePayload.port}/callback?${params}`);
         }
 
         setSessionCookies({ session, refresh: refreshCookie }, tokens);
-        const webMatch = query.state?.match(/^web:([A-Za-z0-9_-]+)$/);
-        if (webMatch) {
-          const returnTo = decodeReturnTo(webMatch[1]);
-          if (returnTo && isSafeReturnTo(returnTo)) {
-            return redirect(returnTo);
-          }
+        if (statePayload.returnTo && isSafeReturnTo(statePayload.returnTo)) {
+          return redirect(statePayload.returnTo);
         }
 
         return { ok: true, user: { id: user.id, login: user.githubLogin } };
@@ -235,18 +253,6 @@ export const githubAuth = (db: Database) =>
 
 function isSafeReturnTo(value: string): boolean {
   return value.startsWith("/") && !value.startsWith("//");
-}
-
-function encodeReturnTo(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64url");
-}
-
-function decodeReturnTo(value: string): string | null {
-  try {
-    return Buffer.from(value, "base64url").toString("utf8");
-  } catch {
-    return null;
-  }
 }
 
 /** CLI token exchange — mounted at /v1/auth to match spec */

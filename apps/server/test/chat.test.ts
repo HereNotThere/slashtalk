@@ -13,7 +13,7 @@ import {
 } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
-import { mockGitHubAuth, resetDatabase, getCookie } from "./helpers";
+import { mockGitHubAuth, resetDatabase, getCookie, signInAs } from "./helpers";
 import { getTeamActivityImpl, getSessionImpl } from "../src/chat/tools";
 import { loadSessionCards } from "../src/chat/cards";
 import { loadChatHistory } from "../src/chat/history";
@@ -48,9 +48,9 @@ beforeAll(async () => {
   baseUrl = `http://localhost:${port}`;
 
   // Sign in Alice + Bob
-  const aliceRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+  const aliceRes = await signInAs(baseUrl, "alice_code");
   aliceCookie = getCookie(aliceRes, "session")!;
-  const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+  const bobRes = await signInAs(baseUrl, "bob_code");
   expect(getCookie(bobRes, "session")).toBeTruthy();
 
   const [alice] = await db.select().from(users).where(eq(users.githubLogin, "alice"));
@@ -797,7 +797,7 @@ describe("GET /api/users/:login/questions", () => {
   it("returns own questions even with no peer-overlap check needed", async () => {
     await seedBobThreads();
     // Bob asks for his own questions — author gate self-shortcuts.
-    const bobLoginRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobLoginRes = await signInAs(baseUrl, "bob_code");
     const bobCookie = getCookie(bobLoginRes, "session")!;
     const res = await fetch(`${baseUrl}/api/users/bob/questions`, {
       headers: { Cookie: bobCookie },

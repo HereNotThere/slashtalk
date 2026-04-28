@@ -11,7 +11,14 @@ import {
 } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
-import { resetDatabase, mockGitHubAuth, getCookie, makeEvent, makeNdjson } from "./helpers";
+import {
+  resetDatabase,
+  mockGitHubAuth,
+  getCookie,
+  makeEvent,
+  makeNdjson,
+  signInAs,
+} from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -58,13 +65,13 @@ describe("social feed integration", () => {
 
   it("authenticates two users via mock GitHub OAuth", async () => {
     // Alice logs in
-    const aliceRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+    const aliceRes = await signInAs(baseUrl, "alice_code");
     expect(aliceRes.status).toBe(200);
     aliceCookie = getCookie(aliceRes, "session")!;
     expect(aliceCookie).toBeTruthy();
 
     // Bob logs in
-    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobRes = await signInAs(baseUrl, "bob_code");
     expect(bobRes.status).toBe(200);
     bobCookie = getCookie(bobRes, "session")!;
     expect(bobCookie).toBeTruthy();

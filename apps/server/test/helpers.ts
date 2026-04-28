@@ -90,6 +90,20 @@ export async function resetDatabase() {
 
 // ── Test Helpers ─────────────────────────────────────────────
 
+/**
+ * Drive a full OAuth round-trip end-to-end so the server-issued CSRF state
+ * nonce is honored. Hits `/auth/github` to seed the nonce, parses it from the
+ * GitHub-bound redirect, then exchanges it for a session via the callback.
+ */
+export async function signInAs(baseUrl: string, code: string): Promise<Response> {
+  const startRes = await fetch(`${baseUrl}/auth/github`, { redirect: "manual" });
+  const location = startRes.headers.get("location");
+  if (!location) throw new Error(`signInAs(${code}): /auth/github did not redirect`);
+  const state = new URL(location).searchParams.get("state");
+  if (!state) throw new Error(`signInAs(${code}): no state on redirect`);
+  return fetch(`${baseUrl}/auth/github/callback?code=${code}&state=${state}`);
+}
+
 export function getCookie(res: Response, name: string): string | null {
   const header = res.headers.get("set-cookie") || "";
   // May have multiple cookies separated by comma in some runtimes

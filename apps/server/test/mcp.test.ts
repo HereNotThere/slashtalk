@@ -18,7 +18,7 @@ import { mcpRoutes } from "../src/mcp/routes";
 import { mcpOAuthRoutes } from "../src/oauth/mcp";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { SUMMARY_ANALYZER } from "../src/analyzers/names";
-import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
+import { resetDatabase, mockGitHubAuth, getCookie, signInAs } from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -43,7 +43,7 @@ beforeAll(async () => {
   app.listen(0);
   baseUrl = `http://localhost:${app.server!.port}`;
 
-  const aliceRes = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+  const aliceRes = await signInAs(baseUrl, "alice_code");
   aliceCookie = getCookie(aliceRes, "session")!;
 
   const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
@@ -60,7 +60,7 @@ beforeAll(async () => {
   const { apiKey } = (await exchangeRes.json()) as { apiKey: string };
   aliceApiKey = apiKey;
 
-  const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+  const bobRes = await signInAs(baseUrl, "bob_code");
   const bobCookie = getCookie(bobRes, "session")!;
 
   const bobSetupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
@@ -662,7 +662,7 @@ describe("MCP OAuth discovery", () => {
     expect(githubRedirect.status).toBe(302);
     const githubLocation = new URL(githubRedirect.headers.get("location")!);
     const webState = githubLocation.searchParams.get("state");
-    expect(webState).toStartWith("web:");
+    expect(webState).toBeTruthy();
 
     const callback = await fetch(
       `${baseUrl}/auth/github/callback?${new URLSearchParams({

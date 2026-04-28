@@ -42,7 +42,7 @@ export function createApp(db: Database, redis: RedisBridge) {
       set.headers["content-type"] = "text/plain";
       return INSTALL_SCRIPT;
     })
-    .use(githubAuth(db))
+    .use(githubAuth(db, redis))
     .use(cliAuth(db))
     .use(ingestRoutes(db, redis))
     .use(socialRoutes(db))

@@ -5,7 +5,7 @@ import { apiKeys, devices, oauthTokens, refreshTokens, users } from "../src/db/s
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { hashToken } from "../src/auth/tokens";
-import { resetDatabase, mockGitHubAuth, getCookie } from "./helpers";
+import { resetDatabase, mockGitHubAuth, getCookie, signInAs } from "./helpers";
 
 let redis: RedisBridge;
 let app: ReturnType<typeof createApp>;
@@ -38,7 +38,7 @@ async function signIn(code: string): Promise<{
   refreshToken: string;
   userId: number;
 }> {
-  const res = await fetch(`${baseUrl}/auth/github/callback?code=${code}`);
+  const res = await signInAs(baseUrl, code);
   expect(res.status).toBe(200);
   const sessionCookie = getCookie(res, "session")!;
   const refreshCookie = getCookie(res, "refresh")!;
@@ -409,7 +409,7 @@ describe("/auth/logout-everywhere", () => {
 
 describe("sign-in issues session + refresh cookies", () => {
   it("emits both cookies on /auth/github/callback", async () => {
-    const res = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const res = await signInAs(baseUrl, "bob_code");
     expect(res.status).toBe(200);
     expect(getCookie(res, "session")).toBeTruthy();
     expect(getCookie(res, "refresh")).toBeTruthy();
@@ -418,6 +418,33 @@ describe("sign-in issues session + refresh cookies", () => {
     const [bob] = await db.select().from(users).where(eq(users.githubLogin, "bob"));
     const rows = await db.select().from(refreshTokens).where(eq(refreshTokens.userId, bob.id));
     expect(rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe("OAuth callback state validation", () => {
+  it("rejects /auth/github/callback with no state", async () => {
+    const res = await fetch(`${baseUrl}/auth/github/callback?code=alice_code`);
+    expect(res.status).toBe(400);
+    expect(getCookie(res, "session")).toBeNull();
+  });
+
+  it("rejects /auth/github/callback with a forged state nonce", async () => {
+    const res = await fetch(
+      `${baseUrl}/auth/github/callback?code=alice_code&state=not-a-real-nonce`,
+    );
+    expect(res.status).toBe(400);
+    expect(getCookie(res, "session")).toBeNull();
+  });
+
+  it("rejects state replay — a nonce can only be consumed once", async () => {
+    const startRes = await fetch(`${baseUrl}/auth/github`, { redirect: "manual" });
+    const state = new URL(startRes.headers.get("location")!).searchParams.get("state")!;
+
+    const first = await fetch(`${baseUrl}/auth/github/callback?code=alice_code&state=${state}`);
+    expect(first.status).toBe(200);
+
+    const replay = await fetch(`${baseUrl}/auth/github/callback?code=alice_code&state=${state}`);
+    expect(replay.status).toBe(400);
   });
 });
 

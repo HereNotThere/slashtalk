@@ -362,6 +362,55 @@ describe("chat tool: get_team_activity", () => {
     expect(exact.teammates.map((t) => t.login)).toEqual(["ryancooley"]);
   });
 
+  it("populates resolvedLogins so the model can distinguish 'unknown name' from 'no recent sessions'", async () => {
+    // ryan is already seeded by the prior test as a peer in commonRepoId.
+    const matched = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "ryan",
+    });
+    expect(matched.resolvedLogins).toEqual(["ryancooley"]);
+    expect(matched.teammates.map((t) => t.login)).toEqual(["ryancooley"]);
+
+    const unmatched = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "nobody-with-this-handle",
+    });
+    expect(unmatched.resolvedLogins).toEqual([]);
+    expect(unmatched.teammates).toEqual([]);
+  });
+
+  it("resolves login from peers in OTHER shared repos, not just args.repoFullName", async () => {
+    // PR 165 narrowed the lookup peer set by args.repoFullName, so a peer
+    // reachable only via a different shared repo silently missed the fuzzy
+    // match. Now the lookup runs against every visible peer; the session
+    // query still narrows, so resolvedLogins captures "I found them" while
+    // teammates is empty for "but no sessions in this repo."
+    const [billingRepo] = await db
+      .insert(repos)
+      .values({ githubId: 9003, fullName: "team/billing", owner: "team", name: "billing" })
+      .returning();
+    await db.insert(userRepos).values({
+      userId: aliceId,
+      repoId: billingRepo.id,
+      permission: "push",
+    });
+    // ryancooley is intentionally NOT given user_repos for billing — they
+    // remain a peer via commonRepoId only.
+
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "ryan",
+      repoFullName: "team/billing",
+    });
+    expect(result.resolvedLogins).toEqual(["ryancooley"]);
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("omits resolvedLogins when no login was passed", async () => {
+    const result = await getTeamActivityImpl(db, aliceId, { sinceHours: 24 });
+    expect(result.resolvedLogins).toBeUndefined();
+  });
+
   it("scopes to a single repo via repoFullName filter", async () => {
     const result = await getTeamActivityImpl(db, aliceId, {
       sinceHours: 24,
@@ -377,6 +426,19 @@ describe("chat tool: get_team_activity", () => {
       sinceHours: 24,
       repoFullName: "other/secret",
     });
+    expect(result.teammates).toEqual([]);
+  });
+
+  it("surfaces resolvedLogins even when repoFullName names a repo the caller can't see", async () => {
+    // Bug: previously this path returned `resolvedLogins: []` despite a
+    // successful login resolution, so the model reported "no teammate named
+    // ryan" — the exact misleading answer this PR set out to eliminate.
+    const result = await getTeamActivityImpl(db, aliceId, {
+      sinceHours: 24,
+      login: "ryan",
+      repoFullName: "other/secret",
+    });
+    expect(result.resolvedLogins).toEqual(["ryancooley"]);
     expect(result.teammates).toEqual([]);
   });
 

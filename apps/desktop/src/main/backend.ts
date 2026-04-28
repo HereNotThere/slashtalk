@@ -25,7 +25,13 @@ import type {
   SpotifyPresence,
   SyncStateEntry,
 } from "@slashtalk/shared";
-import type { BackendAuthState, BackendUser, RepoSummary, TeammateSummary } from "../shared/types";
+import type {
+  BackendAuthState,
+  BackendUser,
+  RepoSummary,
+  TeammateSummary,
+  UserLocation,
+} from "../shared/types";
 import { createEmitter } from "./emitter";
 import { saveEncrypted, loadEncrypted, clearEncrypted } from "./safeStore";
 import { apiBaseUrl } from "./config";
@@ -49,6 +55,10 @@ export const onChange = authChanges.on;
 export function getAuthState(): BackendAuthState {
   if (!creds) return { signedIn: false };
   return { signedIn: true, user: creds.user };
+}
+
+export function isSelf(login: string | null): boolean {
+  return !!login && creds?.user.githubLogin === login;
 }
 
 /** Current JWT — used by the WS client to authenticate the upgrade. May rotate
@@ -782,6 +792,22 @@ export function postSpotifyPresence(
 
 export function listPeerPresence(): Promise<Record<string, SpotifyPresence>> {
   return jsonFetch<Record<string, SpotifyPresence>>("/api/presence/peers", {
+    method: "GET",
+  });
+}
+
+// ---------- User location ----------
+
+export function postUserLocation(body: UserLocation): Promise<{ ok: true }> {
+  return jsonFetch("/v1/me/location", {
+    method: "POST",
+    body,
+    auth: "apiKey",
+  });
+}
+
+export function listPeerLocations(): Promise<Record<string, UserLocation>> {
+  return jsonFetch<Record<string, UserLocation>>("/api/presence/locations", {
     method: "GET",
   });
 }

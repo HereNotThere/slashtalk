@@ -68,6 +68,18 @@ export interface BackendUser {
 
 export type BackendAuthState = { signedIn: false } | { signedIn: true; user: BackendUser };
 
+export type UserLocation = { timezone: string | null; city: string | null };
+
+export interface InfoShowPayload {
+  head: ChatHead;
+  sessions: InfoSession[] | null;
+  /** Session the caller wants auto-expanded on open (e.g. from a chat card click). */
+  expandSessionId?: string | null;
+  spotify: SpotifyPresence | null;
+  location: UserLocation | null;
+  isSelf: boolean;
+}
+
 // Signed-in identity for the MCP/agents shim. Token stays main-side.
 export interface ChatHeadsUser {
   login: string;
@@ -380,6 +392,8 @@ export interface ChatHeadsBridge {
     onEnabledChange: (cb: (enabled: boolean) => void) => Unsubscribe;
   };
 
+  setUserLocation: (payload: UserLocation) => Promise<void>;
+
   // Info box (overlay → main). Show/hide are driven by hover; the rail keeps
   // the leave timer and asks main to hide after the user leaves the bubble
   // and doesn't re-enter the info panel. `infoHoverEnter/Leave` let the info
@@ -451,15 +465,9 @@ export interface ChatHeadsBridge {
   // Info window (main → info renderer). Sessions are prefetched in main so
   // the renderer can paint in one pass at the correct height. `spotify` is
   // whatever the main-process peerPresence poller last saw for this head.
-  onInfoShow: (
-    cb: (payload: {
-      head: ChatHead;
-      sessions: InfoSession[] | null;
-      /** Session the caller wants auto-expanded on open (e.g. from a chat card click). */
-      expandSessionId?: string | null;
-      spotify: SpotifyPresence | null;
-    }) => void,
-  ) => Unsubscribe;
+  // `location` is the head's persisted timezone+city (null until the user
+  // has reported it). `isSelf` switches the renderer to local-resolve mode.
+  onInfoShow: (cb: (payload: InfoShowPayload) => void) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
   /** Pushed from main when the currently-shown head's Spotify presence
    *  changes between polls. Scoped to the visible head already. */

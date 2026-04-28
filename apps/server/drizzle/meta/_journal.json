@@ -99,6 +99,13 @@
       "when": 1777330159624,
       "tag": "0013_new_franklin_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777330200000,
+      "tag": "0014_tearful_yellowjacket",
+      "breakpoints": true
     }
   ]
 }

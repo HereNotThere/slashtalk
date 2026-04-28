@@ -299,19 +299,50 @@ async function handleIngest(
   // and permanently desync line_seq from file content. Let errors propagate
   // (Elysia returns 5xx); the client retries the same chunk and the unique
   // (session_id, line_seq) key dedups any batches that already committed.
+  // The same dedup-on-retry property is what makes the byte/deadline early
+  // returns below safe — anything we already flushed is idempotent.
   let totalLines = 0;
+  let totalBytes = 0;
   const decoder = new TextDecoder();
   let pending = "";
-  for await (const chunk of body as ReadableStream<Uint8Array>) {
-    pending += decoder.decode(chunk, { stream: true });
-    let nl: number;
-    while ((nl = pending.indexOf("\n")) !== -1) {
-      const line = pending.slice(0, nl);
-      pending = pending.slice(nl + 1);
-      totalLines++;
-      consumeLine(line);
-      if (batch.length >= BATCH_SIZE) await flushBatch();
+  const startedAtMs = Date.now();
+  const reader = (body as ReadableStream<Uint8Array>).getReader();
+  // The total-bytes cap doesn't bound `pending` if the attacker sends bytes
+  // without a newline, so put a separate (tighter) cap on a single staged
+  // line. A real session event is at most a few KB.
+  const maxPending = Math.min(config.ingestMaxBytes, 1024 * 1024);
+  try {
+    while (true) {
+      const { value: chunk, done } = await reader.read();
+      if (done) break;
+      totalBytes += chunk.byteLength;
+      if (totalBytes > config.ingestMaxBytes) {
+        void reader.cancel().catch(() => undefined);
+        set.status = 413;
+        return { error: "payload_too_large" };
+      }
+      if (Date.now() - startedAtMs > config.ingestDeadlineMs) {
+        void reader.cancel().catch(() => undefined);
+        set.status = 408;
+        return { error: "ingest_deadline_exceeded" };
+      }
+      pending += decoder.decode(chunk, { stream: true });
+      if (pending.length > maxPending) {
+        void reader.cancel().catch(() => undefined);
+        set.status = 413;
+        return { error: "line_too_large" };
+      }
+      let nl: number;
+      while ((nl = pending.indexOf("\n")) !== -1) {
+        const line = pending.slice(0, nl);
+        pending = pending.slice(nl + 1);
+        totalLines++;
+        consumeLine(line);
+        if (batch.length >= BATCH_SIZE) await flushBatch();
+      }
     }
+  } finally {
+    reader.releaseLock();
   }
   pending += decoder.decode();
   if (pending.length > 0) {

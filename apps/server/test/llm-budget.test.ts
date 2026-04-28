@@ -65,4 +65,17 @@ describe("llm budget", () => {
     expect(err.message).toContain("user 42");
     expect(err.message).toContain("$7.50");
   });
+
+  it("recordLlmSpend never throws even if the underlying Redis op rejects", async () => {
+    // The call site runs after a paid Anthropic API result is in hand —
+    // a Redis blip must not surface as a thrown error that loses the
+    // already-billed response. Stub incrFloat to throw and confirm the
+    // helper still resolves.
+    const fakeRedis = {
+      incrFloat: async () => {
+        throw new Error("ECONNRESET");
+      },
+    } as unknown as RedisBridge;
+    await expect(recordLlmSpend(fakeRedis, userIdA, 0.001)).resolves.toBeUndefined();
+  });
 });

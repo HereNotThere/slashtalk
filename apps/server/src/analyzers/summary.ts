@@ -4,7 +4,12 @@ import { SUMMARY_ANALYZER } from "./names";
 import type { events } from "../db/schema";
 import { compactEvent, isNarrativeEvent } from "./event-compact";
 import { MODELS } from "../models";
-import { promptHistoryLines, topJsonbEntries } from "./session-context";
+import {
+  UNTRUSTED_INPUT_CONTRACT_ANALYZER,
+  fenceUntrusted,
+  promptHistoryLines,
+  topJsonbEntries,
+} from "./session-context";
 
 const VERSION = "4";
 const LINE_SEQ_REFRESH_DELTA = 50;
@@ -33,7 +38,7 @@ const SCHEMA = {
   required: ["title", "description"],
 };
 
-const SYSTEM = `You label a coding session by its overall *goal* — what the developer set out to accomplish — so a teammate glancing at the card understands the point of the work, not the most recent keystroke.
+export const SUMMARY_SYSTEM = `You label a coding session by its overall *goal* — what the developer set out to accomplish — so a teammate glancing at the card understands the point of the work, not the most recent keystroke.
 
 Given session metadata (user prompts, files edited, tools used, recent events), emit a concise title and a 1-2 sentence description focused on the *substantive* feature, fix, or refactor at the heart of the session. Be specific to the technical work, not generic.
 
@@ -52,7 +57,9 @@ What is *not* the goal — treat these as coda, never as the title:
 - waiting, idling, or "awaiting next task"
 - post-merge cleanup, branch hygiene
 
-If the only signals you have are coda activity, infer the goal from the work that *led* to the merge — the user prompts that originally drove the session, the files that were actually edited, the prior title if one exists. The prior title is usually right; only replace it when the user has clearly pivoted to a *new substantive task*, not when they've finished one and moved into wrap-up.`;
+If the only signals you have are coda activity, infer the goal from the work that *led* to the merge — the user prompts that originally drove the session, the files that were actually edited, the prior title if one exists. The prior title is usually right; only replace it when the user has clearly pivoted to a *new substantive task*, not when they've finished one and moved into wrap-up.
+
+${UNTRUSTED_INPUT_CONTRACT_ANALYZER}`;
 
 export function buildPrompt(
   ctx: AnalyzerContext,
@@ -63,28 +70,30 @@ export function buildPrompt(
   const parts: string[] = [];
   if (prior) {
     parts.push(
-      `prior title: ${prior.title}\nprior description: ${prior.description}\n(keep unless the developer has clearly moved on to a new substantive task — coda activity like merging or running tests is not a pivot)`,
+      `prior title and description (keep unless the developer has clearly moved on to a new substantive task — coda activity like merging or running tests is not a pivot):\n${fenceUntrusted(`title: ${prior.title}\ndescription: ${prior.description}`)}`,
     );
   }
-  parts.push(`project: ${s.project}`);
-  if (s.cwd) parts.push(`cwd: ${s.cwd}`);
-  if (s.branch) parts.push(`branch: ${s.branch}`);
+  parts.push(`project: ${fenceUntrusted(s.project)}`);
+  if (s.cwd) parts.push(`cwd: ${fenceUntrusted(s.cwd)}`);
+  if (s.branch) parts.push(`branch: ${fenceUntrusted(s.branch)}`);
   if (s.title) {
     parts.push(
-      `original task anchor (first real user prompt; prefer this over late subtasks unless the session clearly pivoted):\n${s.title}`,
+      `original task anchor (first real user prompt; prefer this over late subtasks unless the session clearly pivoted):\n${fenceUntrusted(s.title)}`,
     );
   }
   const prompts = promptHistoryLines(s.recentPrompts, s.lastUserPrompt);
   if (prompts.length) {
     parts.push(
-      `recent user prompts (oldest first; later entries may be subtasks or acknowledgements, not necessarily a new task):\n${prompts.join("\n")}`,
+      `recent user prompts (oldest first; later entries may be subtasks or acknowledgements, not necessarily a new task):\n${fenceUntrusted(prompts.join("\n"))}`,
     );
   }
 
   const edited = topJsonbEntries(s.topFilesEdited, 5);
   const written = topJsonbEntries(s.topFilesWritten, 5);
-  if (edited.length) parts.push(`top files edited (all-time): ${JSON.stringify(edited)}`);
-  if (written.length) parts.push(`top files written (all-time): ${JSON.stringify(written)}`);
+  if (edited.length)
+    parts.push(`top files edited (all-time):\n${fenceUntrusted(JSON.stringify(edited))}`);
+  if (written.length)
+    parts.push(`top files written (all-time):\n${fenceUntrusted(JSON.stringify(written))}`);
 
   const toolNames =
     s.toolUseNames && typeof s.toolUseNames === "object"
@@ -95,7 +104,9 @@ export function buildPrompt(
   const narrative = recent.filter(isNarrativeEvent);
   if (narrative.length) {
     const compact = narrative.map(compactEvent).join("\n");
-    parts.push(`recent events (oldest first — these reflect current work):\n${compact}`);
+    parts.push(
+      `recent events (oldest first — these reflect current work):\n${fenceUntrusted(compact)}`,
+    );
   }
 
   return parts.join("\n\n");
@@ -131,7 +142,7 @@ export const summaryAnalyzer: Analyzer<SummaryOutput> = {
     const prompt = buildPrompt(ctx, recent, prior);
     const result = await callStructured<SummaryOutput>({
       model: MODELS.haiku,
-      system: SYSTEM,
+      system: SUMMARY_SYSTEM,
       prompt,
       toolName: "emit_summary",
       toolDescription: "Emit the title and 1-2 sentence description for this coding session.",

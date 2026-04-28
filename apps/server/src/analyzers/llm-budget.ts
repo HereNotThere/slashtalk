@@ -62,12 +62,20 @@ export async function checkLlmBudget(redis: RedisBridge, userId: number): Promis
   return { allowed: spentUsd < capUsd, spentUsd, capUsd };
 }
 
-/** Record the cost of a completed LLM call. Soft-fails when Redis is down. */
+/** Record the cost of a completed LLM call. Never throws — callers run this
+ *  *after* the paid Anthropic API result is in hand, so a Redis disconnect
+ *  must not surface as a thrown error that discards the already-billed
+ *  response. The underlying `incrFloat` already soft-fails on disconnect,
+ *  but we wrap defensively in case a future refactor reintroduces a throw. */
 export async function recordLlmSpend(
   redis: RedisBridge,
   userId: number,
   costUsd: number,
 ): Promise<void> {
   if (!Number.isFinite(costUsd) || costUsd <= 0) return;
-  await redis.incrFloat(key(userId, todayUtc()), costUsd, TTL_SECONDS);
+  try {
+    await redis.incrFloat(key(userId, todayUtc()), costUsd, TTL_SECONDS);
+  } catch (err) {
+    console.warn(`[llm-budget] recordLlmSpend user=${userId} failed:`, (err as Error).message);
+  }
 }

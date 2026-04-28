@@ -614,12 +614,42 @@ describe("ingest authorization", () => {
     expect(res.status).toBe(403);
 
     // No event row should have been written under Bob's userId.
-    const stray = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.sessionId, aliceSessionId));
+    const stray = await db.select().from(sessions).where(eq(sessions.sessionId, aliceSessionId));
     expect(stray).toHaveLength(1);
     expect(stray[0].userId).toBe(aliceUserId);
+  });
+});
+
+describe("ingest body size cap", () => {
+  it("returns 413 line_too_large when a single line exceeds the per-line cap", async () => {
+    const SESSION_ID = "b0000000-0000-0000-0000-0000000000fe";
+    await db.insert(sessions).values({
+      sessionId: SESSION_ID,
+      userId: aliceUserId,
+      deviceId: aliceDeviceId,
+      source: "claude",
+      project: "line-cap",
+    });
+
+    // 1.1 MB of newline-free chars — under the 50 MB total cap, over the
+    // 1 MB per-line cap. This exercises the same cap-and-cancel code path as
+    // the total-bytes guard; testing the smaller cap keeps the test fast and
+    // keeps memory pressure off CI.
+    const huge = "x".repeat(1_100_000);
+    const res = await fetch(
+      `${baseUrl}/v1/ingest?project=line-cap&session=${SESSION_ID}&fromLineSeq=0`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          Authorization: `Bearer ${aliceApiKey}`,
+        },
+        body: huge,
+      },
+    );
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("line_too_large");
   });
 });
 
@@ -792,10 +822,7 @@ describe("heartbeat", () => {
     });
     expect(res.status).toBe(404);
 
-    const after = await db
-      .select()
-      .from(heartbeats)
-      .where(eq(heartbeats.sessionId, HB_SESSION_ID));
+    const after = await db.select().from(heartbeats).where(eq(heartbeats.sessionId, HB_SESSION_ID));
     expect(after).toHaveLength(1);
     expect(after[0].pid).toBe(beforePid);
     expect(after[0].userId).toBe(aliceUserId);

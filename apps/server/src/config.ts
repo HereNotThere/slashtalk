@@ -25,6 +25,12 @@ export const config = Object.freeze({
   ),
   ingestConcurrency: parseInt(process.env.INGEST_CONCURRENCY || "4", 10),
   ingestBatchSize: parseInt(process.env.INGEST_BATCH_SIZE || "200", 10),
+  // Bound the per-request body size and wall-clock — the streaming reader
+  // accepts arbitrary input and the concurrency gate is a fixed pool, so a
+  // single connection sending GBs slowly (or a single huge chunk) would
+  // either exhaust memory or hold a slot for hours. Defaults: 50 MB / 60 s.
+  ingestMaxBytes: parseInt(process.env.INGEST_MAX_BYTES || String(50 * 1024 * 1024), 10),
+  ingestDeadlineMs: parseInt(process.env.INGEST_DEADLINE_MS || "60000", 10),
   // Per-user, per-calendar-day USD ceiling on Anthropic spend (analyzers +
   // chat agent combined). 0 disables the cap. The cost is logged after every
   // call, so without this a runaway analyzer or hostile session could rack

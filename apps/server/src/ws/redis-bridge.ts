@@ -52,17 +52,29 @@ export class RedisBridge {
   }
 
   /** Set a JSON-encoded value with a TTL in seconds. Used for ephemeral
-   *  presence state (Spotify "now playing"). No-op when Redis is down. */
+   *  presence state (Spotify "now playing"). No-op when Redis is down or
+   *  drops mid-call — `connected` only flips on initial connect, so callers
+   *  can't rely on it to short-circuit a disconnected client. */
   async setex(key: string, seconds: number, value: object): Promise<void> {
     if (!this.connected) return;
-    await this.pub.setex(key, seconds, JSON.stringify(value));
+    try {
+      await this.pub.setex(key, seconds, JSON.stringify(value));
+    } catch (err) {
+      console.warn(`[redis] setex ${key} failed:`, (err as Error).message);
+    }
   }
 
-  /** Read a JSON-encoded value. Returns null if missing, expired, or Redis
-   *  is down; also returns null when the stored value is malformed. */
+  /** Read a JSON-encoded value. Returns null if missing, expired, malformed,
+   *  or when Redis is unavailable. */
   async getJson<T>(key: string): Promise<T | null> {
     if (!this.connected) return null;
-    const raw = await this.pub.get(key);
+    let raw: string | null;
+    try {
+      raw = await this.pub.get(key);
+    } catch (err) {
+      console.warn(`[redis] get ${key} failed:`, (err as Error).message);
+      return null;
+    }
     if (!raw) return null;
     try {
       return JSON.parse(raw) as T;
@@ -71,20 +83,29 @@ export class RedisBridge {
     }
   }
 
-  /** Delete a key. No-op when Redis is down. */
+  /** Delete a key. No-op when Redis is unavailable. */
   async del(key: string): Promise<void> {
     if (!this.connected) return;
-    await this.pub.del(key);
+    try {
+      await this.pub.del(key);
+    } catch (err) {
+      console.warn(`[redis] del ${key} failed:`, (err as Error).message);
+    }
   }
 
   /** Read a numeric counter as a float. Returns 0 on miss, malformed value,
-   *  or when Redis is down — for budget counters callers should treat this
-   *  as "no spend recorded" only when paired with an `incrFloat` write
-   *  on the success path; if writes also no-op, the budget is effectively
-   *  off until Redis recovers. */
+   *  or when Redis is unavailable. Paired with `incrFloat` on the write
+   *  side; if writes also no-op the budget is effectively off until Redis
+   *  recovers. */
   async getFloat(key: string): Promise<number> {
     if (!this.connected) return 0;
-    const raw = await this.pub.get(key);
+    let raw: string | null;
+    try {
+      raw = await this.pub.get(key);
+    } catch (err) {
+      console.warn(`[redis] get ${key} failed:`, (err as Error).message);
+      return 0;
+    }
     if (!raw) return 0;
     const n = Number.parseFloat(raw);
     return Number.isFinite(n) ? n : 0;
@@ -92,28 +113,42 @@ export class RedisBridge {
 
   /** INCRBYFLOAT a counter and ensure it has a TTL. Pipelined so the EXPIRE
    *  rides the same round-trip. Returns the new value, or null when Redis
-   *  is down or the increment failed. */
+   *  is unavailable or the increment failed. Soft-fail is load-bearing here:
+   *  callers (`recordLlmSpend`) run *after* a paid Anthropic API result, so
+   *  a Redis blip must not surface as a thrown error that discards the
+   *  already-billed response. */
   async incrFloat(key: string, by: number, ttlSeconds: number): Promise<number | null> {
     if (!this.connected) return null;
-    const pipe = this.pub.pipeline();
-    pipe.incrbyfloat(key, by);
-    pipe.expire(key, ttlSeconds);
-    const results = await pipe.exec();
-    const incr = results?.[0];
-    if (!incr || incr[0]) return null;
-    const raw = incr[1];
-    if (typeof raw !== "string") return null;
-    const n = Number.parseFloat(raw);
-    return Number.isFinite(n) ? n : null;
+    try {
+      const pipe = this.pub.pipeline();
+      pipe.incrbyfloat(key, by);
+      pipe.expire(key, ttlSeconds);
+      const results = await pipe.exec();
+      const incr = results?.[0];
+      if (!incr || incr[0]) return null;
+      const raw = incr[1];
+      if (typeof raw !== "string") return null;
+      const n = Number.parseFloat(raw);
+      return Number.isFinite(n) ? n : null;
+    } catch (err) {
+      console.warn(`[redis] incrFloat ${key} failed:`, (err as Error).message);
+      return null;
+    }
   }
 
   /** Atomic GETDEL — read a JSON-encoded value and remove it in one
    *  round-trip. Returns null on miss, malformed JSON, or when Redis is
-   *  down. Use when single-use semantics matter (e.g. OAuth state nonces),
-   *  since `getJson` + `del` is racy under concurrent consumers. */
+   *  unavailable. Use when single-use semantics matter (e.g. OAuth state
+   *  nonces), since `getJson` + `del` is racy under concurrent consumers. */
   async getJsonAndDel<T>(key: string): Promise<T | null> {
     if (!this.connected) return null;
-    const raw = await this.pub.getdel(key);
+    let raw: string | null;
+    try {
+      raw = await this.pub.getdel(key);
+    } catch (err) {
+      console.warn(`[redis] getdel ${key} failed:`, (err as Error).message);
+      return null;
+    }
     if (!raw) return null;
     try {
       return JSON.parse(raw) as T;

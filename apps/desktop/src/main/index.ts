@@ -113,10 +113,10 @@ const mcpProxy = createLocalMcpProxy({
 const INFO_WIDTH = 340;
 const INFO_INITIAL_HEIGHT = 80; // small placeholder; renderer reports actual on mount
 const INFO_GAP = 8; // distance from the pill's outer edge to the info window
-// Match Tailwind `rounded-3xl` (1.5rem) — the renderer used to apply the same
-// radius in CSS, but vibrancy is a sibling NSView so only native clipping
-// catches the popover material at the corners. Gated to macOS 15+ inside
-// setMacCornerRadius; older versions fall back to a plain rectangle.
+// Match Tailwind `rounded-3xl` (1.5rem). Native clipping (setMacCornerRadius)
+// applies on macOS 15+; older versions fall back to a plain rectangle. We
+// keep the native clip even without vibrancy so the dropped shadow follows
+// the rounded silhouette instead of a sharp rectangle.
 const INFO_RADIUS = 24;
 
 const RESIZE_MIN = 60;
@@ -490,8 +490,14 @@ function ensureInfoWindow(): BrowserWindow {
     movable: false,
     skipTaskbar: true,
     show: false,
-    vibrancy: "popover",
-    visualEffectState: "active",
+    // Vibrancy was visually disabled by the renderer's opaque `bg-surface-2`
+    // anyway, but the NSVisualEffectView still re-rendered every setBounds
+    // and could desync from the web-contents layer during fast head-switches,
+    // showing as edge tearing. Drop it; the renderer fully owns the painted
+    // surface. backgroundColor matches dark mode `--color-surface-2`; light-
+    // mode body forces `--color-card` over the top via info/styles.css so
+    // a brief window-level color flash on theme load isn't an issue.
+    backgroundColor: "#2c2c2c",
     hasShadow: true,
     webPreferences: {
       preload: preloadPath,

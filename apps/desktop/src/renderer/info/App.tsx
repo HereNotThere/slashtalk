@@ -183,6 +183,7 @@ export function App(): JSX.Element {
             {spotify && <NowPlaying track={spotify} />}
             <Divider />
             <SessionsSection
+              key={head?.id ?? "no-head"}
               sessions={sessions}
               expandRequest={expandRequest}
               collisionFile={head?.collisionAt != null ? (head.collisionFile ?? null) : null}
@@ -191,7 +192,7 @@ export function App(): JSX.Element {
             {questions && questions.login === head?.label && questions.threads.length > 0 && (
               <>
                 <Divider />
-                <QuestionsSection threads={questions.threads} />
+                <QuestionsSection key={head.id} threads={questions.threads} />
               </>
             )}
           </>

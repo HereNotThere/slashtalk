@@ -99,6 +99,7 @@ import {
 import { getMainWindow, showMainWindow } from "./windows/main";
 import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
 import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
+import { broadcast, liveWindows, sendWhenLoaded } from "./windows/broadcast";
 
 installMcp.configureInstaller({
   localProxySecret: getLocalMcpProxySecret,
@@ -471,10 +472,7 @@ function resizeOverlay(): void {
 }
 
 function broadcastHeads(): void {
-  const targets = [overlayWindow, getMainWindow(), getTrayPopup(), infoWindow].filter(
-    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
-  );
-  for (const w of targets) w.webContents.send("heads:update", heads);
+  broadcast("heads:update", heads, overlayWindow, getMainWindow(), getTrayPopup(), infoWindow);
 }
 
 // -------- Info box --------
@@ -726,13 +724,11 @@ function repositionInfoIfVisible(bubbleScreen?: { x: number; y: number }): void 
 let lastSentDock: DockConfig | null = null;
 
 function broadcastChatVisible(visible: boolean): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("chat:state", { visible });
+  broadcast("chat:state", { visible }, overlayWindow);
 }
 
 function broadcastInfoState(visible: boolean, headId: string | null): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("info:state", { visible, headId });
+  broadcast("info:state", { visible, headId }, overlayWindow);
 }
 
 // Tell the overlay renderer which dock it's in so it can pick flex direction,
@@ -749,15 +745,7 @@ function sendOverlayConfig(): void {
     return;
   }
   lastSentDock = dock;
-  const send = (): void => {
-    if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    overlayWindow.webContents.send("overlay:config", dock);
-  };
-  if (overlayWindow.webContents.isLoading()) {
-    overlayWindow.webContents.once("did-finish-load", send);
-  } else {
-    send();
-  }
+  sendWhenLoaded(overlayWindow, "overlay:config", dock);
 }
 
 // -------- IPC --------
@@ -1243,15 +1231,7 @@ ipcMain.handle("app:openMain", (): void => {
 ipcMain.handle("app:openAgentCreator", (): void => {
   const win = showMainWindow();
   hideTrayPopup();
-  if (win.isDestroyed()) return;
-  const send = (): void => {
-    if (!win.isDestroyed()) win.webContents.send("agents:openCreator");
-  };
-  if (win.webContents.isLoading()) {
-    win.webContents.once("did-finish-load", send);
-  } else {
-    send();
-  }
+  sendWhenLoaded(win, "agents:openCreator", null);
 });
 
 ipcMain.handle("app:quit", (): void => app.quit());
@@ -1717,10 +1697,7 @@ function truncateTitle(text: string): string {
 
 function emitSessionsChange(agentId: string): void {
   const sessions = agentStore.get(agentId)?.sessions ?? [];
-  const payload = { agentId, sessions };
-  for (const w of agentConsumerWindows()) {
-    w.webContents.send("agents:sessionsChange", payload);
-  }
+  broadcast("agents:sessionsChange", { agentId, sessions }, ...agentConsumerWindows());
 }
 
 ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
@@ -1937,39 +1914,27 @@ ipcMain.handle("trackedRepos:toggle", (_e, repoId: number) => [
 ]);
 
 function broadcastToMain(channel: string, payload: unknown): void {
-  const win = getMainWindow();
-  if (win && !win.isDestroyed()) {
-    win.webContents.send(channel, payload);
-  }
+  broadcast(channel, payload, getMainWindow());
 }
 
 // Tray popup (statusbar renderer) is the primary consumer of orgs:* /
 // repos:* push channels. We still broadcast to main so any future settings
 // UI on the main window stays in sync without extra plumbing.
 function broadcastToTrayAndMain(channel: string, payload: unknown): void {
-  for (const w of [getMainWindow(), getTrayPopup()]) {
-    if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
-  }
+  broadcast(channel, payload, getMainWindow(), getTrayPopup());
 }
 
 function agentConsumerWindows(): BrowserWindow[] {
-  return [getMainWindow(), infoWindow, getResponseWindow()].filter(
-    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
-  );
+  return liveWindows(getMainWindow(), infoWindow, getResponseWindow());
 }
 
 function broadcastAgentEvent(event: AgentStreamEvent): void {
-  for (const w of agentConsumerWindows()) {
-    w.webContents.send("agents:event", event);
-  }
+  broadcast("agents:event", event, ...agentConsumerWindows());
 }
 
 backend.onChange((state) => broadcastToMain("backend:authState", state));
 // Tray popup shows sign-in state too — mirror to it so the CTA flips live.
-backend.onChange((state) => {
-  const popup = getTrayPopup();
-  if (popup && !popup.isDestroyed()) popup.webContents.send("backend:authState", state);
-});
+backend.onChange((state) => broadcast("backend:authState", state, getTrayPopup()));
 localRepos.onChange((repos) => broadcastToTrayAndMain("backend:trackedRepos", repos));
 localRepos.onSelectionChange((ids) =>
   broadcastToTrayAndMain("trackedRepos:selectionChange", [...ids]),

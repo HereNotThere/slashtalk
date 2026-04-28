@@ -156,7 +156,7 @@ const POSITION_KEY = "overlayPosition";
 function updateSpotifyRunning(): void {
   const shouldRun =
     backend.getAuthState().signedIn && getSpotifyShareEnabled() && process.platform === "darwin";
-  if (shouldRun) void spotify.start();
+  if (shouldRun) void spotify.start().catch((err) => console.warn("spotify.start failed:", err));
   else spotify.stop();
 }
 
@@ -1621,11 +1621,15 @@ ipcMain.handle("backend:signOutEverywhere", async () => {
 
 function applySyncForAuth(signedIn: boolean): void {
   if (signedIn) {
-    void uploader.start();
-    void heartbeat.start();
+    // Without these catches a thrown start() (e.g. fs.mkdir EACCES on
+    // ~/.claude/projects, or an fs.watch that fails on a quirky filesystem)
+    // is swallowed and the UI flips to "signed in" while nothing is actually
+    // running — same shape the cursor-bot caught on heartbeat.
+    void uploader.start().catch((err) => console.warn("uploader.start failed:", err));
+    void heartbeat.start().catch((err) => console.warn("heartbeat.start failed:", err));
     updateSpotifyRunning();
-    void peerPresence.start();
-    void peerLocations.start();
+    void peerPresence.start().catch((err) => console.warn("peerPresence.start failed:", err));
+    void peerLocations.start().catch((err) => console.warn("peerLocations.start failed:", err));
     ws.start();
     for (const target of ["claude-code", "codex"] as const) {
       void installMcp

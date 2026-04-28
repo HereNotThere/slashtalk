@@ -209,6 +209,18 @@ function Divider(): JSX.Element {
   return <div className="mx-4 h-px bg-divider" />;
 }
 
+function formatHeaderTime(timeZone: string | null | undefined): string | null {
+  try {
+    return new Date().toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timeZone ?? undefined,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function UserHeader({
   head,
   sessions,
@@ -224,15 +236,14 @@ function UserHeader({
   // Self: resolve locally as before. Peer with data: show their tz/city.
   // Peer with no server data yet: render only name + avatar — falling back
   // to local would mislabel the peer's card with our clock.
-  const { city, icon } = useLocationWeather(isSelf ? undefined : (location ?? undefined));
+  const { city, icon } = useLocationWeather(isSelf ? undefined : location);
   const showLocationRow = isSelf || location !== null;
-  const time = showLocationRow
-    ? new Date().toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-        timeZone: location?.timezone ?? undefined,
-      })
-    : null;
+  // For self, always use the device's local tz: a stale peer-poll cache could
+  // otherwise lock the clock to the previously-persisted tz across travel.
+  // Peer tz comes from the server; wrap in try/catch so a malformed value
+  // (platform quirk, future code change) drops the clock instead of crashing
+  // the card subtree.
+  const time = showLocationRow ? formatHeaderTime(isSelf ? null : location?.timezone) : null;
   const totalTokensLabel = fmtTokens(sumSessionTokens(sessions));
   return (
     <div className="flex items-start gap-3 px-4 pt-4 pb-3">

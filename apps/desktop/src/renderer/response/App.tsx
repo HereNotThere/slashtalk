@@ -246,7 +246,6 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
       setMessages(rehydrateMessagesFromThread(seed.thread));
       setThreadId(seed.thread.threadId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed]);
 
   useEffect(() => {
@@ -258,7 +257,14 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     prompt: string,
     currentThreadId: string | undefined,
   ): Promise<void> {
-    if (loading) return;
+    // No closed-over `loading` guard: that reads the render-time value and
+    // would swallow a fresh ask kicked off by the seed effect after a
+    // synchronous setLoading(false) (the new `loading` value isn't visible
+    // to this closure until the next render). Concurrency is governed by
+    // askTokenRef — any earlier in-flight ask's resolution sees a mismatched
+    // token and drops its writes. User-driven double-submit is prevented at
+    // the call sites: handleFollowUpSend's own loading guard and the input's
+    // disabled={loading} attribute.
     const myToken = ++askTokenRef.current;
     setLoading(true);
     setError(null);

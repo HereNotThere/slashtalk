@@ -6,10 +6,11 @@
 // poll as a fallback until WebSocket user_updated events are wired.
 
 import { SessionState } from "@slashtalk/shared";
-import type { ChatHead, RailDebugSnapshot } from "../shared/types";
+import type { ChatHead, RailDebugSnapshot, RoomSummary } from "../shared/types";
 import * as backend from "./backend";
 import * as agentStore from "./agentStore";
 import * as localRepos from "./localRepos";
+import * as rooms from "./rooms";
 import { createEmitter } from "./emitter";
 import type { LocalAgent } from "./agentStore";
 
@@ -110,6 +111,16 @@ export function parseAgentHeadId(headId: string): string | null {
   return headId.startsWith(AGENT_HEAD_PREFIX) ? headId.slice(AGENT_HEAD_PREFIX.length) : null;
 }
 
+const ROOM_HEAD_PREFIX = "room_";
+
+export function roomHeadId(roomId: string): string {
+  return `${ROOM_HEAD_PREFIX}${roomId}`;
+}
+
+export function parseRoomHeadId(headId: string): string | null {
+  return headId.startsWith(ROOM_HEAD_PREFIX) ? headId.slice(ROOM_HEAD_PREFIX.length) : null;
+}
+
 function headForUser(
   login: string,
   avatarUrl: string,
@@ -143,6 +154,24 @@ function headForAgent(agent: LocalAgent): ChatHead {
   };
 }
 
+function headForRoom(room: RoomSummary): ChatHead {
+  const initial = (room.name[0] ?? "R").toUpperCase();
+  const lastTs = room.lastActivityAt
+    ? new Date(room.lastActivityAt).getTime()
+    : room.createdAt
+      ? new Date(room.createdAt).getTime()
+      : Date.now();
+  return {
+    id: roomHeadId(room.id),
+    label: room.name,
+    tint: "var(--color-primary)",
+    avatar: { type: "emoji", value: initial },
+    kind: "room",
+    lastActionAt: lastTs,
+    roomStatus: room.status,
+  };
+}
+
 function selfHead(lastActivityAt?: number | null, isLive?: boolean): ChatHead | null {
   const state = backend.getAuthState();
   if (!state.signedIn) return null;
@@ -165,6 +194,7 @@ function sameHeads(a: ChatHead[], b: ChatHead[]): boolean {
     if (a[i].prActivityAt !== b[i].prActivityAt) return false;
     if (a[i].collisionAt !== b[i].collisionAt) return false;
     if (a[i].collisionFile !== b[i].collisionFile) return false;
+    if (a[i].roomStatus !== b[i].roomStatus) return false;
   }
   return true;
 }
@@ -186,6 +216,7 @@ async function refresh(): Promise<void> {
   console.log(`[rail] refresh as ${initialSelf.label}`);
   const now = Date.now();
   const agentHeads = sortByBucket(agentStore.list().map(headForAgent), heads, now);
+  const roomHeads = sortByBucket(rooms.snapshot().map(headForRoom), heads, now);
   try {
     // Fetch peers and feed in parallel. Each peer's "last activity" is the
     // timestamp of the most recent session in the feed keyed by login — no
@@ -240,13 +271,13 @@ async function refresh(): Promise<void> {
     // Merge debug fakes into the peer list so they survive the poll refresh.
     for (const fake of debugFakes) peerHeads.push(fake);
     const sortedPeers = sortByBucket(peerHeads, heads, now);
-    apply([self, ...agentHeads, ...sortedPeers]);
+    apply([self, ...agentHeads, ...roomHeads, ...sortedPeers]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     lastSnapshot = { at: Date.now(), peers: null, error: message };
     console.error("[rail] listTeammates failed:", err);
-    // Keep showing self + agents so the rail doesn't flash.
-    apply([initialSelf, ...agentHeads]);
+    // Keep showing self + agents + rooms so the rail doesn't flash.
+    apply([initialSelf, ...agentHeads, ...roomHeads]);
   }
 }
 
@@ -409,6 +440,7 @@ export function start(): void {
   agentStore.onChange(scheduleRefresh);
   localRepos.onChange(scheduleRefresh);
   localRepos.onSelectionChange(scheduleRefresh);
+  rooms.onChange(scheduleRefresh);
   setInterval(() => void refresh(), POLL_INTERVAL_MS);
   setInterval(rebucketTick, REBUCKET_TICK_MS);
   void refresh();

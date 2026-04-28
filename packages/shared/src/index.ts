@@ -264,6 +264,51 @@ export interface CollisionDetectedMessage {
   others: Array<{ sessionId: string; userId: number; githubLogin: string }>;
 }
 
+// ── Rooms (microVM agent rooms) ────────────────────────────
+
+export type RoomStatus = "provisioning" | "ready" | "paused" | "destroyed" | "failed";
+
+/** WS push: a new message landed in a room (chat / agent_typing / agent_message
+ *  / system / etc.). Fired on `room:<id>`. Body shape varies by `kind`. */
+export interface RoomMessageCreatedMessage {
+  type: "room_message_created";
+  roomId: string;
+  message: {
+    seq: number;
+    authorUserId: number | null;
+    kind: string;
+    body: unknown;
+    createdAt: string | null;
+  };
+}
+
+/** WS push: a room transitioned status (provisioning→ready, ready→paused, …).
+ *  Fired on `room:<id>` from runner.ts and idle-reaper.ts. */
+export interface RoomStatusChangedMessage {
+  type: "room_status_changed";
+  roomId: string;
+  status: RoomStatus;
+}
+
+/** WS push: live agent activity. Carries either a stream-json event from
+ *  `claude --print` (in `event`) or a stderr chunk (in `chunk` with
+ *  `stream: "stderr"`). Discriminate on `event.type` for assistant text vs
+ *  tool_use vs result. */
+export interface RoomAgentDeltaMessage {
+  type: "room_agent_delta";
+  roomId: string;
+  event?: unknown;
+  stream?: "stderr";
+  chunk?: string;
+}
+
+/** WS push: a user joined a room. Fired on `room:<id>` from POST /:id/join. */
+export interface RoomMemberJoinedMessage {
+  type: "room_member_joined";
+  roomId: string;
+  userId: number;
+}
+
 /**
  * Chat (team-presence Q&A). The server is stateless: the client owns the
  * thread and re-sends the full `messages` array on every turn. Tool turns

@@ -28,6 +28,14 @@
   }
 }
 
+/* Rotating quarter-arc used by the room chat-head provisioning state.
+ * Reads as "setting up" — distinct from the steady-pulse `live-ring`. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * Design tokens. See `docs/design.md` for the system rules. Default values =
  * dark theme. Light theme overrides live below. Three blocks must stay in

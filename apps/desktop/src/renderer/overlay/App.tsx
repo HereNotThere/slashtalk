@@ -265,7 +265,14 @@ export function App(): JSX.Element {
       else bubbleRefs.current.delete(id);
     };
 
-  const handleBubbleEnter = (headId: string, e: React.MouseEvent<HTMLDivElement>): void => {
+  const handleBubbleEnter = (
+    headId: string,
+    kind: ChatHead["kind"],
+    e: React.MouseEvent<HTMLDivElement>,
+  ): void => {
+    // Room heads have no info popover — clicking opens the room window
+    // instead. Skip the hover-show pipeline entirely.
+    if (kind === "room") return;
     // The wrapper has padding around the bubble; report the inner bubble's
     // rect so the info window anchors to the avatar, not the padding box.
     const inner = e.currentTarget.querySelector<HTMLElement>("[data-bubble]");
@@ -273,6 +280,12 @@ export function App(): JSX.Element {
     const screenX = Math.round(rect.left + window.screenX);
     const screenY = Math.round(rect.top + window.screenY);
     hoverEnterBubble(headId, { x: screenX, y: screenY });
+  };
+
+  const handleBubbleClick = (head: ChatHead): void => {
+    if (head.kind !== "room") return;
+    const roomId = head.id.startsWith("room_") ? head.id.slice("room_".length) : null;
+    if (roomId) void window.chatheads.rooms.openWindow(roomId);
   };
 
   const self = heads[0];
@@ -352,7 +365,7 @@ export function App(): JSX.Element {
           key={self.id}
           ref={registerBubble(self.id)}
           className={bubblePadClass}
-          onMouseEnter={(e) => handleBubbleEnter(self.id, e)}
+          onMouseEnter={(e) => handleBubbleEnter(self.id, self.kind, e)}
           onMouseLeave={hoverLeaveBubble}
         >
           <Bubble
@@ -370,14 +383,16 @@ export function App(): JSX.Element {
               key={h.id}
               ref={registerBubble(h.id)}
               className={bubblePadClass}
-              onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
+              onMouseEnter={(e) => handleBubbleEnter(h.id, h.kind, e)}
               onMouseLeave={hoverLeaveBubble}
+              onClick={() => handleBubbleClick(h)}
+              style={h.kind === "room" ? { cursor: "pointer" } : undefined}
             >
               <Bubble
                 head={h}
                 onHoverEnter={() => {}}
                 onHoverLeave={() => {}}
-                pale={isPeerInactive(h)}
+                pale={isPeerInactive(h) || h.roomStatus === "paused"}
                 hideAge={!showActivityTimestamps}
               />
             </div>
@@ -420,9 +435,10 @@ export function App(): JSX.Element {
                 return (
                   <div
                     key={h.id}
-                    onMouseEnter={(e) => handleBubbleEnter(h.id, e)}
+                    onMouseEnter={(e) => handleBubbleEnter(h.id, h.kind, e)}
                     onMouseLeave={hoverLeaveBubble}
-                    style={style}
+                    onClick={() => handleBubbleClick(h)}
+                    style={h.kind === "room" ? { ...style, cursor: "pointer" } : style}
                     className={bubblePadClass}
                   >
                     <Bubble
@@ -574,6 +590,18 @@ function Bubble({
             border-2 border-primary pointer-events-none z-3
           "
           style={{ animation: "live-ring 1.6s ease-in-out infinite" }}
+        />
+      )}
+      {/* Room provisioning — rotating quarter-arc. Distinct from `live`
+       *  (steady pulse) so "setting up" and "active" don't read alike. */}
+      {head.kind === "room" && head.roomStatus === "provisioning" && (
+        <div
+          aria-hidden
+          className="
+            absolute -inset-0.5 rounded-full
+            border-2 border-primary border-t-transparent pointer-events-none z-3
+          "
+          style={{ animation: "spin 1.2s linear infinite" }}
         />
       )}
       {colliding && (

@@ -6,11 +6,13 @@ import type {
   AgentSessionSummary,
   AgentStreamEvent,
   AgentSummary,
+  ApplyPatchResult,
   BackendAuthState,
   ChatHead,
   ChatHeadsAuthState,
   ChatHeadsBridge,
   CreateAgentInput,
+  CreateRoomInput,
   DockConfig,
   GithubConnectState,
   GithubPendingConnect,
@@ -22,10 +24,20 @@ import type {
   McpTargetState,
   RailDebugSnapshot,
   ResponseOpenPayload,
+  RoomSnapshot,
+  RoomSummary,
   TrackedRepo,
   Unsubscribe,
   UpdateAgentInput,
 } from "../shared/types";
+import type {
+  OrgRepo,
+  OrgSummary,
+  RoomAgentDeltaMessage,
+  RoomMemberJoinedMessage,
+  RoomMessageCreatedMessage,
+  RoomStatusChangedMessage,
+} from "@slashtalk/shared";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
   const handler = (_e: Electron.IpcRendererEvent, payload: T): void => cb(payload);
@@ -211,6 +223,32 @@ const bridge: ChatHeadsBridge = {
     removeLocalRepo: (repoId) =>
       ipcRenderer.invoke("backend:removeLocalRepo", repoId) as Promise<TrackedRepo[]>,
     onTrackedReposChange: (cb) => subscribe<TrackedRepo[]>("backend:trackedRepos", cb),
+  },
+
+  rooms: {
+    listOrgs: () => ipcRenderer.invoke("rooms:listOrgs") as Promise<OrgSummary[]>,
+    listOrgRepos: (orgLogin) =>
+      ipcRenderer.invoke("rooms:listOrgRepos", orgLogin) as Promise<OrgRepo[]>,
+    list: (orgLogin) => ipcRenderer.invoke("rooms:list", orgLogin) as Promise<RoomSummary[]>,
+    allRooms: () => ipcRenderer.invoke("rooms:allRooms") as Promise<RoomSummary[]>,
+    get: (roomId) => ipcRenderer.invoke("rooms:get", roomId) as Promise<RoomSnapshot>,
+    create: (input: CreateRoomInput) =>
+      ipcRenderer.invoke("rooms:create", input) as Promise<RoomSummary>,
+    postMessage: (roomId, text) =>
+      ipcRenderer.invoke("rooms:postMessage", roomId, text) as Promise<{ seq: number }>,
+    postAgent: (roomId, prompt) =>
+      ipcRenderer.invoke("rooms:postAgent", roomId, prompt) as Promise<void>,
+    patch: (roomId) => ipcRenderer.invoke("rooms:patch", roomId) as Promise<string>,
+    applyPatchLocally: (roomId, repoId) =>
+      ipcRenderer.invoke("rooms:applyPatchLocally", roomId, repoId) as Promise<ApplyPatchResult>,
+    delete: (roomId) => ipcRenderer.invoke("rooms:delete", roomId) as Promise<void>,
+    openWindow: (roomId) => ipcRenderer.invoke("rooms:openWindow", roomId) as Promise<void>,
+    onMessageCreated: (cb) => subscribe<RoomMessageCreatedMessage>("rooms:messageCreated", cb),
+    onStatusChanged: (cb) => subscribe<RoomStatusChangedMessage>("rooms:statusChanged", cb),
+    onAgentDelta: (cb) => subscribe<RoomAgentDeltaMessage>("rooms:agentDelta", cb),
+    onMemberJoined: (cb) => subscribe<RoomMemberJoinedMessage>("rooms:memberJoined", cb),
+    onListChange: (cb) =>
+      subscribe<{ orgLogin: string; rooms: RoomSummary[] }>("rooms:listChange", cb),
   },
 
   trackedRepos: {

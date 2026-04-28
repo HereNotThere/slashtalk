@@ -19,6 +19,10 @@ import { createEmitter } from "./emitter";
 import type {
   CollisionDetectedMessage,
   PrActivityMessage,
+  RoomAgentDeltaMessage,
+  RoomMemberJoinedMessage,
+  RoomMessageCreatedMessage,
+  RoomStatusChangedMessage,
   SessionInsightsUpdatedMessage,
   SessionUpdatedMessage,
 } from "@slashtalk/shared";
@@ -28,6 +32,10 @@ type ServerMessage =
   | PrActivityMessage
   | SessionInsightsUpdatedMessage
   | SessionUpdatedMessage
+  | RoomMessageCreatedMessage
+  | RoomStatusChangedMessage
+  | RoomAgentDeltaMessage
+  | RoomMemberJoinedMessage
   | { type: "ping" }
   | { type: string; [k: string]: unknown };
 
@@ -42,6 +50,18 @@ export const onSessionUpdated = sessionUpdated.on;
 
 const collisionDetected = createEmitter<CollisionDetectedMessage>();
 export const onCollisionDetected = collisionDetected.on;
+
+const roomMessageCreated = createEmitter<RoomMessageCreatedMessage>();
+export const onRoomMessageCreated = roomMessageCreated.on;
+
+const roomStatusChanged = createEmitter<RoomStatusChangedMessage>();
+export const onRoomStatusChanged = roomStatusChanged.on;
+
+const roomAgentDelta = createEmitter<RoomAgentDeltaMessage>();
+export const onRoomAgentDelta = roomAgentDelta.on;
+
+const roomMemberJoined = createEmitter<RoomMemberJoinedMessage>();
+export const onRoomMemberJoined = roomMemberJoined.on;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -123,6 +143,14 @@ function open(): void {
       sessionUpdated.emit(msg as SessionUpdatedMessage);
     } else if (msg.type === "collision_detected") {
       collisionDetected.emit(msg as CollisionDetectedMessage);
+    } else if (msg.type === "room_message_created") {
+      roomMessageCreated.emit(msg as RoomMessageCreatedMessage);
+    } else if (msg.type === "room_status_changed") {
+      roomStatusChanged.emit(msg as RoomStatusChangedMessage);
+    } else if (msg.type === "room_agent_delta") {
+      roomAgentDelta.emit(msg as RoomAgentDeltaMessage);
+    } else if (msg.type === "room_member_joined") {
+      roomMemberJoined.emit(msg as RoomMemberJoinedMessage);
     }
     // Other types (ping, future) are ignored — connection liveness is handled
     // by the server's keepalive frames; we don't echo.

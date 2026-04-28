@@ -83,20 +83,20 @@ export async function runAgentTurnAsync(
   }
   await postMessage(db, redis, room.id, null, "agent_typing", {});
 
-  let buffer = "";
   try {
     // Auto-resume in case the idle reaper paused the sandbox between turns.
     await e2bAdapter.resume(room.sandboxId);
 
     const result = await e2bAdapter.runAgentTurn(room.sandboxId, {
       prompt,
-      onStdout: (chunk) => {
-        buffer += chunk;
+      onEvent: (event) => {
+        // Forward each Claude stream-json event verbatim. The room window
+        // discriminates on event.type (assistant / tool_use / result / etc.)
+        // and renders the live agent activity.
         void redis.publish(`room:${room.id}`, {
           type: "room_agent_delta",
           roomId: room.id,
-          stream: "stdout",
-          chunk,
+          event,
         });
       },
       onStderr: (chunk) => {
@@ -110,7 +110,7 @@ export async function runAgentTurnAsync(
     });
 
     await postMessage(db, redis, room.id, null, "agent_message", {
-      text: buffer,
+      text: result.text,
       exitCode: result.exitCode,
       diffStat: result.diffStat,
     });

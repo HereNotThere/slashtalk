@@ -20,6 +20,19 @@ async function userIsRoomMember(db: Database, roomId: string, userId: number): P
   return !!r;
 }
 
+// Mirrors the repo-claim gate (CLAUDE.md #12): personal-namespace repos count
+// as in-scope for their owner without an org-membership lookup. GitHub login
+// comparisons are case-insensitive to match GitHub's own behavior — the
+// stored case in repos.fullName may differ from users.githubLogin.
+async function userCanAccessOrg(
+  db: Database,
+  user: { id: number; githubLogin: string },
+  orgLogin: string,
+): Promise<boolean> {
+  if (orgLogin.toLowerCase() === user.githubLogin.toLowerCase()) return true;
+  return userIsInOrg(db, user.id, orgLogin);
+}
+
 export const roomsRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/api/rooms", name: "rooms" })
     .use(jwtAuth)
@@ -32,9 +45,11 @@ export const roomsRoutes = (db: Database, redis: RedisBridge) =>
           return { error: "invalid repoFullName" };
         }
         const orgLogin = body.repoFullName.split("/")[0]!;
-        if (!(await userIsInOrg(db, user.id, orgLogin))) {
+        if (!(await userCanAccessOrg(db, user, orgLogin))) {
           set.status = 403;
-          return { error: "not a member of org" };
+          return {
+            error: `not a member of org "${orgLogin}" (signed in as ${user.githubLogin}). Check the server log for the GitHub /user/memberships/orgs response.`,
+          };
         }
 
         const [repoRow] = await db
@@ -48,12 +63,17 @@ export const roomsRoutes = (db: Database, redis: RedisBridge) =>
           return { error: "repo not in user_repos — claim it first" };
         }
 
-        const token = await fetchUserGithubToken(db, user.id);
-        if (!token) {
+        // Prefer a user-supplied clone token if present (needed for private
+        // repos — OAuth scope is read-only-orgs, can't access private repo
+        // contents). Falls back to the OAuth token, which works for public
+        // repos.
+        const cloneTokenOverride = body.cloneToken?.trim();
+        const cloneToken = cloneTokenOverride || (await fetchUserGithubToken(db, user.id));
+        if (!cloneToken) {
           set.status = 401;
-          return { error: "github token missing" };
+          return { error: "no clone token available" };
         }
-        const cloneUrl = `https://x-access-token:${token}@github.com/${body.repoFullName}.git`;
+        const cloneUrl = `https://x-access-token:${cloneToken}@github.com/${body.repoFullName}.git`;
 
         const agentDef = {
           systemPrompt: body.systemPrompt,
@@ -95,6 +115,7 @@ export const roomsRoutes = (db: Database, redis: RedisBridge) =>
           systemPrompt: t.String({ minLength: 1, maxLength: 10000 }),
           model: t.String({ minLength: 1, maxLength: 200 }),
           mcpServers: t.Optional(t.Array(t.Object({ name: t.String(), url: t.String() }))),
+          cloneToken: t.Optional(t.String({ maxLength: 1000 })),
         }),
       },
     )
@@ -107,9 +128,9 @@ export const roomsRoutes = (db: Database, redis: RedisBridge) =>
           set.status = 400;
           return { error: "org query param required" };
         }
-        if (!(await userIsInOrg(db, user.id, org))) {
+        if (!(await userCanAccessOrg(db, user, org))) {
           set.status = 403;
-          return { error: "not a member of org" };
+          return { error: `not a member of org "${org}" (signed in as ${user.githubLogin})` };
         }
         const list = await db
           .select()
@@ -135,9 +156,11 @@ export const roomsRoutes = (db: Database, redis: RedisBridge) =>
           set.status = 404;
           return { error: "not found" };
         }
-        if (!(await userIsInOrg(db, user.id, room.orgLogin))) {
+        if (!(await userCanAccessOrg(db, user, room.orgLogin))) {
           set.status = 403;
-          return { error: "not a member of org" };
+          return {
+            error: `not a member of org "${room.orgLogin}" (signed in as ${user.githubLogin})`,
+          };
         }
         const members = await db
           .select({
@@ -170,9 +193,11 @@ export const roomsRoutes = (db: Database, redis: RedisBridge) =>
           set.status = 404;
           return { error: "not found" };
         }
-        if (!(await userIsInOrg(db, user.id, room.orgLogin))) {
+        if (!(await userCanAccessOrg(db, user, room.orgLogin))) {
           set.status = 403;
-          return { error: "not a member of org" };
+          return {
+            error: `not a member of org "${room.orgLogin}" (signed in as ${user.githubLogin})`,
+          };
         }
         await db
           .insert(roomMembers)

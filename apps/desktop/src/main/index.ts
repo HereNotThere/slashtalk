@@ -43,6 +43,7 @@ import * as githubAuth from "./githubDeviceAuth";
 import type { LocalAgent } from "./agentStore";
 import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
+import * as rooms from "./rooms";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
 import {
   BUBBLE_PAD,
@@ -185,6 +186,7 @@ function appIsFocused(): boolean {
 
 let overlayWindow: BrowserWindow | null = null;
 let infoWindow: BrowserWindow | null = null;
+const roomWindows = new Map<string, BrowserWindow>();
 
 let heads: ChatHead[] = [];
 let selectedHeadId: string | null = null;
@@ -456,6 +458,40 @@ function ensureInfoWindow(): BrowserWindow {
 
   return infoWindow;
 }
+
+const ROOM_WIDTH = 760;
+const ROOM_HEIGHT = 720;
+
+function ensureRoomWindow(roomId: string): BrowserWindow {
+  const existing = roomWindows.get(roomId);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return existing;
+  }
+  const win = new BrowserWindow({
+    width: ROOM_WIDTH,
+    height: ROOM_HEIGHT,
+    minWidth: 480,
+    minHeight: 400,
+    title: "Slashtalk Room",
+    show: true,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+    },
+  });
+  roomWindows.set(roomId, win);
+  win.on("closed", () => {
+    if (roomWindows.get(roomId) === win) roomWindows.delete(roomId);
+  });
+  loadRenderer(win, "room", `roomId=${encodeURIComponent(roomId)}`);
+  return win;
+}
+
+ipcMain.handle("rooms:openWindow", (_e, roomId: string) => {
+  ensureRoomWindow(roomId);
+});
 
 function positionInfo(headId: string, bubbleScreen?: { x: number; y: number }): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
@@ -1820,6 +1856,8 @@ app.whenReady().then(async () => {
   });
   rail.start();
   selfSession.start();
+  rooms.registerRoomsIpc();
+  rooms.start();
   applySyncForAuth(backend.getAuthState().signedIn);
 
   // DEV ONLY — rail test shortcuts. Remove before shipping.

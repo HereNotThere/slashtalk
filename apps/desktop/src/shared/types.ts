@@ -4,13 +4,20 @@
 import type {
   ManagedAgentSessionRow,
   FeedSessionSnapshot,
+  OrgRepo,
+  OrgSummary,
+  RoomAgentDeltaMessage,
+  RoomMemberJoinedMessage,
+  RoomMessageCreatedMessage,
+  RoomStatus,
+  RoomStatusChangedMessage,
   SessionSnapshot,
   SpotifyPresence,
 } from "@slashtalk/shared";
 
 // Re-export for convenience: renderers import from this module, not from
 // @slashtalk/shared directly.
-export type { ManagedAgentSessionRow, SpotifyPresence };
+export type { ManagedAgentSessionRow, SpotifyPresence, RoomStatus };
 
 // Sessions surfaced to the info window: own sessions (SessionSnapshot) and
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
@@ -20,8 +27,9 @@ export type Avatar = { type: "emoji"; value: string } | { type: "remote"; value:
 
 export interface ChatHead {
   id: string;
-  /** Picks the info-popover layout and routes session fetches. */
-  kind: "user" | "agent";
+  /** Picks the info-popover layout and routes session fetches. `room` heads
+   *  click-open a room window instead of the info popover. */
+  kind: "user" | "agent" | "room";
   label: string;
   tint: string;
   avatar: Avatar;
@@ -45,6 +53,67 @@ export interface ChatHead {
   /** Set when the agent streamed new content while its info panel was not
    *  open. Cleared when the user opens the panel. Agent heads only. */
   unread?: boolean;
+  /** Room status — only set on `kind: 'room'` heads. Drives the rail visual
+   *  (provisioning spinner, paused fade, etc.). */
+  roomStatus?: RoomStatus;
+}
+
+// ── Rooms ────────────────────────────────────────────────────
+
+export interface RoomSummary {
+  id: string;
+  orgLogin: string;
+  repoId: number;
+  name: string;
+  description: string | null;
+  status: RoomStatus;
+  createdBy: number;
+  lastActivityAt: string | null;
+  createdAt: string | null;
+}
+
+export interface RoomMember {
+  userId: number;
+  role: "owner" | "member";
+  joinedAt: string | null;
+  githubLogin: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
+
+export interface RoomMessage {
+  seq: number;
+  authorUserId: number | null;
+  kind: string;
+  body: unknown;
+  createdAt: string | null;
+}
+
+export interface RoomSnapshot {
+  room: RoomSummary;
+  members: RoomMember[];
+  messages: RoomMessage[];
+}
+
+export interface CreateRoomInput {
+  repoFullName: string;
+  name: string;
+  description?: string;
+  systemPrompt: string;
+  model: string;
+  mcpServers?: Array<{ name: string; url: string }>;
+  /** Optional override for git clone auth. The user's OAuth token only has
+   *  read:user read:org scope (CLAUDE.md #11) — not enough to clone private
+   *  repos. Paste a fine-grained PAT with Contents: read for private repos. */
+  cloneToken?: string;
+}
+
+export interface ApplyPatchResult {
+  applied: boolean;
+  /** When the patch couldn't be applied cleanly — file paths with conflicts. */
+  conflicts?: string[];
+  /** Set when something went wrong outside `git apply` (no local clone, etc). */
+  error?: string;
 }
 
 export type Unsubscribe = () => void;
@@ -485,6 +554,36 @@ export interface ChatHeadsBridge {
     addLocalRepo: () => Promise<TrackedRepo | null>;
     removeLocalRepo: (repoId: number) => Promise<TrackedRepo[]>;
     onTrackedReposChange: (cb: (repos: TrackedRepo[]) => void) => Unsubscribe;
+  };
+
+  // microVM agent rooms. Server-owned (apps/server/src/rooms/), org-scoped.
+  // Each method is a thin wrapper around /api/rooms/* via the backend client;
+  // the WS deltas are routed through main/ws.ts and re-emitted via on*().
+  rooms: {
+    listOrgs: () => Promise<OrgSummary[]>;
+    listOrgRepos: (orgLogin: string) => Promise<OrgRepo[]>;
+    list: (orgLogin: string) => Promise<RoomSummary[]>;
+    /** Flattened across every org the user belongs to — used by the
+     *  AgentsSection rooms list. Renderer should refresh on onListChange. */
+    allRooms: () => Promise<RoomSummary[]>;
+    get: (roomId: string) => Promise<RoomSnapshot>;
+    create: (input: CreateRoomInput) => Promise<RoomSummary>;
+    postMessage: (roomId: string, text: string) => Promise<{ seq: number }>;
+    postAgent: (roomId: string, prompt: string) => Promise<void>;
+    patch: (roomId: string) => Promise<string>;
+    /** Apply the room's current diff to the user's local checkout. Resolves
+     *  the local path via device_repo_paths and shells out to `git apply`. */
+    applyPatchLocally: (roomId: string, repoId: number) => Promise<ApplyPatchResult>;
+    delete: (roomId: string) => Promise<void>;
+    /** Open (or focus) the dedicated room window for this room. */
+    openWindow: (roomId: string) => Promise<void>;
+    onMessageCreated: (cb: (msg: RoomMessageCreatedMessage) => void) => Unsubscribe;
+    onStatusChanged: (cb: (msg: RoomStatusChangedMessage) => void) => Unsubscribe;
+    onAgentDelta: (cb: (msg: RoomAgentDeltaMessage) => void) => Unsubscribe;
+    onMemberJoined: (cb: (msg: RoomMemberJoinedMessage) => void) => Unsubscribe;
+    onListChange: (
+      cb: (payload: { orgLogin: string; rooms: RoomSummary[] }) => void,
+    ) => Unsubscribe;
   };
 
   // Tray-popup local-repo picker. Selection is a per-device filter on top of

@@ -40,6 +40,7 @@ export default defineConfig({
           chat: resolve(__dirname, "src/renderer/chat/index.html"),
           response: resolve(__dirname, "src/renderer/response/index.html"),
           statusbar: resolve(__dirname, "src/renderer/statusbar/index.html"),
+          room: resolve(__dirname, "src/renderer/room/index.html"),
         },
       },
     },

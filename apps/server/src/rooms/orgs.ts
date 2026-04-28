@@ -22,17 +22,28 @@ export async function refreshUserOrgs(db: Database, userId: number): Promise<str
   if (fresh) return existing.map((r) => r.orgLogin);
 
   const token = await fetchUserGithubToken(db, userId);
-  if (!token) return existing.map((r) => r.orgLogin);
+  if (!token) {
+    console.warn("[rooms/orgs] no decryptable github token for user", userId);
+    return existing.map((r) => r.orgLogin);
+  }
 
   let res: Response;
   try {
     res = await fetch("https://api.github.com/user/memberships/orgs?state=active&per_page=100", {
       headers: githubHeaders(token),
     });
-  } catch {
+  } catch (err) {
+    console.warn("[rooms/orgs] memberships fetch threw:", (err as Error).message);
     return existing.map((r) => r.orgLogin);
   }
-  if (!res.ok) return existing.map((r) => r.orgLogin);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.warn(
+      `[rooms/orgs] memberships fetch ${res.status} for user ${userId}:`,
+      body.slice(0, 200),
+    );
+    return existing.map((r) => r.orgLogin);
+  }
 
   const raw = (await res.json().catch(() => null)) as RawMembership[] | null;
   if (!Array.isArray(raw)) return existing.map((r) => r.orgLogin);
@@ -59,6 +70,11 @@ export async function refreshUserOrgs(db: Database, userId: number): Promise<str
     }
   });
 
+  console.log(
+    `[rooms/orgs] refreshed user ${userId}: ${memberships.length} active orgs (${memberships
+      .map((m) => m.orgLogin)
+      .join(", ")})`,
+  );
   return memberships.map((m) => m.orgLogin);
 }
 
@@ -68,5 +84,6 @@ export async function userIsInOrg(
   orgLogin: string,
 ): Promise<boolean> {
   const orgs = await refreshUserOrgs(db, userId);
-  return orgs.includes(orgLogin);
+  const target = orgLogin.toLowerCase();
+  return orgs.some((o) => o.toLowerCase() === target);
 }

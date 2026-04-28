@@ -236,8 +236,9 @@ export async function start(): Promise<void> {
   watchRoot(CLAUDE_SESSIONS_DIR);
   watchRoot(CODEX_SESSIONS_DIR);
   watchRoot(CURSOR_PROJECTS_DIR);
-  scheduleNextPulse();
+  // Schedule after the initial pulse so failure backoff reflects its outcome.
   await pulse();
+  scheduleNextPulse();
 }
 
 // Self-rescheduling so the cadence reflects the live failure state — a stable

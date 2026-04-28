@@ -154,6 +154,10 @@ const INFO_FADE_OUT_MS = 90;
 // popover.
 const INFO_SHOW_READY_TIMEOUT_MS = 80;
 type InfoShowReadyResolver = (height: number | null) => void;
+// FIFO queue: each ack drains exactly one resolver so concurrent showInfo
+// calls (rapid head switches) get matched 1:1 with the renderer's acks
+// instead of the first ack settling all pending resolvers with the wrong
+// head's height.
 const infoShowReadyResolvers: InfoShowReadyResolver[] = [];
 
 function waitForInfoShowReady(timeoutMs: number): Promise<number | null> {
@@ -162,6 +166,8 @@ function waitForInfoShowReady(timeoutMs: number): Promise<number | null> {
     const finish = (h: number | null): void => {
       if (settled) return;
       settled = true;
+      const i = infoShowReadyResolvers.indexOf(finish);
+      if (i >= 0) infoShowReadyResolvers.splice(i, 1);
       resolve(h);
     };
     infoShowReadyResolvers.push(finish);
@@ -1019,8 +1025,8 @@ ipcMain.handle("info:hoverLeave", (): void => scheduleHideInfo());
 ipcMain.on("info:show:ready", (_e, height?: unknown): void => {
   const safeHeight =
     typeof height === "number" && Number.isFinite(height) && height > 0 ? Math.round(height) : null;
-  const pending = infoShowReadyResolvers.splice(0, infoShowReadyResolvers.length);
-  for (const resolve of pending) resolve(safeHeight);
+  const next = infoShowReadyResolvers.shift();
+  if (next) next(safeHeight);
 });
 
 ipcMain.handle("overlay:setLength", (_e, length: number): void => {

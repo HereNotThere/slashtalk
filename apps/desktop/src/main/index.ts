@@ -1,34 +1,16 @@
-import {
-  app,
-  BrowserWindow,
-  nativeTheme,
-  ipcMain,
-  screen,
-  clipboard,
-  shell,
-  dialog,
-  globalShortcut,
-} from "electron";
+import { app, BrowserWindow, nativeTheme, ipcMain, screen, globalShortcut } from "electron";
 import type {
-  AgentHistoryPage,
-  AgentSessionSummary,
-  AgentStreamEvent,
-  AgentSummary,
   ChatHead,
-  CreateAgentInput,
   DockConfig,
   DockOrientation,
   InfoSession,
   McpTarget,
   ResponseOpenPayload,
-  UpdateAgentInput,
-  UserLocation,
 } from "../shared/types";
 import type { ChatThread } from "@slashtalk/shared";
 import * as store from "./store";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
-import { isSafeExternalUrl } from "./safeUrl";
 import * as rail from "./rail";
 import * as uploader from "./uploader";
 import * as heartbeat from "./heartbeat";
@@ -39,13 +21,7 @@ import * as selfSession from "./selfSession";
 import { createLocalMcpProxy } from "./localMcpProxy";
 import { getLocalMcpProxySecret } from "./localMcpProxySecret";
 import * as anthropic from "./anthropic";
-import * as localAgent from "./localAgent";
-import * as agentStore from "./agentStore";
-import * as agentIngest from "./agentIngest";
-import * as summarize from "./summarize";
 import * as githubAuth from "./githubDeviceAuth";
-import type { LocalAgent } from "./agentStore";
-import * as spotify from "./spotify";
 import * as peerPresence from "./peerPresence";
 import * as peerLocations from "./peerLocations";
 import { setMacCornerRadius, debugMacWindowState } from "./macCorners";
@@ -57,7 +33,6 @@ import {
   computeDockBoundsOn,
   dockFromPoint,
   overlayLength,
-  overlaySize,
   screenIdOf,
 } from "./windows/dock-geometry";
 import {
@@ -70,12 +45,10 @@ import {
   getRailPinned,
   getRailSessionOnlyMode,
   getShowActivityTimestamps,
-  getSpotifyShareEnabled,
   setRailCollapseInactive,
   setRailPinned,
   setRailSessionOnlyMode,
   setShowActivityTimestamps,
-  setSpotifyShareEnabled,
 } from "./windows/rail-state";
 import {
   configureChat,
@@ -89,7 +62,6 @@ import {
   startHoverPolling,
   stopHoverPolling,
 } from "./windows/hover-polling";
-import { animateOverlayTo, cancelOverlayAnimation } from "./windows/overlay-animation";
 import { appState, loadRenderer, preloadPath } from "./windows/lib";
 import {
   bumpActivity,
@@ -97,8 +69,20 @@ import {
   resolveRailVisibility,
 } from "./windows/rail-visibility";
 import { getMainWindow, showMainWindow } from "./windows/main";
-import { configureResponse, getResponseWindow, showResponse } from "./windows/response";
-import { createTray, getTrayPopup, hideTrayPopup, toggleTrayPopup } from "./windows/tray";
+import { configureResponse, showResponse } from "./windows/response";
+import { createTray, getTrayPopup, toggleTrayPopup } from "./windows/tray";
+import { broadcast, sendWhenLoaded } from "./windows/broadcast";
+import {
+  configureDockDrag,
+  currentDock,
+  getIsDragging,
+  registerDockDrag,
+} from "./windows/dock-drag";
+import * as spotifyToggle from "./sync/spotify-toggle";
+import * as userLocation from "./sync/user-location";
+import { configureAgents, registerAgents } from "./ipc/agents";
+import { configureDebug, registerDebug, registerDebugShortcuts } from "./ipc/debug";
+import { registerShellIpc } from "./ipc/shell";
 
 installMcp.configureInstaller({
   localProxySecret: getLocalMcpProxySecret,
@@ -195,13 +179,6 @@ let infoHideFadeTimer: NodeJS.Timeout | null = null;
 
 const POSITION_KEY = "overlayPosition";
 
-function updateSpotifyRunning(): void {
-  const shouldRun =
-    backend.getAuthState().signedIn && getSpotifyShareEnabled() && process.platform === "darwin";
-  if (shouldRun) void spotify.start().catch((err) => console.warn("spotify.start failed:", err));
-  else spotify.stop();
-}
-
 function applyRailPinned(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const pinned = getRailPinned();
@@ -249,42 +226,9 @@ const sessionCache = new Map<string, InfoSession[]>();
 // popped in mid-show.
 const questionsCache = new Map<string, ChatThread[]>();
 
-function toAgentSummary(a: LocalAgent): AgentSummary {
-  return {
-    id: a.id,
-    name: a.name,
-    description: a.description,
-    systemPrompt: a.systemPrompt,
-    model: a.model,
-    createdAt: a.createdAt,
-    mode: a.mode ?? "cloud",
-    cwd: a.cwd,
-    visibility: a.visibility ?? "private",
-    mcpServers: a.mcpServers,
-  };
-}
-
-function isLocalAgent(a: { mode?: "cloud" | "local" }): boolean {
-  return a.mode === "local";
-}
-
-const streamingAgents = new Set<string>();
-
 function findHead(id: string): ChatHead | undefined {
   return heads.find((h) => h.id === id);
 }
-
-let dragOffset: { dx: number; dy: number } | null = null;
-let dragTicker: ReturnType<typeof setInterval> | null = null;
-// While the stack is being dragged, bubble hovers still fire (the cursor sits
-// over bubbles as the window moves under it), which would pop the info card
-// repeatedly. Suppress showInfo for the duration of the drag + dock animation.
-let isDraggingStack = false;
-
-// Dock-to-edge feature. During drag we show a dashed ghost at the nearest dock
-// slot (center-left / center-right); on release the overlay tweens to it.
-const DOCK_ANIM_MS = 180;
-let dockPlaceholderWindow: BrowserWindow | null = null;
 
 // -------- Overlay (bubbles) --------
 
@@ -471,10 +415,7 @@ function resizeOverlay(): void {
 }
 
 function broadcastHeads(): void {
-  const targets = [overlayWindow, getMainWindow(), getTrayPopup(), infoWindow].filter(
-    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
-  );
-  for (const w of targets) w.webContents.send("heads:update", heads);
+  broadcast("heads:update", heads, overlayWindow, getMainWindow(), getTrayPopup(), infoWindow);
 }
 
 // -------- Info box --------
@@ -582,7 +523,7 @@ async function showInfo(
   bubbleScreen?: { x: number; y: number },
   expandSessionId?: string,
 ): Promise<void> {
-  if (isDraggingStack) return;
+  if (getIsDragging()) return;
   const head = findHead(headId);
   if (!head) return;
 
@@ -726,13 +667,11 @@ function repositionInfoIfVisible(bubbleScreen?: { x: number; y: number }): void 
 let lastSentDock: DockConfig | null = null;
 
 function broadcastChatVisible(visible: boolean): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("chat:state", { visible });
+  broadcast("chat:state", { visible }, overlayWindow);
 }
 
 function broadcastInfoState(visible: boolean, headId: string | null): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("info:state", { visible, headId });
+  broadcast("info:state", { visible, headId }, overlayWindow);
 }
 
 // Tell the overlay renderer which dock it's in so it can pick flex direction,
@@ -749,15 +688,7 @@ function sendOverlayConfig(): void {
     return;
   }
   lastSentDock = dock;
-  const send = (): void => {
-    if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    overlayWindow.webContents.send("overlay:config", dock);
-  };
-  if (overlayWindow.webContents.isLoading()) {
-    overlayWindow.webContents.once("did-finish-load", send);
-  } else {
-    send();
-  }
+  sendWhenLoaded(overlayWindow, "overlay:config", dock);
 }
 
 // -------- IPC --------
@@ -796,190 +727,18 @@ ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
   broadcastShowActivityTimestamps();
 });
 
-ipcMain.handle("spotify:isSupported", (): boolean => process.platform === "darwin");
-ipcMain.handle("spotify:getShareEnabled", (): boolean => getSpotifyShareEnabled());
-ipcMain.handle("spotify:setShareEnabled", async (_e, enabled: boolean): Promise<void> => {
-  const next = !!enabled;
-  const prev = getSpotifyShareEnabled();
-  if (prev === next) return;
-  setSpotifyShareEnabled(next);
-  broadcastToTrayAndMain("spotify:shareEnabled", next);
-  // Turning off while signed in: clear peers immediately so the card
-  // disappears in seconds instead of waiting for the 120s Redis TTL.
-  if (prev && !next && backend.getAuthState().signedIn) {
-    try {
-      await backend.postSpotifyPresence(null);
-    } catch (err) {
-      console.warn("[spotify] clear on disable failed", err);
-    }
-  }
-  updateSpotifyRunning();
+spotifyToggle.register();
+
+userLocation.register();
+
+configureDebug({
+  getOverlay: () => overlayWindow,
+  getSelectedHeadId: () => selectedHeadId,
+  getCachedSessions: (headId) => sessionCache.get(headId),
+  fetchSessionsForHead,
+  verifyAndMarkCollision,
 });
-
-// User location — renderer reports IANA tz + resolved city. We cache the
-// latest payload so a sign-in can re-post when the renderer reported it while
-// signed out, and dedup so concurrent renderers don't each fire a POST.
-// lastSent is keyed by login so an account switch doesn't dedup against the
-// previous account's value (and a sign-out racing the POST can't restore a
-// stale lastSent that hides the next account's flush).
-let lastKnownUserLocation: UserLocation | null = null;
-let lastSentUserLocation: { login: string; location: UserLocation } | null = null;
-let userLocationFlush: Promise<void> | null = null;
-
-async function flushUserLocation(): Promise<void> {
-  if (userLocationFlush) return userLocationFlush;
-  userLocationFlush = (async () => {
-    try {
-      // Loop so a setLocation arriving while the POST is in flight still
-      // gets sent — otherwise the new value would land in lastKnown but
-      // never trigger a follow-up flush.
-      while (true) {
-        const auth = backend.getAuthState();
-        if (!auth.signedIn) return;
-        const next = lastKnownUserLocation;
-        if (!next) return;
-        const login = auth.user.githubLogin;
-        if (
-          lastSentUserLocation &&
-          lastSentUserLocation.login === login &&
-          lastSentUserLocation.location.timezone === next.timezone &&
-          lastSentUserLocation.location.city === next.city
-        ) {
-          return;
-        }
-        await backend.postUserLocation(next);
-        // Re-check after await: if we signed out or switched accounts during
-        // the POST, dropping the write keeps lastSent from masking the next
-        // account's flush.
-        const after = backend.getAuthState();
-        if (after.signedIn && after.user.githubLogin === login) {
-          lastSentUserLocation = { login, location: next };
-        }
-      }
-    } catch (err) {
-      console.warn("[user-location] post failed", err);
-    } finally {
-      userLocationFlush = null;
-    }
-  })();
-  return userLocationFlush;
-}
-
-ipcMain.handle("user:setLocation", async (_e, payload: UserLocation): Promise<void> => {
-  lastKnownUserLocation = payload;
-  await flushUserLocation();
-});
-
-backend.onChange((state) => {
-  if (state.signedIn) void flushUserLocation();
-});
-
-ipcMain.handle("debug:railSnapshot", () => rail.getDebugSnapshot());
-ipcMain.handle("debug:refreshRail", () => rail.forceRefresh());
-ipcMain.handle("debug:shuffleRail", () => rail.debugShuffleRail());
-ipcMain.handle("debug:addFakeTeammate", () => rail.debugAddFakeTeammate());
-ipcMain.handle("debug:removeFakeTeammate", () => rail.debugRemoveFakeTeammate());
-ipcMain.handle("debug:replayEnterAnimation", () => replayEnterAnimation());
-ipcMain.handle("debug:fireCollision", () => runDebugFireCollision());
-ipcMain.handle("debug:fireCollisionOnFake", () => runDebugFireCollisionOnFake());
-ipcMain.handle("collision:dismiss", (_e, login: string) => {
-  if (typeof login === "string" && login.length > 0) rail.dismissCollision(login);
-});
-
-// DEV ONLY — fire a synthetic collision against a peer in the rail, picking
-// a real file from one of their live sessions so the in-row banner has
-// something to attach to. Both ring + popover banner are guaranteed to
-// appear together (or neither does — see verifyAndMarkCollision).
-
-async function runDebugFireCollision(): Promise<void> {
-  const heads = rail.list();
-  // Prefer the head whose popover is currently open — that way the warning
-  // shows up in the popover you're already looking at. Fall back to other
-  // peers if the selected one has no usable sessions.
-  const selfHead = heads[0];
-  const ordered = selectedHeadId
-    ? [
-        ...heads.filter((h) => h.id === selectedHeadId),
-        ...heads.filter((h) => h.id !== selectedHeadId),
-      ]
-    : heads;
-  console.log(
-    `[debug] runDebugFireCollision invoked, rail=${heads.length} selected=${selectedHeadId ?? "(none)"}`,
-  );
-
-  // Find the first peer whose live (non-ENDED) sessions contain a real file
-  // we can collide on. Routes through the same verify-and-mark helper used
-  // by the WS path so debug + production produce identical UI guarantees.
-  for (const head of ordered) {
-    if (head === selfHead) continue;
-    const login = rail.parseUserHeadId(head.id);
-    if (!login) continue;
-    if (!sessionCache.has(head.id)) {
-      try {
-        await fetchSessionsForHead(head.id);
-      } catch {
-        continue;
-      }
-    }
-    const sessions = sessionCache.get(head.id);
-    const realFile = pickRealFileFromSessions(sessions);
-    if (realFile == null) continue;
-    console.log(`[debug] fireCollision → ${login} on ${realFile}`);
-    await verifyAndMarkCollision(login, realFile);
-    return;
-  }
-  console.warn(
-    "[debug] fireCollision: no peer in rail has a live session with edited/written files — try opening Cmd+Shift+' (collision-on-fake) instead, or wait for a teammate to start editing.",
-  );
-}
-
-/**
- * Returns the first real file path appearing in any of the peer's *live*
- * (non-ENDED) sessions' topFilesEdited/Written. Returns null when none
- * found — the caller should try the next peer rather than fall back to a
- * hardcoded path that won't match any session predicate.
- */
-function pickRealFileFromSessions(sessions: InfoSession[] | undefined): string | null {
-  if (!sessions) return null;
-  const fields: Array<keyof Pick<InfoSession, "topFilesEdited" | "topFilesWritten">> = [
-    "topFilesEdited",
-    "topFilesWritten",
-  ];
-  for (const field of fields) {
-    for (const s of sessions) {
-      if (s.state === "ended") continue;
-      const top = s[field];
-      if (!Array.isArray(top) || top.length === 0) continue;
-      for (const entry of top) {
-        if (Array.isArray(entry) && typeof entry[0] === "string" && entry[0].length > 0) {
-          return entry[0];
-        }
-      }
-    }
-  }
-  return null;
-}
-
-async function runDebugFireCollisionOnFake(): Promise<void> {
-  console.log(`[debug] runDebugFireCollisionOnFake invoked`);
-  rail.debugAddFakeTeammate();
-  // Fakes have no backend sessions to attach a popover banner to, so we
-  // bypass verification and stamp the ring directly. Hovering the fake
-  // bubble shows nothing useful — this path is only for testing the
-  // ring/halo animation in isolation.
-  const heads = rail.list();
-  for (let i = heads.length - 1; i > 0; i--) {
-    const login = rail.parseUserHeadId(heads[i].id);
-    if (!login || !login.startsWith("debug_")) continue;
-    rail.markCollision(login, "src/example.ts");
-    return;
-  }
-}
-
-function replayEnterAnimation(): void {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("debug:replayEnter");
-}
+registerDebug();
 
 rail.onChange((next) => {
   heads = next;
@@ -1098,185 +857,20 @@ ipcMain.handle("chat:questionsForLogin", async (_e, login: string) => {
 
 ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));
 
-// -------- Dock to edge (drag → release → snap) --------
-
-function overlayDisplay(): Electron.Display {
-  if (!overlayWindow || overlayWindow.isDestroyed()) {
-    return screen.getPrimaryDisplay();
-  }
-  return screen.getDisplayMatching(overlayWindow.getBounds());
-}
-
-function currentDock(): DockConfig {
-  if (!overlayWindow || overlayWindow.isDestroyed()) {
-    return { orientation: "vertical", side: "end" };
-  }
-  const b = overlayWindow.getBounds();
-  const center = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-  return dockFromPoint(center, overlayDisplay());
-}
-
-function computeDockBounds(dock: DockConfig): Electron.Rectangle {
-  const display = overlayDisplay();
-  return computeDockBoundsOn(display, dock, effectiveOverlayLength(dock.orientation, display));
-}
-
-function ensureDockPlaceholder(): BrowserWindow {
-  if (dockPlaceholderWindow && !dockPlaceholderWindow.isDestroyed()) {
-    return dockPlaceholderWindow;
-  }
-  // Radius matches the overlay's pill cap (half the short axis = OVERLAY_WIDTH/2).
-  // Both orientations share the same short axis, so the same radius gives
-  // perfect semi-circle caps whether the placeholder is tall or wide.
-  const radius = Math.round(OVERLAY_WIDTH / 2);
-  const html = `<!doctype html><html><head><style>
-    html,body{margin:0;padding:0;background:transparent;overflow:hidden;height:100%;}
-    .pill{
-      position:fixed;inset:0;box-sizing:border-box;
-      border:2px dashed rgba(255,255,255,0.55);
-      border-radius:${radius}px;
-      background:rgba(255,255,255,0.05);
-    }
-  </style></head><body><div class="pill"></div></body></html>`;
-  const initialSize = overlaySize(heads.length, "vertical");
-  dockPlaceholderWindow = new BrowserWindow({
-    width: initialSize.width,
-    height: initialSize.height,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    resizable: false,
-    movable: false,
-    focusable: false,
-    skipTaskbar: true,
-    hasShadow: false,
-    show: false,
-    backgroundColor: "#00000000",
-    webPreferences: {
-      contextIsolation: true,
-    },
-  });
-  dockPlaceholderWindow.setAlwaysOnTop(true, "floating");
-  dockPlaceholderWindow.setVisibleOnAllWorkspaces(true, {
-    visibleOnFullScreen: true,
-  });
-  dockPlaceholderWindow.setIgnoreMouseEvents(true);
-  void dockPlaceholderWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
-  dockPlaceholderWindow.on("closed", () => {
-    dockPlaceholderWindow = null;
-  });
-  return dockPlaceholderWindow;
-}
-
-function updateDockPlaceholder(): void {
-  const ph = ensureDockPlaceholder();
-  ph.setBounds(computeDockBounds(currentDock()));
-  if (!ph.isVisible()) ph.showInactive();
-}
-
-function hideDockPlaceholder(): void {
-  if (!dockPlaceholderWindow || dockPlaceholderWindow.isDestroyed()) return;
-  if (dockPlaceholderWindow.isVisible()) dockPlaceholderWindow.hide();
-}
-
-ipcMain.handle("drag:start", (): void => {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  // A new drag cancels any in-flight dock tween.
-  cancelOverlayAnimation();
-
-  const cursor = screen.getCursorScreenPoint();
-  const win = overlayWindow.getBounds();
-  dragOffset = { dx: cursor.x - win.x, dy: cursor.y - win.y };
-  isDraggingStack = true;
-  // Kill any visible/pending info card so it doesn't trail the stack.
-  hideInfoNow();
-  updateDockPlaceholder();
-
-  if (dragTicker) clearInterval(dragTicker);
-  dragTicker = setInterval(() => {
-    if (!overlayWindow || overlayWindow.isDestroyed() || !dragOffset) return;
-    const p = screen.getCursorScreenPoint();
-    overlayWindow.setPosition(p.x - dragOffset.dx, p.y - dragOffset.dy);
+configureDockDrag({
+  getOverlay: () => overlayWindow,
+  effectiveOverlayLength,
+  onTick: () => {
     repositionInfoIfVisible();
     repositionChatIfVisible();
-    updateDockPlaceholder();
-  }, 16);
-});
-
-ipcMain.handle("drag:end", (): void => {
-  if (dragTicker) clearInterval(dragTicker);
-  dragTicker = null;
-  dragOffset = null;
-  hideDockPlaceholder();
-
-  if (!overlayWindow || overlayWindow.isDestroyed()) {
-    isDraggingStack = false;
-    saveOverlayPosition();
-    return;
-  }
-
-  const target = computeDockBounds(currentDock());
-  // Push the new dock to the overlay renderer first so flex direction + FLIP
-  // tracking swap before the window resizes. The renderer will see the new
-  // size via its resize event during the animation, but with the right flex
-  // orientation already in place.
-  sendOverlayConfig();
-  // Keep isDraggingStack on through the slide so bubble hovers under the
-  // moving window don't pop the info card mid-tween.
-  animateOverlayTo(overlayWindow, target, DOCK_ANIM_MS, {
-    onTick: () => {
-      repositionInfoIfVisible();
-      repositionChatIfVisible();
-    },
-    onDone: () => {
-      isDraggingStack = false;
-      saveOverlayPosition();
-    },
-  });
-});
-
-ipcMain.handle("app:openMain", (): void => {
-  showMainWindow();
-  hideTrayPopup();
-});
-
-ipcMain.handle("app:openAgentCreator", (): void => {
-  const win = showMainWindow();
-  hideTrayPopup();
-  if (win.isDestroyed()) return;
-  const send = (): void => {
-    if (!win.isDestroyed()) win.webContents.send("agents:openCreator");
-  };
-  if (win.webContents.isLoading()) {
-    win.webContents.once("did-finish-load", send);
-  } else {
-    send();
-  }
-});
-
-ipcMain.handle("app:quit", (): void => app.quit());
-
-ipcMain.handle("clipboard:writeText", (_e, text: string): void => clipboard.writeText(text ?? ""));
-ipcMain.handle("shell:openExternal", async (_e, url: string): Promise<void> => {
-  if (!isSafeExternalUrl(url)) {
-    console.warn(`[shell:openExternal] refusing url: ${url}`);
-    return;
-  }
-  await shell.openExternal(url);
-});
-
-ipcMain.handle(
-  "dialog:selectDirectory",
-  async (_e, defaultPath?: string): Promise<string | null> => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory"],
-      title: "Choose working directory",
-      ...(defaultPath ? { defaultPath } : {}),
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0] ?? null;
   },
-);
+  onHideInfoNow: hideInfoNow,
+  onSendOverlayConfig: sendOverlayConfig,
+  onSavePosition: saveOverlayPosition,
+});
+registerDockDrag();
+
+registerShellIpc();
 
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
@@ -1364,10 +958,6 @@ ipcMain.handle("sessions:preload", async (_e, headId: string): Promise<void> => 
   void fetchSessionsForHead(headId);
 });
 
-ipcMain.handle("agentSessions:forAgent", async (_e, agentId: string) =>
-  agentIngest.listForAgent(agentId),
-);
-
 ipcMain.handle("mcp:install", (_e, target: McpTarget, options?: unknown) =>
   installMcp.install(target, options as Parameters<typeof installMcp.install>[1]),
 );
@@ -1386,342 +976,8 @@ ipcMain.handle("github:connect", () => githubAuth.startConnect());
 ipcMain.handle("github:cancelConnect", () => githubAuth.cancelConnect());
 ipcMain.handle("github:disconnect", () => githubAuth.disconnect());
 
-ipcMain.handle("agents:isConfigured", () => anthropic.isConfigured());
-ipcMain.handle("agents:setApiKey", async (_e, key: string): Promise<void> => {
-  await anthropic.setApiKey(key);
-});
-ipcMain.handle("agents:clearApiKey", () => anthropic.clearApiKey());
-ipcMain.handle("agents:list", () => agentStore.list().map(toAgentSummary));
-ipcMain.handle("agents:create", async (_e, input: CreateAgentInput): Promise<AgentSummary> => {
-  const visibility = input.visibility ?? "private";
-  if (input.mode === "local") {
-    const created = localAgent.createAgent(input);
-    const row: LocalAgent = {
-      id: created.id,
-      name: created.name,
-      description: created.description,
-      systemPrompt: created.systemPrompt,
-      model: created.model,
-      createdAt: Date.now(),
-      sessions: [],
-      mode: "local",
-      cwd: created.cwd,
-      visibility,
-      mcpServers: [],
-    };
-    agentStore.add(row);
-    return toAgentSummary(row);
-  }
-
-  const created = await anthropic.createAgent({
-    name: input.name,
-    description: input.description,
-    systemPrompt: input.systemPrompt,
-    model: input.model,
-    mcpServers: input.mcpServers,
-  });
-  const row: LocalAgent = {
-    id: created.id,
-    name: created.name,
-    description: created.description,
-    systemPrompt: created.systemPrompt,
-    model: created.model,
-    createdAt: Date.now(),
-    sessions: [],
-    mode: "cloud",
-    visibility,
-    mcpServers: input.mcpServers ?? [],
-  };
-  agentStore.add(row);
-  return toAgentSummary(row);
-});
-ipcMain.handle(
-  "agents:update",
-  async (_e, id: string, input: UpdateAgentInput): Promise<AgentSummary> => {
-    const existing = agentStore.get(id);
-    if (!existing) throw new Error("Unknown agent");
-
-    const name = input.name.trim();
-    const systemPrompt = input.systemPrompt.trim();
-    if (!name) throw new Error("Agent name is required.");
-    if (!systemPrompt) throw new Error("Agent prompt is required.");
-
-    const patch = {
-      name,
-      description: input.description?.trim() || undefined,
-      systemPrompt,
-      model: input.model?.trim() || existing.model,
-      cwd: isLocalAgent(existing) ? input.cwd?.trim() || undefined : existing.cwd,
-      visibility: input.visibility ?? existing.visibility ?? "private",
-      mcpServers: isLocalAgent(existing)
-        ? existing.mcpServers
-        : (input.mcpServers ?? existing.mcpServers ?? []),
-    };
-
-    if (!isLocalAgent(existing)) {
-      const updated = await anthropic.updateAgent(id, {
-        name: patch.name,
-        description: patch.description,
-        systemPrompt: patch.systemPrompt,
-        model: patch.model,
-        mcpServers: patch.mcpServers,
-      });
-      const row = agentStore.update(id, {
-        ...patch,
-        name: updated.name,
-        description: updated.description,
-        systemPrompt: updated.systemPrompt,
-        model: updated.model,
-      });
-      if (!row) throw new Error("Unknown agent");
-      return toAgentSummary(row);
-    }
-
-    const row = agentStore.update(id, patch);
-    if (!row) throw new Error("Unknown agent");
-    return toAgentSummary(row);
-  },
-);
-ipcMain.handle("agents:remove", async (_e, id: string): Promise<void> => {
-  const row = agentStore.get(id);
-  if (row && isLocalAgent(row)) {
-    for (const s of row.sessions) localAgent.archiveSession(s.id);
-  } else {
-    try {
-      await anthropic.archiveAgent(id);
-    } catch (err) {
-      console.warn("archive agent failed (continuing):", err);
-    }
-  }
-  streamingAgents.delete(id);
-  agentStore.remove(id);
-});
-ipcMain.handle(
-  "agents:history",
-  async (
-    _e,
-    agentId: string,
-    sessionId?: string | null,
-    cursor?: string | null,
-  ): Promise<AgentHistoryPage> => {
-    const row = agentStore.get(agentId);
-    const targetSessionId = sessionId ?? row?.activeSessionId;
-    if (!row || !targetSessionId) return { msgs: [], nextCursor: null };
-    if (isLocalAgent(row)) {
-      return localAgent.loadSessionMessages(targetSessionId, cursor);
-    }
-    try {
-      return await anthropic.loadSessionMessages(targetSessionId, cursor);
-    } catch (err) {
-      console.warn("history load failed:", err);
-      return { msgs: [], nextCursor: null };
-    }
-  },
-);
-ipcMain.handle(
-  "agents:send",
-  async (_e, agentId: string, text: string, requestedSessionId?: string | null) => {
-    const row = agentStore.get(agentId);
-    if (!row) throw new Error("Unknown agent");
-    streamingAgents.add(agentId);
-    try {
-      let sessionId = requestedSessionId ?? row.activeSessionId;
-      if (!sessionId) {
-        sessionId = isLocalAgent(row)
-          ? localAgent.localSessionId()
-          : (await anthropic.startSession(agentId)).sessionId;
-        const createdAt = Date.now();
-        agentStore.addSession(agentId, { id: sessionId, createdAt });
-        agentIngest.upsertSessionStart(row, sessionId, createdAt);
-        emitSessionsChange(agentId);
-      } else if (requestedSessionId) {
-        agentStore.setActiveSession(agentId, requestedSessionId);
-      }
-
-      const latestRow = agentStore.get(agentId) ?? row;
-      const session = latestRow.sessions.find((s) => s.id === sessionId);
-      if (session && !session.title) {
-        const title = truncateTitle(text);
-        agentStore.setSessionTitle(agentId, sessionId, title);
-        emitSessionsChange(agentId);
-        if (!isLocalAgent(row)) {
-          anthropic.updateSessionTitle(sessionId, title).catch((err) => {
-            console.warn("server title update failed:", err);
-          });
-        }
-      }
-
-      const streamSessionId = sessionId;
-      const handleEvent = (e: anthropic.AgentStreamEvent): void => {
-        const payload: AgentStreamEvent = { ...e, agentId };
-        broadcastAgentEvent(payload);
-        if (e.kind === "usage") {
-          agentStore.addSessionUsage(agentId, streamSessionId, {
-            input: e.input,
-            output: e.output,
-          });
-          emitSessionsChange(agentId);
-        }
-        if (e.kind === "done" || e.kind === "error") {
-          streamingAgents.delete(agentId);
-        }
-      };
-
-      if (isLocalAgent(row)) {
-        void localAgent.sendMessage(streamSessionId, text, row, handleEvent, () =>
-          emitSessionsChange(agentId),
-        );
-      } else {
-        void anthropic.sendMessage(streamSessionId, text, handleEvent);
-      }
-    } catch (err) {
-      streamingAgents.delete(agentId);
-      throw err;
-    }
-  },
-);
-ipcMain.handle("agents:listSessions", (_e, agentId: string): AgentSessionSummary[] => {
-  const row = agentStore.get(agentId);
-  if (row && !isLocalAgent(row)) void refreshSessionsFromServer(agentId);
-  return row?.sessions ?? [];
-});
-
-const pendingArchive = new Set<string>();
-const PENDING_ARCHIVE_TTL_MS = 30_000;
-
-async function refreshSessionsFromServer(agentId: string): Promise<void> {
-  try {
-    const server = await anthropic.listAgentSessions(agentId);
-    const active = server.filter((s) => s.archivedAt == null && !pendingArchive.has(s.id));
-    agentStore.reconcileSessions(
-      agentId,
-      active.map((s) => ({
-        id: s.id,
-        createdAt: s.createdAt,
-        title: s.title ?? undefined,
-      })),
-    );
-    emitSessionsChange(agentId);
-  } catch (err) {
-    console.warn("session reconcile failed:", err);
-  }
-}
-
-ipcMain.handle("agents:popOut", (_e, agentId: string, sessionId: string): void => {
-  agentStore.setActiveSession(agentId, sessionId);
-  showResponse({ kind: "agent", agentId, sessionId });
-});
-
-ipcMain.handle(
-  "agents:removeSession",
-  async (_e, agentId: string, sessionId: string): Promise<void> => {
-    const row = agentStore.get(agentId);
-    if (row && isLocalAgent(row)) {
-      agentStore.removeSession(agentId, sessionId);
-      emitSessionsChange(agentId);
-      localAgent.archiveSession(sessionId);
-      return;
-    }
-
-    pendingArchive.add(sessionId);
-    setTimeout(() => pendingArchive.delete(sessionId), PENDING_ARCHIVE_TTL_MS);
-
-    const isTeamCloud = !!row && (row.visibility ?? "private") === "team";
-    const startedAtMs = row?.sessions.find((s) => s.id === sessionId)?.createdAt ?? Date.now();
-    const agentSnapshot = row;
-
-    agentStore.removeSession(agentId, sessionId);
-    emitSessionsChange(agentId);
-
-    try {
-      await anthropic.archiveSession(sessionId);
-    } catch (err) {
-      console.warn("archive session failed (continuing):", err);
-    }
-
-    if (isTeamCloud && agentSnapshot) {
-      void finalizeTeamSession(agentSnapshot, sessionId, startedAtMs);
-    }
-  },
-);
-
-async function finalizeTeamSession(
-  agent: LocalAgent,
-  sessionId: string,
-  startedAtMs: number,
-): Promise<void> {
-  const endedAt = new Date().toISOString();
-  const base = {
-    agentId: agent.id,
-    sessionId,
-    mode: "cloud" as const,
-    visibility: "team" as const,
-    name: agent.name,
-    startedAt: new Date(startedAtMs).toISOString(),
-    endedAt,
-    lastActivity: endedAt,
-  };
-  try {
-    const { summary, model } = await summarize.summarizeCloudSession(sessionId);
-    await agentIngest.upsertSession({
-      ...base,
-      summary,
-      summaryModel: model,
-      summaryTs: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.warn("[summarize] failed:", err);
-    await agentIngest.upsertSession(base);
-  }
-}
-
-ipcMain.handle("agents:newSession", async (_e, agentId: string): Promise<AgentSessionSummary> => {
-  const row = agentStore.get(agentId);
-  if (!row) throw new Error("Unknown agent");
-  const id = isLocalAgent(row)
-    ? localAgent.localSessionId()
-    : (await anthropic.startSession(agentId)).sessionId;
-  const session: AgentSessionSummary = { id, createdAt: Date.now() };
-  agentStore.addSession(agentId, session);
-  agentIngest.upsertSessionStart(row, id, session.createdAt);
-  emitSessionsChange(agentId);
-  return session;
-});
-
-ipcMain.handle("agents:selectSession", (_e, agentId: string, sessionId: string): void => {
-  agentStore.setActiveSession(agentId, sessionId);
-  emitSessionsChange(agentId);
-});
-
-ipcMain.handle(
-  "agents:ensureSessionUsage",
-  async (_e, agentId: string, sessionId: string): Promise<void> => {
-    const row = agentStore.get(agentId);
-    const session = row?.sessions.find((s) => s.id === sessionId);
-    if (!row || !session || session.tokens) return;
-    if (isLocalAgent(row)) return;
-    try {
-      const total = await anthropic.sumSessionUsage(sessionId);
-      agentStore.setSessionUsage(agentId, sessionId, total);
-      emitSessionsChange(agentId);
-    } catch (err) {
-      console.warn("backfill usage failed:", err);
-    }
-  },
-);
-
-function truncateTitle(text: string): string {
-  const clean = text.replace(/\s+/g, " ").trim();
-  return clean.length <= 60 ? clean : clean.slice(0, 57) + "...";
-}
-
-function emitSessionsChange(agentId: string): void {
-  const sessions = agentStore.get(agentId)?.sessions ?? [];
-  const payload = { agentId, sessions };
-  for (const w of agentConsumerWindows()) {
-    w.webContents.send("agents:sessionsChange", payload);
-  }
-}
+configureAgents({ getInfoWindow: () => infoWindow });
+registerAgents();
 
 ipcMain.handle("chatheads:getAuthState", () => chatheadsAuth.getAuthState());
 ipcMain.handle("chatheads:signIn", () => chatheadsAuth.signIn());
@@ -1760,7 +1016,7 @@ function applySyncForAuth(signedIn: boolean): void {
     // running — same shape the cursor-bot caught on heartbeat.
     void uploader.start().catch((err) => console.warn("uploader.start failed:", err));
     void heartbeat.start().catch((err) => console.warn("heartbeat.start failed:", err));
-    updateSpotifyRunning();
+    spotifyToggle.updateSpotifyRunning();
     void peerPresence.start().catch((err) => console.warn("peerPresence.start failed:", err));
     void peerLocations.start().catch((err) => console.warn("peerLocations.start failed:", err));
     ws.start();
@@ -1772,7 +1028,7 @@ function applySyncForAuth(signedIn: boolean): void {
   } else {
     heartbeat.stop();
     uploader.reset();
-    updateSpotifyRunning();
+    spotifyToggle.updateSpotifyRunning();
     peerPresence.stop();
     peerLocations.stop();
     ws.stop();
@@ -1937,39 +1193,19 @@ ipcMain.handle("trackedRepos:toggle", (_e, repoId: number) => [
 ]);
 
 function broadcastToMain(channel: string, payload: unknown): void {
-  const win = getMainWindow();
-  if (win && !win.isDestroyed()) {
-    win.webContents.send(channel, payload);
-  }
+  broadcast(channel, payload, getMainWindow());
 }
 
 // Tray popup (statusbar renderer) is the primary consumer of orgs:* /
 // repos:* push channels. We still broadcast to main so any future settings
 // UI on the main window stays in sync without extra plumbing.
 function broadcastToTrayAndMain(channel: string, payload: unknown): void {
-  for (const w of [getMainWindow(), getTrayPopup()]) {
-    if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
-  }
-}
-
-function agentConsumerWindows(): BrowserWindow[] {
-  return [getMainWindow(), infoWindow, getResponseWindow()].filter(
-    (w): w is BrowserWindow => !!w && !w.isDestroyed(),
-  );
-}
-
-function broadcastAgentEvent(event: AgentStreamEvent): void {
-  for (const w of agentConsumerWindows()) {
-    w.webContents.send("agents:event", event);
-  }
+  broadcast(channel, payload, getMainWindow(), getTrayPopup());
 }
 
 backend.onChange((state) => broadcastToMain("backend:authState", state));
 // Tray popup shows sign-in state too — mirror to it so the CTA flips live.
-backend.onChange((state) => {
-  const popup = getTrayPopup();
-  if (popup && !popup.isDestroyed()) popup.webContents.send("backend:authState", state);
-});
+backend.onChange((state) => broadcast("backend:authState", state, getTrayPopup()));
 localRepos.onChange((repos) => broadcastToTrayAndMain("backend:trackedRepos", repos));
 localRepos.onSelectionChange((ids) =>
   broadcastToTrayAndMain("trackedRepos:selectionChange", [...ids]),
@@ -1977,7 +1213,6 @@ localRepos.onSelectionChange((ids) =>
 chatheadsAuth.onChange((state) => broadcastToMain("chatheads:authState", state));
 githubAuth.onChange((state) => broadcastToMain("github:state", state));
 anthropic.onConfiguredChange((configured) => broadcastToMain("agents:configured", configured));
-agentStore.onChange((agents) => broadcastToMain("agents:listChange", agents.map(toAgentSummary)));
 
 // -------- Lifecycle --------
 
@@ -2042,27 +1277,7 @@ app.whenReady().then(async () => {
   selfSession.start();
   applySyncForAuth(backend.getAuthState().signedIn);
 
-  // DEV ONLY — rail test shortcuts. Remove before shipping.
-  if (!app.isPackaged) {
-    const bindings: Array<[string, () => void]> = [
-      ["CommandOrControl+Shift+R", () => rail.debugShuffleRail()],
-      ["CommandOrControl+Shift+J", () => rail.debugAddFakeTeammate()],
-      ["CommandOrControl+Shift+L", () => rail.debugRemoveFakeTeammate()],
-      ["CommandOrControl+Shift+K", () => replayEnterAnimation()],
-      // Fire a synthetic collision against the first peer (or do nothing if
-      // the rail is empty). Picks a real file from the peer's cached sessions
-      // so the in-row banner attaches. Using semicolon to avoid OS-level
-      // bindings that capture Cmd+Shift+letter combos.
-      ["CommandOrControl+Shift+;", () => void runDebugFireCollision()],
-      // Same, but spawns a fake teammate first so a single shortcut on an
-      // empty rail still produces a visible rail-ring animation.
-      ["CommandOrControl+Shift+'", () => void runDebugFireCollisionOnFake()],
-    ];
-    for (const [accel, fn] of bindings) {
-      const ok = globalShortcut.register(accel, fn);
-      console.log(`[debug] shortcut ${accel}: ${ok ? "registered" : "FAILED"}`);
-    }
-  }
+  registerDebugShortcuts();
 });
 
 app.on("before-quit", () => {

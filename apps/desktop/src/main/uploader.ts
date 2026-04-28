@@ -11,6 +11,7 @@ import path from "node:path";
 import type { FSWatcher } from "node:fs";
 import type { EventSource } from "@slashtalk/shared";
 import * as backend from "./backend";
+import * as claudeSessionMeta from "./claudeSessionMeta";
 import { createEmitter } from "./emitter";
 import * as localRepos from "./localRepos";
 import * as store from "./store";
@@ -194,22 +195,52 @@ async function readHeader(
   const hash = crypto.createHash("sha256").update(hashSlice).digest("hex");
   const header =
     source === "claude"
-      ? scanClaudeHeader(buf, filePath)
+      ? await scanClaudeHeader(buf, filePath)
       : source === "codex"
         ? scanCodexHeader(buf, filePath)
         : await scanCursorHeader(buf, filePath);
   return { hash, header };
 }
 
-function scanClaudeHeader(buf: Buffer, filePath: string): SessionHeader {
+async function scanClaudeHeader(buf: Buffer, filePath: string): Promise<SessionHeader> {
   const sessionId = sessionIdFromPath(filePath, "claude");
-  const cwd = scanForCwd(buf);
+  const cwd = await resolveClaudeCwd(buf, filePath, sessionId);
   return {
     sessionId,
     cwd,
     version: null,
     project: path.basename(path.dirname(filePath)),
   };
+}
+
+// Layered cwd resolution. The inline jsonl scan is the fast path, but a large
+// opening prompt (e.g. an image-bearing user message) can push the first
+// `"cwd":"..."` line past HEADER_BYTES, leaving the session permanently
+// invisible to the rail. Fall back to the per-pid metadata file Claude writes
+// to ~/.claude/sessions/{pid}.json, then to a heuristic decode of the
+// project-dir slug. Both fallbacks are validated before being trusted.
+async function resolveClaudeCwd(
+  buf: Buffer,
+  filePath: string,
+  sessionId: string | null,
+): Promise<string | null> {
+  const inline = scanForCwd(buf);
+  if (inline) return inline;
+
+  if (sessionId) {
+    const fromMeta = await claudeSessionMeta.findCwdBySessionId(sessionId);
+    if (fromMeta) return fromMeta;
+  }
+
+  const decoded = claudeSessionMeta.decodeCwdFromProjectDir(filePath);
+  // Decode is heuristic — original paths containing `-` (e.g. `/Users/foo-bar`)
+  // round-trip wrong. Only trust it when the path exists *and* is already
+  // tracked, so a wrong-decode can't accidentally widen the upload set.
+  if (decoded && fs.existsSync(decoded) && localRepos.isPathTracked(decoded)) {
+    return decoded;
+  }
+
+  return null;
 }
 
 function scanCodexHeader(buf: Buffer, filePath: string): SessionHeader {

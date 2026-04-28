@@ -148,14 +148,10 @@ const INFO_HIDE_GRACE_MS = 180;
 // the NSWindow is hidden so it doesn't intercept events while invisible.
 const INFO_FADE_OUT_MS = 90;
 
-// Cap on how long showInfo waits for the renderer to commit new content and
-// report its measured height before repositioning the window. Without this,
-// positionInfo runs against the previous head's height — too-tall content
-// then lands at a desiredY that overflows the bottom of the screen and snaps
-// up only after `requestResize` arrives a frame later. The renderer dispatches
-// the ack synchronously in a layout effect (before paint), so a single paint
-// frame of slack (60Hz ≈ 17ms) is plenty; 80ms is a safety net for slower
-// frames and never strands the popover if the renderer doesn't ack.
+// Cap on how long showInfo waits for the renderer's measured-height ack
+// before positioning. Renderer dispatches in a layout effect (sub-frame in
+// practice); 80ms is a safety net so a wedged renderer can't strand the
+// popover.
 const INFO_SHOW_READY_TIMEOUT_MS = 80;
 type InfoShowReadyResolver = (height: number | null) => void;
 const infoShowReadyResolvers: InfoShowReadyResolver[] = [];
@@ -232,12 +228,11 @@ let infoWindow: BrowserWindow | null = null;
 
 let heads: ChatHead[] = [];
 let selectedHeadId: string | null = null;
-// Last bubble screen-coords reported by the overlay for the currently
-// selected head. positionInfo's fallback math (rail.stackBounds + idx * cell)
-// doesn't account for inactive-stack peek collapsing, so a resize-driven
-// reposition would otherwise snap the popover to the wrong slot. Cleared on
-// hide; refreshed by every showInfo. Dock flips / rail slides deliberately
-// reposition without the stash because the rail itself has moved.
+// Stashed bubble screen-coords for the selected head. positionInfo's
+// fallback (rail-derived idx * cell) misses by a slot for peers in a
+// peek-collapsed stack, so resize-driven reposition uses this directly.
+// Dock flips / rail slides intentionally don't pass it — the rail itself
+// moved, so the stash is stale.
 let selectedBubbleScreen: { x: number; y: number } | null = null;
 const sessionCache = new Map<string, InfoSession[]>();
 // Mirrors sessionCache but for the "Asked Slashtalk" panel, keyed by github
@@ -620,14 +615,9 @@ async function showInfo(
   // below resolve and re-push with the same snapshot helper.
   pushInfoShowSnapshot(win, head, expandSessionId);
 
-  // Wait for the renderer to commit the new content and report its measured
-  // height. This serves two glitches at once:
-  //   1. Position lands with the right height, so a too-tall card doesn't
-  //      first appear clamped to the bottom and then snap up on resize.
-  //   2. The window move and the content swap land on the same paint frame
-  //      instead of move-then-swap.
-  // The ack is dispatched in a renderer-side useLayoutEffect (synchronous,
-  // before paint), so the round-trip is well under one frame in practice.
+  // Wait for the renderer's measured-height ack so position+content land on
+  // the same paint frame and the bottom-clamp uses the right height (no
+  // overflow-then-snap when the new card is taller than the previous).
   const ackedHeight = await waitForInfoShowReady(INFO_SHOW_READY_TIMEOUT_MS);
   if (selectedHeadId !== head.id) return;
   if (!infoWindow || infoWindow.isDestroyed()) return;
@@ -640,24 +630,20 @@ async function showInfo(
   if (firstShow) win.showInactive();
   broadcastInfoState(true, head.id);
 
-  // Cache misses: fetch in the background and re-push the current snapshot
-  // when each completes. Each push triggers a fresh useAutoResize cycle in
-  // the renderer, so the window grows naturally as data fills in.
-  if (!sessionCache.has(head.id)) {
-    void fetchSessionsForHead(head.id).then(() => {
-      pushInfoShowSnapshot(infoWindow, head, expandSessionId);
-    });
-  }
-  if (login && !questionsCache.has(login)) {
-    void fetchQuestionsForLoginCached(login).then(() => {
+  // Fetch any cache misses in parallel and push the merged snapshot once
+  // both settle, so the renderer doesn't ping-pong through two resize cycles.
+  const pending: Promise<unknown>[] = [];
+  if (!sessionCache.has(head.id)) pending.push(fetchSessionsForHead(head.id));
+  if (login && !questionsCache.has(login)) pending.push(fetchQuestionsForLoginCached(login));
+  if (pending.length > 0) {
+    void Promise.all(pending).then(() => {
       pushInfoShowSnapshot(infoWindow, head, expandSessionId);
     });
   }
 }
 
-// Sends a single info:show carrying whatever sessions, spotify presence, and
-// asked-questions are currently in main's caches. Bails if the head we're
-// pushing for is no longer the selected one (a newer hover took over).
+// Sends an info:show with whatever's currently in main's caches. No-op if a
+// newer hover has taken over (head no longer selected).
 function pushInfoShowSnapshot(
   win: BrowserWindow | null,
   head: ChatHead,
@@ -716,17 +702,14 @@ function hideInfoNow(): void {
   }
 }
 
-// Re-anchor the info window. By default uses the rail-derived fallback so dock
-// flips and rail slides reposition relative to the rail's new layout. Resize-
-// driven reflows pass `useStashedBubble=true` so the popover stays anchored to
-// the bubble's actual screen Y instead of snapping to the fallback math (which
-// doesn't account for inactive-stack peek collapsing and would jump up by one
-// slot for some bubbles).
-function repositionInfoIfVisible(useStashedBubble = false): void {
+// Re-anchor the info window. Default is rail-fallback math (right for dock
+// flips and rail slides). Resize callers pass `selectedBubbleScreen` to
+// anchor against the bubble itself — the fallback misses by a slot for
+// peers in a peek-collapsed stack.
+function repositionInfoIfVisible(bubbleScreen?: { x: number; y: number }): void {
   if (!selectedHeadId) return;
   if (!findHead(selectedHeadId)) return;
-  const bubble = useStashedBubble ? (selectedBubbleScreen ?? undefined) : undefined;
-  positionInfo(selectedHeadId, bubble);
+  positionInfo(selectedHeadId, bubbleScreen);
 }
 
 // -------- Overlay-renderer notifications --------
@@ -1089,9 +1072,13 @@ ipcMain.handle(
 
 ipcMain.handle("chat:history", () => backend.fetchChatHistory());
 
-// Renderer's 15s refresh: bypass cache (always fresh) but write through so
-// the next showInfo for this login lands with up-to-date threads.
+// Renderer's 15s refresh wants fresh data, but also fires the same fetcher
+// on initial load when main hasn't cached yet. Dedupe against any in-flight
+// fetch (so showInfo's bg fetch + this IPC share one HTTP request); fall
+// back to a fresh fetch when nothing's pending so the 15s tick stays live.
 ipcMain.handle("chat:questionsForLogin", async (_e, login: string) => {
+  const inFlight = questionsInFlight.get(login);
+  if (inFlight) return { threads: await inFlight };
   const res = await backend.fetchQuestionsForLogin(login);
   questionsCache.set(login, res.threads);
   return res;
@@ -1282,33 +1269,26 @@ ipcMain.handle(
 ipcMain.handle("window:requestResize", (e, height: number): void => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!win || win.isDestroyed()) return;
-  let maxForWin = RESIZE_MAX;
-  if (win === infoWindow) {
-    const { height: screenH } = screen.getDisplayMatching(win.getBounds()).workAreaSize;
-    maxForWin = Math.min(INFO_MAX_ABSOLUTE, Math.floor(screenH * INFO_MAX_SCREEN_FRACTION));
-  }
-  const h = Math.max(RESIZE_MIN, Math.min(maxForWin, Math.round(height)));
 
   if (win === infoWindow) {
+    const h = clampInfoHeight(height);
     if (h === infoCurrentHeight) return;
     infoCurrentHeight = h;
-    // Remember the height for this head so the next time it's shown we land
-    // at the right size on first paint.
     if (selectedHeadId) infoHeightByHead.set(selectedHeadId, h);
 
     if (selectedHeadId) {
-      // Smoothly retween the open panel to the new height. Use the stashed
-      // bubble screen-coords so a height change re-anchors against the same
-      // bubble — the rail-derived fallback can disagree by a slot for
-      // inactive peers in a peek-collapsed stack.
-      repositionInfoIfVisible(true);
+      repositionInfoIfVisible(selectedBubbleScreen ?? undefined);
     } else {
-      // Nothing selected (renderer sending a resize during fade-out or
-      // initial load) — apply the height so the next show lands correctly.
+      // Nothing selected (renderer resizing during fade-out or initial load).
+      // Apply the new height so the next show lands correctly.
       const b = win.getBounds();
       win.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
     }
-  } else if (win === getTrayPopup()) {
+    return;
+  }
+
+  const h = Math.max(RESIZE_MIN, Math.min(RESIZE_MAX, Math.round(height)));
+  if (win === getTrayPopup()) {
     const b = win.getBounds();
     if (h === b.height) return;
     // Tray popup is anchored at top — height grows downward.
@@ -1344,16 +1324,27 @@ ipcMain.handle("sessions:forHead", async (_e, headId: string): Promise<InfoSessi
   return fetchSessionsForHead(headId);
 });
 
+// Coalesce concurrent callers (showInfo's bg fetch + the renderer's load
+// effect on cache miss) onto one HTTP request.
+const questionsInFlight = new Map<string, Promise<ChatThread[]>>();
+
 async function fetchQuestionsForLoginCached(login: string): Promise<ChatThread[]> {
   const cached = questionsCache.get(login);
   if (cached) return cached;
-  try {
-    const res = await backend.fetchQuestionsForLogin(login);
-    questionsCache.set(login, res.threads);
-    return res.threads;
-  } catch {
-    return [];
-  }
+  const inFlight = questionsInFlight.get(login);
+  if (inFlight) return inFlight;
+  const promise = backend
+    .fetchQuestionsForLogin(login)
+    .then((res) => {
+      questionsCache.set(login, res.threads);
+      return res.threads;
+    })
+    .catch(() => [] as ChatThread[])
+    .finally(() => {
+      questionsInFlight.delete(login);
+    });
+  questionsInFlight.set(login, promise);
+  return promise;
 }
 
 // Preload sessions for a head on hover to avoid flicker when opening info window

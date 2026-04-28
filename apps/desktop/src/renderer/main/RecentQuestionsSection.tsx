@@ -49,7 +49,11 @@ export function RecentQuestionsSection(): JSX.Element | null {
   }
 
   const visible = showAll ? threads : threads.slice(0, PREVIEW_LIMIT);
-  const overflow = threads.length - visible.length;
+  // Gate visibility on the total count, not the currently-visible slice —
+  // otherwise expanding the list zeroes out the overflow and the toggle
+  // disappears, stranding the user with no way to collapse back.
+  const hasMore = threads.length > PREVIEW_LIMIT;
+  const overflow = threads.length - PREVIEW_LIMIT;
 
   return (
     <section className="bg-surface rounded-2xl p-4 mt-4">
@@ -75,13 +79,13 @@ export function RecentQuestionsSection(): JSX.Element | null {
           </button>
         ))}
       </div>
-      {overflow > 0 && (
+      {hasMore && (
         <button
           type="button"
-          onClick={() => setShowAll(true)}
+          onClick={() => setShowAll((v) => !v)}
           className="text-xs text-subtle hover:text-muted underline decoration-dotted underline-offset-2 mt-3"
         >
-          Show {overflow} more
+          {showAll ? "Show less" : `Show ${overflow} more`}
         </button>
       )}
     </section>

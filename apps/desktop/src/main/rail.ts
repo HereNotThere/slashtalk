@@ -89,9 +89,15 @@ const DEBUG_TINTS = ["#ff6b6b", "#4ecdc4", "#ffd166", "#9b5de5", "#06d6a0", "#f1
 
 export const onChange = changes.on;
 export const list = (): ChatHead[] => heads;
-// Self is always at heads[0] when signed in, with `live` set only while the
-// user has a BUSY/ACTIVE feed session. Drives the rail's session-only mode.
-export const isSelfLive = (): boolean => heads[0]?.live === true;
+// `live` reflects the user's BUSY/ACTIVE session state and drives session-only
+// mode. The demo head is pinned ahead of self in the rail, so look up self by
+// its user-id rather than relying on heads[0].
+export const isSelfLive = (): boolean => {
+  const state = backend.getAuthState();
+  if (!state.signedIn) return false;
+  const selfId = userHeadId(state.user.githubLogin);
+  return heads.find((h) => h.id === selfId)?.live === true;
+};
 
 const USER_HEAD_PREFIX = "user:";
 const AGENT_HEAD_PREFIX = "agent:";
@@ -137,12 +143,16 @@ function loadDemoAvatar(): Avatar {
   return { type: "emoji", value: "✨" };
 }
 
+// Pinned at the top of the rail and always rendered as `live` so the demo is
+// visually distinct from the dormant teammates that follow.
 const demoHead: ChatHead = {
   id: DEMO_HEAD_ID,
   kind: "demo",
   label: DEMO_HEAD_LABEL,
   tint: "transparent",
   avatar: loadDemoAvatar(),
+  lastActionAt: Date.now(),
+  live: true,
 };
 
 function headForUser(
@@ -274,16 +284,17 @@ async function refresh(): Promise<void> {
     );
     // Merge debug fakes into the peer list so they survive the poll refresh.
     for (const fake of debugFakes) peerHeads.push(fake);
-    // Persistent demo head — sandboxed preview of the redesigned info window.
-    peerHeads.push(demoHead);
     const sortedPeers = sortByBucket(peerHeads, heads, now);
-    apply([self, ...agentHeads, ...sortedPeers]);
+    // Demo head is pinned above self — sandboxed preview of the new info
+    // hierarchy. Self stays second so callers that look up "the first user"
+    // still find it.
+    apply([demoHead, self, ...agentHeads, ...sortedPeers]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     lastSnapshot = { at: Date.now(), peers: null, error: message };
     console.error("[rail] listTeammates failed:", err);
-    // Keep showing self + agents + demo so the rail doesn't flash.
-    apply([initialSelf, ...agentHeads, demoHead]);
+    // Keep showing demo + self + agents so the rail doesn't flash.
+    apply([demoHead, initialSelf, ...agentHeads]);
   }
 }
 

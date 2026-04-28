@@ -198,8 +198,10 @@ export function App(): JSX.Element {
         {head?.kind === "agent" ? (
           <AgentPanel head={head} />
         ) : head?.kind === "demo" ? (
+          // Demo previews the new hierarchy against the viewer's data, so
+          // borrow the self-mode location/time/weather logic in UserHeader.
           <>
-            <UserHeader head={head} sessions={sessions} location={location} isSelf={false} />
+            <UserHeader head={head} sessions={sessions} location={location} isSelf={true} />
             <HierarchyDashboard sessions={sessions} />
           </>
         ) : (

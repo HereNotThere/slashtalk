@@ -275,8 +275,11 @@ export function App(): JSX.Element {
     hoverEnterBubble(headId, { x: screenX, y: screenY });
   };
 
-  const self = heads[0];
-  const allPeers = heads.slice(1);
+  // Demo head is a pinned preview above self; find self as the first
+  // user-kind head (rail.ts orders self before peers within `kind: "user"`).
+  const demo = heads.find((h) => h.kind === "demo") ?? null;
+  const self = heads.find((h) => h.kind === "user") ?? null;
+  const allPeers = heads.filter((h) => h !== demo && h !== self);
   const now = Date.now();
   // Inactivity is a property of the peer's last action — independent of the
   // tray toggle. The toggle only controls whether inactive peers get split
@@ -307,10 +310,12 @@ export function App(): JSX.Element {
   const headsLoaded = heads.length > 0;
   const activeCount = activePeers.length;
   const inactiveCount = inactivePeers.length;
+  const hasDemo = demo != null;
   useEffect(() => {
     if (!headsLoaded) return;
     const RAIL_OUTER_PAD_PX = 16; // py-4 / px-4 main-axis padding on the rail
-    const wrapperCount = 3 + activeCount; // search + self + active + create
+    // search + (demo if present) + self + active + create
+    const wrapperCount = 3 + (hasDemo ? 1 : 0) + activeCount;
     let length = wrapperCount * STACK_WRAPPER_PX;
     if (inactiveCount > 0) {
       length += stackVisuallyExpanded
@@ -319,7 +324,7 @@ export function App(): JSX.Element {
     }
     length += RAIL_OUTER_PAD_PX * 2;
     void window.chatheads.setOverlayLength(length);
-  }, [headsLoaded, activeCount, inactiveCount, stackVisuallyExpanded]);
+  }, [headsLoaded, activeCount, inactiveCount, hasDemo, stackVisuallyExpanded]);
 
   // Outer fills the window exactly along the rail's main axis (height for
   // vertical, width for horizontal). Self + chat are shrink-0; the peer list
@@ -347,6 +352,22 @@ export function App(): JSX.Element {
       <div className={bubblePadClass}>
         <SearchBubble open={chatOpen} />
       </div>
+      {demo && (
+        <div
+          key={demo.id}
+          ref={registerBubble(demo.id)}
+          className={bubblePadClass}
+          onMouseEnter={(e) => handleBubbleEnter(demo.id, e)}
+          onMouseLeave={hoverLeaveBubble}
+        >
+          <Bubble
+            head={demo}
+            onHoverEnter={() => {}}
+            onHoverLeave={() => {}}
+            hideAge={!showActivityTimestamps}
+          />
+        </div>
+      )}
       {self && (
         <div
           key={self.id}

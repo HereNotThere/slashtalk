@@ -896,7 +896,10 @@ async function runDebugFireCollision(): Promise<void> {
   // Prefer the head whose popover is currently open — that way the warning
   // shows up in the popover you're already looking at. Fall back to other
   // peers if the selected one has no usable sessions.
-  const selfHead = heads[0];
+  const authState = backend.getAuthState();
+  const selfHead = authState.signedIn
+    ? (heads.find((h) => h.id === rail.userHeadId(authState.user.githubLogin)) ?? null)
+    : null;
   const ordered = selectedHeadId
     ? [
         ...heads.filter((h) => h.id === selectedHeadId),

@@ -1,5 +1,5 @@
 import { Fragment, useState, type CSSProperties, type MouseEvent } from "react";
-import { ChatBubbleLeftIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { BoltIcon, ChatBubbleLeftIcon, ClockIcon, FolderIcon } from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, TokenUsage } from "@slashtalk/shared";
 import type { InfoSession } from "../../shared/types";
@@ -110,21 +110,33 @@ function pickNowSession(sessions: InfoSession[] | null): InfoSession | null {
 
 function NowSection({ session }: { session: InfoSession }): JSX.Element {
   const [editing, setEditing] = useState(false);
-  const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
   const status = sessionStatus(session);
   const repo = repoLabel(session);
   const tokens = fmtTokens(session.tokens);
-  const summary = session.rollingSummary ?? null;
+  // Prefer the analyzer's 1-2 sentence description; fall back to the user's
+  // most recent prompt if a description hasn't been generated yet.
+  const summary = session.description ?? session.lastUserPrompt ?? null;
+  const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
   return (
     <div>
-      <PlainHeader label="Now" />
+      <div className="px-4 pt-3 pb-1.5 flex items-center gap-1.5">
+        <BoltIcon className="w-3.5 h-3.5 shrink-0 text-info" aria-hidden />
+        <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Now</span>
+      </div>
       <div className="px-4 pb-3">
         <div className="flex items-start gap-2.5">
           <div className="flex-1 min-w-0">
-            <div className="text-sm text-fg leading-snug line-clamp-2">{title}</div>
+            {summary && <p className="text-sm text-fg leading-snug">{summary}</p>}
             {(repo || tokens || status) && (
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-subtle min-w-0">
-                {repo && <span className="font-mono text-fg/70 truncate">{repo}</span>}
+              <div
+                className={`${summary ? "mt-1" : ""} flex items-center gap-2 text-[11px] text-subtle min-w-0`}
+              >
+                {repo && (
+                  <span className="inline-flex items-center gap-1 min-w-0">
+                    <FolderIcon className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                    <span className="font-mono truncate text-fg/75">{repo}</span>
+                  </span>
+                )}
                 {tokens && (
                   <span className="inline-flex items-center gap-1 shrink-0">
                     <ProviderIcon source={session.source} />
@@ -137,9 +149,6 @@ function NowSection({ session }: { session: InfoSession }): JSX.Element {
                   </span>
                 )}
               </div>
-            )}
-            {summary && (
-              <p className="mt-2 text-sm text-fg/85 leading-snug line-clamp-3">{summary}</p>
             )}
           </div>
           <AskTrigger onClick={() => setEditing(true)} className="self-end -mb-0.5 -mr-1" />
@@ -161,7 +170,7 @@ function PastDaySection(): JSX.Element {
   return (
     <div>
       <div className="px-4 pt-3 pb-1.5 flex items-center gap-1.5">
-        <SparklesIcon className="w-3.5 h-3.5 shrink-0 text-primary" aria-hidden />
+        <ClockIcon className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden />
         <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Past Day</span>
       </div>
       <div className="px-4 pb-3">

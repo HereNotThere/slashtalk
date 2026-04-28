@@ -89,13 +89,12 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
     // POST /v1/heartbeat — session heartbeat
     .post(
       "/heartbeat",
-      async ({ body, user, device }) => {
-        const [prevHb] = await db
-          .select()
-          .from(heartbeats)
-          .where(eq(heartbeats.sessionId, body.sessionId))
-          .limit(1);
-
+      async ({ body, user, device, set }) => {
+        // Authorize before doing anything: a device API key without this gate
+        // could heartbeat any session whose UUID it knew, polluting another
+        // user's `heartbeats` row and publishing a `session_updated` to the
+        // repo channel under the attacker's `user_id`/`github_login` —
+        // spoofing presence on the live feed.
         const [session] = await db
           .select({
             inTurn: sessions.inTurn,
@@ -103,16 +102,25 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             repoId: sessions.repoId,
           })
           .from(sessions)
-          .where(eq(sessions.sessionId, body.sessionId))
+          .where(and(eq(sessions.sessionId, body.sessionId), eq(sessions.userId, user.id)))
           .limit(1);
 
-        const prevState = session
-          ? classifySessionState({
-              heartbeatUpdatedAt: prevHb?.updatedAt ?? null,
-              inTurn: session.inTurn ?? false,
-              lastTs: session.lastTs,
-            })
-          : null;
+        if (!session) {
+          set.status = 404;
+          return { error: "session_not_found" };
+        }
+
+        const [prevHb] = await db
+          .select()
+          .from(heartbeats)
+          .where(eq(heartbeats.sessionId, body.sessionId))
+          .limit(1);
+
+        const prevState = classifySessionState({
+          heartbeatUpdatedAt: prevHb?.updatedAt ?? null,
+          inTurn: session.inTurn ?? false,
+          lastTs: session.lastTs,
+        });
 
         await db
           .insert(heartbeats)
@@ -133,25 +141,23 @@ export const ingestRoutes = (db: Database, redis: RedisBridge) =>
             },
           });
 
-        if (session) {
-          const newState = classifySessionState({
-            heartbeatUpdatedAt: new Date(),
-            inTurn: session.inTurn ?? false,
-            lastTs: session.lastTs,
-          });
+        const newState = classifySessionState({
+          heartbeatUpdatedAt: new Date(),
+          inTurn: session.inTurn ?? false,
+          lastTs: session.lastTs,
+        });
 
-          if (newState !== prevState && session.repoId) {
-            const msg: SessionUpdatedMessage = {
-              type: "session_updated",
-              session_id: body.sessionId,
-              user_id: user.id,
-              github_login: user.githubLogin,
-              repo_id: session.repoId,
-              last_ts: session.lastTs?.toISOString(),
-              state: newState,
-            };
-            void redis.publish(`repo:${session.repoId}`, msg);
-          }
+        if (newState !== prevState && session.repoId) {
+          const msg: SessionUpdatedMessage = {
+            type: "session_updated",
+            session_id: body.sessionId,
+            user_id: user.id,
+            github_login: user.githubLogin,
+            repo_id: session.repoId,
+            last_ts: session.lastTs?.toISOString(),
+            state: newState,
+          };
+          void redis.publish(`repo:${session.repoId}`, msg);
         }
 
         return { ok: true };

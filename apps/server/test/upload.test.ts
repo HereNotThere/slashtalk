@@ -752,4 +752,61 @@ describe("heartbeat", () => {
     expect(hb.pid).toBe(99999);
     expect(hb.kind).toBe("background");
   });
+
+  it("rejects a heartbeat for a session owned by another user", async () => {
+    const bobRes = await fetch(`${baseUrl}/auth/github/callback?code=bob_code`);
+    const bobCookie = getCookie(bobRes, "session")!;
+    const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: bobCookie },
+    });
+    const { token: bobSetupToken } = (await setupRes.json()) as { token: string };
+    const exchangeRes = await fetch(`${baseUrl}/v1/auth/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: bobSetupToken, deviceName: "bob-hb-device", os: "darwin" }),
+    });
+    const { apiKey: bobApiKey } = (await exchangeRes.json()) as { apiKey: string };
+
+    const before = await db
+      .select()
+      .from(heartbeats)
+      .where(eq(heartbeats.sessionId, HB_SESSION_ID));
+    expect(before).toHaveLength(1);
+    const beforePid = before[0].pid;
+
+    const res = await fetch(`${baseUrl}/v1/heartbeat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${bobApiKey}`,
+      },
+      body: JSON.stringify({ sessionId: HB_SESSION_ID, pid: 13, kind: "interactive" }),
+    });
+    expect(res.status).toBe(404);
+
+    const after = await db
+      .select()
+      .from(heartbeats)
+      .where(eq(heartbeats.sessionId, HB_SESSION_ID));
+    expect(after).toHaveLength(1);
+    expect(after[0].pid).toBe(beforePid);
+    expect(after[0].userId).toBe(aliceUserId);
+  });
+
+  it("returns 404 for a heartbeat against a non-existent session", async () => {
+    const res = await fetch(`${baseUrl}/v1/heartbeat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${aliceApiKey}`,
+      },
+      body: JSON.stringify({
+        sessionId: "00000000-0000-0000-0000-000000000999",
+        pid: 1,
+        kind: "interactive",
+      }),
+    });
+    expect(res.status).toBe(404);
+  });
 });

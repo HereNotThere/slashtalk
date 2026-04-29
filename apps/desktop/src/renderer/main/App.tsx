@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Button } from "../shared/Button";
 import { SlashtalkLogo } from "../shared/icons";
+import { RailPreferences } from "../shared/RailPreferences";
+import { SignOutSection } from "./SignOutSection";
 import { SlashtalkSection } from "./SlashtalkSection";
-import { RecentQuestionsSection } from "./RecentQuestionsSection";
-// AgentsSection hidden for now — re-import alongside its render below to restore.
 import type { BackendAuthState } from "../../shared/types";
 
 export function App(): JSX.Element {
@@ -30,9 +30,7 @@ export function App(): JSX.Element {
           <SlashtalkLogo size={64} />
           <div>
             <h1 className="m-0 text-2xl font-bold leading-tight tracking-tight">Slashtalk</h1>
-            <div className="text-subtle text-base mt-1.5">
-              Floating bubbles that stay on top of everything.
-            </div>
+            <div className="text-subtle text-base mt-1.5">A dock for your team&rsquo;s work.</div>
           </div>
         </div>
         <Button
@@ -56,7 +54,12 @@ export function App(): JSX.Element {
       </header>
 
       <SlashtalkSection />
-      <RecentQuestionsSection />
+
+      <section className="bg-surface rounded-2xl p-4 mt-4 flex flex-col gap-1">
+        <RailPreferences />
+      </section>
+
+      <SignOutSection />
     </>
   );
 }

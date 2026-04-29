@@ -2,7 +2,7 @@
 import Layout from '../layouts/Layout.astro';
 ---
 
-<Layout title="Slashtalk — we built it for our team. Here's why.">
+<Layout title="Slashtalk — we built a presence dock for our remote team. Here's why.">
 	<main class="mx-auto max-w-2xl px-6 py-16 sm:py-24">
 		<header class="mb-16 flex items-center justify-between gap-3">
 			<div class="flex items-center gap-3">
@@ -31,7 +31,7 @@ import Layout from '../layouts/Layout.astro';
 			<h1
 				class="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl"
 			>
-				We built Slashtalk for our team. Here's why.
+				We built a presence dock for our remote team. Here's why.
 			</h1>
 
 			<p>
@@ -40,18 +40,17 @@ import Layout from '../layouts/Layout.astro';
 			</p>
 
 			<p>
-				We're small, fully remote, and shipping fast. We weren't 100%
-				relying on tickets anymore. We pinged each other constantly — <em
+				We're small, fully remote, and we ship fast. Because we aren't 100%
+				relying on tickets, we pinged each other constantly — <em
 					class="italic text-neutral-900">"hey, are you on this?"</em
-				> — and every ping interrupted whoever we pinged. We tried daily
-				standups, status threads, Telegram-style channels. Nobody was paying
+				>. We did daily
+				standups, status threads, Slack channels. People wouldn't pay
 				attention and the noise became louder, not clearer.
 			</p>
 
 			<p>
-				The tools we'd inherited were built for a slower kind of work.
-				Standups assume a day fits in two sentences. PR reviews assume
-				you've got time to wait. Slack assumes someone's reading. None of
+				The tools we'd inherited were built for the old way of work.
+				Standups assume your whole day of work fits into two sentences. Ticket tracking assumes people should only work on what they're assigned. Slack channel updates assume people read them. None of
 				those assumptions hold at the speed small teams are moving today.
 			</p>
 
@@ -60,8 +59,7 @@ import Layout from '../layouts/Layout.astro';
 			<hr class="my-12 border-neutral-200" />
 
 			<p>
-				Slashtalk is a floating dock that sits on top of whatever you're
-				working on.
+				Slashtalk is a floating dock that sits on top of your desktop.
 			</p>
 
 			<figure class="my-10">
@@ -74,9 +72,9 @@ import Layout from '../layouts/Layout.astro';
 
 			<p>
 				Each teammate is a card which shows what they're shipping: recent
-				PRs, what active sessions they're working on. The question "what
+				PRs, active sessions. The question "what
 				are you working on?" stops getting asked because the answer is
-				always on screen.
+				always on your dock.
 			</p>
 
 			<figure class="my-10 flex justify-center">
@@ -88,10 +86,8 @@ import Layout from '../layouts/Layout.astro';
 			</figure>
 
 			<p>
-				It can also answer things about the team's actual work — "did
-				anyone touch billing today?" "who's deep in the migration?" —
-				because it can see every active session. The answers come from
-				real code, not a guess (shoutout to the PMs and CEOs).
+				PMs or CEOs constantly pinging developers? They can just go ask. The answers come from
+				real code, not a guess.
 			</p>
 
 			<figure class="my-10">
@@ -105,19 +101,15 @@ import Layout from '../layouts/Layout.astro';
 			<p>
 				When two of us start editing files that are about to collide,
 				both our cards flag it. We catch conflicts in the five minutes
-				they're being created, not in the three-day cycle of waiting
-				for review.
+				they're being created.
 			</p>
 
 			<p>
-				The install is one auth. No IDE plugin, no Slack app, no admin
-				onboarding call. Each contributor connects git and points
-				Slashtalk at the repo on their machine. The product reads
-				locally and stays out of your toolchain.
+				And we purposely left chat or messaging out of this product. We all have enough of those apps on our computers.
 			</p>
 
 			<p id="install" class="scroll-mt-8">
-				To install:
+				If you'd like to give it a try, install it with your team:
 			</p>
 
 			<div class="relative">
@@ -139,11 +131,11 @@ bun run start</code></pre>
 
 			<p>
 				On first launch you'll be asked to authenticate with your git
-				provider and point Slashtalk at your local repo. That's the
+				provider and point it to your local repo. That's the
 				setup.
 			</p>
-<p>
-				We've been on it ourselves for a while now, and so far, we’re shipping more with fewer interruptions and it’s been delightful to feel like you’re working alongside your teammates even when you’re not physically together.
+			<p>
+				We've been on it ourselves for a while now, and so far, we're shipping more with fewer interruptions and it's been delightful to feel like you're working alongside your teammates even when you're not physically together.
 			</p>
 
 			<p>

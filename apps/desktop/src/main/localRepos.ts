@@ -41,6 +41,10 @@ let selectedIds = new Set<number>();
 // server state (different device, manual DB edit, partial prior failure).
 let syncedRepoIds = new Set<number>();
 let reconcilingClaims = false;
+// Set when `reconcileClaims` is called while a prior reconcile is in flight.
+// The in-flight pass loops once more after it finishes whenever this is true,
+// so toggles during the async window can't be silently dropped.
+let reconcilePending = false;
 const changes = createEmitter<TrackedRepo[]>();
 const selectionChanges = createEmitter<Set<number>>();
 
@@ -83,36 +87,46 @@ export function restore(): void {
 // trusts this subscriber to catch up. Re-emits `selectionChanges` once after
 // a successful round so cache listeners (info-card `dashboardCache`) clear
 // against post-sync state, not the optimistic local one.
-async function reconcileClaims(current: Set<number>): Promise<void> {
-  if (reconcilingClaims) return;
+async function reconcileClaims(): Promise<void> {
+  if (reconcilingClaims) {
+    // Another emit fired while we're mid-reconcile. The current pass will
+    // pick up the latest `selectedIds` on its next loop iteration via the
+    // pending flag — bail without re-entering.
+    reconcilePending = true;
+    return;
+  }
   if (!backend.getAuthState().signedIn) return;
-  const toClaim = [...current].filter((id) => !syncedRepoIds.has(id));
-  const toUnclaim = [...syncedRepoIds].filter((id) => !current.has(id));
-  if (toClaim.length === 0 && toUnclaim.length === 0) return;
   reconcilingClaims = true;
   try {
-    let mutated = false;
-    for (const repoId of toClaim) {
-      const repo = tracked.find((t) => t.repoId === repoId);
-      if (!repo) continue;
-      try {
-        await backend.claimRepo(repo.fullName);
-        syncedRepoIds.add(repoId);
-        mutated = true;
-      } catch (err) {
-        console.warn(`[localRepos] reconcile claim(${repoId}) failed:`, err);
+    do {
+      reconcilePending = false;
+      const target = new Set(selectedIds);
+      const toClaim = [...target].filter((id) => !syncedRepoIds.has(id));
+      const toUnclaim = [...syncedRepoIds].filter((id) => !target.has(id));
+      if (toClaim.length === 0 && toUnclaim.length === 0) break;
+      let mutated = false;
+      for (const repoId of toClaim) {
+        const repo = tracked.find((t) => t.repoId === repoId);
+        if (!repo) continue;
+        try {
+          await backend.claimRepo(repo.fullName);
+          syncedRepoIds.add(repoId);
+          mutated = true;
+        } catch (err) {
+          console.warn(`[localRepos] reconcile claim(${repoId}) failed:`, err);
+        }
       }
-    }
-    for (const repoId of toUnclaim) {
-      try {
-        await backend.unclaimRepo(repoId);
-        syncedRepoIds.delete(repoId);
-        mutated = true;
-      } catch (err) {
-        console.warn(`[localRepos] reconcile unclaim(${repoId}) failed:`, err);
+      for (const repoId of toUnclaim) {
+        try {
+          await backend.unclaimRepo(repoId);
+          syncedRepoIds.delete(repoId);
+          mutated = true;
+        } catch (err) {
+          console.warn(`[localRepos] reconcile unclaim(${repoId}) failed:`, err);
+        }
       }
-    }
-    if (mutated) selectionChanges.emit(new Set(selectedIds));
+      if (mutated) selectionChanges.emit(new Set(selectedIds));
+    } while (reconcilePending);
   } finally {
     reconcilingClaims = false;
   }

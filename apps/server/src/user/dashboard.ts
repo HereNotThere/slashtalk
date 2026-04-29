@@ -315,7 +315,10 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
         lastTs: sessions.lastTs,
       })
       .from(sessions)
-      .leftJoin(repos, eq(repos.id, sessions.repoId))
+      // innerJoin (not left): the `inArray(sessions.repoId, visibleRepoIds)`
+      // filter below already excludes null-repoId sessions, and including them
+      // would risk leaking work on untracked repos to peer callers.
+      .innerJoin(repos, eq(repos.id, sessions.repoId))
       .where(
         and(
           eq(sessions.userId, target.id),
@@ -386,7 +389,7 @@ interface StandupPromptArgs {
   }>;
   sessions: Array<{
     title: string | null;
-    repoFullName: string | null;
+    repoFullName: string;
     lastTs: string;
     summary: RollingSummaryShape | null;
   }>;
@@ -408,7 +411,7 @@ function buildStandupPrompt(args: StandupPromptArgs): string {
 
   if (args.sessions.length > 0) {
     const lines = args.sessions.map((s) => {
-      const repo = s.repoFullName ? shortRepo(s.repoFullName) : "(unknown repo)";
+      const repo = shortRepo(s.repoFullName);
       const title = s.title ? truncate(s.title, 120) : "(untitled)";
       const summary = s.summary?.summary ? truncate(s.summary.summary, 240) : "(no summary)";
       const highlights = s.summary?.highlights?.length

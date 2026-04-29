@@ -111,7 +111,10 @@ const dashboardInFlight = new Map<string, Promise<InfoDashboardData>>();
 // apps/server/src/repo/overview.ts), so a single PR change naturally busts
 // the LLM cache on the next request.
 const projectOverviewCache = new Map<string, ProjectOverviewResponse>();
-const projectOverviewInFlight = new Map<string, Promise<ProjectOverviewResponse>>();
+// Promises stored here always resolve (never reject) — see
+// fetchProjectOverviewForRepo. Null means the fetch failed; callers
+// `.finally()` chain on this map's entries can't trip an unhandled rejection.
+const projectOverviewInFlight = new Map<string, Promise<ProjectOverviewResponse | null>>();
 
 // User toggled which local repos are tracked: clear optimistically so the
 // next hover doesn't paint stale cache. Then again on `onClaimsSettled` to
@@ -487,7 +490,11 @@ function selectedIsSynthetic(): boolean {
 // flips and drag ticks where the rail has moved.
 export function repositionIfVisible(): void {
   if (!selectedHeadId) return;
-  if (!selectedIsSynthetic() && !deps.getHeads().some((h) => h.id === selectedHeadId)) return;
+  // Synthetic project heads have no rail bubble — fallback math collapses to
+  // idx 0 (top of rail) which mispositions the popover. Skip; the popover
+  // stays put through the drag and the next hover snaps it back.
+  if (selectedIsSynthetic()) return;
+  if (!deps.getHeads().some((h) => h.id === selectedHeadId)) return;
   positionInfo(selectedHeadId);
 }
 
@@ -529,25 +536,33 @@ export async function fetchSessionsForHead(headId: string): Promise<InfoSession[
 async function fetchProjectOverviewForRepo(
   repoFullName: string,
   opts: { force?: boolean } = {},
-): Promise<ProjectOverviewResponse> {
+): Promise<ProjectOverviewResponse | null> {
   if (!opts.force) {
     const cached = projectOverviewCache.get(repoFullName);
     if (cached) return cached;
     const inFlight = projectOverviewInFlight.get(repoFullName);
     if (inFlight) return inFlight;
   }
-  const promise = backend.fetchProjectOverview(repoFullName, PROJECT_OVERVIEW_SCOPE);
+  // IIFE always resolves (mirrors fetchDashboardForLogin's posture): callers
+  // chain `.finally()` directly off the returned promise, so a raw fetch
+  // rejection here would surface as an unhandled rejection.
+  const promise = (async (): Promise<ProjectOverviewResponse | null> => {
+    try {
+      return await backend.fetchProjectOverview(repoFullName, PROJECT_OVERVIEW_SCOPE);
+    } catch (err) {
+      console.warn(`[info] project overview fetch failed repo=${repoFullName}:`, err);
+      return null;
+    }
+  })();
   projectOverviewInFlight.set(repoFullName, promise);
   void promise
     .then((data) => {
       // Same superseded-write guard as fetchDashboardForLogin: only commit
-      // to the cache when this is still the active in-flight.
-      if (projectOverviewInFlight.get(repoFullName) === promise) {
+      // to the cache when this is still the active in-flight, and only when
+      // the fetch produced data (skip the null-on-error case).
+      if (data && projectOverviewInFlight.get(repoFullName) === promise) {
         projectOverviewCache.set(repoFullName, data);
       }
-    })
-    .catch((err) => {
-      console.warn(`[info] project overview fetch failed repo=${repoFullName}:`, err);
     })
     .finally(() => {
       if (projectOverviewInFlight.get(repoFullName) === promise) {

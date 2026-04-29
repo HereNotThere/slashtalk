@@ -1,0 +1,65 @@
+---
+interface Bubble {
+	name: string;
+	avatar: string;
+	label: string;
+	self?: boolean;
+}
+
+const bubbles: Bubble[] = [
+	{ name: "Theo", avatar: "https://i.pravatar.cc/120?img=47", label: "16m" },
+	{ name: "Jamie", avatar: "https://i.pravatar.cc/120?img=12", label: "14m" },
+	{ name: "Alex", avatar: "https://i.pravatar.cc/120?img=33", label: "49m" },
+	{ name: "Mika", avatar: "https://i.pravatar.cc/120?img=5", label: "1h" },
+	{ name: "Ryan", avatar: "https://i.pravatar.cc/120?img=15", label: "1h", self: true },
+	{ name: "Tex", avatar: "https://i.pravatar.cc/120?img=68", label: "6h" },
+	{ name: "Ben", avatar: "https://i.pravatar.cc/120?img=51", label: "13h" },
+	{ name: "Sara", avatar: "https://i.pravatar.cc/120?img=44", label: "23h" },
+];
+---
+
+<div
+	class="inline-flex items-center gap-2.5 rounded-full border border-white/60 bg-neutral-200/70 px-3 py-2 shadow-[0_10px_40px_-12px_rgba(0,0,0,0.25)] backdrop-blur-md"
+>
+	{
+		bubbles.map((b) => (
+			<button
+				type="button"
+				aria-label={`${b.name} — last active ${b.label || "recently"}`}
+				class={`relative inline-flex size-[52px] items-center justify-center rounded-full bg-neutral-300 ring-1 ring-black/5 transition hover:scale-110 ${b.self ? "outline outline-[3px] -outline-offset-[3px] outline-white/80" : ""}`}
+			>
+				<img
+					src={b.avatar}
+					alt=""
+					loading="lazy"
+					class="size-full rounded-full object-cover"
+				/>
+				{b.label && (
+					<span class="absolute -right-1 -bottom-1 rounded-full bg-neutral-900/90 px-1.5 py-0.5 text-[10px] leading-none font-medium text-white shadow-sm ring-2 ring-neutral-200/70">
+						{b.label}
+					</span>
+				)}
+			</button>
+		))
+	}
+	<button
+		type="button"
+		aria-label="Search the dock"
+		class="inline-flex size-[52px] items-center justify-center rounded-full bg-neutral-300/80 text-neutral-700 transition hover:bg-neutral-300"
+	>
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="2"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			width="20"
+			height="20"
+			aria-hidden="true"
+		>
+			<circle cx="11" cy="11" r="7"></circle>
+			<path d="m20 20-3.5-3.5"></path>
+		</svg>
+	</button>
+</div>

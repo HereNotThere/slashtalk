@@ -192,6 +192,63 @@ Notes:
 - For a hosted-API + local-everything-else dev session, comment the local
   URLs out and the desktop falls back to the hosted defaults.
 
+## Releasing the desktop app
+
+Desktop releases are driven by [changesets](https://github.com/changesets/changesets). Only `@slashtalk/electron` is versioned — server, web, website, and shared packages are listed in `ignore` in [`.changeset/config.json`](.changeset/config.json).
+
+### Author flow
+
+1. Make a desktop change in a feature branch.
+2. From the repo root, create a changeset:
+   ```sh
+   bun run changeset
+   ```
+   Pick `@slashtalk/electron`, choose a bump type (`patch` / `minor` / `major`), and write a one-line summary. Commit the generated `.changeset/*.md` alongside your code.
+3. Open and merge the PR to `main`.
+
+### What CI does
+
+The [`release` workflow](.github/workflows/release.yml) runs on every push to `main`:
+
+1. **`release` job** (ubuntu) — runs `changesets/action`. If pending changesets exist, it opens (or updates) a `chore: version packages` PR that bumps `apps/desktop/package.json` and updates the changelog.
+2. When that PR is merged, the same job runs `changeset tag` and pushes the new tag (`@slashtalk/electron@<version>`).
+3. **`build-mac` job** (macos-latest) — gated on the publish output. Imports the Developer ID cert + App Store Connect API key from secrets, then runs `bun run dist:mac` in `apps/desktop/`. electron-builder signs (hardened runtime + entitlements at [`apps/desktop/build/entitlements.mac.plist`](apps/desktop/build/entitlements.mac.plist)), notarizes with Apple, and packages a `.dmg`.
+4. The DMG is uploaded to a fresh GitHub Release as `Slashtalk-mac.dmg` (stable filename via `artifactName` in `apps/desktop/package.json`).
+
+### Stable download URL
+
+The website (or anywhere else) should link to:
+
+```
+https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac.dmg
+```
+
+GitHub redirects this to the most recent release's asset, so the URL never has to change.
+
+### Required repo secrets
+
+| Secret                 | What it is                                                          |
+| ---------------------- | ------------------------------------------------------------------- |
+| `MAC_CERT_BASE64`      | `base64 -i DeveloperID.p12` of the Developer ID Application cert    |
+| `MAC_CERT_PASSWORD`    | Password for the `.p12`                                             |
+| `APPLE_API_KEY_BASE64` | `base64 -i AuthKey_XXXX.p8` from App Store Connect                  |
+| `APPLE_API_KEY_ID`     | Key ID shown next to the key in App Store Connect                   |
+| `APPLE_API_ISSUER`     | Issuer ID at the top of App Store Connect → Users and Access → Keys |
+
+The cert is bound to your Apple Developer team; the API key drives notarization. To rotate either, regenerate, re-base64, and update the secret.
+
+### Manual / unsigned local build
+
+For day-to-day local packaging without going through Apple, unset `CSC_LINK` and override the mac config:
+
+```sh
+cd apps/desktop
+bun run build
+bunx electron-builder --mac --config.mac.identity=null --config.mac.notarize=false
+```
+
+This produces an unsigned `.dmg` in `apps/desktop/dist/` that macOS will Gatekeeper-block on first launch (right-click → Open to bypass) — fine for testing, not for distribution.
+
 ## Project structure
 
 See [`AGENTS.md`](AGENTS.md) for the full map and per-workspace pointers.
@@ -221,11 +278,13 @@ slashtalk/
 
 ## Key scripts
 
-| Command               | Directory     | Description                 |
-| --------------------- | ------------- | --------------------------- |
-| `bun run dev`         | `apps/server` | Start with file watching    |
-| `bun run start`       | `apps/server` | Start without watching      |
-| `bun run db:generate` | `apps/server` | Generate Drizzle migrations |
-| `bun run db:migrate`  | `apps/server` | Apply migrations            |
-| `bun run typecheck`   | `apps/server` | TypeScript type check       |
-| `bun test`            | `apps/server` | Run test suite              |
+| Command               | Directory      | Description                                     |
+| --------------------- | -------------- | ----------------------------------------------- |
+| `bun run dev`         | `apps/server`  | Start with file watching                        |
+| `bun run start`       | `apps/server`  | Start without watching                          |
+| `bun run db:generate` | `apps/server`  | Generate Drizzle migrations                     |
+| `bun run db:migrate`  | `apps/server`  | Apply migrations                                |
+| `bun run typecheck`   | `apps/server`  | TypeScript type check                           |
+| `bun test`            | `apps/server`  | Run test suite                                  |
+| `bun run changeset`   | repo root      | Author a desktop release changeset              |
+| `bun run dist:mac`    | `apps/desktop` | Build, sign, notarize, and package macOS `.dmg` |

@@ -30,14 +30,20 @@
       "package.json"
     ],
     "asar": true,
+    "artifactName": "${productName}-mac.${ext}",
     "mac": {
       "target": [
         {
-          "target": "dmg"
+          "target": "dmg",
+          "arch": ["arm64"]
         }
       ],
-      "category": "public.app-category.developer-tools",
-      "identity": null
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     }
   },
   "trustedDependencies": [

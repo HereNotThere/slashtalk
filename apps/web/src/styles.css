@@ -173,7 +173,7 @@ button {
 }
 
 .person-card {
-  padding: 14px;
+  overflow: hidden;
 }
 
 .person-header {
@@ -181,11 +181,10 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  margin-bottom: 12px;
+  padding: 14px;
 }
 
 .person-header h2,
-.session-row h3,
 .empty-state h2 {
   margin: 0;
   letter-spacing: 0;
@@ -196,7 +195,6 @@ button {
 }
 
 .person-header p,
-.session-row p,
 .empty-state p {
   margin: 4px 0 0;
   color: #617067;
@@ -254,41 +252,126 @@ button {
   color: #66706a;
 }
 
-.session-list {
-  display: grid;
-  gap: 8px;
+.card-section {
+  border-top: 1px solid #e5eae5;
+  padding: 12px 14px;
 }
 
-.session-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 8px;
-  background: #f7f9f7;
+.card-section-last {
+  padding-bottom: 14px;
+}
+
+.section-label {
+  margin-bottom: 7px;
+  color: #617067;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.now-link {
+  display: block;
   color: inherit;
   text-decoration: none;
 }
 
-.session-row h3 {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  font-size: 15px;
-  line-height: 1.3;
+.now-summary,
+.today-copy,
+.section-empty {
+  margin: 0;
+  line-height: 1.45;
 }
 
-.session-meta {
+.now-summary {
+  color: #26312b;
+  font-size: 15px;
+}
+
+.today-copy {
+  color: #26312b;
+  font-size: 14px;
+}
+
+.today-copy a {
+  color: #245c42;
+  font-weight: 700;
+}
+
+.today-copy code {
+  border-radius: 5px;
+  background: #eef2ee;
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.now-meta {
   display: flex;
-  min-width: 88px;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 7px;
   color: #617067;
   font-size: 12px;
   font-weight: 700;
+}
+
+.live-text {
+  color: #16834a;
+}
+
+.pr-list {
+  display: grid;
+}
+
+.pr-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 9px;
+  padding: 8px 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.pr-row + .pr-row {
+  border-top: 1px solid #edf1ed;
+}
+
+.pr-row h3 {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 14px;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.pr-row p {
+  margin: 4px 0 0;
+  color: #617067;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pr-state {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 999px;
+}
+
+.pr-state-open {
+  background: #228b52;
+}
+
+.pr-state-merged {
+  background: #7c3aed;
+}
+
+.pr-state-closed {
+  background: #c2410c;
 }
 
 .empty-state {
@@ -395,9 +478,8 @@ button {
   .eyebrow,
   .metric span,
   .person-header p,
-  .session-row p,
   .empty-state p,
-  .session-meta {
+  .muted {
     color: #9daba3;
   }
 
@@ -413,13 +495,30 @@ button {
     color: #f6f7f4;
   }
 
+  .card-section {
+    border-color: #2c3832;
+  }
+
+  .now-summary,
+  .today-copy {
+    color: #f6f7f4;
+  }
+
+  .today-copy a {
+    color: #8ee2b5;
+  }
+
+  .today-copy code {
+    background: #24302a;
+  }
+
+  .pr-row + .pr-row {
+    border-color: #2c3832;
+  }
+
   .primary {
     background: #35d07f;
     color: #07150d;
-  }
-
-  .session-row {
-    background: #111816;
   }
 
   .plain-list li {
@@ -480,17 +579,5 @@ button {
 
   .detail-grid {
     grid-template-columns: 1fr;
-  }
-
-  .session-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .session-meta {
-    width: 100%;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
   }
 }

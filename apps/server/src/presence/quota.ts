@@ -129,10 +129,15 @@ export async function writeQuotaPresence(
 /**
  * Fan out a `presence_updated` to the user's WS channel and every repo channel
  * they participate in. Mirrors the spotify presence pattern so live
- * subscribers refresh without waiting for the next 15s peer-poll. Pure
- * fire-and-forget: redis.publish never throws (already soft-fail), and the
- * userRepos lookup is a small read that's allowed to fail loudly — if it
- * does, the only consequence is a single missed real-time refresh.
+ * subscribers refresh without waiting for the next 15s peer-poll.
+ *
+ * Soft-fail: redis.publish is already fire-and-forget per core-beliefs #7,
+ * but the userRepos lookup is a real DB read that can throw on a transient
+ * Postgres hiccup. We swallow it here because the only callers (ingest after
+ * events have already committed, Claude POST after Redis SETEX has already
+ * succeeded) treat this as a real-time-fan-out optimization on top of a
+ * durable write — losing the publish must not propagate as a 5xx and trick
+ * the client into retrying already-persisted work.
  */
 export async function publishQuotaUpdate(
   db: Database,
@@ -142,19 +147,23 @@ export async function publishQuotaUpdate(
   source: QuotaSource,
   presence: QuotaPresence | null,
 ): Promise<void> {
-  const repoRows = await db
-    .select({ repoId: userRepos.repoId })
-    .from(userRepos)
-    .where(eq(userRepos.userId, userId));
-  const msg = {
-    type: "presence_updated",
-    user_id: userId,
-    github_login: githubLogin,
-    quota: { source, presence },
-  } as const;
-  void redis.publish(`user:${userId}`, msg);
-  for (const r of repoRows) {
-    void redis.publish(`repo:${r.repoId}`, msg);
+  try {
+    const repoRows = await db
+      .select({ repoId: userRepos.repoId })
+      .from(userRepos)
+      .where(eq(userRepos.userId, userId));
+    const msg = {
+      type: "presence_updated",
+      user_id: userId,
+      github_login: githubLogin,
+      quota: { source, presence },
+    } as const;
+    void redis.publish(`user:${userId}`, msg);
+    for (const r of repoRows) {
+      void redis.publish(`repo:${r.repoId}`, msg);
+    }
+  } catch (err) {
+    console.warn(`[quota] publish failed for user=${userId}:`, (err as Error).message);
   }
 }
 
@@ -162,8 +171,10 @@ export async function publishQuotaUpdate(
  * Combined SETEX + publish — every ingest path that writes a quota also wants
  * the live notification, and the Claude POST endpoint does too. Keeping them
  * in one helper makes "forgot to publish" impossible (the original ingest
- * bug). The Claude POST clear path (presence: null) doesn't go through here
- * because it uses redis.del instead of setex.
+ * bug). Both halves are soft-fail (see writeQuotaPresence and
+ * publishQuotaUpdate), so callers can `await` this without try/catch even
+ * after they've already committed durable state. The Claude POST clear path
+ * (presence: null) doesn't go through here because it uses redis.del.
  */
 export async function writeAndPublishQuotaPresence(
   db: Database,

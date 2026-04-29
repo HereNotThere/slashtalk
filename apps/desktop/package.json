@@ -22,6 +22,7 @@
   "build": {
     "appId": "com.slashtalk.desktop",
     "productName": "Slashtalk",
+    "electronVersion": "33.4.11",
     "directories": {
       "output": "dist"
     },

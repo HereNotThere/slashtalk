@@ -6,6 +6,7 @@ import * as localRepos from "../localRepos";
 import * as rail from "../rail";
 import * as peerPresence from "../peerPresence";
 import * as peerLocations from "../peerLocations";
+import { fetchGhUserPrs } from "../ghPrs";
 import { setMacCornerRadius } from "../macCorners";
 import { BUBBLE_PAD, BUBBLE_SIZE, PADDING_Y } from "./dock-geometry";
 import { currentDock, getIsDragging } from "./dock-drag";
@@ -487,7 +488,7 @@ async function fetchDashboardForLogin(
   // forced refetch) from clobbering newer data.
   const promise = (async (): Promise<InfoDashboardData> => {
     const [prsRes, standupRes] = await Promise.allSettled([
-      backend.fetchUserPrs(login, DASHBOARD_PRS_SCOPE),
+      fetchGhUserPrs(login, DASHBOARD_PRS_SCOPE),
       backend.fetchUserStandup(login, DASHBOARD_STANDUP_SCOPE),
     ]);
     if (prsRes.status === "rejected") {
@@ -497,11 +498,32 @@ async function fetchDashboardForLogin(
       console.warn(`[info] dashboard standup fetch failed login=${login}:`, standupRes.reason);
     }
     const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
+    const ghStatus = prsRes.status === "fulfilled" ? prsRes.value.ghStatus : "ready";
     const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
+    // `noClaimedRepos` now comes from the standup endpoint alone — gh-driven
+    // PR fetching has no notion of user_repos rows since it queries GitHub
+    // directly with the caller's token.
     const noClaimedRepos =
-      (prsRes.status === "fulfilled" && prsRes.value.noClaimedRepos === true) ||
-      (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
-    return { prs, standup, noClaimedRepos };
+      standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true;
+    // When the dashboard target is self, push the gh-discovered PRs back to
+    // the server so the standup composer (server-side, queries
+    // `pull_requests`) can mention them on the same day they're opened.
+    // Soft-fail: a network blip here must never break the user-card.
+    if (prs.length > 0 && backend.isSelf(login)) {
+      backend
+        .pushSelfPrs(prs)
+        .then((r) => {
+          if (r.upserted > 0) {
+            console.log(
+              `[info] pushed ${r.upserted} self PR(s) to server (${r.unknownRepos} unknown repo)`,
+            );
+          }
+        })
+        .catch((err) => {
+          console.warn(`[info] pushSelfPrs failed:`, (err as Error).message);
+        });
+    }
+    return { prs, standup, noClaimedRepos, ghStatus };
   })();
   dashboardInFlight.set(login, promise);
   void promise

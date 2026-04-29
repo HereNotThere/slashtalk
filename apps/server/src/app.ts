@@ -4,6 +4,7 @@ import { openapi } from "@elysiajs/openapi";
 import type { Database } from "./db";
 import { githubAuth, cliAuth } from "./auth/github";
 import { ingestRoutes } from "./ingest/routes";
+import { prIngestRoutes } from "./social/pr-ingest-routes";
 import { socialRoutes } from "./social/routes";
 import { sessionRoutes } from "./sessions/routes";
 import { userRoutes, deviceReposRoutes, userLocationRoutes } from "./user/routes";
@@ -46,6 +47,7 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(githubAuth(db, redis))
     .use(cliAuth(db))
     .use(ingestRoutes(db, redis))
+    .use(prIngestRoutes(db))
     .use(socialRoutes(db))
     .use(sessionRoutes(db))
     .use(userRoutes(db))

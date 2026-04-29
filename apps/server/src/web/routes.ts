@@ -42,7 +42,7 @@ async function serveWebApp(request: Request, set: { status?: number | string }) 
   return "Web app has not been built. Run `bun --filter @slashtalk/web build`.";
 }
 
-function relativeAppPath(pathname: string): string | null {
+export function relativeAppPath(pathname: string): string | null {
   if (pathname === "/app" || pathname === "/app/") return INDEX_HTML;
   if (!pathname.startsWith("/app/")) return null;
 
@@ -53,7 +53,10 @@ function relativeAppPath(pathname: string): string | null {
     return null;
   }
 
-  if (!rel || rel.includes("\0")) return null;
+  if (rel.includes("\0")) return null;
+  rel = rel.replace(/\/+$/, "");
+  if (!rel) return INDEX_HTML;
+
   const segments = rel.split("/");
   if (segments.some((segment) => segment === ".." || segment === "." || segment === "")) {
     return null;

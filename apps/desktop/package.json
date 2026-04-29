@@ -1,6 +1,6 @@
 {
   "name": "@slashtalk/electron",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "slashtalk electron app",
   "type": "module",
@@ -35,7 +35,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "artifactName": "${productName}-mac-${arch}.${ext}",

@@ -41,7 +41,10 @@ interface GraphqlPrNode {
 }
 
 interface GraphqlSearchResponse {
-  data?: { search?: { nodes?: GraphqlPrNode[] } };
+  // Nodes are loosely typed: GitHub returns `null` for entries the viewer
+  // can't see, and the inline-fragment shape means non-PR types arrive as
+  // `{}`. The mapping below filters both out before relying on fields.
+  data?: { search?: { nodes?: (Partial<GraphqlPrNode> | null)[] } };
   errors?: { message?: string }[];
 }
 
@@ -119,7 +122,12 @@ export async function fetchGhUserPrs(
     console.warn(`[ghPrs] graphql errors login=${login}:`, parsed.errors[0]?.message);
     return { prs: [], ghStatus: "ready" };
   }
-  const nodes = parsed.data?.search?.nodes ?? [];
+  // GitHub's search connection can return `null` (viewer lost access) or
+  // `{}` (non-PullRequest types matching the inline fragment) — drop both
+  // before mapping so a single bad node doesn't blow up the whole list.
+  const nodes = (parsed.data?.search?.nodes ?? []).filter(
+    (p): p is GraphqlPrNode => !!p && typeof p.state === "string" && !!p.repository?.nameWithOwner,
+  );
 
   const prs: GhPr[] = nodes.map((p) => ({
     number: p.number,

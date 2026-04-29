@@ -47,6 +47,13 @@ let reconcilingClaims = false;
 let reconcilePending = false;
 const changes = createEmitter<TrackedRepo[]>();
 const selectionChanges = createEmitter<Set<number>>();
+// Fires after `reconcileClaims` actually mutated server state. Distinct from
+// `selectionChanges` (which fires on user toggle, before the round-trip
+// completes) so listeners that need post-sync state — `dashboardCache.clear`,
+// where stale entries can leak repo permissions — aren't conflated with
+// optimistic UI listeners. Self-emitting on `selectionChanges` instead would
+// re-trigger every other subscriber for no benefit.
+const claimsSettled = createEmitter<void>();
 
 export function restore(): void {
   const saved = store.get<TrackedRepo[]>(TRACKED_KEY);
@@ -84,9 +91,9 @@ export function restore(): void {
 // Diffs `current` against `syncedRepoIds` and runs the claim/unclaim deltas.
 // Designed as the single point that touches `user_repos` server-side so each
 // UI surface (settings X, tray tick, rehydrate) just toggles local state and
-// trusts this subscriber to catch up. Re-emits `selectionChanges` once after
-// a successful round so cache listeners (info-card `dashboardCache`) clear
-// against post-sync state, not the optimistic local one.
+// trusts this subscriber to catch up. Emits `claimsSettled` after a mutating
+// round so cache listeners (info-card `dashboardCache`) can re-fetch against
+// post-sync server state.
 async function reconcileClaims(): Promise<void> {
   if (reconcilingClaims) {
     // Another emit fired while we're mid-reconcile. The current pass will
@@ -125,7 +132,7 @@ async function reconcileClaims(): Promise<void> {
           console.warn(`[localRepos] reconcile unclaim(${repoId}) failed:`, err);
         }
       }
-      if (mutated) selectionChanges.emit(new Set(selectedIds));
+      if (mutated) claimsSettled.emit();
     } while (reconcilePending);
   } finally {
     reconcilingClaims = false;
@@ -192,6 +199,7 @@ export function findByFullName(fullName: string | null | undefined): TrackedRepo
 
 export const onChange = changes.on;
 export const onSelectionChange = selectionChanges.on;
+export const onClaimsSettled = claimsSettled.on;
 
 /** Repo IDs currently included in the rail filter. */
 export function selectedRepoIds(): Set<number> {

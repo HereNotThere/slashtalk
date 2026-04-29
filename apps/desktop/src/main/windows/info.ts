@@ -101,16 +101,17 @@ const sessionCache = new Map<string, InfoSession[]>();
 const dashboardCache = new Map<string, InfoDashboardData>();
 const dashboardInFlight = new Map<string, Promise<InfoDashboardData>>();
 
-// When the user toggles which local repos are tracked, the server's view of
-// `user_repos` may also have shifted (claim on add, prior unclaim, etc.).
-// Wipe the cache wholesale so the next hover refetches and picks up either a
-// fresh standup or the `noClaimedRepos` empty-state CTA. Cheap: at most one
-// HTTP roundtrip per visible login on next paint.
-localRepos.onSelectionChange(() => {
+// User toggled which local repos are tracked: clear optimistically so the
+// next hover doesn't paint stale cache. Then again on `onClaimsSettled` to
+// pick up the server's post-sync view (claim succeeded, `noClaimedRepos`
+// flipped, etc.). Cheap: at most one HTTP roundtrip per visible login on
+// next paint.
+const clearDashboardCache = (): void => {
   if (dashboardCache.size === 0) return;
-  console.log(`[info] dashboard cache cleared on selection change (had=${dashboardCache.size})`);
   dashboardCache.clear();
-});
+};
+localRepos.onSelectionChange(clearDashboardCache);
+localRepos.onClaimsSettled(clearDashboardCache);
 
 type InfoShowReadyResolver = (height: number | null) => void;
 // FIFO queue: each ack drains exactly one resolver so concurrent showInfo
@@ -374,15 +375,14 @@ async function showInfo(
   // re-expands a session the user may have manually collapsed mid-fetch.
   const pending: Promise<unknown>[] = [];
   if (!sessionCache.has(head.id)) pending.push(fetchSessionsForHead(head.id));
-  // Dashboard is always refetched on show (stale-while-revalidate): the cache
-  // gives the renderer something to paint immediately via the snapshot push
-  // above, but server-side state (claimed repos, freshly-merged PRs, standup
-  // TTL) can shift between hovers in ways the desktop has no event for. The
-  // cost is one HTTP roundtrip per hover; the server's own LLM cache absorbs
-  // the heavy work.
+  // Dashboard is always refetched on show (stale-while-revalidate): the
+  // snapshot push above already painted the previous cache entry for instant
+  // feedback, and `force: true` makes the new fetch bypass both cache and
+  // any pre-existing in-flight (which could have started before an
+  // invalidating event the desktop has no signal for). The cost is one HTTP
+  // roundtrip per hover; the server's own LLM cache absorbs the heavy work.
   if (login) {
-    dashboardCache.delete(login);
-    pending.push(fetchDashboardForLogin(login));
+    pending.push(fetchDashboardForLogin(login, { force: true }));
   }
   if (pending.length > 0) {
     void Promise.all(pending).then(() => {
@@ -472,11 +472,19 @@ export async function fetchSessionsForHead(headId: string): Promise<InfoSession[
   return [];
 }
 
-async function fetchDashboardForLogin(login: string): Promise<InfoDashboardData> {
-  const cached = dashboardCache.get(login);
-  if (cached) return cached;
-  const inFlight = dashboardInFlight.get(login);
-  if (inFlight) return inFlight;
+async function fetchDashboardForLogin(
+  login: string,
+  opts: { force?: boolean } = {},
+): Promise<InfoDashboardData> {
+  // `force` bypasses BOTH the cache and the in-flight dedupe so callers that
+  // intentionally invalidated state (showInfo, refreshNow) don't get served
+  // a result from a fetch started before the invalidation.
+  if (!opts.force) {
+    const cached = dashboardCache.get(login);
+    if (cached) return cached;
+    const inFlight = dashboardInFlight.get(login);
+    if (inFlight) return inFlight;
+  }
 
   const promise = (async () => {
     // PRs and standup run independently — one failing shouldn't blank the
@@ -502,10 +510,16 @@ async function fetchDashboardForLogin(login: string): Promise<InfoDashboardData>
     const data: InfoDashboardData = { prs, standup, noClaimedRepos };
     dashboardCache.set(login, data);
     return data;
-  })().finally(() => {
-    dashboardInFlight.delete(login);
-  });
+  })();
   dashboardInFlight.set(login, promise);
+  // Only delete our slot if we're still the active in-flight. A forced
+  // refetch may have replaced us with a newer promise; in that case the
+  // newer one owns cleanup.
+  void promise.finally(() => {
+    if (dashboardInFlight.get(login) === promise) {
+      dashboardInFlight.delete(login);
+    }
+  });
   return promise;
 }
 
@@ -539,15 +553,14 @@ async function refreshNow(): Promise<void> {
   // Only drop the selected head's cache; other heads stay warm until clicked.
   sessionCache.delete(head.id);
   const login = rail.parseUserHeadId(head.id);
-  if (login) {
-    // The dashboard derives from sessions and PRs — invalidate the slot for
-    // this user so a session_updated propagates into the next paint.
-    dashboardCache.delete(login);
-  }
   try {
     await Promise.all([
       fetchSessionsForHead(head.id),
-      login ? fetchDashboardForLogin(login) : Promise.resolve(),
+      // session_updated triggered this refresh — force a dashboard refetch
+      // so the renderer sees PR/standup state derived from the new events
+      // (in-flight fetches that started before this signal would otherwise
+      // satisfy the dedup and serve pre-event data).
+      login ? fetchDashboardForLogin(login, { force: true }) : Promise.resolve(),
     ]);
     pushInfoShowSnapshot(infoWindow, head, undefined);
   } catch (e) {

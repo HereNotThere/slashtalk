@@ -80,6 +80,17 @@ function cacheKey(callerId: number, targetId: number, scope: DashboardScope): st
   return `${callerId}:${targetId}:${scope}`;
 }
 
+/** Drop the user's *self-view* standup cache entries across all scopes.
+ *  Called after the desktop pushes new self-PRs so the next hover composes
+ *  a fresh blurb instead of waiting STANDUP_CACHE_TTL_MS. We don't bother
+ *  invalidating peer-viewing-self entries — peers already accept some lag,
+ *  and tracking them would mean iterating the cache. */
+export function invalidateSelfStandupCache(userId: number): void {
+  for (const scope of SCOPE_VALUES) {
+    standupCache.delete(cacheKey(userId, userId, scope));
+  }
+}
+
 function parseScope(raw: string | undefined): DashboardScope {
   if (raw && (SCOPE_VALUES as string[]).includes(raw)) return raw as DashboardScope;
   return "today";

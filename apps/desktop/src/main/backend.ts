@@ -22,11 +22,13 @@ import type {
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
+  IngestSelfPrEntry,
+  IngestSelfPrsRequest,
+  IngestSelfPrsResponse,
   SessionSnapshot,
   SpotifyPresence,
   StandupResponse,
   SyncStateEntry,
-  UserPrsResponse,
 } from "@slashtalk/shared";
 import type {
   BackendAuthState,
@@ -675,10 +677,15 @@ export function listFeedSessionsForUser(login: string): Promise<FeedSessionSnaps
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
 }
 
-export function fetchUserPrs(login: string, scope: DashboardScope): Promise<UserPrsResponse> {
-  const qs = new URLSearchParams({ scope });
-  return jsonFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs?${qs}`, {
-    method: "GET",
+/** Pushes the caller's own PRs (sourced from local `gh`) to the server so
+ *  `pull_requests` is fresh enough for the standup composer. Server filters
+ *  to caller-authored / known-repo entries — see pr-ingest-routes.ts. */
+export function pushSelfPrs(prs: IngestSelfPrEntry[]): Promise<IngestSelfPrsResponse> {
+  const body: IngestSelfPrsRequest = { prs };
+  return jsonFetch<IngestSelfPrsResponse>("/v1/me/prs", {
+    method: "POST",
+    body,
+    auth: "apiKey",
   });
 }
 

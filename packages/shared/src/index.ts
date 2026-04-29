@@ -102,6 +102,33 @@ export interface UserPrsResponse {
   noClaimedRepos?: boolean;
 }
 
+/** Desktop → server push of PRs the caller authored, sourced from the local
+ *  `gh` CLI. Lets the server keep `pull_requests` fresh without waiting for
+ *  the events-feed poller, so the standup composer can mention them. The
+ *  server filters to entries where `pr.repoFullName` is a known repo and
+ *  treats `caller.githubLogin` as the only valid `authorLogin` — desktops
+ *  cannot ingest PRs on behalf of other users. */
+export interface IngestSelfPrEntry {
+  number: number;
+  title: string;
+  url: string;
+  repoFullName: string;
+  state: "open" | "closed" | "merged";
+  updatedAt: string;
+  headRef: string;
+}
+
+export interface IngestSelfPrsRequest {
+  prs: IngestSelfPrEntry[];
+}
+
+export interface IngestSelfPrsResponse {
+  /** PRs upserted into `pull_requests`. */
+  upserted: number;
+  /** PRs dropped because the repo isn't in `repos` (not claimed by anyone). */
+  unknownRepos: number;
+}
+
 /** LLM-composed standup blurb for a specific user. `summary` is null when
  *  the window has nothing substantive to summarize (no shipped PRs, no
  *  rolling-summary insights). */

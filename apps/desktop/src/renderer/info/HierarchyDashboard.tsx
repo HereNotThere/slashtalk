@@ -70,7 +70,7 @@ export function HierarchyDashboard({
         subjectLabel={subjectLabel}
       />
       <Divider />
-      <PrsSection prs={dashboard?.prs ?? null} />
+      <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
     </>
   );
 }
@@ -275,12 +275,20 @@ function PastDaySection({
   );
 }
 
-function PrsSection({ prs }: { prs: UserPr[] | null }): JSX.Element {
+function PrsSection({
+  prs,
+  ghStatus,
+}: {
+  prs: UserPr[] | null;
+  ghStatus: InfoDashboardData["ghStatus"] | null;
+}): JSX.Element {
   return (
     <div>
       <PlainHeader label="PRs pushed" />
       {prs === null ? (
         <div className="px-4 py-2.5 text-xs text-subtle">Loading…</div>
+      ) : ghStatus && ghStatus !== "ready" ? (
+        <GhUnavailableNudge status={ghStatus} />
       ) : prs.length === 0 ? (
         <div className="px-4 py-2.5 text-xs text-subtle">No PRs in this window.</div>
       ) : (
@@ -291,6 +299,38 @@ function PrsSection({ prs }: { prs: UserPr[] | null }): JSX.Element {
           </Fragment>
         ))
       )}
+    </div>
+  );
+}
+
+function GhUnavailableNudge({
+  status,
+}: {
+  status: Exclude<InfoDashboardData["ghStatus"], "ready">;
+}): JSX.Element {
+  // Single-line, copy-pasteable. `brew install gh` covers the common macOS
+  // path; users on other package managers will adapt. After install, `gh
+  // auth login` is interactive and prints the device-flow URL itself.
+  const command = status === "missing" ? "brew install gh && gh auth login" : "gh auth login";
+  const headline =
+    status === "missing"
+      ? "Install the GitHub CLI to see PRs here."
+      : "Sign in to the GitHub CLI to see PRs here.";
+  const copy = (e: MouseEvent<HTMLButtonElement>): void => {
+    e.stopPropagation();
+    void window.chatheads.copyText(command);
+  };
+  return (
+    <div className="px-4 py-2.5">
+      <p className="text-xs text-subtle leading-snug">{headline}</p>
+      <button
+        type="button"
+        onClick={copy}
+        className="mt-1.5 inline-block w-full text-left px-2 py-1.5 rounded bg-surface-alt/60 hover:bg-surface-alt font-mono text-[11px] text-fg/90 cursor-pointer transition-colors"
+        title="Copy command"
+      >
+        {command}
+      </button>
     </div>
   );
 }

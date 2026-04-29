@@ -89,12 +89,18 @@ export interface InfoShowPayload {
   dashboardFetching: boolean;
 }
 
+/** Local `gh` CLI state at PR-fetch time. "ready" → prs is authoritative.
+ *  "missing"/"unauthed" → prs is empty by definition; renderer shows an
+ *  install/auth nudge instead of "No PRs in this window." */
+export type GhStatus = "ready" | "missing" | "unauthed";
+
 export interface InfoDashboardData {
   prs: import("@slashtalk/shared").UserPr[];
   standup: string | null;
   /** Self-mode signal: caller has no claimed `user_repos`. The renderer
    *  shows a "connect a repo" CTA instead of empty PR/standup placeholders. */
   noClaimedRepos: boolean;
+  ghStatus: GhStatus;
 }
 
 // Signed-in identity for the MCP/agents shim. Token stays main-side.

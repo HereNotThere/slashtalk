@@ -210,6 +210,7 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
   );
 
 async function loadPrs(db: Database, repoId: number, since: Date): Promise<ProjectPr[]> {
+  const sinceIso = since.toISOString();
   const rows = await db
     .select({
       number: pullRequests.number,
@@ -236,7 +237,12 @@ async function loadPrs(db: Database, repoId: number, since: Date): Promise<Proje
     state: r.state,
     authorLogin: r.authorLogin,
     authorAvatarUrl: r.authorAvatarUrl ?? null,
-    updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
+    // Stable fallback (per-request, not wall-clock): a non-deterministic
+    // value here would feed into hashPrs and bust the overview cache on
+    // every hover. `since` is the window-start so any null-updatedAt PR
+    // returned by the query (in practice none, since the WHERE filters by
+    // gte(updatedAt, since)) gets a deterministic stamp.
+    updatedAt: r.updatedAt?.toISOString() ?? sinceIso,
   }));
 }
 

@@ -426,6 +426,21 @@ function logHttp(
   else console[level](prefix);
 }
 
+const HTTP_ERROR_PREVIEW_CHARS = 240;
+
+function responsePreview(body: string): string {
+  const text = body
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const preview = text || body.replace(/\s+/g, " ").trim() || "empty response";
+  return preview.length > HTTP_ERROR_PREVIEW_CHARS
+    ? `${preview.slice(0, HTTP_ERROR_PREVIEW_CHARS)}…`
+    : preview;
+}
+
 /** Thrown by `jsonFetch` on any non-2xx response after the single-flight
  *  JWT-refresh has been tried. Extends `Error` so older callers that just
  *  read `.message` keep working; new callers can read `status` and `body`
@@ -437,7 +452,7 @@ export class HttpError extends Error {
     method: string,
     path: string,
   ) {
-    super(`${method} ${path} failed (${status}): ${body}`);
+    super(`${method} ${path} failed (${status}): ${responsePreview(body)}`);
     this.name = "HttpError";
   }
 }
@@ -489,7 +504,7 @@ async function doJsonFetch<T>(path: string, opts: FetchOpts, retried: boolean): 
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    logHttp("error", opts.method, path, String(res.status), ms, text.slice(0, 500));
+    logHttp("error", opts.method, path, String(res.status), ms, responsePreview(text));
     throw new HttpError(res.status, text, opts.method, path);
   }
 

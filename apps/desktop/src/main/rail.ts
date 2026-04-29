@@ -294,7 +294,7 @@ async function refresh(): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     lastSnapshot = { at: Date.now(), peers: null, error: message };
-    console.error("[rail] listTeammates failed:", err);
+    console.error("[rail] listTeammates failed:", message);
     // Keep showing self + agents so the rail doesn't flash.
     apply([initialSelf, ...agentHeads]);
   }

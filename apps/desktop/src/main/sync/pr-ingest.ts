@@ -34,10 +34,15 @@ let timer: NodeJS.Timeout | null = null;
 let lastFingerprint: string | null = null;
 
 function fingerprintPrs(prs: GhPr[]): string {
-  // Stable sort by number so input order doesn't affect the hash. Include
-  // the fields the server actually upserts (state, title, url, updatedAt)
-  // — a rename or state flip should bump the fingerprint.
-  const sorted = [...prs].sort((a, b) => a.number - b.number);
+  // Sort by (repoFullName, number) so input order doesn't affect the hash.
+  // PR numbers aren't unique across repos, so without the repoFullName
+  // tiebreak the relative order of e.g. owner-a/r#1 and owner-b/r#1 would
+  // depend on whatever order GitHub's GraphQL search returned them — which
+  // can vary across calls and silently defeat the skip-when-unchanged
+  // optimization.
+  const sorted = [...prs].sort(
+    (a, b) => a.repoFullName.localeCompare(b.repoFullName) || a.number - b.number,
+  );
   return sorted
     .map(
       (p) =>

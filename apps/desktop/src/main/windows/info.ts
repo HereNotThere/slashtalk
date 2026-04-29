@@ -477,11 +477,17 @@ export function hideNow(): void {
   }
 }
 
+// True when the selected head is a synthetic project head — those don't
+// live in `getHeads()`, so the membership guard below would wrongly bail.
+function selectedIsSynthetic(): boolean {
+  return selectedHeadId !== null && rail.parseProjectHeadId(selectedHeadId) !== null;
+}
+
 // Re-anchor using fallback math (rail-derived bubble position). For dock
 // flips and drag ticks where the rail has moved.
 export function repositionIfVisible(): void {
   if (!selectedHeadId) return;
-  if (!deps.getHeads().some((h) => h.id === selectedHeadId)) return;
+  if (!selectedIsSynthetic() && !deps.getHeads().some((h) => h.id === selectedHeadId)) return;
   positionInfo(selectedHeadId);
 }
 
@@ -490,7 +496,7 @@ export function repositionIfVisible(): void {
 // would miss by a slot for peers in a peek-collapsed stack.
 export function repositionIfVisibleAtStash(): void {
   if (!selectedHeadId) return;
-  if (!deps.getHeads().some((h) => h.id === selectedHeadId)) return;
+  if (!selectedIsSynthetic() && !deps.getHeads().some((h) => h.id === selectedHeadId)) return;
   positionInfo(selectedHeadId, selectedBubbleScreen ?? undefined);
 }
 
@@ -677,11 +683,9 @@ function refreshNow(): void {
 // (rail data changed but bubble screen-coords are still valid), and pre-warms
 // the session cache for newly-arrived heads.
 export function onHeadsChanged(heads: ChatHead[]): void {
-  // Skip the "selection left rail" check for project heads — they're synthetic
-  // and never live in `heads` to begin with, so absence is the steady state.
-  const isProjectSelected =
-    selectedHeadId !== null && rail.parseProjectHeadId(selectedHeadId) !== null;
-  if (selectedHeadId && !isProjectSelected && !heads.some((h) => h.id === selectedHeadId)) {
+  // Skip the "selection left rail" check for synthetic heads (project) —
+  // they don't live in `heads` to begin with, so absence is the steady state.
+  if (selectedHeadId && !selectedIsSynthetic() && !heads.some((h) => h.id === selectedHeadId)) {
     hideNow();
   }
   if (heads.length > 0) {

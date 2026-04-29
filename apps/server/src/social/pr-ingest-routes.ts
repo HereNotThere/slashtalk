@@ -14,7 +14,7 @@
 // branch and gh search returned a stale one.
 
 import { Elysia, t } from "elysia";
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import type {
   IngestSelfPrEntry,
   IngestSelfPrsRequest,
@@ -36,14 +36,16 @@ export const prIngestRoutes = (db: Database) =>
 
       // Resolve repos in one round-trip — case-insensitive on full_name to
       // match how pr-poller looks them up (`lower(full_name) = lower(?)`).
-      // `= ANY(array)` accepts the whole array as a single bound param;
-      // `IN ${array}` would NOT auto-expand and Postgres would receive a
-      // `text[]` against a scalar column.
+      // `inArray` is the right operator here: with `sql\`= ANY(${arr})\``,
+      // postgres-js sends a single-element JS array as a scalar string, and
+      // Postgres throws "malformed array literal" when it tries to coerce
+      // that to text[]. `inArray` expands to `IN (...)` and binds each value
+      // separately, so it works for any array length.
       const wanted = unique(entries.map((e) => e.repoFullName.toLowerCase()));
       const repoRows = await db
         .select({ id: repos.id, fullName: repos.fullName })
         .from(repos)
-        .where(sql`lower(${repos.fullName}) = ANY(${wanted})`);
+        .where(inArray(sql<string>`lower(${repos.fullName})`, wanted));
       const repoIdByName = new Map<string, number>();
       for (const r of repoRows) repoIdByName.set(r.fullName.toLowerCase(), r.id);
 

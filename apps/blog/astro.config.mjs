@@ -3,13 +3,12 @@ import { defineConfig } from 'astro/config';
 
 import tailwindcss from '@tailwindcss/vite';
 
-import vercel from '@astrojs/vercel';
-
+// Served by apps/server under /blog — see apps/server/src/web/blog-routes.ts.
 // https://astro.build/config
 export default defineConfig({
+  base: '/blog',
+  trailingSlash: 'ignore',
   vite: {
-    plugins: [tailwindcss()]
+    plugins: [tailwindcss()],
   },
-
-  adapter: vercel()
 });

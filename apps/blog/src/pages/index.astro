@@ -1,5 +1,9 @@
 ---
 import Layout from '../layouts/Layout.astro';
+
+const base = import.meta.env.BASE_URL.endsWith('/')
+	? import.meta.env.BASE_URL
+	: `${import.meta.env.BASE_URL}/`;
 ---
 
 <Layout title="Slashtalk — we built a presence dock for our remote team. Here's why.">
@@ -7,7 +11,7 @@ import Layout from '../layouts/Layout.astro';
 		<header class="mb-16 flex items-center justify-between gap-3">
 			<div class="flex items-center gap-3">
 				<img
-					src="/favicon.svg"
+					src={`${base}favicon.svg`}
 					alt="Slashtalk"
 					width="36"
 					height="36"
@@ -64,7 +68,7 @@ import Layout from '../layouts/Layout.astro';
 
 			<figure class="my-10">
 				<img
-					src="/screenshot-dock.png"
+					src={`${base}screenshot-dock.png`}
 					alt="The Slashtalk dock — a row of teammate avatars floating above your other apps."
 					class="w-full rounded-xl"
 				/>
@@ -79,7 +83,7 @@ import Layout from '../layouts/Layout.astro';
 
 			<figure class="my-10 flex justify-center">
 				<img
-					src="/screenshot-card.png"
+					src={`${base}screenshot-card.png`}
 					alt="A teammate card showing recent sessions, current branch, and token usage."
 					class="w-full max-w-sm rounded-xl"
 				/>
@@ -92,7 +96,7 @@ import Layout from '../layouts/Layout.astro';
 
 			<figure class="my-10">
 				<img
-					src="/screenshot-ask.png"
+					src={`${base}screenshot-ask.png`}
 					alt="The Ask window — a chat interface synthesizing what the team shipped this week."
 					class="w-full rounded-xl"
 				/>

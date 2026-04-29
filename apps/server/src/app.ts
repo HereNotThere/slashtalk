@@ -19,6 +19,7 @@ import { mcpRoutes } from "./mcp/routes";
 import { mcpOAuthRoutes } from "./oauth/mcp";
 import { wsHandler } from "./ws/handler";
 import { webAppRoutes } from "./web/routes";
+import { blogRoutes } from "./web/blog-routes";
 import type { RedisBridge } from "./ws/redis-bridge";
 
 const INSTALL_SCRIPT = await Bun.file(
@@ -47,6 +48,7 @@ export function createApp(db: Database, redis: RedisBridge) {
       return INSTALL_SCRIPT;
     })
     .use(webAppRoutes())
+    .use(blogRoutes())
     .use(githubAuth(db, redis))
     .use(cliAuth(db))
     .use(ingestRoutes(db, redis))

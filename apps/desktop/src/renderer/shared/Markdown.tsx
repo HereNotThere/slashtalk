@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MARKDOWN_LINK_COMPONENT } from "./MarkdownLink";
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -14,7 +15,8 @@ const MARKDOWN_CLASSES =
   "[&_a]:text-primary [&_a]:underline hover:[&_a]:text-primary-hover " +
   "[&_strong]:font-semibold [&_strong]:text-fg";
 
-const INLINE_COMPONENTS = { p: Fragment };
+const INLINE_COMPONENTS = { p: Fragment, ...MARKDOWN_LINK_COMPONENT };
+const BLOCK_COMPONENTS = MARKDOWN_LINK_COMPONENT;
 
 export function Markdown({
   children,
@@ -29,7 +31,7 @@ export function Markdown({
   const markdown = (
     <ReactMarkdown
       remarkPlugins={REMARK_PLUGINS}
-      components={inline ? INLINE_COMPONENTS : undefined}
+      components={inline ? INLINE_COMPONENTS : BLOCK_COMPONENTS}
     >
       {children}
     </ReactMarkdown>

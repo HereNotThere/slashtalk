@@ -55,6 +55,7 @@ Drizzle export: `chatMessages`.
 | `prompt` | `PgText` | not null |
 | `answer` | `PgText` | not null |
 | `citations` | `PgJsonb` | not null, has default |
+| `delegation` | `PgJsonb` | — |
 | `created_at` | `PgTimestamp` | has default |
 
 **Indexes:**

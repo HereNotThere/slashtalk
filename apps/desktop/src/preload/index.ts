@@ -174,6 +174,13 @@ const bridge: ChatHeadsBridge = {
   fetchChatGerunds: (prompt: string) =>
     ipcRenderer.invoke("chat:gerund", prompt) as Promise<string[]>,
 
+  runDelegatedChat: (req) =>
+    ipcRenderer.invoke("chat:run-delegated", req) as Promise<
+      import("../shared/types").DelegatedChatResponse
+    >,
+  onDelegatedEvent: (cb) =>
+    subscribe<import("../shared/types").ChatDelegateEvent>("chat:delegated-event", cb),
+
   dragStart: () => ipcRenderer.invoke("drag:start") as Promise<void>,
   dragEnd: () => ipcRenderer.invoke("drag:end") as Promise<void>,
 

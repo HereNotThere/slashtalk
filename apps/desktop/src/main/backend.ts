@@ -742,6 +742,20 @@ export async function fetchChatHistory(): Promise<ChatHistoryResponse> {
   return jsonFetch<ChatHistoryResponse>("/api/chat/history", { method: "GET" });
 }
 
+export async function finalizeDelegatedChat(input: {
+  threadId: string;
+  messageId: string;
+  answer: string;
+}): Promise<{ ok: true }> {
+  return jsonFetch<{ ok: true }>(
+    `/api/chat/threads/${encodeURIComponent(input.threadId)}/finalize`,
+    {
+      method: "POST",
+      body: { messageId: input.messageId, answer: input.answer },
+    },
+  );
+}
+
 export async function fetchQuestionsForLogin(login: string): Promise<ChatHistoryResponse> {
   return jsonFetch<ChatHistoryResponse>(`/api/users/${encodeURIComponent(login)}/questions`, {
     method: "GET",

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MARKDOWN_LINK_COMPONENT } from "../shared/MarkdownLink";
 import {
   Bars3Icon,
   PaperAirplaneIcon,
@@ -14,7 +15,14 @@ import type {
   SessionCard,
   SessionState,
 } from "@slashtalk/shared";
-import type { AgentSummary, ChatHead, ResponseOpenPayload } from "../../shared/types";
+import type {
+  AgentSummary,
+  ChatDelegateEvent,
+  ChatHead,
+  DelegatedChatRequest,
+  ResponseOpenPayload,
+  TrackedRepo,
+} from "../../shared/types";
 import { AgentChat } from "../info/AgentPanel";
 import { Button } from "../shared/Button";
 import { CheckIcon, CopyIcon } from "../shared/icons";
@@ -79,6 +87,35 @@ function SlashtalkSpinner(): JSX.Element {
 const DEFAULT_GERUNDS = ["Thinking"];
 const GERUND_CYCLE_MS = 2200;
 
+function describeDelegateEvent(e: ChatDelegateEvent): string | null {
+  if (e.kind === "tool_use") {
+    if (e.name === "Bash" && e.input && typeof e.input === "object") {
+      const cmd = (e.input as { command?: unknown }).command;
+      if (typeof cmd === "string" && cmd) {
+        return `Running \`${cmd.length > 60 ? cmd.slice(0, 57) + "…" : cmd}\``;
+      }
+    }
+    if (
+      (e.name === "Read" || e.name === "Grep" || e.name === "Glob") &&
+      e.input &&
+      typeof e.input === "object"
+    ) {
+      const target =
+        (e.input as { file_path?: unknown }).file_path ??
+        (e.input as { pattern?: unknown }).pattern ??
+        (e.input as { path?: unknown }).path;
+      if (typeof target === "string" && target) {
+        return `${e.name} ${target.length > 60 ? "…" + target.slice(-57) : target}`;
+      }
+    }
+    return `Running ${e.name}`;
+  }
+  if (e.kind === "phase" && e.label) return e.label;
+  if (e.kind === "thinking") return "Thinking…";
+  if (e.kind === "error") return `Error: ${e.message}`;
+  return null;
+}
+
 const SAMPLE_PROMPTS = [
   "What did the team ship this week?",
   "Summarize the open PRs across our repos",
@@ -102,6 +139,11 @@ const MARKDOWN_CLASSES =
   "[&_em]:italic " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-divider [&_blockquote]:pl-4 [&_blockquote]:text-muted [&_blockquote]:my-3 " +
   "[&_hr]:border-divider [&_hr]:my-6 " +
+  "[&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:text-sm " +
+  "[&_thead]:border-b [&_thead]:border-divider " +
+  "[&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:align-top " +
+  "[&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:border-t [&_td]:border-divider/60 " +
+  "[&_tbody_tr:first-child_td]:border-t-0 " +
   "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-primary-hover";
 
 export function App(): JSX.Element {
@@ -205,6 +247,17 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
   const [gerundIdx, setGerundIdx] = useState(0);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // At most one delegated run is active per Ask window. Tracked by the
+  // server-side messageId of the placeholder we'll mutate on completion —
+  // safer than an array index, which goes stale on history-jump or new-chat.
+  const [delegateRun, setDelegateRun] = useState<{
+    messageId: string;
+    statusLine: string;
+  } | null>(null);
+  const [repoPicker, setRepoPicker] = useState<{
+    candidates: TrackedRepo[];
+    pendingReq: DelegatedChatRequest;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Monotonic token used to ignore stale ask() resolutions. Bumped whenever
@@ -258,11 +311,62 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
       setMessages(rehydrateMessagesFromThread(seed.thread));
       setThreadId(seed.thread.threadId);
     }
+    // `ask` is a non-memoized closure over local state; including it would
+    // re-fire this effect on every render. Concurrency is governed by
+    // askTokenRef, not the dep array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
+
+  // The trace isn't persisted (server stores the final answer only), so this
+  // subscription stays renderer-local.
+  useEffect(() => {
+    return window.chatheads.onDelegatedEvent((event) => {
+      setDelegateRun((prev) => {
+        if (!prev) return prev;
+        const next = describeDelegateEvent(event);
+        if (next === null || next === prev.statusLine) return prev;
+        return { ...prev, statusLine: next };
+      });
+    });
+  }, []);
+
+  async function runDelegated(req: DelegatedChatRequest): Promise<void> {
+    setDelegateRun({ messageId: req.messageId, statusLine: "Investigating…" });
+    const res = await window.chatheads.runDelegatedChat(req);
+    if (res.kind === "needs-repo") {
+      setDelegateRun(null);
+      setRepoPicker({ candidates: res.candidates, pendingReq: req });
+      return;
+    }
+    setDelegateRun(null);
+    if (res.kind === "error") {
+      setError(res.message);
+      return;
+    }
+    if (!res.text) {
+      setError("Local agent returned an empty answer.");
+      return;
+    }
+    const repoFooter = req.repoFullName ? `\n\n_ran locally on \`${req.repoFullName}\`_` : "";
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.role === "assistant" && m.delegation?.messageId === req.messageId
+          ? { ...m, content: res.text + repoFooter, delegation: undefined }
+          : m,
+      ),
+    );
+  }
+
+  function handleRepoPick(repoId: number): void {
+    if (!repoPicker) return;
+    const { pendingReq } = repoPicker;
+    setRepoPicker(null);
+    void runDelegated({ ...pendingReq, resolvedRepoId: repoId });
+  }
 
   async function ask(
     history: ChatMessage[],
@@ -300,6 +404,14 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
       if (askTokenRef.current !== myToken) return;
       setMessages((prev) => [...prev, res.message]);
       setThreadId(res.threadId);
+      if (res.message.delegation) {
+        void runDelegated({
+          task: res.message.delegation.task,
+          repoFullName: res.message.delegation.repoFullName,
+          threadId: res.threadId,
+          messageId: res.message.delegation.messageId,
+        });
+      }
     } catch (err) {
       if (askTokenRef.current !== myToken) return;
       setError((err as Error).message || "Something went wrong");
@@ -383,10 +495,23 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
             ) : (
               <div key={i} className="group space-y-3">
                 <div className={MARKDOWN_CLASSES}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_LINK_COMPONENT}>
                     {m.content.replace(CITATION_TOKEN, "")}
                   </ReactMarkdown>
                 </div>
+                {delegateRun?.messageId === m.delegation?.messageId && delegateRun && (
+                  <div className="flex items-center gap-2 text-sm text-subtle">
+                    <SlashtalkSpinner />
+                    <span className="shimmer-text italic">{delegateRun.statusLine}</span>
+                  </div>
+                )}
+                {repoPicker?.pendingReq.messageId === m.delegation?.messageId && repoPicker && (
+                  <RepoPicker
+                    candidates={repoPicker.candidates}
+                    onPick={handleRepoPick}
+                    onCancel={() => setRepoPicker(null)}
+                  />
+                )}
                 {m.cards && m.cards.length > 0 && <SessionCardStack cards={m.cards} />}
                 <CopyMessageButton
                   copied={copiedIdx === i}
@@ -458,6 +583,41 @@ function SamplePrompts({ onPick }: { onPick: (prompt: string) => void }): JSX.El
             {p}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function RepoPicker({
+  candidates,
+  onPick,
+  onCancel,
+}: {
+  candidates: TrackedRepo[];
+  onPick: (repoId: number) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  return (
+    <div className="rounded-xl border border-divider bg-surface-alt px-4 py-3 space-y-2">
+      <div className="text-sm text-subtle">Which repo should I look in?</div>
+      <div className="flex flex-wrap gap-2">
+        {candidates.map((r) => (
+          <button
+            key={r.repoId}
+            type="button"
+            onClick={() => onPick(r.repoId)}
+            className="px-3 py-1.5 rounded-full bg-surface text-fg text-sm hover:bg-surface-alt-hover border border-divider transition-colors"
+          >
+            {r.fullName}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 rounded-full text-subtle text-sm hover:text-fg transition-colors"
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );

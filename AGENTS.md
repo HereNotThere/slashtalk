@@ -28,6 +28,7 @@ Bun workspace monorepo. **`bun` is the only supported package manager** ([core-b
 | [`apps/server`](apps/server)         | [AGENTS.md](apps/server/AGENTS.md)     | Elysia backend (auth, ingest, sessions, social, analyzers, ws)        |
 | [`apps/desktop`](apps/desktop)       | [AGENTS.md](apps/desktop/AGENTS.md)    | Electron overlay, 6 renderer windows + tray/dock chrome               |
 | [`apps/web`](apps/web)               | [AGENTS.md](apps/web/AGENTS.md)        | Installable React PWA served by the server under `/app/*`             |
+| [`apps/landing`](apps/landing)       | [README.md](apps/landing/README.md)    | Marketing homepage (Astro + Tailwind) served by the server at `/`     |
 | [`apps/blog`](apps/blog)             | [README.md](apps/blog/README.md)       | Public Astro marketing/blog site served by the server under `/blog/*` |
 | [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types                                                  |
 
@@ -37,8 +38,9 @@ Per-workspace `AGENTS.md` shape varies intentionally by workspace role — serve
 
 | Prefix               | Auth                                                            | Used by                  |
 | -------------------- | --------------------------------------------------------------- | ------------------------ |
+| `/`                  | Public static; no auth                                          | Marketing homepage       |
 | `/app/*`             | Static shell; data fetched via `/api/*` cookie auth             | Web PWA                  |
-| `/blog`, `/blog/*`   | Public static; no auth                                          | Marketing/blog site      |
+| `/blog`, `/blog/*`   | Public static; no auth                                          | Blog site                |
 | `/v1/*`              | `apiKeyAuth` (Bearer token, SHA-256 compared)                   | Desktop + CLI            |
 | `/mcp`               | MCP OAuth access token; device API key for local proxy / legacy | MCP HTTP clients         |
 | `/auth/*` + `/api/*` | `jwtAuth` (httpOnly `session` cookie or `Cookie:` header)       | Browser + desktop cookie |
@@ -52,11 +54,13 @@ Mixing is a rule violation. Root `/mcp` is the explicit MCP resource-server exce
 bun run dev                                    # start server + desktop for local development
 bun run dev:web                                # start only the web PWA Vite dev server
 bun run dev:blog                               # start only the blog Astro dev server (localhost:4321/blog)
+bun run dev:landing                            # start only the landing Astro dev server (localhost:4321)
 bun install                                    # install all workspaces
 bun --filter @slashtalk/server <script>
 bun --filter @slashtalk/electron <script>
 bun --filter @slashtalk/web <script>
 bun --filter @slashtalk/blog <script>
+bun --filter @slashtalk/landing <script>
 bun --filter @slashtalk/shared <script>
 ```
 
@@ -79,6 +83,7 @@ If you touched `apps/server/src/db/schema.ts`, also run `bun run gen:db-schema` 
 - **DB column/table** → [`apps/server/AGENTS.md`](apps/server/AGENTS.md#adding-a-database-column-or-table)
 - **BrowserWindow or IPC** → [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md)
 - **Web PWA route/service worker** → [`apps/web/AGENTS.md`](apps/web/AGENTS.md)
+- **Landing page or copy change** → [`apps/landing/README.md`](apps/landing/README.md)
 - **Blog page or copy change** → [`apps/blog/README.md`](apps/blog/README.md)
 - **Shared type** → [`packages/shared/AGENTS.md`](packages/shared/AGENTS.md#adding-a-new-type)
 

@@ -22,6 +22,11 @@ Violating one of these causes a visible regression or data loss. Tier 3 of the h
 12. **Repo claims gate on org membership or personal namespace.** `POST /api/me/repos` accepts iff `owner` is in the caller's active orgs (`GET /user/memberships/orgs?state=active`) or `owner === user.githubLogin`. Else `403 no_access`. Detail: [`core-beliefs #12`](docs/design-docs/core-beliefs.md#12-repo-access-is-verified-not-asserted).
 13. **`user_repos` is the only authorization for cross-user reads.** Feed, sessions, events, WS channels all gate on it. Any new cross-user surface must go through the same check. Detail: [`core-beliefs #13`](docs/design-docs/core-beliefs.md#13-user_repos-is-the-only-authorization-for-cross-user-reads).
 
+## Marketing surfaces
+
+- [`apps/landing`](apps/landing) — marketing homepage; served by the server at `/`.
+- [`apps/blog`](apps/blog) — long-form blog post(s); served by the server at `/blog/*` (Astro `base: '/blog'`). Treat it as the blog, not the homepage.
+
 ## Where to go next
 
 - [`AGENTS.md`](AGENTS.md) — project map + workspaces.

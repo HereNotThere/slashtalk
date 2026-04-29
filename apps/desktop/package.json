@@ -31,7 +31,6 @@
       "package.json"
     ],
     "asar": true,
-    "artifactName": "${productName}-mac.${ext}",
     "mac": {
       "target": [
         {
@@ -39,6 +38,7 @@
           "arch": ["arm64"]
         }
       ],
+      "artifactName": "${productName}-mac.${ext}",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

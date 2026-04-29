@@ -741,9 +741,23 @@ export function registerInfo(d: InfoDeps): void {
 
   ipcMain.handle(
     "heads:showInfo",
-    (_e, headId: string, bubbleScreen?: { x: number; y: number }): void => {
-      if (!d.getHeads().some((h) => h.id === headId)) return;
-      void showInfo(headId, bubbleScreen);
+    (
+      _e,
+      headId: string,
+      bubbleScreen?: { x: number; y: number },
+      fallbackAvatarUrl?: string,
+    ): void => {
+      if (d.getHeads().some((h) => h.id === headId)) {
+        void showInfo(headId, bubbleScreen);
+        return;
+      }
+      // Not on the rail: synthesize when the headId is a well-formed user
+      // (project-card active-people path — they're claimed user_repos
+      // members but not necessarily in the social feed). Avatar URL comes
+      // from the calling card so the synthetic head paints correctly.
+      const login = rail.parseUserHeadId(headId);
+      if (!login) return;
+      void showInfo(headId, bubbleScreen, undefined, rail.synthUserHead(login, fallbackAvatarUrl));
     },
   );
 

@@ -34,7 +34,7 @@ export function ProjectDashboard({
     <div>
       <ProjectHeader repoFullName={repoFullName} activeCount={active.length} />
       <Divider />
-      <PulseSection pulse={overview?.pulse ?? null} loading={overview === null || fetching} />
+      <PulseSection pulse={overview?.pulse ?? null} loading={fetching} />
       {buckets.length > 0 && <Divider />}
       {buckets.map((b, i) => (
         <Fragment key={`${b.name}-${i}`}>
@@ -211,13 +211,16 @@ function ActiveStrip({ people }: { people: ProjectActivePerson[] }): JSX.Element
 }
 
 function PersonChip({ person }: { person: ProjectActivePerson }): JSX.Element {
-  // Click → ask main to swap the popover to that person's card. Main treats
-  // this like any other showInfo: same window, same fade, just different
-  // content. Falls through silently when the user isn't in the rail's heads
-  // (server gates active to user_repos members so this should always match,
-  // but the IPC handler is defensive).
+  // Click → ask main to swap the popover to that person's card. Pass the
+  // avatar so main can synthesize a head when the target isn't on the rail
+  // (active people are user_repos members; the rail is the social-feed
+  // subset, which can omit folks who authored a PR without a session).
   const open = (): void => {
-    void window.chatheads.showInfo(`user:${person.login}`);
+    void window.chatheads.showInfo(
+      `user:${person.login}`,
+      undefined,
+      person.avatarUrl ?? undefined,
+    );
   };
   return (
     <button

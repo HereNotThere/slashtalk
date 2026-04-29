@@ -143,6 +143,23 @@ export function projectHead(repoFullName: string): ChatHead {
   };
 }
 
+// Synthetic user head for callers that have a login + optional avatar but
+// whose target isn't on the rail (e.g. project-card active-people: they're
+// derived from `user_repos` members, while the rail is the social-feed
+// subset). Lets clicking those avatars open the user card without needing
+// the full feed entry.
+export function synthUserHead(login: string, avatarUrl?: string | null): ChatHead {
+  return {
+    id: userHeadId(login),
+    kind: "user",
+    label: login,
+    tint: "transparent",
+    avatar: avatarUrl
+      ? { type: "remote", value: avatarUrl }
+      : { type: "emoji", value: (login[0] ?? "?").toUpperCase() },
+  };
+}
+
 function headForUser(
   login: string,
   avatarUrl: string,

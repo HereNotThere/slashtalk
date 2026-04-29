@@ -481,7 +481,15 @@ export interface ChatHeadsBridge {
   // panel itself hold the window open while the cursor is over it.
   // Both axes of the bubble's screen-space top-left are reported so main can
   // align the popover against whichever axis matches the current dock.
-  showInfo: (headId: string, bubbleScreen?: { x: number; y: number }) => Promise<void>;
+  showInfo: (
+    headId: string,
+    bubbleScreen?: { x: number; y: number },
+    /** Used when the headId isn't in the rail's heads (e.g. clicking an
+     *  active-person avatar on a project card whose target user has no
+     *  social-feed entry). Main synthesizes a basic user head with this
+     *  avatar so the popover renders correctly. */
+    fallbackAvatarUrl?: string,
+  ) => Promise<void>;
   /** Hover-show a project-card popover anchored to a non-rail-bubble element
    *  (e.g. the SearchBubble). Synthesizes a `kind: "project"` ChatHead from
    *  the repo full-name; main handles cache + fetch + position. */

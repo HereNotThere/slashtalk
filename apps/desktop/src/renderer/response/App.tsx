@@ -787,7 +787,7 @@ function SessionCardView({ card }: { card: SessionCard }): JSX.Element {
 function Avatar({ src, fallback }: { src: string | null; fallback: string }): JSX.Element {
   if (src) {
     return (
-      <img src={src} alt="" className="w-8 h-8 rounded-full shrink-0 bg-surface-alt object-cover" />
+      <img src={src} alt="" className="w-8 h-8 rounded-full shrink-0 bg-white/20 object-cover" />
     );
   }
   return (

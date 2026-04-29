@@ -115,6 +115,12 @@ export async function start(): Promise<void> {
   lastSent = null;
   lastSentAt = 0;
   await tick();
+  // tick() awaits a disk read + a network POST, so stop() can land in
+  // between. If it did, `running` is false and `timer` was cleared — don't
+  // schedule a new interval that nothing tracks, or a later start() would
+  // orphan it (overwriting `timer` without ever clearing this one) and end
+  // up running two ticks per cycle.
+  if (!running) return;
   timer = setInterval(() => void tick(), POLL_MS);
 }
 

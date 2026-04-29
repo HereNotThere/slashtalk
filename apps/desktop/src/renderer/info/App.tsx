@@ -205,6 +205,9 @@ function fmtResetsIn(resetsAt: string | null): string | null {
   const ms = t - Date.now();
   if (ms <= 0) return "now";
   const mins = Math.round(ms / 60_000);
+  // Sub-30-second resets round to 0m; render that as "now" so the UI doesn't
+  // briefly show "resets 0m" in the final seconds before a window flips.
+  if (mins <= 0) return "now";
   if (mins < 60) return `${mins}m`;
   const hours = Math.round(mins / 60);
   if (hours < 48) return `${hours}h`;

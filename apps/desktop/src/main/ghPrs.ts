@@ -58,18 +58,25 @@ const GRAPHQL_QUERY = `query($q: String!, $first: Int!) {
   }
 }`;
 
-// Cached process-wide. `gh auth status` exits 0 only when gh is installed AND
-// authenticated against at least one host — distinguish the two by inspecting
-// stderr ("command not found" vs auth message) so the renderer can show the
-// right nudge.
-let probeCache: Promise<GhStatus> | null = null;
+// Cache the "ready" state once we've seen it — gh auth doesn't disappear
+// during a session in practice. Failure states are NOT cached: a user who
+// follows the install/auth nudge needs the next hover to discover their
+// fixed setup, otherwise the nudge is a dead-end until app restart.
+// `gh auth status` exits 0 only when installed AND authed; ENOENT
+// distinguishes missing-binary from "installed but logged out" via stderr.
+let cachedReady: Promise<"ready"> | null = null;
 
 export function probeGhStatus(): Promise<GhStatus> {
-  return (probeCache ??= execFileAsync("gh", ["auth", "status"], { timeout: 5000 })
+  if (cachedReady) return cachedReady;
+  const attempt = execFileAsync("gh", ["auth", "status"], { timeout: 5000 })
     .then((): GhStatus => "ready")
     .catch(
       (err: NodeJS.ErrnoException): GhStatus => (err.code === "ENOENT" ? "missing" : "unauthed"),
-    ));
+    );
+  void attempt.then((status) => {
+    if (status === "ready") cachedReady = Promise.resolve("ready");
+  });
+  return attempt;
 }
 
 export async function fetchGhUserPrs(

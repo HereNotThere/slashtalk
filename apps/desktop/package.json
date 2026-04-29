@@ -35,10 +35,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": ["arm64", "x64"]
         }
       ],
-      "artifactName": "${productName}-mac.${ext}",
+      "artifactName": "${productName}-mac-${arch}.${ext}",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

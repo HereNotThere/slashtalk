@@ -1,18 +1,12 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "../shared/Button";
-import type { BackendAuthState } from "../../shared/types";
 
-export function SignOutSection(): JSX.Element | null {
-  const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
+// Caller is responsible for only rendering this section when the user is
+// signed in — see `main/App.tsx`. We deliberately don't subscribe to auth
+// here so this component doesn't briefly render `null` on mount.
+export function SignOutSection(): JSX.Element {
   const [busy, setBusy] = useState<null | "signOut" | "signOutEverywhere">(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    void window.chatheads.backend.getAuthState().then(setAuth);
-    return window.chatheads.backend.onAuthState(setAuth);
-  }, []);
-
-  if (!auth.signedIn) return null;
 
   const signOut = async (): Promise<void> => {
     setBusy("signOut");

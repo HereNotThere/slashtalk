@@ -50,7 +50,12 @@ export function registerChatDelegateIpc(
         }
       }
 
-      return { kind: "ok", text: result.text, hadError: result.hadError };
+      return {
+        kind: "ok",
+        text: result.text,
+        hadError: result.hadError,
+        ghAvailable: result.ghAvailable,
+      };
     },
   );
 }

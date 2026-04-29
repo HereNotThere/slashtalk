@@ -365,11 +365,20 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
       setError("Local agent returned an empty answer.");
       return;
     }
-    const repoFooter = req.repoFullName ? `\n\n_ran locally on \`${req.repoFullName}\`_` : "";
+    const footerParts: string[] = [];
+    if (req.repoFullName) footerParts.push(`ran locally on \`${req.repoFullName}\``);
+    if (!res.ghAvailable) {
+      footerParts.push(
+        "PR/CI data is from local git only — `gh auth login` would give live answers",
+      );
+    }
+    if (res.hadError)
+      footerParts.push("the agent hit an error mid-run; this answer may be partial");
+    const footer = footerParts.length > 0 ? `\n\n_${footerParts.join(" — ")}_` : "";
     setMessages((prev) =>
       prev.map((m) =>
         m.role === "assistant" && m.delegation?.messageId === req.messageId
-          ? { ...m, content: res.text + repoFooter, delegation: undefined }
+          ? { ...m, content: res.text + footer, delegation: undefined }
           : m,
       ),
     );

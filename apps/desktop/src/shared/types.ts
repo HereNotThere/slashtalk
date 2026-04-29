@@ -281,7 +281,7 @@ export interface DelegatedChatRequest {
 }
 
 export type DelegatedChatResponse =
-  | { kind: "ok"; text: string; hadError: boolean }
+  | { kind: "ok"; text: string; hadError: boolean; ghAvailable: boolean }
   | { kind: "needs-repo"; candidates: TrackedRepo[] }
   | { kind: "error"; message: string };
 

@@ -53,7 +53,7 @@ export function relativeAppPath(pathname: string): string | null {
     return null;
   }
 
-  if (rel.includes("\0")) return null;
+  if (rel.includes("\0") || rel.includes("%")) return null;
   rel = rel.replace(/\/+$/, "");
   if (!rel) return INDEX_HTML;
 

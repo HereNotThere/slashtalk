@@ -17,6 +17,7 @@ describe("web app route path mapping", () => {
     expect(relativeAppPath("/api/feed")).toBeNull();
     expect(relativeAppPath("/app/sessions//example")).toBeNull();
     expect(relativeAppPath("/app/../secret")).toBeNull();
+    expect(relativeAppPath("/app/%252e%252e/%252e%252e/package.json")).toBeNull();
     expect(relativeAppPath("/app/%00")).toBeNull();
   });
 });

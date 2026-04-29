@@ -2,15 +2,10 @@ import { useEffect, useState } from "react";
 import { FolderIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { XMarkIcon } from "@heroicons/react/20/solid";
 import { Button } from "../shared/Button";
-import type {
-  BackendAuthState,
-  McpInstallStatus,
-  McpTarget,
-  TrackedRepo,
-} from "../../shared/types";
+import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 
 type Status = { kind: "ok" | "err"; text: string } | null;
-type Busy = null | "signIn" | "add" | "globalSignOut";
+type Busy = null | "signIn" | "add";
 
 export function SlashtalkSection(): JSX.Element {
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
@@ -28,10 +23,7 @@ export function SlashtalkSection(): JSX.Element {
     return window.chatheads.backend.onTrackedReposChange(setTracked);
   }, []);
 
-  const withBusy = async (
-    kind: Exclude<Busy, null | "globalSignOut">,
-    fn: () => Promise<Status>,
-  ): Promise<void> => {
+  const withBusy = async (kind: Exclude<Busy, null>, fn: () => Promise<Status>): Promise<void> => {
     setBusy(kind);
     setStatus(null);
     try {
@@ -48,31 +40,6 @@ export function SlashtalkSection(): JSX.Element {
       await window.chatheads.backend.signIn();
       return null;
     });
-
-  const signOut = async (): Promise<void> => {
-    setStatus(null);
-    await window.chatheads.backend.signOut();
-  };
-
-  const signOutEverywhere = async (): Promise<void> => {
-    if (
-      !window.confirm(
-        "Sign out everywhere? This revokes all Slashtalk device keys and MCP OAuth sessions.",
-      )
-    ) {
-      return;
-    }
-
-    setBusy("globalSignOut");
-    setStatus(null);
-    try {
-      await window.chatheads.backend.signOutEverywhere();
-    } catch (err) {
-      setStatus({ kind: "err", text: (err as Error).message });
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const addRepo = (): Promise<void> =>
     withBusy("add", async () => {
@@ -92,22 +59,8 @@ export function SlashtalkSection(): JSX.Element {
   return (
     <section className="bg-surface rounded-2xl p-4">
       {auth.signedIn ? (
-        <div className="flex items-center justify-between mb-3">
+        <div className="mb-3">
           <span className="text-base font-medium">@{auth.user.githubLogin}</span>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={signOut}>
-              Sign out
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={signOutEverywhere}
-              disabled={busy === "globalSignOut"}
-              className="text-danger hover:text-danger"
-            >
-              {busy === "globalSignOut" ? "Signing out..." : "Sign out everywhere"}
-            </Button>
-          </div>
         </div>
       ) : null}
 
@@ -150,8 +103,6 @@ function SignedInBody({
 }): JSX.Element {
   return (
     <>
-      <McpAccessSettings />
-
       <Button
         variant="secondary"
         size="md"
@@ -193,88 +144,4 @@ function SignedInBody({
       )}
     </>
   );
-}
-
-const MCP_TARGETS: McpTarget[] = ["claude-code", "codex"];
-
-function McpAccessSettings(): JSX.Element {
-  const [status, setStatus] = useState<McpInstallStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<Status>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void window.chatheads.mcp
-      .status()
-      .then((next) => {
-        if (!cancelled) setStatus(next);
-      })
-      .catch((err) => {
-        if (!cancelled) setMessage({ kind: "err", text: (err as Error).message });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const setAgentsEnabled = async (enabled: boolean): Promise<void> => {
-    setBusy(true);
-    setMessage(null);
-    let operationError: Error | null = null;
-
-    for (const target of MCP_TARGETS) {
-      try {
-        if (enabled) {
-          await window.chatheads.mcp.install(target);
-        } else {
-          await window.chatheads.mcp.uninstall(target);
-        }
-      } catch (err) {
-        operationError ??= err as Error;
-      }
-    }
-
-    try {
-      const next = await window.chatheads.mcp.status();
-      setStatus(next);
-    } catch (err) {
-      operationError ??= err as Error;
-    }
-    if (operationError) {
-      setMessage({ kind: "err", text: operationError.message });
-    }
-    setBusy(false);
-  };
-
-  const connected = status ? hasAnyInstalled(status) : false;
-
-  return (
-    <div className="mb-4 border-b border-divider pb-3">
-      <div className="flex items-start justify-between gap-3 p-2">
-        <div>
-          <div className="text-base font-medium">Connect your agents</div>
-          <div className="text-sm text-subtle leading-snug mt-1">
-            Enable to see what your team is working on across agents.
-          </div>
-        </div>
-        <Button
-          variant={connected ? "ghost" : "secondary"}
-          size="sm"
-          onClick={() => void setAgentsEnabled(!connected)}
-          disabled={!status || busy}
-          className="shrink-0"
-        >
-          {busy ? "Saving..." : connected ? "Disconnect" : "Enable"}
-        </Button>
-      </div>
-
-      {message?.kind === "err" && (
-        <div className="text-sm px-2 mt-2 leading-snug text-danger">{message.text}</div>
-      )}
-    </div>
-  );
-}
-
-function hasAnyInstalled(status: McpInstallStatus): boolean {
-  return status.claudeCode.installed || status.codex.installed;
 }

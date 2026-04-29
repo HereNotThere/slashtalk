@@ -1,81 +1,11 @@
 import { useEffect, useState } from "react";
-import type { BackendAuthState, ThemeMode, TrackedRepo } from "../../shared/types";
+import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
+import { Checkbox } from "../shared/Checkbox";
+import { RailPreferences } from "../shared/RailPreferences";
 
 export function App(): JSX.Element {
   useAutoResize();
-  const [pinned, setPinned] = useState<boolean>(true);
-  const [sessionOnly, setSessionOnly] = useState<boolean>(false);
-  const [collapseInactive, setCollapseInactive] = useState<boolean>(false);
-  const [showActivityTimestamps, setShowActivityTimestamps] = useState<boolean>(true);
-  const [spotifySupported, setSpotifySupported] = useState<boolean>(false);
-  const [spotifyShare, setSpotifyShare] = useState<boolean>(false);
-  const [theme, setTheme] = useState<ThemeMode>("system");
-
-  useEffect(() => {
-    let alive = true;
-    void window.chatheads.rail.getPinned().then((v) => {
-      if (alive) setPinned(v);
-    });
-    const off = window.chatheads.rail.onPinnedChange((v) => setPinned(v));
-    return () => {
-      alive = false;
-      off();
-    };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    void window.chatheads.rail.getSessionOnlyMode().then((v) => {
-      if (alive) setSessionOnly(v);
-    });
-    const off = window.chatheads.rail.onSessionOnlyModeChange((v) => setSessionOnly(v));
-    return () => {
-      alive = false;
-      off();
-    };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    void window.chatheads.rail.getCollapseInactive().then((v) => {
-      if (alive) setCollapseInactive(v);
-    });
-    const off = window.chatheads.rail.onCollapseInactiveChange((v) => setCollapseInactive(v));
-    return () => {
-      alive = false;
-      off();
-    };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    void window.chatheads.rail.getShowActivityTimestamps().then((v) => {
-      if (alive) setShowActivityTimestamps(v);
-    });
-    const off = window.chatheads.rail.onShowActivityTimestampsChange((v) =>
-      setShowActivityTimestamps(v),
-    );
-    return () => {
-      alive = false;
-      off();
-    };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    void window.chatheads.spotifyShare.isSupported().then((v) => {
-      if (alive) setSpotifySupported(v);
-    });
-    void window.chatheads.spotifyShare.getEnabled().then((v) => {
-      if (alive) setSpotifyShare(v);
-    });
-    const off = window.chatheads.spotifyShare.onEnabledChange((v) => setSpotifyShare(v));
-    return () => {
-      alive = false;
-      off();
-    };
-  }, []);
 
   const auth = useBackendAuth();
   const repos = useTrackedRepos();
@@ -83,65 +13,12 @@ export function App(): JSX.Element {
   const [busy, setBusy] = useState<null | "add">(null);
   const [addError, setAddError] = useState<string | null>(null);
 
-  const onSpotifyShareChange = (v: boolean): void => {
-    setSpotifyShare(v);
-    void window.chatheads.spotifyShare.setEnabled(v);
-  };
-
-  const onSessionOnlyChange = (v: boolean): void => {
-    setSessionOnly(v);
-    void window.chatheads.rail.setSessionOnlyMode(v);
-  };
-
-  const onCollapseInactiveChange = (v: boolean): void => {
-    setCollapseInactive(v);
-    void window.chatheads.rail.setCollapseInactive(v);
-  };
-
-  const onShowActivityTimestampsChange = (v: boolean): void => {
-    setShowActivityTimestamps(v);
-    void window.chatheads.rail.setShowActivityTimestamps(v);
-  };
-
-  useEffect(() => {
-    let alive = true;
-    void window.chatheads.theme.getMode().then((v) => {
-      if (alive) setTheme(v);
-    });
-    const off = window.chatheads.theme.onModeChange((v) => setTheme(v));
-    return () => {
-      alive = false;
-      off();
-    };
-  }, []);
-
-  const onThemeChange = (mode: ThemeMode): void => {
-    setTheme(mode);
-    void window.chatheads.theme.setMode(mode);
-  };
-
   if (!auth.signedIn) {
     return (
       <Shell>
         <SignedOutPrompt />
         <Divider />
-        <PinRow
-          pinned={pinned}
-          onChange={(v) => {
-            setPinned(v);
-            void window.chatheads.rail.setPinned(v);
-          }}
-        />
-        <SessionOnlyRow enabled={sessionOnly} disabled={pinned} onChange={onSessionOnlyChange} />
-        <CollapseInactiveRow enabled={collapseInactive} onChange={onCollapseInactiveChange} />
-        <ShowActivityTimestampsRow
-          shown={showActivityTimestamps}
-          onChange={onShowActivityTimestampsChange}
-        />
-        {spotifySupported ? (
-          <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
-        ) : null}
-        <ThemeRow value={theme} onChange={onThemeChange} />
+        <RailPreferences />
         <Divider />
         <Footer />
       </Shell>
@@ -173,23 +50,7 @@ export function App(): JSX.Element {
       {addError ? <ErrorNote message={addError} /> : null}
       <AddButton busy={busy === "add"} onClick={onAdd} />
       <Divider />
-      <PinRow
-        pinned={pinned}
-        onChange={(v) => {
-          setPinned(v);
-          void window.chatheads.rail.setPinned(v);
-        }}
-      />
-      <SessionOnlyRow enabled={sessionOnly} disabled={pinned} onChange={onSessionOnlyChange} />
-      <CollapseInactiveRow enabled={collapseInactive} onChange={onCollapseInactiveChange} />
-      <ShowActivityTimestampsRow
-        shown={showActivityTimestamps}
-        onChange={onShowActivityTimestampsChange}
-      />
-      {spotifySupported ? (
-        <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
-      ) : null}
-      <ThemeRow value={theme} onChange={onThemeChange} />
+      <RailPreferences />
       <Divider />
       <Footer />
     </Shell>
@@ -304,30 +165,6 @@ function RepoRow({
   );
 }
 
-function Checkbox({ checked }: { checked: boolean }): JSX.Element {
-  return (
-    <span
-      className={`
-        w-[14px] h-[14px] rounded-[3px] inline-flex items-center justify-center flex-shrink-0
-        ${checked ? "bg-fg text-bg" : "bg-transparent border border-fg/40"}
-      `}
-    >
-      {checked ? (
-        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-          <path
-            d="M1.5 5 L4 7.5 L8.5 2.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      ) : null}
-    </span>
-  );
-}
-
 function AddButton({ busy, onClick }: { busy: boolean; onClick: () => void }): JSX.Element {
   return (
     <button
@@ -351,171 +188,6 @@ function ErrorNote({ message }: { message: string }): JSX.Element {
   return <div className="px-1.5 py-1 text-sm text-danger">{message}</div>;
 }
 
-// ---------- Pin toggle ----------
-
-function PinRow({
-  pinned,
-  onChange,
-}: {
-  pinned: boolean;
-  onChange: (v: boolean) => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!pinned)}
-      className="
-        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
-        bg-transparent border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-alt
-        text-left
-      "
-    >
-      <Checkbox checked={pinned} />
-      <span className="flex-1 text-base">Keep rail on top</span>
-    </button>
-  );
-}
-
-function SpotifyShareRow({
-  enabled,
-  onChange,
-}: {
-  enabled: boolean;
-  onChange: (v: boolean) => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!enabled)}
-      title={enabled ? undefined : "macOS will ask for automation permission"}
-      className="
-        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
-        bg-transparent border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-alt
-        text-left
-      "
-    >
-      <Checkbox checked={enabled} />
-      <span className="flex-1 text-base">Share Spotify Now Playing</span>
-    </button>
-  );
-}
-
-function CollapseInactiveRow({
-  enabled,
-  onChange,
-}: {
-  enabled: boolean;
-  onChange: (v: boolean) => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!enabled)}
-      className="
-        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
-        bg-transparent border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-alt
-        text-left
-      "
-    >
-      <Checkbox checked={enabled} />
-      <span className="flex-1 text-base">Stack inactive teammates</span>
-    </button>
-  );
-}
-
-function ShowActivityTimestampsRow({
-  shown,
-  onChange,
-}: {
-  shown: boolean;
-  onChange: (shown: boolean) => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!shown)}
-      className="
-        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
-        bg-transparent border-none text-fg cursor-pointer [font:inherit]
-        hover:bg-surface-alt
-        text-left
-      "
-    >
-      <Checkbox checked={shown} />
-      <span className="flex-1 text-base">Show activity timestamps</span>
-    </button>
-  );
-}
-
-function ThemeRow({
-  value,
-  onChange,
-}: {
-  value: ThemeMode;
-  onChange: (mode: ThemeMode) => void;
-}): JSX.Element {
-  const opts: { mode: ThemeMode; label: string }[] = [
-    { mode: "system", label: "System" },
-    { mode: "light", label: "Light" },
-    { mode: "dark", label: "Dark" },
-  ];
-  return (
-    <div className="flex items-center gap-2 px-1.5 py-1">
-      <span className="flex-1 text-base text-fg">Theme</span>
-      <div className="flex rounded-md bg-surface-alt p-0.5 gap-0.5">
-        {opts.map((o) => {
-          const active = value === o.mode;
-          return (
-            <button
-              key={o.mode}
-              type="button"
-              onClick={() => onChange(o.mode)}
-              aria-pressed={active}
-              className={`
-                px-2 py-0.5 rounded text-xs [font:inherit] cursor-pointer border-none
-                ${active ? "bg-bg text-fg" : "bg-transparent text-fg/60 hover:text-fg"}
-              `}
-            >
-              {o.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function SessionOnlyRow({
-  enabled,
-  disabled,
-  onChange,
-}: {
-  enabled: boolean;
-  disabled: boolean;
-  onChange: (v: boolean) => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={() => onChange(!enabled)}
-      title={disabled ? "Turn off \u201cKeep rail on top\u201d to use this mode" : undefined}
-      className={`
-        w-full flex items-center gap-2 px-1.5 py-1 rounded-md
-        bg-transparent border-none text-fg [font:inherit]
-        text-left
-        ${disabled ? "opacity-40 cursor-default" : "cursor-pointer hover:bg-surface-alt"}
-      `}
-    >
-      <Checkbox checked={enabled} />
-      <span className="flex-1 text-base">Show rail only during active sessions</span>
-    </button>
-  );
-}
-
 // ---------- Footer / signed-out CTA ----------
 
 function SignedOutPrompt(): JSX.Element {
@@ -532,7 +204,6 @@ function SignedOutPrompt(): JSX.Element {
 function Footer(): JSX.Element {
   return (
     <div className="flex gap-2">
-      <FooterButton onClick={() => window.chatheads.openMain()}>Settings</FooterButton>
       <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
     </div>
   );

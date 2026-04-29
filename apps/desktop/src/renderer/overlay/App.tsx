@@ -515,7 +515,7 @@ function SearchBubble({ open }: { open: boolean }): JSX.Element {
         relative w-11.25 h-11.25 rounded-full cursor-pointer
         flex items-center justify-center
         bg-black/15 text-white
-        outline-1 -outline-offset-1 outline-bubble-outline
+        outline-1 -outline-offset-1 outline-white/20
         transition-transform duration-150 ease-out
         hover:scale-[1.03] hover:bg-black/20
       "

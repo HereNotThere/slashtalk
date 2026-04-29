@@ -12,11 +12,16 @@ function createMainWindow(): BrowserWindow {
     width: 620,
     height: 640,
     title: "Settings",
+    alwaysOnTop: true,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
     },
   });
+  // Match the response window's level so focus determines z-order between
+  // the two — without this, the response window's `floating` level always
+  // sits above the settings window regardless of which is focused.
+  mainWindow.setAlwaysOnTop(true, "floating");
   loadRenderer(mainWindow, "main");
   // Hide-on-close rather than destroy. Rationale: the rail overlay is
   // `focusable: false`, which Electron implements as NSPanel on macOS. An

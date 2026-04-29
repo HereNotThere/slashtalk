@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { MARKDOWN_LINK_COMPONENT } from "../shared/MarkdownLink";
 import {
   Bars3Icon,
+  Cog6ToothIcon,
   PaperAirplaneIcon,
   PencilSquareIcon,
   XMarkIcon,
@@ -520,6 +521,14 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
           {historyOpen ? <XMarkIcon className="w-5 h-5" /> : <Bars3Icon className="w-5 h-5" />}
         </button>
         <span className="text-sm text-muted truncate">Ask anything about your team</span>
+        <button
+          type="button"
+          onClick={() => void window.chatheads.openMain()}
+          aria-label="Open settings"
+          className="absolute right-3 inline-flex items-center justify-center p-1.5 rounded-md text-subtle hover:text-fg hover:bg-surface-alt-hover transition-colors"
+        >
+          <Cog6ToothIcon className="w-5 h-5" />
+        </button>
       </div>
       <HistorySideNav
         open={historyOpen}
@@ -584,7 +593,7 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
 
       <div className="flex-none">
         <div className="mx-auto w-full max-w-[720px] px-6 pb-6 pt-2">
-          <div className="flex items-center gap-2 p-2 pl-5 rounded-full bg-surface border border-divider focus-within:border-subtle transition-colors">
+          <div className="flex items-center gap-2 p-2 pl-5 rounded-full bg-surface border border-fg/10 focus-within:border-fg/25 transition-colors">
             <input
               ref={inputRef}
               autoFocus

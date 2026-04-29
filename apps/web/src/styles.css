@@ -435,6 +435,28 @@ button {
     background: #24302a;
     color: #c5d1ca;
   }
+
+  .status.live,
+  .state-busy,
+  .state-active {
+    background: #143723;
+    color: #8ee2b5;
+  }
+
+  .state-idle {
+    background: #172b47;
+    color: #9cc5ff;
+  }
+
+  .state-recent {
+    background: #3a2c12;
+    color: #f1cf82;
+  }
+
+  .state-ended {
+    background: #26302b;
+    color: #aebbb3;
+  }
 }
 
 @media (max-width: 720px) {

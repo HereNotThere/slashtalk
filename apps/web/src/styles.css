@@ -185,7 +185,6 @@ button {
 }
 
 .person-header h2,
-.session-row h3,
 .empty-state h2 {
   margin: 0;
   letter-spacing: 0;
@@ -196,7 +195,6 @@ button {
 }
 
 .person-header p,
-.session-row p,
 .empty-state p {
   margin: 4px 0 0;
   color: #617067;
@@ -252,11 +250,6 @@ button {
 .state-ended {
   background: #f0f0ef;
   color: #66706a;
-}
-
-.session-list {
-  display: grid;
-  gap: 8px;
 }
 
 .card-section {
@@ -381,38 +374,6 @@ button {
   background: #c2410c;
 }
 
-.session-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 8px;
-  background: #f7f9f7;
-  color: inherit;
-  text-decoration: none;
-}
-
-.session-row h3 {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  font-size: 15px;
-  line-height: 1.3;
-}
-
-.session-meta {
-  display: flex;
-  min-width: 88px;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-  color: #617067;
-  font-size: 12px;
-  font-weight: 700;
-}
-
 .empty-state {
   padding: 24px;
 }
@@ -517,9 +478,8 @@ button {
   .eyebrow,
   .metric span,
   .person-header p,
-  .session-row p,
   .empty-state p,
-  .session-meta {
+  .muted {
     color: #9daba3;
   }
 
@@ -559,10 +519,6 @@ button {
   .primary {
     background: #35d07f;
     color: #07150d;
-  }
-
-  .session-row {
-    background: #111816;
   }
 
   .plain-list li {
@@ -623,17 +579,5 @@ button {
 
   .detail-grid {
     grid-template-columns: 1fr;
-  }
-
-  .session-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .session-meta {
-    width: 100%;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
   }
 }

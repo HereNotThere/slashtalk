@@ -473,24 +473,6 @@ function MarkdownInline({ text }: { text: string }): JSX.Element {
   return <>{parts}</>;
 }
 
-function SessionRow({ session }: { session: FeedSessionSnapshot }): JSX.Element {
-  return (
-    <a className="session-row" href={`/app/sessions/${session.id}`}>
-      <div>
-        <h3>{session.title || session.lastUserPrompt || "Untitled session"}</h3>
-        <p>
-          {repoName(session.repo_full_name)}
-          {session.branch ? ` · ${session.branch}` : ""}
-        </p>
-      </div>
-      <div className="session-meta">
-        <span className={`state state-${session.state}`}>{stateLabel(session.state)}</span>
-        <span>{timeAgo(session.lastTs)}</span>
-      </div>
-    </a>
-  );
-}
-
 function pickNowSession(sessions: FeedSessionSnapshot[]): FeedSessionSnapshot | null {
   const cutoff = Date.now() - NOW_WINDOW_MS;
   let bestLive: FeedSessionSnapshot | null = null;
@@ -549,7 +531,7 @@ function fmtDuration(seconds: number): string {
 
 function fmtTokens(tokens: TokenUsage | undefined): string | null {
   if (!tokens) return null;
-  const total = tokens.in + tokens.out + tokens.cacheWrite + tokens.reasoning;
+  const total = tokens.in + tokens.out + tokens.cacheRead + tokens.cacheWrite + tokens.reasoning;
   if (total <= 0) return null;
   if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}M`;
   if (total >= 1_000) return `${(total / 1_000).toFixed(1)}k`;

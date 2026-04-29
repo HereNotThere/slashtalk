@@ -3,7 +3,11 @@ import {
   SessionState,
   type FeedSessionSnapshot,
   type FeedUser,
+  type StandupResponse,
   type SessionSnapshot,
+  type TokenUsage,
+  type UserPr,
+  type UserPrsResponse,
 } from "@slashtalk/shared";
 
 interface Me {
@@ -16,8 +20,21 @@ interface Me {
 type LoadState =
   | { kind: "loading" }
   | { kind: "signed-out" }
-  | { kind: "ready"; me: Me; users: FeedUser[]; sessions: FeedSessionSnapshot[] }
+  | {
+      kind: "ready";
+      me: Me;
+      users: FeedUser[];
+      sessions: FeedSessionSnapshot[];
+      refreshedAt: number;
+    }
   | { kind: "error"; message: string };
+
+type DashboardState =
+  | { kind: "loading" }
+  | { kind: "ready"; standup: string | null; prs: UserPr[]; noClaimedRepos: boolean }
+  | { kind: "error"; message: string };
+
+const NOW_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 async function apiFetch<T>(path: string): Promise<T> {
   const res = await fetch(path, {
@@ -83,7 +100,7 @@ export default function App(): JSX.Element {
         apiFetch<FeedUser[]>("/api/feed/users"),
         apiFetch<FeedSessionSnapshot[]>("/api/feed"),
       ]);
-      setState({ kind: "ready", me, users, sessions });
+      setState({ kind: "ready", me, users, sessions, refreshedAt: Date.now() });
     } catch (err) {
       if (err instanceof AuthError) {
         setState({ kind: "signed-out" });
@@ -147,7 +164,15 @@ export default function App(): JSX.Element {
     );
   }
 
-  return <TeamNow me={state.me} users={state.users} sessions={state.sessions} onRefresh={load} />;
+  return (
+    <TeamNow
+      me={state.me}
+      users={state.users}
+      sessions={state.sessions}
+      refreshKey={state.refreshedAt}
+      onRefresh={load}
+    />
+  );
 }
 
 function Shell({
@@ -173,11 +198,13 @@ function TeamNow({
   me,
   users,
   sessions,
+  refreshKey,
   onRefresh,
 }: {
   me: Me;
   users: FeedUser[];
   sessions: FeedSessionSnapshot[];
+  refreshKey: number;
   onRefresh: () => Promise<void>;
 }): JSX.Element {
   const liveCount = sessions.filter(
@@ -246,6 +273,7 @@ function TeamNow({
               login={login}
               user={usersByLogin.get(login)}
               sessions={userSessions}
+              refreshKey={refreshKey}
             />
           ))
         )}
@@ -267,14 +295,46 @@ function PersonCard({
   login,
   user,
   sessions,
+  refreshKey,
 }: {
   login: string;
   user?: FeedUser;
   sessions: FeedSessionSnapshot[];
+  refreshKey: number;
 }): JSX.Element {
-  const live = sessions.some(
-    (s) => s.state === SessionState.BUSY || s.state === SessionState.ACTIVE,
-  );
+  const [dashboard, setDashboard] = useState<DashboardState>({ kind: "loading" });
+  const nowSession = pickNowSession(sessions);
+  const live = nowSession?.state === SessionState.BUSY || nowSession?.state === SessionState.ACTIVE;
+
+  useEffect(() => {
+    let cancelled = false;
+    setDashboard((current) => (current.kind === "ready" ? current : { kind: "loading" }));
+    Promise.all([
+      apiFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs?scope=today`),
+      apiFetch<StandupResponse>(`/api/users/${encodeURIComponent(login)}/standup?scope=today`),
+    ])
+      .then(([prsRes, standupRes]) => {
+        if (cancelled) return;
+        setDashboard({
+          kind: "ready",
+          standup: standupRes.summary,
+          prs: prsRes.prs,
+          noClaimedRepos: standupRes.noClaimedRepos === true || prsRes.noClaimedRepos === true,
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDashboard({
+            kind: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [login, refreshKey]);
+
   return (
     <article className="person-card">
       <header className="person-header">
@@ -287,13 +347,130 @@ function PersonCard({
         </div>
         <span className={live ? "status live" : "status"}>{live ? "Live" : "Quiet"}</span>
       </header>
-      <div className="session-list">
-        {sessions.slice(0, 4).map((session) => (
-          <SessionRow key={session.id} session={session} />
-        ))}
-      </div>
+      {dashboard.kind === "ready" && dashboard.noClaimedRepos ? (
+        <div className="card-section">
+          <p className="muted">No repos connected yet.</p>
+        </div>
+      ) : (
+        <>
+          {nowSession ? <NowSection session={nowSession} /> : null}
+          <TodaySection dashboard={dashboard} />
+          <PrsSection dashboard={dashboard} />
+        </>
+      )}
     </article>
   );
+}
+
+function NowSection({ session }: { session: FeedSessionSnapshot }): JSX.Element {
+  const status = sessionStatus(session);
+  const tokens = fmtTokens(session.tokens);
+  const summary = session.description;
+  return (
+    <section className="card-section">
+      <SectionLabel label="Now" />
+      <a className="now-link" href={`/app/sessions/${session.id}`}>
+        <p className="now-summary">
+          {summary ? summary : <span className="muted">Summarizing current session...</span>}
+        </p>
+        <div className="now-meta">
+          <span>{repoName(session.repo_full_name)}</span>
+          {tokens ? <span>{tokens} tokens</span> : null}
+          {status ? (
+            <span className={status.isLive ? "live-text" : undefined}>{status.text}</span>
+          ) : null}
+        </div>
+      </a>
+    </section>
+  );
+}
+
+function TodaySection({ dashboard }: { dashboard: DashboardState }): JSX.Element {
+  return (
+    <section className="card-section">
+      <SectionLabel label="Today" />
+      <p className="today-copy">
+        {dashboard.kind === "loading" ? (
+          <span className="muted">Fetching...</span>
+        ) : dashboard.kind === "error" ? (
+          <span className="muted">Could not load today.</span>
+        ) : dashboard.standup ? (
+          <MarkdownInline text={dashboard.standup} />
+        ) : (
+          <span className="muted">Nothing shipped yet today.</span>
+        )}
+      </p>
+    </section>
+  );
+}
+
+function PrsSection({ dashboard }: { dashboard: DashboardState }): JSX.Element {
+  const prs = dashboard.kind === "ready" ? dashboard.prs : null;
+  return (
+    <section className="card-section card-section-last">
+      <SectionLabel label="PRs" />
+      {dashboard.kind === "loading" ? (
+        <p className="muted section-empty">Loading...</p>
+      ) : dashboard.kind === "error" ? (
+        <p className="muted section-empty">Could not load PRs.</p>
+      ) : prs && prs.length > 0 ? (
+        <div className="pr-list">
+          {prs.slice(0, 4).map((pr) => (
+            <PrRow key={`${pr.repoFullName}#${pr.number}`} pr={pr} />
+          ))}
+        </div>
+      ) : (
+        <p className="muted section-empty">No PRs in this window.</p>
+      )}
+    </section>
+  );
+}
+
+function SectionLabel({ label }: { label: string }): JSX.Element {
+  return <div className="section-label">{label}</div>;
+}
+
+function PrRow({ pr }: { pr: UserPr }): JSX.Element {
+  return (
+    <a className="pr-row" href={pr.url} target="_blank" rel="noreferrer">
+      <div className={`pr-state pr-state-${pr.state}`} aria-hidden="true" />
+      <div>
+        <h3>{pr.title}</h3>
+        <p>
+          {repoName(pr.repoFullName)} #{pr.number} · {prStateLabel(pr.state)} ·{" "}
+          {timeAgo(pr.updatedAt)}
+        </p>
+      </div>
+    </a>
+  );
+}
+
+function MarkdownInline({ text }: { text: string }): JSX.Element {
+  const parts: React.ReactNode[] = [];
+  const pattern = /(`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > last) parts.push(text.slice(last, index));
+    const token = match[0];
+    if (token.startsWith("`")) {
+      parts.push(<code key={index}>{token.slice(1, -1)}</code>);
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (link) {
+        parts.push(
+          <a key={index} href={link[2]} target="_blank" rel="noreferrer">
+            {link[1]}
+          </a>,
+        );
+      } else {
+        parts.push(token);
+      }
+    }
+    last = index + token.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 function SessionRow({ session }: { session: FeedSessionSnapshot }): JSX.Element {
@@ -312,6 +489,82 @@ function SessionRow({ session }: { session: FeedSessionSnapshot }): JSX.Element 
       </div>
     </a>
   );
+}
+
+function pickNowSession(sessions: FeedSessionSnapshot[]): FeedSessionSnapshot | null {
+  const cutoff = Date.now() - NOW_WINDOW_MS;
+  let bestLive: FeedSessionSnapshot | null = null;
+  let bestLiveTs = -Infinity;
+  let bestRecent: FeedSessionSnapshot | null = null;
+  let bestRecentTs = -Infinity;
+
+  for (const session of sessions) {
+    const ts = session.lastTs ? new Date(session.lastTs).getTime() : 0;
+    const isLive = session.state === SessionState.BUSY || session.state === SessionState.ACTIVE;
+    if (isLive) {
+      if (ts > bestLiveTs) {
+        bestLiveTs = ts;
+        bestLive = session;
+      }
+      continue;
+    }
+
+    if (session.state === SessionState.IDLE || session.state === SessionState.RECENT) {
+      if (ts >= cutoff && ts > bestRecentTs) {
+        bestRecentTs = ts;
+        bestRecent = session;
+      }
+    }
+  }
+
+  return bestLive ?? bestRecent;
+}
+
+function sessionStatus(session: FeedSessionSnapshot): { text: string; isLive: boolean } | null {
+  switch (session.state) {
+    case SessionState.BUSY:
+    case SessionState.ACTIVE:
+      return { text: "working now", isLive: true };
+    case SessionState.IDLE:
+      return {
+        text: session.idleS != null ? `idle ${fmtDuration(session.idleS)}` : "idle",
+        isLive: false,
+      };
+    case SessionState.RECENT:
+      return session.lastTs ? { text: `paused ${timeAgo(session.lastTs)}`, isLive: false } : null;
+    case SessionState.ENDED:
+      return session.lastTs ? { text: `ended ${timeAgo(session.lastTs)}`, isLive: false } : null;
+  }
+}
+
+function fmtDuration(seconds: number): string {
+  const value = Math.max(0, Math.floor(seconds));
+  if (value < 60) return `${value}s`;
+  const minutes = Math.floor(value / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return rem > 0 ? `${hours}h ${rem}m` : `${hours}h`;
+}
+
+function fmtTokens(tokens: TokenUsage | undefined): string | null {
+  if (!tokens) return null;
+  const total = tokens.in + tokens.out + tokens.cacheWrite + tokens.reasoning;
+  if (total <= 0) return null;
+  if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}M`;
+  if (total >= 1_000) return `${(total / 1_000).toFixed(1)}k`;
+  return `${total}`;
+}
+
+function prStateLabel(state: UserPr["state"]): string {
+  switch (state) {
+    case "open":
+      return "Open";
+    case "closed":
+      return "Closed";
+    case "merged":
+      return "Merged";
+  }
 }
 
 function SessionDetail({

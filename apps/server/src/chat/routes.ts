@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
 import { runChatAgent } from "./runner";
@@ -134,6 +134,10 @@ export const chatRoutes = (db: Database, redis: RedisBridge) =>
                 eq(chatMessages.id, body.messageId),
                 eq(chatMessages.threadId, params.threadId),
                 eq(chatMessages.userId, user.id),
+                // Only finalize delegation placeholders. Defense against a
+                // bug or crafted request from overwriting a non-delegated
+                // chat turn's answer.
+                isNotNull(chatMessages.delegation),
               ),
             )
             .returning({ id: chatMessages.id });

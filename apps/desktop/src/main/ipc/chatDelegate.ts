@@ -27,7 +27,15 @@ export function registerChatDelegateIpc(
 
       const cwd = resolveCwd(raw);
       if (!cwd) {
-        return { kind: "needs-repo", candidates: localRepos.list() };
+        const candidates = localRepos.list();
+        if (candidates.length === 0) {
+          return {
+            kind: "error",
+            message:
+              "No local repos tracked. Add one from the tray menu so the agent has somewhere to look.",
+          };
+        }
+        return { kind: "needs-repo", candidates };
       }
 
       const onEvent = (event: AgentStreamEvent): void => {

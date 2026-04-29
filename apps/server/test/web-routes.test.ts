@@ -18,6 +18,9 @@ describe("web app route path mapping", () => {
     expect(relativeAppPath("/app/sessions//example")).toBeNull();
     expect(relativeAppPath("/app/../secret")).toBeNull();
     expect(relativeAppPath("/app/%252e%252e/%252e%252e/package.json")).toBeNull();
+    expect(relativeAppPath("/app/file:/etc/passwd")).toBeNull();
+    expect(relativeAppPath("/app/https://example.com/app.js")).toBeNull();
+    expect(relativeAppPath("/app/assets\\evil.js")).toBeNull();
     expect(relativeAppPath("/app/%00")).toBeNull();
   });
 });

@@ -19,7 +19,7 @@ import { classifySessionState } from "../sessions/state";
 import { detectCollisions } from "../correlate/file-index";
 import { config } from "../config";
 import { makeSemaphore } from "../util/semaphore";
-import { extractCodexQuotaFromBatch, writeQuotaPresence } from "../presence/quota";
+import { extractCodexQuotaFromBatch, writeAndPublishQuotaPresence } from "../presence/quota";
 import type { QuotaPresence } from "@slashtalk/shared";
 
 function topFilesKeys(field: unknown): string[] {
@@ -376,11 +376,12 @@ async function handleIngest(
   }
   await flushBatch();
 
-  // One Redis write per ingest with whichever quota was freshest across all
-  // batches. Soft-fail inside writeQuotaPresence — a Redis blip must never
-  // break ingest itself.
+  // One Redis write + WS publish per ingest with whichever quota was freshest
+  // across all batches. Soft-fail inside writeAndPublishQuotaPresence — a
+  // Redis blip must never break ingest itself. The publish lets connected WS
+  // peers refresh in real time instead of waiting for the next 15s poll.
   if (latestCodexQuota) {
-    await writeQuotaPresence(redis, user.id, latestCodexQuota);
+    await writeAndPublishQuotaPresence(db, redis, user.id, user.githubLogin, latestCodexQuota);
   }
 
   if (totalLines === 0) {

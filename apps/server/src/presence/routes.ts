@@ -21,7 +21,7 @@ import type { Database } from "../db";
 import { apiKeyAuth, jwtAuth } from "../auth/middleware";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { userRepos, users } from "../db/schema";
-import { quotaKey, QUOTA_SOURCES, writeQuotaPresence } from "./quota";
+import { publishQuotaUpdate, quotaKey, QUOTA_SOURCES, writeAndPublishQuotaPresence } from "./quota";
 
 const TTL_SECONDS = 120;
 
@@ -129,30 +129,6 @@ const quotaBodySchema = t.Object({
   ]),
 });
 
-async function publishQuotaUpdate(
-  db: Database,
-  redis: RedisBridge,
-  userId: number,
-  githubLogin: string,
-  source: QuotaSource,
-  presence: QuotaPresence | null,
-): Promise<void> {
-  const repoRows = await db
-    .select({ repoId: userRepos.repoId })
-    .from(userRepos)
-    .where(eq(userRepos.userId, userId));
-  const msg = {
-    type: "presence_updated",
-    user_id: userId,
-    github_login: githubLogin,
-    quota: { source, presence },
-  } as const;
-  void redis.publish(`user:${userId}`, msg);
-  for (const r of repoRows) {
-    void redis.publish(`repo:${r.repoId}`, msg);
-  }
-}
-
 export const quotaPresenceRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/v1", name: "quota-presence" }).use(apiKeyAuth).post(
     "/presence/quota",
@@ -168,8 +144,7 @@ export const quotaPresenceRoutes = (db: Database, redis: RedisBridge) =>
         windows: body.presence.windows,
         updatedAt: new Date().toISOString(),
       };
-      await writeQuotaPresence(redis, user.id, stamped);
-      await publishQuotaUpdate(db, redis, user.id, user.githubLogin, body.source, stamped);
+      await writeAndPublishQuotaPresence(db, redis, user.id, user.githubLogin, stamped);
       return { ok: true as const };
     },
     { body: quotaBodySchema },

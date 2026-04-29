@@ -4,7 +4,10 @@
 // so adding Claude later is just adding another extractor — readers MGET each
 // source they care about.
 
+import { eq } from "drizzle-orm";
 import type { QuotaPresence, QuotaSource, QuotaWindow } from "@slashtalk/shared";
+import type { Database } from "../db";
+import { userRepos } from "../db/schema";
 import type { RedisBridge } from "../ws/redis-bridge";
 
 // Quota state changes on the order of minutes-to-hours, not seconds. A long
@@ -121,6 +124,56 @@ export async function writeQuotaPresence(
   } catch (err) {
     console.warn(`[quota] redis setex failed for user=${userId}:`, (err as Error).message);
   }
+}
+
+/**
+ * Fan out a `presence_updated` to the user's WS channel and every repo channel
+ * they participate in. Mirrors the spotify presence pattern so live
+ * subscribers refresh without waiting for the next 15s peer-poll. Pure
+ * fire-and-forget: redis.publish never throws (already soft-fail), and the
+ * userRepos lookup is a small read that's allowed to fail loudly — if it
+ * does, the only consequence is a single missed real-time refresh.
+ */
+export async function publishQuotaUpdate(
+  db: Database,
+  redis: RedisBridge,
+  userId: number,
+  githubLogin: string,
+  source: QuotaSource,
+  presence: QuotaPresence | null,
+): Promise<void> {
+  const repoRows = await db
+    .select({ repoId: userRepos.repoId })
+    .from(userRepos)
+    .where(eq(userRepos.userId, userId));
+  const msg = {
+    type: "presence_updated",
+    user_id: userId,
+    github_login: githubLogin,
+    quota: { source, presence },
+  } as const;
+  void redis.publish(`user:${userId}`, msg);
+  for (const r of repoRows) {
+    void redis.publish(`repo:${r.repoId}`, msg);
+  }
+}
+
+/**
+ * Combined SETEX + publish — every ingest path that writes a quota also wants
+ * the live notification, and the Claude POST endpoint does too. Keeping them
+ * in one helper makes "forgot to publish" impossible (the original ingest
+ * bug). The Claude POST clear path (presence: null) doesn't go through here
+ * because it uses redis.del instead of setex.
+ */
+export async function writeAndPublishQuotaPresence(
+  db: Database,
+  redis: RedisBridge,
+  userId: number,
+  githubLogin: string,
+  quota: QuotaPresence,
+): Promise<void> {
+  await writeQuotaPresence(redis, userId, quota);
+  await publishQuotaUpdate(db, redis, userId, githubLogin, quota.source, quota);
 }
 
 /** All sources whose quota we accept and surface. Codex is extracted

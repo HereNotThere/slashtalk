@@ -204,14 +204,18 @@ function fmtResetsIn(resetsAt: string | null): string | null {
   if (!Number.isFinite(t)) return null;
   const ms = t - Date.now();
   if (ms <= 0) return "now";
-  const mins = Math.round(ms / 60_000);
-  // Sub-30-second resets round to 0m; render that as "now" so the UI doesn't
-  // briefly show "resets 0m" in the final seconds before a window flips.
+  // Compute every unit from `ms` directly (not from the next-larger unit's
+  // already-rounded value) — otherwise compounding rounding can skip a label.
+  // E.g. 47.5h via Math.round(mins/60) becomes 48, but `hours < 48` is false,
+  // so the display jumps "47h" → "2d" with "48h" never appearing. `floor`
+  // gives stable, downward-biased "time-until" semantics: each label sticks
+  // until you actually cross into the next unit.
+  const mins = Math.floor(ms / 60_000);
   if (mins <= 0) return "now";
   if (mins < 60) return `${mins}m`;
-  const hours = Math.round(mins / 60);
+  const hours = Math.floor(ms / 3_600_000);
   if (hours < 48) return `${hours}h`;
-  const days = Math.round(hours / 24);
+  const days = Math.floor(ms / 86_400_000);
   return `${days}d`;
 }
 

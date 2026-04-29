@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Checkbox } from "./Checkbox";
-import type { ThemeMode } from "../../shared/types";
+import type { McpInstallStatus, McpTarget, ThemeMode } from "../../shared/types";
+
+const MCP_TARGETS: McpTarget[] = ["claude-code", "codex"];
 
 export function RailPreferences(): JSX.Element {
   const [pinned, setPinned] = useState<boolean>(true);
@@ -115,6 +117,7 @@ export function RailPreferences(): JSX.Element {
 
   return (
     <>
+      <McpRow />
       <PinRow pinned={pinned} onChange={onPinnedChange} />
       <SessionOnlyRow enabled={sessionOnly} disabled={pinned} onChange={onSessionOnlyChange} />
       <CollapseInactiveRow enabled={collapseInactive} onChange={onCollapseInactiveChange} />
@@ -126,6 +129,80 @@ export function RailPreferences(): JSX.Element {
         <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
       ) : null}
       <ThemeRow value={theme} onChange={onThemeChange} />
+    </>
+  );
+}
+
+function McpRow(): JSX.Element {
+  const [status, setStatus] = useState<McpInstallStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.chatheads.mcp
+      .status()
+      .then((next) => {
+        if (!cancelled) setStatus(next);
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const connected = status ? status.claudeCode.installed || status.codex.installed : false;
+  const disabled = !status || busy;
+
+  const onToggle = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    let opError: Error | null = null;
+    const enabled = !connected;
+
+    for (const target of MCP_TARGETS) {
+      try {
+        if (enabled) {
+          await window.chatheads.mcp.install(target);
+        } else {
+          await window.chatheads.mcp.uninstall(target);
+        }
+      } catch (err) {
+        opError ??= err as Error;
+      }
+    }
+
+    try {
+      const next = await window.chatheads.mcp.status();
+      setStatus(next);
+    } catch (err) {
+      opError ??= err as Error;
+    }
+    if (opError) setError(opError.message);
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => void onToggle()}
+        className={`
+          w-full flex items-center gap-2 px-1.5 py-1 rounded-md
+          bg-transparent border-none text-fg [font:inherit]
+          text-left
+          ${disabled ? "opacity-60 cursor-default" : "cursor-pointer hover:bg-surface-alt"}
+        `}
+      >
+        <Checkbox checked={connected} />
+        <span className="flex-1 text-base">Install MCP</span>
+      </button>
+      {error ? (
+        <div className="text-sm px-1.5 -mt-0.5 mb-1 leading-snug text-danger">{error}</div>
+      ) : null}
     </>
   );
 }

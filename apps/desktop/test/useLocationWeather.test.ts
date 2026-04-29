@@ -152,30 +152,32 @@ describe("ipLocation", () => {
 });
 
 describe("resolveLocationFresh", () => {
-  it("uses the timezone city when geocoding succeeds", async () => {
+  it("uses the IP city when ipapi succeeds", async () => {
     const { fetcher, calls } = mockFetcher({
+      "ipapi.co": { body: { city: "Seattle", latitude: 47.6, longitude: -122.33 } },
       "geocoding-api.open-meteo.com": {
-        body: { results: [{ name: "Berlin", latitude: 52.52, longitude: 13.4 }] },
+        body: { results: [{ name: "SHOULD_NOT_HIT", latitude: 0, longitude: 0 }] },
       },
-      "ipapi.co": { body: { city: "SHOULD_NOT_HIT", latitude: 0, longitude: 0 } },
     });
-    const r = await resolveLocationFresh("Europe/Berlin", fetcher);
-    expect(r?.city).toBe("Berlin");
-    expect(calls.some((c) => c.url.includes("ipapi.co"))).toBe(false);
+    const r = await resolveLocationFresh("America/Los_Angeles", fetcher);
+    expect(r?.city).toBe("Seattle");
+    expect(calls.some((c) => c.url.includes("geocoding-api"))).toBe(false);
   });
 
-  it("falls back to IP when geocoding returns nothing", async () => {
+  it("falls back to the timezone city when IP lookup fails", async () => {
     const { fetcher, calls } = mockFetcher({
-      "geocoding-api.open-meteo.com": { body: { results: [] } },
-      "ipapi.co": { body: { city: "Tokyo", latitude: 35.68, longitude: 139.77 } },
+      "ipapi.co": { ok: false, body: {} },
+      "geocoding-api.open-meteo.com": {
+        body: { results: [{ name: "Tokyo", latitude: 35.68, longitude: 139.77 }] },
+      },
     });
     const r = await resolveLocationFresh("Asia/Tokyo", fetcher);
     expect(r?.city).toBe("Tokyo");
-    expect(calls.some((c) => c.url.includes("geocoding-api"))).toBe(true);
     expect(calls.some((c) => c.url.includes("ipapi.co"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("geocoding-api"))).toBe(true);
   });
 
-  it("skips geocoding when the timezone has no city (e.g. UTC)", async () => {
+  it("returns the IP city even when the timezone has no city (e.g. UTC)", async () => {
     const { fetcher, calls } = mockFetcher({
       "ipapi.co": { body: { city: "London", latitude: 51.5, longitude: -0.12 } },
     });
@@ -184,10 +186,10 @@ describe("resolveLocationFresh", () => {
     expect(calls.every((c) => !c.url.includes("geocoding-api"))).toBe(true);
   });
 
-  it("returns null when both geocoding and IP lookup fail", async () => {
+  it("returns null when both IP and geocoding fail", async () => {
     const { fetcher } = mockFetcher({
-      "geocoding-api.open-meteo.com": { body: { results: [] } },
       "ipapi.co": { ok: false, body: {} },
+      "geocoding-api.open-meteo.com": { body: { results: [] } },
     });
     expect(await resolveLocationFresh("Europe/Nowhere", fetcher)).toBeNull();
   });

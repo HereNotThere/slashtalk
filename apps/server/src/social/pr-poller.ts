@@ -13,20 +13,11 @@
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "../db";
-import {
-  users,
-  repos,
-  sessions,
-  pullRequests,
-  userRepos,
-} from "../db/schema";
+import { users, repos, sessions, pullRequests, userRepos } from "../db/schema";
 import { decryptGithubToken } from "../auth/tokens";
 import { config } from "../config";
 import type { RedisBridge } from "../ws/redis-bridge";
-import type {
-  PrActivityMessage,
-  SessionUpdatedMessage,
-} from "@slashtalk/shared";
+import type { PrActivityMessage, SessionUpdatedMessage } from "@slashtalk/shared";
 
 const POLL_INTERVAL_MS = 60_000;
 // Stagger users so we don't pin a single tick at hundreds of req/sec.
@@ -168,10 +159,7 @@ async function pollUser(
  * Uses `read:user` tokens which can read public repos fine; private repos
  * without `repo` scope silently 404/403 and are skipped.
  */
-export async function backfillOpenPrs(
-  db: Database,
-  redis: RedisBridge,
-): Promise<void> {
+export async function backfillOpenPrs(db: Database, redis: RedisBridge): Promise<void> {
   let userRows: { id: number; githubLogin: string; githubToken: string }[];
   try {
     userRows = await db
@@ -233,17 +221,14 @@ async function backfillRepo(
 ): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(
-      `https://api.github.com/repos/${fullName}/pulls?state=open&per_page=50`,
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          Authorization: `token ${token}`,
-          "User-Agent": "slashtalk-pr-poller",
-        },
+    res = await fetch(`https://api.github.com/repos/${fullName}/pulls?state=open&per_page=50`, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        Authorization: `token ${token}`,
+        "User-Agent": "slashtalk-pr-poller",
       },
-    );
+    });
   } catch (err) {
     console.warn(`[pr-poller] backfill ${fullName}: fetch failed:`, (err as Error).message);
     return;
@@ -307,7 +292,7 @@ async function backfillRepo(
         github_login: m.githubLogin,
         repo_id: repoId,
       };
-      await redis.publish(`repo:${repoId}`, upd);
+      void redis.publish(`repo:${repoId}`, upd);
     }
   }
   console.log(`[pr-poller] backfilled ${prs.length} open PR(s) for ${fullName}`);
@@ -374,9 +359,7 @@ export async function persistPrFromEvent(
         updatedAt: new Date(ev.created_at),
       },
     });
-  console.log(
-    `[pr-poller] upserted PR ${ev.repo.name}#${number} head=${headRef} state=${state}`,
-  );
+  console.log(`[pr-poller] upserted PR ${ev.repo.name}#${number} head=${headRef} state=${state}`);
 
   // Announce to every session on this (repo, branch) so the UI refreshes.
   const matches = await db
@@ -387,9 +370,7 @@ export async function persistPrFromEvent(
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
-    .where(
-      and(eq(sessions.repoId, repoRow.id), eq(sessions.branch, headRef)),
-    );
+    .where(and(eq(sessions.repoId, repoRow.id), eq(sessions.branch, headRef)));
 
   for (const m of matches) {
     const upd: SessionUpdatedMessage = {
@@ -399,7 +380,7 @@ export async function persistPrFromEvent(
       github_login: m.githubLogin,
       repo_id: repoRow.id,
     };
-    await redis.publish(`repo:${repoRow.id}`, upd);
+    void redis.publish(`repo:${repoRow.id}`, upd);
   }
 }
 

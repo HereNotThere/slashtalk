@@ -358,7 +358,7 @@ function Avatar({ head }: { head: ChatHead | null }): JSX.Element {
       <img
         src={head.avatar.value}
         alt=""
-        className="w-12 h-12 rounded-full object-cover shrink-0"
+        className="w-12 h-12 rounded-full object-cover shrink-0 bg-white/20"
       />
     );
   }

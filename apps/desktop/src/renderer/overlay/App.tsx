@@ -538,7 +538,7 @@ function Bubble({
         <img
           src={head.avatar.value}
           alt=""
-          className="w-full h-full rounded-full object-cover pointer-events-none"
+          className="w-full h-full rounded-full object-cover pointer-events-none bg-white/20"
         />
       )}
       {!hideAge && head.lastActionAt != null && !head.live && (

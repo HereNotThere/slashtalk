@@ -170,6 +170,7 @@ export default function App(): JSX.Element {
       users={state.users}
       sessions={state.sessions}
       refreshKey={state.refreshedAt}
+      onAuthError={() => setState({ kind: "signed-out" })}
       onRefresh={load}
     />
   );
@@ -199,12 +200,14 @@ function TeamNow({
   users,
   sessions,
   refreshKey,
+  onAuthError,
   onRefresh,
 }: {
   me: Me;
   users: FeedUser[];
   sessions: FeedSessionSnapshot[];
   refreshKey: number;
+  onAuthError: () => void;
   onRefresh: () => Promise<void>;
 }): JSX.Element {
   const liveCount = sessions.filter(
@@ -274,6 +277,7 @@ function TeamNow({
               user={usersByLogin.get(login)}
               sessions={userSessions}
               refreshKey={refreshKey}
+              onAuthError={onAuthError}
             />
           ))
         )}
@@ -296,11 +300,13 @@ function PersonCard({
   user,
   sessions,
   refreshKey,
+  onAuthError,
 }: {
   login: string;
   user?: FeedUser;
   sessions: FeedSessionSnapshot[];
   refreshKey: number;
+  onAuthError: () => void;
 }): JSX.Element {
   const [dashboard, setDashboard] = useState<DashboardState>({ kind: "loading" });
   const nowSession = pickNowSession(sessions);
@@ -323,6 +329,10 @@ function PersonCard({
         });
       })
       .catch((err) => {
+        if (err instanceof AuthError) {
+          if (!cancelled) onAuthError();
+          return;
+        }
         if (!cancelled) {
           setDashboard({
             kind: "error",
@@ -333,7 +343,7 @@ function PersonCard({
     return () => {
       cancelled = true;
     };
-  }, [login, refreshKey]);
+  }, [login, onAuthError, refreshKey]);
 
   return (
     <article className="person-card">

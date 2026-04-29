@@ -26,6 +26,7 @@ These are top-level cross-cutting specs — UPPERCASE filenames at `docs/` root 
 
 - [`product-specs/backend.md`](../product-specs/backend.md) — hosted backend spec (ingest, feed, WS).
 - [`product-specs/upload.md`](../product-specs/upload.md) — delta-sync upload protocol.
+- [`product-specs/webapp-pwa.md`](../product-specs/webapp-pwa.md) — `apps/web` PWA scope, push notifications, and web/desktop code-sharing boundaries.
 
 ## References (3rd-party libs)
 

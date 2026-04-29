@@ -16,6 +16,7 @@ Domain map for slashtalk. For rules that shape these domains, see [`docs/design-
  │ backend client (single-flight │        │ chat  (/api/chat, Q&A)        │
  │  refresh, safeStorage creds)  │        │ analyzers  (LLM scheduler)    │
  │                               │        │ presence  (now-playing)       │
+ │                               │        │ web  (/app/* PWA static)      │
  └───────────────────────────────┘        └───────────────┬───────────────┘
                                                           │
                                                   Postgres + Redis
@@ -89,7 +90,7 @@ Team-presence Q&A. Stateless server; client owns the thread.
 WebSocket upgrade + Redis pub/sub bridge.
 
 - **Files:** `ws/handler.ts`, `ws/redis-bridge.ts`.
-- **Routes:** `GET /ws?token=...` (accepts JWT or API key).
+- **Routes:** `GET /ws` (accepts browser `session` cookie, else `?token=` JWT or API key).
 - **Channels:** subscribes a connection to `repo:<id>` for every row in `user_repos`, plus `user:<userId>`.
 - **Soft-fail:** Redis errors in `RedisBridge.publish`/`subscribe` are swallowed so HTTP stays up. See [core-beliefs #7](docs/design-docs/core-beliefs.md#7-redis-publishing-is-soft-fail).
 
@@ -106,6 +107,14 @@ Background LLM scheduler that produces session insights (title/description, roll
 ### `install` (vestigial)
 
 `install/install.sh` is served at `GET /install.sh` but targets the old byte-offset ingest API and will 400 if invoked. Scheduled for removal — see [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md). **Do not extend.**
+
+### `web`
+
+Static-file serving for the installable browser app.
+
+- **Files:** `web/routes.ts` serves `apps/web/dist`.
+- **Routes:** `GET /app`, `GET /app/*`.
+- **Contract:** `/app/*` shares the server origin with `/api/*`, `/auth/*`, and `/ws` so browser auth can use httpOnly cookies and same-origin `fetch(..., { credentials: "include" })`.
 
 ## Desktop architecture (`apps/desktop/src/`)
 
@@ -135,6 +144,10 @@ Six renderer windows plus auxiliary system chrome (`trayPopup`, `dockPlaceholder
 
 Tailwind v4 via single shared `tailwind.css`.
 
+## Web app (`apps/web/`)
+
+Installable Vite + React PWA served by `apps/server` under `/app/*`. It renders the server-backed presence/feed surface with same-origin `/api/*` calls and browser cookies. It is read/control plane only: local ingest, heartbeats, device repo paths, MCP proxy installation, local delegated agents, and local Spotify reads remain desktop-only.
+
 ## MCP surface
 
 `apps/server` serves the consolidated MCP HTTP resource at root `/mcp` and owns managed-agent session ingest at `/v1/managed-agent-sessions`. `/mcp` accepts standards-aligned MCP OAuth access tokens for direct Claude Code and Codex clients, while retaining Slashtalk device API key compatibility for the desktop-local proxy and legacy installs. `/v1/managed-agent-sessions` remains device API key authenticated. The deprecated standalone `apps/mcp` workspace has been removed; new MCP capability belongs in `apps/server`.
@@ -163,5 +176,6 @@ Single file (`index.ts`) exporting types + runtime const objects (`SessionState`
 - **Add an analyzer** → [`apps/server/AGENTS.md`](apps/server/AGENTS.md#adding-an-llm-analyzer)
 - **Add a database table** → [`apps/server/AGENTS.md`](apps/server/AGENTS.md#adding-a-database-column-or-table)
 - **Add a BrowserWindow or IPC channel** → [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md)
+- **Add a web PWA route or service worker behavior** → [`apps/web/AGENTS.md`](apps/web/AGENTS.md)
 - **Add a shared type** → [`packages/shared/AGENTS.md`](packages/shared/AGENTS.md#adding-a-new-type)
 - **Add a WebSocket message type** → rules in [`apps/server/AGENTS.md`](apps/server/AGENTS.md) + consumer in [`apps/desktop/src/main/ws.ts`](apps/desktop/src/main/ws.ts).

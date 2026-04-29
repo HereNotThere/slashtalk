@@ -4,13 +4,8 @@ import { eq } from "drizzle-orm";
 import { config } from "../config";
 import { db } from "../db";
 import { users, apiKeys, devices } from "../db/schema";
+import { isSessionCredentialFresh, verifySessionJwt } from "./session";
 import { hashToken } from "./tokens";
-
-type SessionJwtPayload = {
-  sub?: string | number;
-  iat?: number | boolean;
-  sessionIssuedAt?: number;
-};
 
 const authUserColumns = {
   id: users.id,
@@ -40,8 +35,8 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
       throw new Error("Unauthorized");
     }
 
-    const payload = (await jwt.verify(token as string)) as false | SessionJwtPayload;
-    if (!payload || !payload.sub) {
+    const payload = await verifySessionJwt(jwt, token as string);
+    if (!payload) {
       set.status = 401;
       throw new Error("Invalid token");
     }
@@ -57,17 +52,9 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
       throw new Error("User not found");
     }
 
-    if (user.credentialsRevokedAt) {
-      const issuedAtMs =
-        typeof payload.sessionIssuedAt === "number"
-          ? payload.sessionIssuedAt
-          : typeof payload.iat === "number"
-            ? payload.iat * 1000
-            : null;
-      if (!issuedAtMs || issuedAtMs < user.credentialsRevokedAt.getTime()) {
-        set.status = 401;
-        throw new Error("Invalid token");
-      }
+    if (!isSessionCredentialFresh(user, payload)) {
+      set.status = 401;
+      throw new Error("Invalid token");
     }
 
     return { user };

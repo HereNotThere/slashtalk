@@ -4,42 +4,36 @@ import { eq } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
 import { users, apiKeys, userRepos } from "../db/schema";
+import {
+  isSessionCredentialFresh,
+  type SessionJwtVerifier,
+  verifySessionJwt,
+} from "../auth/session";
 import { hashToken } from "../auth/tokens";
 import type { RedisBridge } from "./redis-bridge";
 
 const PING_INTERVAL_MS = 30_000;
+const BASE_ORIGIN = new URL(config.baseUrl).origin;
+const BASE_IS_LOOPBACK = isLoopbackHost(new URL(config.baseUrl).hostname);
 
 export const wsHandler = (db: Database, redis: RedisBridge) =>
   new Elysia({ name: "ws" }).use(jwt({ name: "jwt", secret: config.jwtSecret })).ws("/ws", {
     query: t.Object({
-      token: t.String(),
+      token: t.Optional(t.String()),
     }),
 
     async open(ws) {
-      const token = ws.data.query.token;
-      let userId: number | null = null;
-
-      // Try JWT first
       const jwtPlugin = ws.data as any;
-      if (jwtPlugin.jwt) {
-        const payload = await jwtPlugin.jwt.verify(token);
-        if (payload?.sub) {
-          userId = Number(payload.sub);
-        }
-      }
-
-      // Try API key if JWT didn't work
-      if (!userId) {
-        const keyHash = await hashToken(token);
-        const [apiKey] = await db
-          .select()
-          .from(apiKeys)
-          .where(eq(apiKeys.keyHash, keyHash))
-          .limit(1);
-        if (apiKey) {
-          userId = apiKey.userId;
-        }
-      }
+      const queryToken = ws.data.query.token;
+      const cookieToken = jwtPlugin.cookie?.session?.value;
+      const origin = jwtPlugin.headers?.origin;
+      const userId = queryToken
+        ? await authenticateQueryToken(db, jwtPlugin.jwt, queryToken)
+        : typeof cookieToken === "string"
+          ? isAllowedCookieWebSocketOrigin(origin)
+            ? await authenticateJwt(db, jwtPlugin.jwt, cookieToken)
+            : null
+          : null;
 
       if (!userId) {
         ws.close(4001, "Unauthorized");
@@ -85,3 +79,57 @@ export const wsHandler = (db: Database, redis: RedisBridge) =>
       // Server → Client only; ignore client messages
     },
   });
+
+async function authenticateQueryToken(
+  db: Database,
+  jwtVerifier: SessionJwtVerifier | undefined,
+  token: string,
+): Promise<number | null> {
+  return (await authenticateJwt(db, jwtVerifier, token)) ?? authenticateApiKey(db, token);
+}
+
+async function authenticateJwt(
+  db: Database,
+  jwtVerifier: SessionJwtVerifier | undefined,
+  token: string,
+): Promise<number | null> {
+  const payload = await verifySessionJwt(jwtVerifier, token);
+  if (!payload) return null;
+
+  const [user] = await db
+    .select({
+      id: users.id,
+      credentialsRevokedAt: users.credentialsRevokedAt,
+    })
+    .from(users)
+    .where(eq(users.id, Number(payload.sub)))
+    .limit(1);
+  if (!user) return null;
+  if (!isSessionCredentialFresh(user, payload)) return null;
+
+  return user.id;
+}
+
+export function isAllowedCookieWebSocketOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  if (parsed.origin === BASE_ORIGIN) return true;
+  return BASE_IS_LOOPBACK && isLoopbackHost(parsed.hostname);
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+async function authenticateApiKey(db: Database, token: string): Promise<number | null> {
+  const keyHash = await hashToken(token);
+  const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash)).limit(1);
+  return apiKey?.userId ?? null;
+}

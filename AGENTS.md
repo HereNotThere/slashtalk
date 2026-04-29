@@ -27,6 +27,7 @@ Bun workspace monorepo. **`bun` is the only supported package manager** ([core-b
 | ------------------------------------ | -------------------------------------- | -------------------------------------------------------------- |
 | [`apps/server`](apps/server)         | [AGENTS.md](apps/server/AGENTS.md)     | Elysia backend (auth, ingest, sessions, social, analyzers, ws) |
 | [`apps/desktop`](apps/desktop)       | [AGENTS.md](apps/desktop/AGENTS.md)    | Electron overlay, 6 renderer windows + tray/dock chrome        |
+| [`apps/web`](apps/web)               | [AGENTS.md](apps/web/AGENTS.md)        | Installable React PWA served by the server under `/app/*`      |
 | [`packages/shared`](packages/shared) | [AGENTS.md](packages/shared/AGENTS.md) | Source-only TS types                                           |
 
 Per-workspace `AGENTS.md` shape varies intentionally by workspace role — server is recipe-heavy, desktop is design-system-heavy, and shared is constraint-heavy. The minimum every workspace AGENTS.md must include is `Layout` + `Commands` + `Before committing`. See [`docs/CONVENTIONS.md#per-workspace-agentsmd`](docs/CONVENTIONS.md#per-workspace-agentsmd).
@@ -35,10 +36,11 @@ Per-workspace `AGENTS.md` shape varies intentionally by workspace role — serve
 
 | Prefix               | Auth                                                            | Used by                  |
 | -------------------- | --------------------------------------------------------------- | ------------------------ |
+| `/app/*`             | Static shell; data fetched via `/api/*` cookie auth             | Web PWA                  |
 | `/v1/*`              | `apiKeyAuth` (Bearer token, SHA-256 compared)                   | Desktop + CLI            |
 | `/mcp`               | MCP OAuth access token; device API key for local proxy / legacy | MCP HTTP clients         |
 | `/auth/*` + `/api/*` | `jwtAuth` (httpOnly `session` cookie or `Cookie:` header)       | Browser + desktop cookie |
-| `/ws?token=…`        | JWT, else API key                                               | All clients              |
+| `/ws`                | httpOnly `session` cookie, else `?token=` JWT/API key           | Web + desktop            |
 
 Mixing is a rule violation. Root `/mcp` is the explicit MCP resource-server exception because MCP protocol versioning happens in the initialize handshake — see [core-beliefs #2](docs/design-docs/core-beliefs.md#2-route-prefix-encodes-auth).
 
@@ -46,9 +48,11 @@ Mixing is a rule violation. Root `/mcp` is the explicit MCP resource-server exce
 
 ```sh
 bun run dev                                    # start server + desktop for local development
+bun run dev:web                                # start only the web PWA Vite dev server
 bun install                                    # install all workspaces
 bun --filter @slashtalk/server <script>
 bun --filter @slashtalk/electron <script>
+bun --filter @slashtalk/web <script>
 bun --filter @slashtalk/shared <script>
 ```
 
@@ -70,6 +74,7 @@ If you touched `apps/server/src/db/schema.ts`, also run `bun run gen:db-schema` 
 - **LLM analyzer** → [`apps/server/AGENTS.md`](apps/server/AGENTS.md#adding-an-llm-analyzer)
 - **DB column/table** → [`apps/server/AGENTS.md`](apps/server/AGENTS.md#adding-a-database-column-or-table)
 - **BrowserWindow or IPC** → [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md)
+- **Web PWA route/service worker** → [`apps/web/AGENTS.md`](apps/web/AGENTS.md)
 - **Shared type** → [`packages/shared/AGENTS.md`](packages/shared/AGENTS.md#adding-a-new-type)
 
 ## Keeping this map current

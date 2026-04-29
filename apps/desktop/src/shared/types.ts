@@ -385,6 +385,7 @@ export interface ChatHeadsBridge {
     install: (target: McpTarget, options?: McpInstallOptions) => Promise<McpTargetState>;
     uninstall: (target: McpTarget) => Promise<McpTargetState>;
     status: () => Promise<McpInstallStatus>;
+    onStatusChange: (cb: (status: McpInstallStatus) => void) => Unsubscribe;
     url: () => Promise<string>;
     detailForHead: (headId: string) => Promise<McpPresenceDetail | null>;
   };

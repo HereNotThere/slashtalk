@@ -138,27 +138,49 @@ function McpRow(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const refreshStatus = async (
+    shouldApply: () => boolean = () => true,
+  ): Promise<McpInstallStatus | null> => {
+    try {
+      const next = await window.chatheads.mcp.status();
+      if (shouldApply()) {
+        setStatus(next);
+        setError(null);
+      }
+      return next;
+    } catch (err) {
+      if (shouldApply()) setError((err as Error).message);
+      return null;
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
-    void window.chatheads.mcp
-      .status()
-      .then((next) => {
-        if (!cancelled) setStatus(next);
-      })
-      .catch((err) => {
-        if (!cancelled) setError((err as Error).message);
-      });
+    void refreshStatus(() => !cancelled);
+    const off = window.chatheads.mcp.onStatusChange((next) => {
+      if (!cancelled) {
+        setStatus(next);
+        setError(null);
+      }
+    });
     return () => {
       cancelled = true;
+      off();
     };
   }, []);
 
   const connected = status ? status.claudeCode.installed || status.codex.installed : false;
-  const disabled = !status || busy;
+  const disabled = busy;
 
   const onToggle = async (): Promise<void> => {
     setBusy(true);
     setError(null);
+    if (!status) {
+      await refreshStatus();
+      setBusy(false);
+      return;
+    }
+
     let opError: Error | null = null;
     const enabled = !connected;
 

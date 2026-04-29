@@ -1,5 +1,11 @@
 # @slashtalk/electron
 
+## 0.0.4
+
+### Patch Changes
+
+- 76aaa4c: Disable `installAppDeps` in electron-builder. Bun isn't a drop-in npm replacement here — electron-builder's app-deps step invokes `node /path/to/bun` which fails with `SyntaxError: Invalid or unexpected token` on the Bun binary. Vite already bundles all production code into `out/`, so there's nothing to install.
+
 ## 0.0.3
 
 ### Patch Changes

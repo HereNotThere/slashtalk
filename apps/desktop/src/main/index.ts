@@ -63,6 +63,7 @@ import { applyInitialSync, registerAuthOrchestrator } from "./sync/auth-orchestr
 import { registerAgents } from "./ipc/agents";
 import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
+import { registerChatDelegateIpc } from "./ipc/chatDelegate";
 
 // uncaughtException leaves the process in undefined state — exit so Electron
 // surfaces a crash dialog and the user gets a clean restart. A stray
@@ -222,6 +223,8 @@ ipcMain.handle(
 ipcMain.handle("chat:history", () => backend.fetchChatHistory());
 
 ipcMain.handle("chat:gerund", (_e, prompt: string) => backend.fetchChatGerunds(prompt));
+
+registerChatDelegateIpc(getResponseWindow);
 
 registerDockDrag({
   getOverlay: overlay.getOverlayWindow,

@@ -248,6 +248,43 @@ export type AgentStreamEvent =
   | { kind: "done"; agentId: string; stopReason?: string }
   | { kind: "error"; agentId: string; message: string };
 
+/** Streaming events from a chat-delegate run. Same shape as
+ *  AgentStreamEvent but without `agentId` — chat-delegate runs aren't tied
+ *  to a managed agent record; the {runId} in the envelope is enough. */
+export type ChatDelegateEvent =
+  | { kind: "text"; text: string }
+  | { kind: "thinking" }
+  | {
+      kind: "tool_use";
+      id: string;
+      name: string;
+      server?: string;
+      input?: unknown;
+    }
+  | {
+      kind: "tool_result";
+      toolUseId: string;
+      isError?: boolean;
+      summary?: string;
+    }
+  | { kind: "phase"; label: string | null }
+  | { kind: "usage"; input: number; output: number }
+  | { kind: "done"; stopReason?: string }
+  | { kind: "error"; message: string };
+
+export interface DelegatedChatRequest {
+  task: string;
+  repoFullName?: string;
+  threadId: string;
+  messageId: string;
+  resolvedRepoId?: number;
+}
+
+export type DelegatedChatResponse =
+  | { kind: "ok"; text: string; hadError: boolean; ghAvailable: boolean }
+  | { kind: "needs-repo"; candidates: TrackedRepo[] }
+  | { kind: "error"; message: string };
+
 export type AssistantBlock =
   | { kind: "text"; text: string }
   | { kind: "thinking" }
@@ -475,6 +512,13 @@ export interface ChatHeadsBridge {
   // what the assistant is actually doing for this specific prompt. The UI
   // cycles through them. Server guarantees a non-empty array.
   fetchChatGerunds: (prompt: string) => Promise<string[]>;
+
+  // Chat delegation: server returned a ChatAssistantMessage with a `delegation`
+  // field. Renderer hands the envelope here; main resolves the named repo to
+  // a local cwd, runs a read-only Claude Agent SDK session, streams events
+  // via onDelegatedEvent, and POSTs the final answer back to the server.
+  runDelegatedChat: (req: DelegatedChatRequest) => Promise<DelegatedChatResponse>;
+  onDelegatedEvent: (cb: (event: ChatDelegateEvent) => void) => Unsubscribe;
 
   // Drag (overlay → main)
   dragStart: () => Promise<void>;

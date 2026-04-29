@@ -14,12 +14,7 @@
 // A future pass should use the canUseTool callback to route through a
 // renderer-side approval dialog.
 
-import {
-  query,
-  type Options,
-  type SDKMessage,
-  type PermissionMode,
-} from "@anthropic-ai/claude-agent-sdk";
+import { query, type Options, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import os from "node:os";
@@ -27,6 +22,7 @@ import * as path from "node:path";
 import * as agentStore from "./agentStore";
 import * as localTranscripts from "./localTranscripts";
 import type { AgentStreamEvent } from "./anthropic";
+import { normalizeSdkMessage } from "./sdkEvents";
 import type { AgentHistoryPage, AgentMsg, AssistantBlock, CreateAgentInput } from "../shared/types";
 
 const LOCAL_AGENT_PREFIX = "local:";
@@ -100,8 +96,7 @@ export async function sendMessage(
   onSessionUnavailable?: () => void,
 ): Promise<void> {
   const cwd = agent.cwd ?? os.homedir();
-  const persistedSdkId = agent.sessions.find((s) => s.id === sessionId)
-    ?.sdkSessionId;
+  const persistedSdkId = agent.sessions.find((s) => s.id === sessionId)?.sdkSessionId;
 
   // If we have a saved SDK session id but its on-disk transcript is gone
   // (Claude Code pruned it, the cwd was renamed, or the user wiped
@@ -180,83 +175,6 @@ export async function sendMessage(
   }
 }
 
-/** SDKMessage → 0+ AgentStreamEvent. Handles the subset of SDK variants the
- *  renderer actually renders; unknown kinds fall through silently. Emits
- *  events without agentId — main/index.ts's handler stamps it before
- *  broadcasting to renderers, matching the anthropic.ts callback shape. */
-function normalizeSdkMessage(msg: SDKMessage): AgentStreamEvent[] {
-  const out: AgentStreamEvent[] = [];
-
-  if (msg.type === "assistant") {
-    for (const block of msg.message.content) {
-      if (block.type === "text") {
-        if (block.text) out.push({ kind: "text", text: block.text });
-      } else if (block.type === "thinking") {
-        out.push({ kind: "thinking" });
-      } else if (block.type === "tool_use") {
-        out.push({
-          kind: "tool_use",
-          id: block.id,
-          name: block.name,
-          input: block.input,
-        });
-        out.push({ kind: "phase", label: `Running ${block.name}…` });
-      }
-    }
-  } else if (msg.type === "user") {
-    // The SDK echoes tool_result blocks back as synthetic user messages
-    // (the agent's loop consumes them as context). Surface them so the UI
-    // can flip the matching tool_use pill from running → ok/error.
-    const content = msg.message.content;
-    if (Array.isArray(content)) {
-      for (const block of content) {
-        if (
-          typeof block === "object" &&
-          block !== null &&
-          "type" in block &&
-          (block as { type: string }).type === "tool_result"
-        ) {
-          const b = block as {
-            tool_use_id: string;
-            is_error?: boolean;
-            content?: unknown;
-          };
-          out.push({
-            kind: "tool_result",
-            toolUseId: b.tool_use_id,
-            isError: b.is_error,
-            summary: summarizeToolResult(b.content),
-          });
-        }
-      }
-    }
-  } else if (msg.type === "result") {
-    // Terminal: push usage then done. Any assistant turn in progress is
-    // considered complete.
-    if (msg.usage) {
-      out.push({
-        kind: "usage",
-        input: msg.usage.input_tokens ?? 0,
-        output: msg.usage.output_tokens ?? 0,
-      });
-    }
-    out.push({ kind: "phase", label: null });
-    if (msg.subtype === "success") {
-      out.push({
-        kind: "done",
-        stopReason: msg.stop_reason ?? undefined,
-      });
-    } else {
-      out.push({
-        kind: "error",
-        message: msg.errors.join("\n") || `Agent run failed (${msg.subtype}).`,
-      });
-    }
-  }
-
-  return out;
-}
-
 /** Mirrors the renderer's applyEvent so our persisted transcript matches
  *  what the user sees. */
 function applyEventToAssistant(
@@ -302,24 +220,4 @@ function applyEventToAssistant(
   } else if (e.kind === "phase") {
     acc.phase = e.label ?? null;
   }
-}
-
-function summarizeToolResult(content: unknown): string | undefined {
-  if (content == null) return undefined;
-  const text =
-    typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content
-            .map((c) =>
-              typeof c === "object" && c !== null && "text" in c
-                ? String((c as { text?: unknown }).text ?? "")
-                : "",
-            )
-            .filter(Boolean)
-            .join("")
-        : "";
-  if (!text) return undefined;
-  const trimmed = text.replace(/\s+/g, " ").trim();
-  return trimmed.length <= 140 ? trimmed : trimmed.slice(0, 137) + "…";
 }

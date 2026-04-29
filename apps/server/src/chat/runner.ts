@@ -11,7 +11,12 @@ import type { Database } from "../db";
 import { chatMessages, repos, userRepos } from "../db/schema";
 import { MODELS, calculateCostUsd } from "../models";
 import { getAnthropicClient } from "../analyzers/anthropic-client";
-import { buildChatTools, type ChatToolDefinition } from "./tools";
+import {
+  buildChatTools,
+  tryParseDelegatePayload,
+  type ChatToolDefinition,
+  type DelegatePayload,
+} from "./tools";
 import { loadSessionCards, MAX_CARDS_PER_MESSAGE } from "./cards";
 import { LlmBudgetExceededError, checkLlmBudget, recordLlmSpend } from "../analyzers/llm-budget";
 import type { RedisBridge } from "../ws/redis-bridge";
@@ -21,8 +26,15 @@ const SYSTEM_PROMPT = `You are the slashtalk team-presence assistant. You answer
 Tools:
 - get_team_activity — per-teammate roll-up of recent sessions (call this first for open-ended questions)
 - get_session — detail on a single session
+- delegate_to_local_agent — hand off the question to a read-only Claude agent running on the user's desktop with full repo access (Read/Grep/Glob/git/typecheck/test). Use this when answering needs repo source, git history, or build/test output — things the activity tools cannot see.
 
 Default behavior: for any question about "the team", "what's going on", "who's working on X", call get_team_activity first, then synthesize a per-teammate roll-up. One sentence per person. Name them explicitly. Mention the repo when it adds information.
+
+Delegation: if the question is about repo internals (where a function is defined, what a file does, how data flows, what changed in a file recently, why typecheck/tests fail, who wrote a line of code), call delegate_to_local_agent with a one-paragraph \`task\` and \`repoFullName\` if you can identify it from the user's visible repos. Don't try to answer those from team-presence data — you will hallucinate.
+
+Also delegate for **authoritative PR/GitHub-state questions** ("is PR 123 merged?", "what's the CI status on this branch?", "list open PRs in apps/server"). The \`pr\` field returned by get_team_activity is best-effort and can lag the GitHub remote; if the user is asking about current PR state, route through the local agent (it can call \`gh pr view\`, \`gh pr list\`, \`gh run list\` for fresh data) instead of trusting \`pr\`.
+
+After calling delegate_to_local_agent the run ends; don't try to summarize or rephrase its result yourself.
 
 Naming a person: when the user mentions a teammate by name — first name, last name, GitHub login, or display-name fragment — pass it as the \`login\` argument to get_team_activity. The tool fuzzy-matches against logins and display names, so "ryan" resolves to ryancooley. Do NOT auto-scope to a specific repo when the user names a person — call without \`repoFullName\` first so the rollup covers every repo you share with that teammate. Inspect the response's \`resolvedLogins\` field: empty means the name didn't match any peer; non-empty with empty \`teammates\` means the peer exists but had no sessions in the time window — widen \`sinceHours\` instead of reporting "no teammate named X."
 
@@ -110,6 +122,7 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
   ];
 
   let finalText = "";
+  let delegate: DelegatePayload | null = null;
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     // Re-check after the first iteration — the agent can loop up to
@@ -149,7 +162,64 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
     const toolResults: ToolResultBlockParam[] = await Promise.all(
       toolUses.map((use) => runToolCall(use, byName)),
     );
+
+    // Short-circuit on delegation: the model called delegate_to_local_agent.
+    // We don't feed the sentinel back to the model — that would just hand it
+    // free-form text and tempt it to summarize/hallucinate. The desktop runs
+    // the actual answer.
+    for (const tr of toolResults) {
+      const content = typeof tr.content === "string" ? tr.content : null;
+      const parsed = content ? tryParseDelegatePayload(content) : null;
+      if (parsed) {
+        delegate = parsed;
+        break;
+      }
+    }
+    if (delegate) break;
+
     messages.push({ role: "user", content: toolResults });
+  }
+
+  const threadId = params.threadId ?? randomUUID();
+  const lastUserPrompt = lastUserPromptOf(params.messages);
+  const turnIndex = priorAssistantTurns(params.messages);
+
+  if (delegate) {
+    // Don't compute citations/cards on the placeholder — the desktop will
+    // POST the final answer (and its own tool trace) to /finalize, where
+    // citations are recomputed from the real text.
+    const placeholderText = "Looking deeper in your local repo…";
+    let messageId: string = randomUUID();
+    if (lastUserPrompt !== null) {
+      try {
+        const [row] = await db
+          .insert(chatMessages)
+          .values({
+            id: messageId,
+            threadId,
+            userId: user.id,
+            turnIndex,
+            prompt: lastUserPrompt,
+            answer: "",
+            citations: [],
+            delegation: delegate,
+          })
+          .returning({ id: chatMessages.id });
+        if (row?.id) messageId = row.id as string;
+      } catch (err) {
+        console.error("[chat] failed to persist delegation placeholder:", err);
+      }
+    }
+    return {
+      message: {
+        role: "assistant",
+        content: placeholderText,
+        citations: [],
+        cards: [],
+        delegation: { ...delegate, messageId },
+      },
+      threadId,
+    };
   }
 
   const citations = extractCitations(finalText);
@@ -160,12 +230,9 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
     visibleRepos.map((r) => r.id),
   );
 
-  const threadId = params.threadId ?? randomUUID();
-  const lastUserPrompt = lastUserPromptOf(params.messages);
   // Persist the turn so it shows up in history. Soft-fail: a DB hiccup must
   // not break the user's chat.
   if (lastUserPrompt !== null) {
-    const turnIndex = priorAssistantTurns(params.messages);
     try {
       await db.insert(chatMessages).values({
         threadId,

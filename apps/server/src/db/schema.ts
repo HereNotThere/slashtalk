@@ -404,6 +404,14 @@ export const chatMessages = pgTable(
       .$type<Array<{ sessionId: string; reason: string }>>()
       .notNull()
       .default([]),
+    /** Non-null when this turn was delegated to a desktop-side headless
+     *  agent. The row is inserted with `answer = ""` at delegation time and
+     *  filled in via /api/chat/threads/:threadId/finalize once the local
+     *  run completes. */
+    delegation: jsonb("delegation").$type<{
+      task: string;
+      repoFullName?: string;
+    } | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (t) => [

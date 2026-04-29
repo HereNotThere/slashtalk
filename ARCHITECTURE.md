@@ -110,11 +110,11 @@ Background LLM scheduler that produces session insights (title/description, roll
 
 ### `web`
 
-Static-file serving for the installable browser app.
+Static-file serving for the installable browser app and the public blog.
 
-- **Files:** `web/routes.ts` serves `apps/web/dist`.
-- **Routes:** `GET /app`, `GET /app/*`.
-- **Contract:** `/app/*` shares the server origin with `/api/*`, `/auth/*`, and `/ws` so browser auth can use httpOnly cookies and same-origin `fetch(..., { credentials: "include" })`.
+- **Files:** `web/routes.ts` serves `apps/web/dist`; `web/blog-routes.ts` serves `apps/blog/dist`.
+- **Routes:** `GET /app`, `GET /app/*`, `GET /blog`, `GET /blog/*`.
+- **Contract:** `/app/*` shares the server origin with `/api/*`, `/auth/*`, and `/ws` so browser auth can use httpOnly cookies and same-origin `fetch(..., { credentials: "include" })`. `/blog/*` is the public Astro marketing site (no auth) — its build base must match the mount path (see [`apps/blog/astro.config.mjs`](apps/blog/astro.config.mjs)).
 
 ## Desktop architecture (`apps/desktop/src/`)
 
@@ -148,6 +148,10 @@ Tailwind v4 via single shared `tailwind.css`.
 
 Installable Vite + React PWA served by `apps/server` under `/app/*`. It renders the server-backed presence/feed surface with same-origin `/api/*` calls and browser cookies. It is read/control plane only: local ingest, heartbeats, device repo paths, MCP proxy installation, local delegated agents, and local Spotify reads remain desktop-only.
 
+## Blog (`apps/blog/`)
+
+Public Astro static site (no auth) served by `apps/server` under `/blog/*`. Contains marketing copy and long-form posts. The Astro build is configured with `base: '/blog'` so generated asset paths match the mount; the server serves the static `dist/` output through the same handler family as the PWA. See [`apps/blog/README.md`](apps/blog/README.md).
+
 ## MCP surface
 
 `apps/server` serves the consolidated MCP HTTP resource at root `/mcp` and owns managed-agent session ingest at `/v1/managed-agent-sessions`. `/mcp` accepts standards-aligned MCP OAuth access tokens for direct Claude Code and Codex clients, while retaining Slashtalk device API key compatibility for the desktop-local proxy and legacy installs. `/v1/managed-agent-sessions` remains device API key authenticated. The deprecated standalone `apps/mcp` workspace has been removed; new MCP capability belongs in `apps/server`.
@@ -177,5 +181,6 @@ Single file (`index.ts`) exporting types + runtime const objects (`SessionState`
 - **Add a database table** → [`apps/server/AGENTS.md`](apps/server/AGENTS.md#adding-a-database-column-or-table)
 - **Add a BrowserWindow or IPC channel** → [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md)
 - **Add a web PWA route or service worker behavior** → [`apps/web/AGENTS.md`](apps/web/AGENTS.md)
+- **Add or edit a blog page** → [`apps/blog/README.md`](apps/blog/README.md)
 - **Add a shared type** → [`packages/shared/AGENTS.md`](packages/shared/AGENTS.md#adding-a-new-type)
 - **Add a WebSocket message type** → rules in [`apps/server/AGENTS.md`](apps/server/AGENTS.md) + consumer in [`apps/desktop/src/main/ws.ts`](apps/desktop/src/main/ws.ts).

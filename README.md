@@ -214,7 +214,8 @@ slashtalk/
 └── apps/
     ├── server/             # ElysiaJS backend (auth, ingest, sessions, ws, analyzers)
     ├── desktop/            # Electron overlay, 6 renderer windows + tray/dock chrome
-    └── mcp/                # MCP server (being consolidated into server)
+    ├── web/                # Installable React PWA — served by server under /app/*
+    └── blog/               # Public Astro blog/marketing site — served by server under /blog/*
 ```
 
 ## Key scripts

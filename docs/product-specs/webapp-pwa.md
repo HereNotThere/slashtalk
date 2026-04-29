@@ -9,7 +9,7 @@ surfaces without pretending it can replace the desktop uploader.
 ## Decision
 
 Add a new workspace named `apps/web`, package name `@slashtalk/web`, for the
-authenticated product app. Keep `apps/website` as the public marketing site.
+authenticated product app. Keep `apps/blog` as the public marketing/blog site.
 `apps/web` should be a Vite + React PWA because the desktop renderer is already
 React, the shared UI/refactor path is straightforward, and the app is mostly
 client-side authenticated state rather than content pages.
@@ -258,12 +258,12 @@ Server tests should cover:
 
 ## Alternatives considered
 
-- **Reuse `apps/website`** — rejected because the existing Astro app is the
+- **Reuse `apps/blog`** — rejected because the existing Astro app is the
   public site. Mixing marketing pages, OAuth app shell, service worker scope,
   and notification settings makes deploy and cache boundaries muddy.
 - **Name it `apps/webapp`** — rejected because `webapp` describes the category,
   not the workspace. `apps/web` is shorter and conventional next to
-  `apps/server`, `apps/desktop`, and `apps/website`.
+  `apps/server`, `apps/desktop`, and `apps/blog`.
 - **Make the browser app a full desktop replacement** — rejected because browser
   APIs cannot watch local Claude/Codex files, own a local MCP proxy, or keep
   device API keys with the same trust model.

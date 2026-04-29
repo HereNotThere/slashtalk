@@ -106,7 +106,7 @@ const dashboardInFlight = new Map<string, Promise<InfoDashboardData>>();
 // pick up the server's post-sync view (claim succeeded, `noClaimedRepos`
 // flipped, etc.). Cheap: at most one HTTP roundtrip per visible login on
 // next paint.
-const clearDashboardCache = (): void => {
+export const clearDashboardCache = (): void => {
   if (dashboardCache.size === 0) return;
   dashboardCache.clear();
 };
@@ -371,19 +371,18 @@ async function showInfo(
   if (firstShow) win.showInactive();
   broadcast("info:state", { visible: true, headId: head.id }, deps.getOverlay());
 
-  // Fetch any cache misses in parallel and push the merged snapshot once
-  // all settle, so the renderer doesn't ping-pong through two resize cycles.
-  // Drop expandSessionId on the follow-up: the initial push already carried
-  // it, and re-sending bumps expandRequest.nonce in the renderer, which
-  // re-expands a session the user may have manually collapsed mid-fetch.
-  const pending: Promise<unknown>[] = [];
-  if (!sessionCache.has(head.id)) pending.push(fetchSessionsForHead(head.id));
-  if (dashboardPromise) pending.push(dashboardPromise);
-  if (pending.length > 0) {
-    void Promise.all(pending).then(() => {
-      pushInfoShowSnapshot(infoWindow, head, undefined);
-    });
+  // Push as each fetch settles independently — the dashboard standup can
+  // take several seconds on a cache miss, and we don't want to gate the
+  // (typically faster) session refresh behind it. Two re-renders are fine;
+  // each push reads the latest cache state. Drop expandSessionId on these
+  // follow-ups: the initial push already carried it, and re-sending bumps
+  // expandRequest.nonce in the renderer, which re-expands a session the
+  // user may have manually collapsed mid-fetch.
+  const pushFollowUp = (): void => pushInfoShowSnapshot(infoWindow, head, undefined);
+  if (!sessionCache.has(head.id)) {
+    void fetchSessionsForHead(head.id).finally(pushFollowUp);
   }
+  if (dashboardPromise) void dashboardPromise.finally(pushFollowUp);
 }
 
 function scheduleHideInfo(): void {
@@ -539,7 +538,7 @@ export function scheduleRefresh(sessionId: string | null): void {
   }, REFRESH_DEBOUNCE_MS);
 }
 
-async function refreshNow(): Promise<void> {
+function refreshNow(): void {
   if (!selectedHeadId) return;
   if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
     return;
@@ -549,18 +548,19 @@ async function refreshNow(): Promise<void> {
   // Only drop the selected head's cache; other heads stay warm until clicked.
   sessionCache.delete(head.id);
   const login = rail.parseUserHeadId(head.id);
-  try {
-    await Promise.all([
-      fetchSessionsForHead(head.id),
-      // session_updated triggered this refresh — force a dashboard refetch
-      // so the renderer sees PR/standup state derived from the new events
-      // (in-flight fetches that started before this signal would otherwise
-      // satisfy the dedup and serve pre-event data).
-      login ? fetchDashboardForLogin(login, { force: true }) : Promise.resolve(),
-    ]);
-    pushInfoShowSnapshot(infoWindow, head, undefined);
-  } catch (e) {
-    console.warn("[ws] refreshInfoNow failed:", e);
+  // Push each fetch independently. The session_updated signal is what
+  // triggered us, so the new session data should reach the renderer ASAP —
+  // not block on the standup endpoint, which can take several seconds on
+  // a server-cache miss. `force: true` makes the dashboard refetch bypass
+  // any in-flight that started before this signal landed.
+  const pushFollowUp = (): void => pushInfoShowSnapshot(infoWindow, head, undefined);
+  void fetchSessionsForHead(head.id)
+    .catch((e) => console.warn("[ws] refreshNow sessions failed:", e))
+    .finally(pushFollowUp);
+  if (login) {
+    void fetchDashboardForLogin(login, { force: true })
+      .catch((e) => console.warn("[ws] refreshNow dashboard failed:", e))
+      .finally(pushFollowUp);
   }
 }
 

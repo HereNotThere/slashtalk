@@ -25,6 +25,7 @@ import type {
   IngestSelfPrEntry,
   IngestSelfPrsRequest,
   IngestSelfPrsResponse,
+  ProjectOverviewResponse,
   SessionSnapshot,
   SpotifyPresence,
   StandupResponse,
@@ -694,6 +695,23 @@ export function fetchUserStandup(login: string, scope: DashboardScope): Promise<
   return jsonFetch<StandupResponse>(`/api/users/${encodeURIComponent(login)}/standup?${qs}`, {
     method: "GET",
   });
+}
+
+export function fetchProjectOverview(
+  repoFullName: string,
+  scope: DashboardScope,
+): Promise<ProjectOverviewResponse> {
+  const qs = new URLSearchParams({ scope });
+  // repoFullName splits at the LAST slash — owner can't contain "/", but name
+  // can theoretically (GitHub doesn't allow it but be defensive).
+  const slash = repoFullName.indexOf("/");
+  if (slash < 0) throw new Error(`fetchProjectOverview: bad repoFullName "${repoFullName}"`);
+  const owner = repoFullName.slice(0, slash);
+  const name = repoFullName.slice(slash + 1);
+  return jsonFetch<ProjectOverviewResponse>(
+    `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/overview?${qs}`,
+    { method: "GET" },
+  );
 }
 
 export function listDeviceRepos(): Promise<

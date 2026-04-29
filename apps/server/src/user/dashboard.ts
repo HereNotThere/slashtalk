@@ -24,7 +24,13 @@ import type { RedisBridge } from "../ws/redis-bridge";
 import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
 import { loadInsightsForSessions } from "../sessions/snapshot";
-import type { DashboardScope, StandupResponse, UserPr, UserPrsResponse } from "@slashtalk/shared";
+import {
+  shortRepoName,
+  type DashboardScope,
+  type StandupResponse,
+  type UserPr,
+  type UserPrsResponse,
+} from "@slashtalk/shared";
 
 const SCOPE_VALUES: DashboardScope[] = ["today", "past24h"];
 
@@ -412,7 +418,7 @@ function buildStandupPrompt(args: StandupPromptArgs): string {
 
   if (args.prs.length > 0) {
     const lines = args.prs.map((p) => {
-      const repo = shortRepo(p.repoFullName);
+      const repo = shortRepoName(p.repoFullName);
       return `- [${p.state}] ${repo} #${p.number} (url: ${p.url}): ${truncate(p.title, 160)}`;
     });
     parts.push(`PRs authored in window:\n${lines.join("\n")}`);
@@ -422,7 +428,7 @@ function buildStandupPrompt(args: StandupPromptArgs): string {
 
   if (args.sessions.length > 0) {
     const lines = args.sessions.map((s) => {
-      const repo = shortRepo(s.repoFullName);
+      const repo = shortRepoName(s.repoFullName);
       const title = s.title ? truncate(s.title, 120) : "(untitled)";
       const summary = s.summary?.summary ? truncate(s.summary.summary, 240) : "(no summary)";
       const highlights = s.summary?.highlights?.length
@@ -437,11 +443,6 @@ function buildStandupPrompt(args: StandupPromptArgs): string {
   }
 
   return parts.join("\n\n");
-}
-
-function shortRepo(fullName: string): string {
-  const slash = fullName.lastIndexOf("/");
-  return slash >= 0 ? fullName.slice(slash + 1) : fullName;
 }
 
 function truncate(s: string, max: number): string {

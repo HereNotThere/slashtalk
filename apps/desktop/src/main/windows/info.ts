@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
 import type { ChatHead, InfoDashboardData, InfoSession } from "../../shared/types";
-import type { DashboardScope } from "@slashtalk/shared";
+import type { DashboardScope, ProjectOverviewResponse } from "@slashtalk/shared";
 import * as backend from "../backend";
 import * as localRepos from "../localRepos";
 import * as rail from "../rail";
@@ -63,6 +63,7 @@ const REFRESH_DEBOUNCE_MS = 300;
 // the two can evolve at different cadences.
 const DASHBOARD_PRS_SCOPE: DashboardScope = "today";
 const DASHBOARD_STANDUP_SCOPE: DashboardScope = "today";
+const PROJECT_OVERVIEW_SCOPE: DashboardScope = "today";
 
 let deps: InfoDeps;
 let infoWindow: BrowserWindow | null = null;
@@ -102,6 +103,19 @@ const sessionCache = new Map<string, InfoSession[]>();
 const dashboardCache = new Map<string, InfoDashboardData>();
 const dashboardInFlight = new Map<string, Promise<InfoDashboardData>>();
 
+// Per-repo project-overview cache. Same SWR pattern as `dashboardCache`:
+// every showProjectInfo deletes the entry and refetches so the renderer
+// paints from the previous snapshot for instant feedback and re-renders
+// when the fresh data lands. Server caches the LLM-derived pulse+buckets
+// for ~5min with a key that folds in the in-window PR set (see
+// apps/server/src/repo/overview.ts), so a single PR change naturally busts
+// the LLM cache on the next request.
+const projectOverviewCache = new Map<string, ProjectOverviewResponse>();
+// Promises stored here always resolve (never reject) — see
+// fetchProjectOverviewForRepo. Null means the fetch failed; callers
+// `.finally()` chain on this map's entries can't trip an unhandled rejection.
+const projectOverviewInFlight = new Map<string, Promise<ProjectOverviewResponse | null>>();
+
 // User toggled which local repos are tracked: clear optimistically so the
 // next hover doesn't paint stale cache. Then again on `onClaimsSettled` to
 // pick up the server's post-sync view (claim succeeded, `noClaimedRepos`
@@ -113,6 +127,22 @@ export const clearDashboardCache = (): void => {
 };
 localRepos.onSelectionChange(clearDashboardCache);
 localRepos.onClaimsSettled(clearDashboardCache);
+
+// Repo claim/selection changes also affect what overview data the caller is
+// allowed to see (gate is `user_repos`). Wholesale-clear so the next hover
+// repaints from fresh data.
+export const clearProjectOverviewCache = (): void => {
+  if (projectOverviewCache.size === 0) return;
+  projectOverviewCache.clear();
+};
+localRepos.onSelectionChange(clearProjectOverviewCache);
+localRepos.onClaimsSettled(clearProjectOverviewCache);
+
+/** Drop the cached overview for one repo. Used by the WS handler when a
+ *  `pr_activity` lands so the next hover repaints with fresh data. */
+export function invalidateProjectOverview(repoFullName: string): void {
+  projectOverviewCache.delete(repoFullName);
+}
 
 type InfoShowReadyResolver = (height: number | null) => void;
 // FIFO queue: each ack drains exactly one resolver so concurrent showInfo
@@ -285,8 +315,9 @@ function positionInfo(headId: string, bubbleScreen?: { x: number; y: number }): 
 
 // Sends an info:show with whatever's currently in main's caches. No-op if a
 // newer hover has taken over (head no longer selected). `dashboardFetching`
-// is derived from `dashboardInFlight` so a superseded promise's settled push
-// can't accidentally mark a still-pending newer fetch as "done."
+// and `projectOverviewFetching` derive from their in-flight maps so a
+// superseded promise's settled push can't accidentally mark a still-pending
+// newer fetch as "done."
 function pushInfoShowSnapshot(
   win: BrowserWindow | null,
   head: ChatHead,
@@ -297,6 +328,9 @@ function pushInfoShowSnapshot(
   const login = rail.parseUserHeadId(head.id);
   const dashboard = login ? (dashboardCache.get(login) ?? null) : null;
   const dashboardFetching = login ? dashboardInFlight.has(login) : false;
+  const repoFullName = head.kind === "project" ? (head.repoFullName ?? null) : null;
+  const projectOverview = repoFullName ? (projectOverviewCache.get(repoFullName) ?? null) : null;
+  const projectOverviewFetching = repoFullName ? projectOverviewInFlight.has(repoFullName) : false;
   win.webContents.send("info:show", {
     head,
     sessions: sessionCache.get(head.id) ?? null,
@@ -306,6 +340,8 @@ function pushInfoShowSnapshot(
     isSelf: backend.isSelf(login),
     dashboard,
     dashboardFetching,
+    projectOverview,
+    projectOverviewFetching,
   });
 }
 
@@ -313,9 +349,12 @@ async function showInfo(
   headId: string,
   bubbleScreen?: { x: number; y: number },
   expandSessionId?: string,
+  headOverride?: ChatHead,
 ): Promise<void> {
   if (getIsDragging()) return;
-  const head = deps.getHeads().find((h) => h.id === headId);
+  // Project heads are synthetic — they don't live in `getHeads()`. Callers
+  // that build a project head pass it in directly via `headOverride`.
+  const head = headOverride ?? deps.getHeads().find((h) => h.id === headId);
   if (!head) return;
 
   // Cancel any pending hide so fast re-entry just swaps content.
@@ -347,6 +386,7 @@ async function showInfo(
   if (cachedHeight) infoCurrentHeight = cachedHeight;
 
   const login = rail.parseUserHeadId(head.id);
+  const projectFullName = head.kind === "project" ? (head.repoFullName ?? null) : null;
   const firstShow = !win.isVisible();
   // Kick off the dashboard refetch *before* the snapshot push so
   // `dashboardInFlight` is populated by the time the snapshot reads it.
@@ -355,6 +395,9 @@ async function showInfo(
   // snapshot still paints the previous cache entry; the fetch lands later
   // and re-pushes the fresh value.
   const dashboardPromise = login ? fetchDashboardForLogin(login, { force: true }) : null;
+  const projectOverviewPromise = projectFullName
+    ? fetchProjectOverviewForRepo(projectFullName, { force: true })
+    : null;
   pushInfoShowSnapshot(win, head, expandSessionId);
 
   // Wait for the renderer's measured-height ack so position+content land on
@@ -380,10 +423,23 @@ async function showInfo(
   // expandRequest.nonce in the renderer, which re-expands a session the
   // user may have manually collapsed mid-fetch.
   const pushFollowUp = (): void => pushInfoShowSnapshot(infoWindow, head, undefined);
-  if (!sessionCache.has(head.id)) {
+  // Project heads don't have per-head sessions — skip the session fetch.
+  if (head.kind !== "project" && !sessionCache.has(head.id)) {
     void fetchSessionsForHead(head.id).finally(pushFollowUp);
   }
   if (dashboardPromise) void dashboardPromise.finally(pushFollowUp);
+  if (projectOverviewPromise) void projectOverviewPromise.finally(pushFollowUp);
+}
+
+/** Hover-show entry for a synthetic project head. The repo full-name is the
+ *  canonical id; the ChatHead shape lives in rail.ts so callers don't need
+ *  to know the tint/avatar conventions. */
+async function showProjectInfo(
+  repoFullName: string,
+  bubbleScreen?: { x: number; y: number },
+): Promise<void> {
+  const head = rail.projectHead(repoFullName);
+  return showInfo(head.id, bubbleScreen, undefined, head);
 }
 
 function scheduleHideInfo(): void {
@@ -424,10 +480,20 @@ export function hideNow(): void {
   }
 }
 
+// True when the selected head is a synthetic project head — those don't
+// live in `getHeads()`, so the membership guard below would wrongly bail.
+function selectedIsSynthetic(): boolean {
+  return selectedHeadId !== null && rail.parseProjectHeadId(selectedHeadId) !== null;
+}
+
 // Re-anchor using fallback math (rail-derived bubble position). For dock
 // flips and drag ticks where the rail has moved.
 export function repositionIfVisible(): void {
   if (!selectedHeadId) return;
+  // Synthetic project heads have no rail bubble — fallback math collapses to
+  // idx 0 (top of rail) which mispositions the popover. Skip; the popover
+  // stays put through the drag and the next hover snaps it back.
+  if (selectedIsSynthetic()) return;
   if (!deps.getHeads().some((h) => h.id === selectedHeadId)) return;
   positionInfo(selectedHeadId);
 }
@@ -437,7 +503,7 @@ export function repositionIfVisible(): void {
 // would miss by a slot for peers in a peek-collapsed stack.
 export function repositionIfVisibleAtStash(): void {
   if (!selectedHeadId) return;
-  if (!deps.getHeads().some((h) => h.id === selectedHeadId)) return;
+  if (!selectedIsSynthetic() && !deps.getHeads().some((h) => h.id === selectedHeadId)) return;
   positionInfo(selectedHeadId, selectedBubbleScreen ?? undefined);
 }
 
@@ -465,6 +531,45 @@ export async function fetchSessionsForHead(headId: string): Promise<InfoSession[
   }
 
   return [];
+}
+
+async function fetchProjectOverviewForRepo(
+  repoFullName: string,
+  opts: { force?: boolean } = {},
+): Promise<ProjectOverviewResponse | null> {
+  if (!opts.force) {
+    const cached = projectOverviewCache.get(repoFullName);
+    if (cached) return cached;
+    const inFlight = projectOverviewInFlight.get(repoFullName);
+    if (inFlight) return inFlight;
+  }
+  // IIFE always resolves (mirrors fetchDashboardForLogin's posture): callers
+  // chain `.finally()` directly off the returned promise, so a raw fetch
+  // rejection here would surface as an unhandled rejection.
+  const promise = (async (): Promise<ProjectOverviewResponse | null> => {
+    try {
+      return await backend.fetchProjectOverview(repoFullName, PROJECT_OVERVIEW_SCOPE);
+    } catch (err) {
+      console.warn(`[info] project overview fetch failed repo=${repoFullName}:`, err);
+      return null;
+    }
+  })();
+  projectOverviewInFlight.set(repoFullName, promise);
+  void promise
+    .then((data) => {
+      // Same superseded-write guard as fetchDashboardForLogin: only commit
+      // to the cache when this is still the active in-flight, and only when
+      // the fetch produced data (skip the null-on-error case).
+      if (data && projectOverviewInFlight.get(repoFullName) === promise) {
+        projectOverviewCache.set(repoFullName, data);
+      }
+    })
+    .finally(() => {
+      if (projectOverviewInFlight.get(repoFullName) === promise) {
+        projectOverviewInFlight.delete(repoFullName);
+      }
+    });
+  return promise;
 }
 
 async function fetchDashboardForLogin(
@@ -593,7 +698,9 @@ function refreshNow(): void {
 // (rail data changed but bubble screen-coords are still valid), and pre-warms
 // the session cache for newly-arrived heads.
 export function onHeadsChanged(heads: ChatHead[]): void {
-  if (selectedHeadId && !heads.some((h) => h.id === selectedHeadId)) {
+  // Skip the "selection left rail" check for synthetic heads (project) —
+  // they don't live in `heads` to begin with, so absence is the steady state.
+  if (selectedHeadId && !selectedIsSynthetic() && !heads.some((h) => h.id === selectedHeadId)) {
     hideNow();
   }
   if (heads.length > 0) {
@@ -634,9 +741,31 @@ export function registerInfo(d: InfoDeps): void {
 
   ipcMain.handle(
     "heads:showInfo",
-    (_e, headId: string, bubbleScreen?: { x: number; y: number }): void => {
-      if (!d.getHeads().some((h) => h.id === headId)) return;
-      void showInfo(headId, bubbleScreen);
+    (
+      _e,
+      headId: string,
+      bubbleScreen?: { x: number; y: number },
+      fallbackAvatarUrl?: string,
+    ): void => {
+      if (d.getHeads().some((h) => h.id === headId)) {
+        void showInfo(headId, bubbleScreen);
+        return;
+      }
+      // Not on the rail: synthesize when the headId is a well-formed user
+      // (project-card active-people path — they're claimed user_repos
+      // members but not necessarily in the social feed). Avatar URL comes
+      // from the calling card so the synthetic head paints correctly.
+      const login = rail.parseUserHeadId(headId);
+      if (!login) return;
+      void showInfo(headId, bubbleScreen, undefined, rail.synthUserHead(login, fallbackAvatarUrl));
+    },
+  );
+
+  ipcMain.handle(
+    "heads:showProjectInfo",
+    (_e, repoFullName: string, bubbleScreen?: { x: number; y: number }): void => {
+      if (typeof repoFullName !== "string" || !repoFullName.includes("/")) return;
+      void showProjectInfo(repoFullName, bubbleScreen);
     },
   );
 

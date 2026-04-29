@@ -63,6 +63,10 @@ export function App(): JSX.Element {
   // when settings load asynchronously, which read as an expand/collapse yoyo.
   const [collapseInactive, setCollapseInactive] = useState(true);
   const [showActivityTimestamps, setShowActivityTimestamps] = useState(true);
+  // Repo the SearchBubble's project-card hover targets. Resolved from the
+  // tray's repo-selection (∩ tracked) — null when nothing is picked, in which
+  // case hover falls through and only click-to-search remains.
+  const [projectRepoFullName, setProjectRepoFullName] = useState<string | null>(null);
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   // FLIP "previous position" cache, keyed on id. We store the main-axis coord
   // (top for vertical rail, left for horizontal) so a reorder that moves a
@@ -232,6 +236,37 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  // Resolve which repo the SearchBubble's project-card hover targets. Pick
+  // the first selected tracked repo (intersection of `trackedRepos.selection`
+  // and `backend.listTrackedRepos`); fall back to the first tracked repo when
+  // selection is empty so a fresh sign-in still shows a card. Null when
+  // nothing is tracked yet.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async (): Promise<void> => {
+      try {
+        const [selectedIds, tracked] = await Promise.all([
+          window.chatheads.trackedRepos.selection(),
+          window.chatheads.backend.listTrackedRepos(),
+        ]);
+        if (cancelled) return;
+        const selected = new Set(selectedIds);
+        const first = tracked.find((r) => selected.has(r.repoId)) ?? tracked[0] ?? null;
+        setProjectRepoFullName(first?.fullName ?? null);
+      } catch {
+        if (!cancelled) setProjectRepoFullName(null);
+      }
+    };
+    void refresh();
+    const offSel = window.chatheads.trackedRepos.onSelectionChange(() => void refresh());
+    const offTracked = window.chatheads.backend.onTrackedReposChange(() => void refresh());
+    return () => {
+      cancelled = true;
+      offSel();
+      offTracked();
+    };
+  }, []);
+
   const hoverEnterBubble = (headId: string, bubbleScreen: { x: number; y: number }): void => {
     if (hoverShowTimer.current != null) {
       window.clearTimeout(hoverShowTimer.current);
@@ -242,6 +277,17 @@ export function App(): JSX.Element {
     hoverShowTimer.current = window.setTimeout(() => {
       hoverShowTimer.current = null;
       void window.chatheads.showInfo(headId, bubbleScreen);
+    }, HOVER_SHOW_DELAY_MS);
+  };
+
+  const hoverEnterSearch = (repoFullName: string, bubbleScreen: { x: number; y: number }): void => {
+    if (hoverShowTimer.current != null) {
+      window.clearTimeout(hoverShowTimer.current);
+    }
+    void window.chatheads.infoHoverEnter();
+    hoverShowTimer.current = window.setTimeout(() => {
+      hoverShowTimer.current = null;
+      void window.chatheads.showProjectInfo(repoFullName, bubbleScreen);
     }, HOVER_SHOW_DELAY_MS);
   };
 
@@ -268,6 +314,19 @@ export function App(): JSX.Element {
     const screenX = Math.round(rect.left + window.screenX);
     const screenY = Math.round(rect.top + window.screenY);
     hoverEnterBubble(headId, { x: screenX, y: screenY });
+  };
+
+  const handleSearchBubbleEnter = (e: React.MouseEvent<HTMLDivElement>): void => {
+    // Project card needs a target repo. We anchor the popover off the inner
+    // SearchBubble rect (same math as user bubbles), and bail when the user
+    // hasn't picked a repo yet — falling through to no card is friendlier
+    // than guessing.
+    if (!projectRepoFullName) return;
+    const inner = e.currentTarget.querySelector<HTMLElement>("[data-bubble]");
+    const rect = (inner ?? e.currentTarget).getBoundingClientRect();
+    const screenX = Math.round(rect.left + window.screenX);
+    const screenY = Math.round(rect.top + window.screenY);
+    hoverEnterSearch(projectRepoFullName, { x: screenX, y: screenY });
   };
 
   // Self is the first user-kind head — rail.ts orders self before peers
@@ -435,7 +494,11 @@ export function App(): JSX.Element {
           )}
         </div>
       )}
-      <div className={bubblePadClass}>
+      <div
+        className={bubblePadClass}
+        onMouseEnter={handleSearchBubbleEnter}
+        onMouseLeave={hoverLeaveBubble}
+      >
         <SearchBubble open={chatOpen} />
       </div>
     </div>

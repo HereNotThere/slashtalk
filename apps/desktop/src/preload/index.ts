@@ -138,8 +138,10 @@ const bridge: ChatHeadsBridge = {
 
   setUserLocation: (payload) => ipcRenderer.invoke("user:setLocation", payload) as Promise<void>,
 
-  showInfo: (headId, bubbleScreen) =>
-    ipcRenderer.invoke("heads:showInfo", headId, bubbleScreen) as Promise<void>,
+  showInfo: (headId, bubbleScreen, fallbackAvatarUrl) =>
+    ipcRenderer.invoke("heads:showInfo", headId, bubbleScreen, fallbackAvatarUrl) as Promise<void>,
+  showProjectInfo: (repoFullName, bubbleScreen) =>
+    ipcRenderer.invoke("heads:showProjectInfo", repoFullName, bubbleScreen) as Promise<void>,
   infoHoverEnter: () => ipcRenderer.invoke("info:hoverEnter") as Promise<void>,
   infoHoverLeave: () => ipcRenderer.invoke("info:hoverLeave") as Promise<void>,
   notifyInfoShowReady: (height) => ipcRenderer.send("info:show:ready", height),

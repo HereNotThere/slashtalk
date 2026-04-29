@@ -32,7 +32,10 @@ src/
 │   ├── github-sync.ts # matchSessionRepo() — called from ingest + user routes
 │   └── pr-poller.ts # 60s poll, publishes pr_activity
 ├── user/
-│   └── routes.ts    # /api/me/*, incl. POST /api/me/repos (claim)
+│   ├── routes.ts    # /api/me/*, incl. POST /api/me/repos (claim)
+│   └── dashboard.ts # /api/users/:login/{prs,standup} — info-card user surface
+├── repo/
+│   └── overview.ts  # /api/repos/:owner/:name/overview — info-card project surface
 ├── chat/
 │   └── routes.ts    # /api/chat/ask (stateless Q&A)
 ├── presence/

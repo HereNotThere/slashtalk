@@ -99,6 +99,7 @@ export const isSelfLive = (): boolean => {
 
 const USER_HEAD_PREFIX = "user:";
 const AGENT_HEAD_PREFIX = "agent:";
+const PROJECT_HEAD_PREFIX = "project:";
 
 export function userHeadId(login: string): string {
   return `${USER_HEAD_PREFIX}${login}`;
@@ -114,6 +115,49 @@ export function agentHeadId(agentId: string): string {
 
 export function parseAgentHeadId(headId: string): string | null {
   return headId.startsWith(AGENT_HEAD_PREFIX) ? headId.slice(AGENT_HEAD_PREFIX.length) : null;
+}
+
+// Project heads are synthetic — built on the fly when the user hovers a
+// non-bubble surface (e.g. the SearchBubble) and never appear in `heads`.
+// The id format mirrors user/agent heads so consumers can disambiguate by
+// prefix without needing the head object.
+export function projectHeadId(repoFullName: string): string {
+  return `${PROJECT_HEAD_PREFIX}${repoFullName}`;
+}
+
+export function parseProjectHeadId(headId: string): string | null {
+  return headId.startsWith(PROJECT_HEAD_PREFIX) ? headId.slice(PROJECT_HEAD_PREFIX.length) : null;
+}
+
+// Constructor for synthetic project heads. Lives here next to `headForUser`
+// and `headForAgent` so the head shape stays in one module — windows/info.ts
+// shouldn't need to know the tint, avatar, or label conventions.
+export function projectHead(repoFullName: string): ChatHead {
+  return {
+    id: projectHeadId(repoFullName),
+    kind: "project",
+    repoFullName,
+    label: repoFullName,
+    tint: "#888888",
+    avatar: { type: "emoji", value: "📦" },
+  };
+}
+
+// Synthetic user head for callers that have a login + optional avatar but
+// whose target isn't on the rail (e.g. project-card active-people: they're
+// derived from `user_repos` members, while the rail is the social-feed
+// subset). Lets clicking those avatars open the user card without needing
+// the full feed entry.
+export function synthUserHead(login: string, avatarUrl?: string | null): ChatHead {
+  return {
+    id: userHeadId(login),
+    kind: "user",
+    label: login,
+    tint: "transparent",
+    avatar: avatarUrl
+      ? { type: "remote", value: avatarUrl }
+      : { type: "emoji", value: (login[0] ?? "?").toUpperCase() },
+  };
 }
 
 function headForUser(

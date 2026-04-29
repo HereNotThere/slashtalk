@@ -55,6 +55,11 @@ export function registerWsHandlers(): void {
       `[ws] pr_activity ${msg.action} by ${msg.login} on ${msg.repoFullName}#${msg.number}`,
     );
     rail.markPrActivity(msg.login);
+    // Project overview's LLM-derived pulse+buckets depend on the in-window
+    // PR set. A new opened/merged PR changes the set; drop the desktop cache
+    // so the next hover refetches. (Server-side cache key folds in the PR
+    // fingerprint too, so the LLM call also reruns.)
+    info.invalidateProjectOverview(msg.repoFullName);
   });
 
   ws.onCollisionDetected((msg) => {

@@ -140,6 +140,53 @@ export interface StandupResponse {
   noClaimedRepos?: boolean;
 }
 
+/** A PR shown in the project overview. Carries author info because the
+ *  project view spans multiple authors (the user-card `UserPr` omits this
+ *  since that view is already filtered to one author). */
+export interface ProjectPr {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  authorLogin: string;
+  authorAvatarUrl: string | null;
+  updatedAt: string;
+}
+
+/** Category bucket emergent from the LLM's per-call analysis of the repo's
+ *  active PRs. Names vary per call — a docs sprint repo may produce
+ *  "docs / examples / typos", an infra repo "terraform / k8s / observability"
+ *  — no fixed taxonomy. `prNumbers` indexes into `ProjectOverviewResponse.prs`. */
+export interface ProjectBucket {
+  name: string;
+  prNumbers: number[];
+}
+
+/** Person contributing to the repo inside the window. Active = authored a
+ *  PR updated in window, or had a session whose `lastTs` is in window. */
+export interface ProjectActivePerson {
+  login: string;
+  avatarUrl: string | null;
+  /** ISO8601 — most recent activity timestamp inside the window. */
+  lastTs: string;
+}
+
+/** Response for `GET /api/repos/:owner/:name/overview`. The `pulse` is a
+ *  directional one-liner ("half the team's adding payments while alice & bob
+ *  polish auth"). `buckets` are emergent categories over the same PR set as
+ *  `prs`. `active` is the people strip. Scope/since semantics mirror
+ *  `StandupResponse` — see `DashboardScope`. */
+export interface ProjectOverviewResponse {
+  /** Null when nothing substantive happened in window (renderer hides the
+   *  pulse line and shows the empty-state copy). */
+  pulse: string | null;
+  buckets: ProjectBucket[];
+  prs: ProjectPr[];
+  active: ProjectActivePerson[];
+  scope: DashboardScope;
+  since: string;
+}
+
 /** A user prompt captured at ingest — what the developer asked for. */
 export interface RecentPrompt {
   ts: string;
@@ -462,4 +509,12 @@ export interface SpotifyPresence {
   isPlaying: boolean;
   /** ISO-8601. Server stamps this on write. */
   updatedAt: string;
+}
+
+/** "owner/name" → "name". Used in LLM prompts and UI labels — the basename
+ *  is what users actually call the project ("slashtalk", not "owner/slashtalk").
+ *  Returns the input unchanged when there's no slash. */
+export function shortRepoName(fullName: string): string {
+  const slash = fullName.lastIndexOf("/");
+  return slash >= 0 ? fullName.slice(slash + 1) : fullName;
 }

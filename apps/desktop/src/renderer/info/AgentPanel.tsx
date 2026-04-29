@@ -196,7 +196,8 @@ function AgentSessions({
     const refetch = (): void => {
       void window.chatheads
         .listAgentSessionsForAgent(agentId)
-        .then((rows) => setPastSessions(rows.filter((row) => row.endedAt)));
+        .then((rows) => setPastSessions(rows.filter((row) => row.endedAt)))
+        .catch((err) => console.warn("[AgentPanel] listAgentSessionsForAgent failed:", err));
     };
     refetch();
     const timer = setInterval(refetch, 15_000);

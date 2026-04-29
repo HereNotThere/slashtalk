@@ -64,6 +64,18 @@ import { registerAgents } from "./ipc/agents";
 import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
 
+// uncaughtException leaves the process in undefined state — exit so Electron
+// surfaces a crash dialog and the user gets a clean restart. A stray
+// unhandledRejection (often a renderer-bound IPC failure) is recoverable, so
+// log-only there.
+process.on("unhandledRejection", (reason) => {
+  console.error("[main] unhandledRejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[main] uncaughtException:", err);
+  process.exit(1);
+});
+
 installMcp.configureInstaller({
   localProxySecret: getLocalMcpProxySecret,
 });
@@ -338,39 +350,44 @@ configureRailVisibility({
   isChatVisible,
 });
 
-app.whenReady().then(async () => {
-  // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
-  // "regular" but we set it explicitly, and force-show the dock icon in case
-  // something demoted us to accessory mode.
-  if (process.platform === "darwin") {
-    console.log("[app] setActivationPolicy(regular) + dock.show()");
-    app.setActivationPolicy("regular");
-    void app.dock?.show();
-  }
-  backend.restore();
-  await backend.validateStoredSession();
-  chatheadsAuth.restore();
-  anthropic.restore();
-  githubAuth.restore();
-  localRepos.restore();
-  void mcpProxy.start().catch((err) => console.warn("[localMcpProxy] start failed:", err));
-  // In session-only mode the tray click is the user's escape hatch: it
-  // force-shows the rail and resets the 15-min grace timer. Outside that
-  // mode the lastActivityTs bump is inert — resolveRailVisibility ignores
-  // it while pinned or with session-only off.
-  createTray({
-    onClick: (bounds) => {
-      bumpActivity();
-      toggleTrayPopup(bounds);
-      resolveRailVisibility();
-    },
-  });
-  rail.start();
-  selfSession.start();
-  applyInitialSync();
+app
+  .whenReady()
+  .then(async () => {
+    // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
+    // "regular" but we set it explicitly, and force-show the dock icon in case
+    // something demoted us to accessory mode.
+    if (process.platform === "darwin") {
+      console.log("[app] setActivationPolicy(regular) + dock.show()");
+      app.setActivationPolicy("regular");
+      void app.dock?.show();
+    }
+    backend.restore();
+    await backend.validateStoredSession();
+    chatheadsAuth.restore();
+    anthropic.restore();
+    githubAuth.restore();
+    localRepos.restore();
+    void mcpProxy.start().catch((err) => console.warn("[localMcpProxy] start failed:", err));
+    // In session-only mode the tray click is the user's escape hatch: it
+    // force-shows the rail and resets the 15-min grace timer. Outside that
+    // mode the lastActivityTs bump is inert — resolveRailVisibility ignores
+    // it while pinned or with session-only off.
+    createTray({
+      onClick: (bounds) => {
+        bumpActivity();
+        toggleTrayPopup(bounds);
+        resolveRailVisibility();
+      },
+    });
+    rail.start();
+    selfSession.start();
+    applyInitialSync();
 
-  registerDebugShortcuts();
-});
+    registerDebugShortcuts();
+  })
+  .catch((err) => {
+    console.error("[startup] app.whenReady handler failed:", err);
+  });
 
 app.on("before-quit", () => {
   // Flag read by mainWindow's "close" handler to allow actual destruction

@@ -175,7 +175,10 @@ export class McpPresenceStore {
     for (const fn of this.listeners) {
       try {
         fn(event);
-      } catch {}
+      } catch (err) {
+        // A buggy listener must not break fan-out to peers.
+        console.warn("[presence] listener threw:", (err as Error).message);
+      }
     }
   }
 }

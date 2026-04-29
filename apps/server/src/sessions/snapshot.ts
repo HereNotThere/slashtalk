@@ -5,7 +5,8 @@
 
 import { inArray, or, and, eq, sql } from "drizzle-orm";
 import { classifySessionState } from "./state";
-import type { EventSource, SessionPr, SessionState } from "@slashtalk/shared";
+import { SessionState } from "@slashtalk/shared";
+import type { EventSource, SessionPr } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { pullRequests, sessionInsights } from "../db/schema";
 import { SUMMARY_ANALYZER, ROLLING_SUMMARY_ANALYZER } from "../analyzers/names";
@@ -325,7 +326,7 @@ export async function loadPrsForSessions(
 // Within each tier we sort by lastTs desc, so an idle-for-a-day session can't
 // outrank a just-paused one purely on state priority — idle means the
 // developer has moved on.
-const LIVE_STATES = new Set(["busy", "active"]);
+const LIVE_STATES = new Set<string>([SessionState.BUSY, SessionState.ACTIVE]);
 
 export function sortByStateThenTime<T extends { state: string; lastTs: string | null }>(
   items: T[],

@@ -61,9 +61,10 @@ export async function geocodeCity(
   }
 }
 
-// Fallback only — we prefer the OS timezone so the user's IP never leaves the
-// device in the common case. ipapi.co is used when the timezone is missing or
-// an Etc/* zone with no city component.
+// Primary source for the user's city. IANA timezone names use a principal
+// city (`America/Los_Angeles` covers all of US Pacific), so deriving the
+// city from the OS tz mislabels anyone not in that exact city. ipapi.co
+// returns the actual city; the timezone-derived city is the fallback.
 export async function ipLocation(fetcher: Fetcher = fetch): Promise<ResolvedLocation | null> {
   try {
     const r = await fetcher("https://ipapi.co/json/");
@@ -87,12 +88,11 @@ export async function resolveLocationFresh(
   tz: string | null,
   fetcher: Fetcher = fetch,
 ): Promise<ResolvedLocation | null> {
+  const ip = await ipLocation(fetcher);
+  if (ip) return ip;
   const city = parseCityFromTimezone(tz);
-  if (city) {
-    const geo = await geocodeCity(city, fetcher);
-    if (geo) return geo;
-  }
-  return ipLocation(fetcher);
+  if (city) return geocodeCity(city, fetcher);
+  return null;
 }
 
 export function iconForWeatherCode(code: number, isDay: boolean): string {

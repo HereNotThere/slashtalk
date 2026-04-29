@@ -345,6 +345,23 @@ export interface ChatAssistantMessage {
   content: string;
   citations?: ChatCitation[];
   cards?: SessionCard[];
+  /** Set when the server chat planner judged the question needs repo access
+   *  and delegated it to a desktop-side headless Claude agent. The desktop
+   *  receives this on the response, runs the local agent against the named
+   *  repo (or asks the user to pick one), and POSTs the final answer back to
+   *  /api/chat/threads/:threadId/finalize keyed by `messageId`. */
+  delegation?: ChatDelegation;
+}
+
+export interface ChatDelegation {
+  /** The model-rephrased task to hand to the local agent. */
+  task: string;
+  /** owner/name of the repo the question is about, when the model could
+   *  identify one from context. Unset means "ask the user to pick". */
+  repoFullName?: string;
+  /** chat_messages.id of the placeholder row the desktop should finalize
+   *  once the local agent run completes. */
+  messageId: string;
 }
 
 export type ChatMessage = ChatUserMessage | ChatAssistantMessage;

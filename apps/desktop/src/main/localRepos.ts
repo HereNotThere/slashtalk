@@ -180,6 +180,16 @@ export function list(): TrackedRepo[] {
   return tracked;
 }
 
+/** Find a tracked repo by GitHub `owner/name`. Case-insensitive — GitHub
+ *  treats logins and repo names as case-insensitive on the URL side, and
+ *  the chat planner may pass either case. Returns null if untracked. */
+export function findByFullName(fullName: string | null | undefined): TrackedRepo | null {
+  if (!fullName) return null;
+  const target = fullName.trim().toLowerCase();
+  if (!target) return null;
+  return tracked.find((r) => r.fullName.toLowerCase() === target) ?? null;
+}
+
 export const onChange = changes.on;
 export const onSelectionChange = selectionChanges.on;
 

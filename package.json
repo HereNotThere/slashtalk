@@ -9,6 +9,7 @@
     "dev": "concurrently -k --no-color --names server,desktop \"bun run dev:server\" \"bun run dev:desktop\"",
     "dev:server": "cd apps/server && bun --watch --no-clear-screen src/index.ts",
     "dev:desktop": "cd apps/desktop && bun run dev",
+    "dev:web": "cd apps/web && bun run dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"

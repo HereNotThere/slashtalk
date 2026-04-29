@@ -1,0 +1,25 @@
+{
+  "id": "/app/",
+  "name": "Slashtalk",
+  "short_name": "Slashtalk",
+  "description": "Installable team presence feed for Slashtalk sessions.",
+  "scope": "/app/",
+  "start_url": "/app/",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#111816",
+  "icons": [
+    {
+      "src": "/app/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/icons/maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

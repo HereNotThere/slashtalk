@@ -17,6 +17,7 @@ import { managedAgentSessionRoutes } from "./managed-agent-sessions/routes";
 import { mcpRoutes } from "./mcp/routes";
 import { mcpOAuthRoutes } from "./oauth/mcp";
 import { wsHandler } from "./ws/handler";
+import { webAppRoutes } from "./web/routes";
 import type { RedisBridge } from "./ws/redis-bridge";
 
 const INSTALL_SCRIPT = await Bun.file(
@@ -44,6 +45,7 @@ export function createApp(db: Database, redis: RedisBridge) {
       set.headers["content-type"] = "text/plain";
       return INSTALL_SCRIPT;
     })
+    .use(webAppRoutes())
     .use(githubAuth(db, redis))
     .use(cliAuth(db))
     .use(ingestRoutes(db, redis))

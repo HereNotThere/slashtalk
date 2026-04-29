@@ -9,37 +9,27 @@ import type { RedisBridge } from "./redis-bridge";
 
 const PING_INTERVAL_MS = 30_000;
 
+type SessionJwtPayload = {
+  sub?: string | number;
+  iat?: number | boolean;
+  sessionIssuedAt?: number;
+};
+
 export const wsHandler = (db: Database, redis: RedisBridge) =>
   new Elysia({ name: "ws" }).use(jwt({ name: "jwt", secret: config.jwtSecret })).ws("/ws", {
     query: t.Object({
-      token: t.String(),
+      token: t.Optional(t.String()),
     }),
 
     async open(ws) {
-      const token = ws.data.query.token;
-      let userId: number | null = null;
-
-      // Try JWT first
       const jwtPlugin = ws.data as any;
-      if (jwtPlugin.jwt) {
-        const payload = await jwtPlugin.jwt.verify(token);
-        if (payload?.sub) {
-          userId = Number(payload.sub);
-        }
-      }
-
-      // Try API key if JWT didn't work
-      if (!userId) {
-        const keyHash = await hashToken(token);
-        const [apiKey] = await db
-          .select()
-          .from(apiKeys)
-          .where(eq(apiKeys.keyHash, keyHash))
-          .limit(1);
-        if (apiKey) {
-          userId = apiKey.userId;
-        }
-      }
+      const queryToken = ws.data.query.token;
+      const cookieToken = jwtPlugin.cookie?.session?.value;
+      const userId = queryToken
+        ? await authenticateQueryToken(db, jwtPlugin.jwt, queryToken)
+        : typeof cookieToken === "string"
+          ? await authenticateJwt(db, jwtPlugin.jwt, cookieToken)
+          : null;
 
       if (!userId) {
         ws.close(4001, "Unauthorized");
@@ -85,3 +75,54 @@ export const wsHandler = (db: Database, redis: RedisBridge) =>
       // Server → Client only; ignore client messages
     },
   });
+
+async function authenticateQueryToken(
+  db: Database,
+  jwtVerifier: { verify: (token: string) => Promise<false | SessionJwtPayload> } | undefined,
+  token: string,
+): Promise<number | null> {
+  return (await authenticateJwt(db, jwtVerifier, token)) ?? authenticateApiKey(db, token);
+}
+
+async function authenticateJwt(
+  db: Database,
+  jwtVerifier: { verify: (token: string) => Promise<false | SessionJwtPayload> } | undefined,
+  token: string,
+): Promise<number | null> {
+  if (!jwtVerifier) return null;
+  let payload: false | SessionJwtPayload;
+  try {
+    payload = await jwtVerifier.verify(token);
+  } catch {
+    return null;
+  }
+  if (payload === false || !payload.sub) return null;
+
+  const [user] = await db
+    .select({
+      id: users.id,
+      credentialsRevokedAt: users.credentialsRevokedAt,
+    })
+    .from(users)
+    .where(eq(users.id, Number(payload.sub)))
+    .limit(1);
+  if (!user) return null;
+
+  if (user.credentialsRevokedAt) {
+    const issuedAtMs =
+      typeof payload.sessionIssuedAt === "number"
+        ? payload.sessionIssuedAt
+        : typeof payload.iat === "number"
+          ? payload.iat * 1000
+          : null;
+    if (!issuedAtMs || issuedAtMs < user.credentialsRevokedAt.getTime()) return null;
+  }
+
+  return user.id;
+}
+
+async function authenticateApiKey(db: Database, token: string): Promise<number | null> {
+  const keyHash = await hashToken(token);
+  const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash)).limit(1);
+  return apiKey?.userId ?? null;
+}

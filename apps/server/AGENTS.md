@@ -37,6 +37,8 @@ src/
 │   └── routes.ts    # /api/chat/ask (stateless Q&A)
 ├── presence/
 │   └── routes.ts    # POST /v1/presence/spotify, GET /api/presence/peers; publishes to user:<id> + repo:<id>
+├── web/
+│   └── routes.ts    # GET /app and /app/* static serving for the installable PWA
 ├── managed-agent-sessions/
 │   └── routes.ts    # PUT/GET /v1/managed-agent-sessions (apiKeyAuth)
 ├── mcp/
@@ -92,7 +94,7 @@ From repo root: `bun --filter @slashtalk/server <script>`.
 - `/v1/*` → `apiKeyAuth`
 - `/mcp` → explicit MCP resource-server exception; accepts MCP OAuth access tokens, plus device API keys for desktop-local proxy and legacy clients
 - `/auth/*` + `/api/*` → `jwtAuth`
-- `/ws?token=…` → JWT, else API key
+- `/ws` → browser `session` cookie, else `?token=` JWT/API key
 
 See [core-beliefs #2](../../docs/design-docs/core-beliefs.md#2-route-prefix-encodes-auth). A new auth scheme gets a new plugin in `auth/middleware.ts`, not an overload.
 

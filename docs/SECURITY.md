@@ -122,7 +122,7 @@ Data that does **not** leave the desktop:
 
 ## Secrets in WS payloads
 
-WebSocket channel messages carry **identifiers only** (`session_id`, `repo_id`, `user_id`, `github_login`, timestamps). Clients fetch full snapshots via `/api/feed` / `/api/session/:id` under `jwtAuth`. Channels are namespaced by `repo:<id>`; subscription is gated on `user_repos` membership at WS open time.
+WebSocket channel messages carry **identifiers only** (`session_id`, `repo_id`, `user_id`, `github_login`, timestamps). Clients fetch full snapshots via `/api/feed` / `/api/session/:id` under `jwtAuth`. Browser clients authenticate the upgrade with the httpOnly `session` cookie; desktop/API-key clients can still use `?token=`. Channels are namespaced by `repo:<id>`; subscription is gated on `user_repos` membership at WS open time.
 
 ## Environment
 

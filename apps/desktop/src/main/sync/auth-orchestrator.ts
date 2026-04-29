@@ -9,6 +9,7 @@ import * as peerPresence from "../peerPresence";
 import * as uploader from "../uploader";
 import * as ws from "../ws";
 import { clearDashboardCache } from "../windows/info";
+import * as prIngest from "./pr-ingest";
 import * as spotifyToggle from "./spotify-toggle";
 import { broadcast } from "../windows/broadcast";
 import { getMainWindow } from "../windows/main";
@@ -25,6 +26,7 @@ function applySyncForAuth(signedIn: boolean): void {
     spotifyToggle.updateSpotifyRunning();
     void peerPresence.start().catch((err) => console.warn("peerPresence.start failed:", err));
     void peerLocations.start().catch((err) => console.warn("peerLocations.start failed:", err));
+    void prIngest.start().catch((err) => console.warn("prIngest.start failed:", err));
     ws.start();
   } else {
     heartbeat.stop();
@@ -32,6 +34,7 @@ function applySyncForAuth(signedIn: boolean): void {
     spotifyToggle.updateSpotifyRunning();
     peerPresence.stop();
     peerLocations.stop();
+    prIngest.stop();
     ws.stop();
     // Drop the per-user dashboard cache so a sign-out → different-user
     // sign-in doesn't briefly serve the prior user's PRs/standup. The
@@ -59,6 +62,10 @@ export function registerAuthOrchestrator(): void {
   localRepos.onSelectionChange((ids) =>
     broadcast("trackedRepos:selectionChange", [...ids], getMainWindow(), getTrayPopup()),
   );
+  // A newly-claimed repo means the server now accepts PRs for it that the
+  // previous tick discarded as unknown — push again immediately so the
+  // project card has data on the next hover instead of waiting up to 5 min.
+  localRepos.onClaimsSettled(() => prIngest.refreshNow());
 
   chatheadsAuth.onChange((state) => broadcast("chatheads:authState", state, getMainWindow()));
   githubAuth.onChange((state) => broadcast("github:state", state, getMainWindow()));

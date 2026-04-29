@@ -33,8 +33,27 @@ let tracked: TrackedRepo[] = [];
 // persisted across launches. Stored as repoId so rename of fullName on GitHub
 // doesn't desync the user's choice.
 let selectedIds = new Set<number>();
+// Last-known set of repo IDs successfully synced to the server's user_repos.
+// Diffed against `selectedIds` whenever a selection event fires; new entries
+// trigger `claimRepo`, removed entries trigger `unclaimRepo`. Starts empty so
+// the first reconciliation after sign-in claims everything currently
+// selected — covers the case where local persisted selection doesn't match
+// server state (different device, manual DB edit, partial prior failure).
+let syncedRepoIds = new Set<number>();
+let reconcilingClaims = false;
+// Set when `reconcileClaims` is called while a prior reconcile is in flight.
+// The in-flight pass loops once more after it finishes whenever this is true,
+// so toggles during the async window can't be silently dropped.
+let reconcilePending = false;
 const changes = createEmitter<TrackedRepo[]>();
 const selectionChanges = createEmitter<Set<number>>();
+// Fires after `reconcileClaims` actually mutated server state. Distinct from
+// `selectionChanges` (which fires on user toggle, before the round-trip
+// completes) so listeners that need post-sync state — `dashboardCache.clear`,
+// where stale entries can leak repo permissions — aren't conflated with
+// optimistic UI listeners. Self-emitting on `selectionChanges` instead would
+// re-trigger every other subscriber for no benefit.
+const claimsSettled = createEmitter<void>();
 
 export function restore(): void {
   const saved = store.get<TrackedRepo[]>(TRACKED_KEY);
@@ -46,10 +65,78 @@ export function restore(): void {
     // First launch or legacy store: default every tracked repo ON.
     selectedIds = new Set(tracked.map((t) => t.repoId));
   }
+  // Hook up the claim reconciler exactly once. Subsequent selection changes
+  // (toggle, prune-on-remove, rehydrate) all flow through it.
+  selectionChanges.on(reconcileClaims);
   backend.onChange((state) => {
-    if (state.signedIn) void rehydrateFromServer();
+    if (state.signedIn) {
+      // Reset synced-state so the first emit after sign-in re-claims every
+      // currently-selected repo. Idempotent server-side (`onConflictDoNothing`).
+      syncedRepoIds = new Set();
+      void rehydrateFromServer().then(() => {
+        // Even if rehydrate didn't mutate selectedIds (no new repos arrived),
+        // we still want to reconcile against the empty syncedRepoIds — a kick.
+        selectionChanges.emit(new Set(selectedIds));
+      });
+    }
   });
-  if (backend.getAuthState().signedIn) void rehydrateFromServer();
+  if (backend.getAuthState().signedIn) {
+    syncedRepoIds = new Set();
+    void rehydrateFromServer().then(() => {
+      selectionChanges.emit(new Set(selectedIds));
+    });
+  }
+}
+
+// Diffs `current` against `syncedRepoIds` and runs the claim/unclaim deltas.
+// Designed as the single point that touches `user_repos` server-side so each
+// UI surface (settings X, tray tick, rehydrate) just toggles local state and
+// trusts this subscriber to catch up. Emits `claimsSettled` after a mutating
+// round so cache listeners (info-card `dashboardCache`) can re-fetch against
+// post-sync server state.
+async function reconcileClaims(): Promise<void> {
+  if (reconcilingClaims) {
+    // Another emit fired while we're mid-reconcile. The current pass will
+    // pick up the latest `selectedIds` on its next loop iteration via the
+    // pending flag — bail without re-entering.
+    reconcilePending = true;
+    return;
+  }
+  if (!backend.getAuthState().signedIn) return;
+  reconcilingClaims = true;
+  try {
+    do {
+      reconcilePending = false;
+      const target = new Set(selectedIds);
+      const toClaim = [...target].filter((id) => !syncedRepoIds.has(id));
+      const toUnclaim = [...syncedRepoIds].filter((id) => !target.has(id));
+      if (toClaim.length === 0 && toUnclaim.length === 0) break;
+      let mutated = false;
+      for (const repoId of toClaim) {
+        const repo = tracked.find((t) => t.repoId === repoId);
+        if (!repo) continue;
+        try {
+          await backend.claimRepo(repo.fullName);
+          syncedRepoIds.add(repoId);
+          mutated = true;
+        } catch (err) {
+          console.warn(`[localRepos] reconcile claim(${repoId}) failed:`, err);
+        }
+      }
+      for (const repoId of toUnclaim) {
+        try {
+          await backend.unclaimRepo(repoId);
+          syncedRepoIds.delete(repoId);
+          mutated = true;
+        } catch (err) {
+          console.warn(`[localRepos] reconcile unclaim(${repoId}) failed:`, err);
+        }
+      }
+      if (mutated) claimsSettled.emit();
+    } while (reconcilePending);
+  } finally {
+    reconcilingClaims = false;
+  }
 }
 
 // Pulls the device's registered paths from the server and adopts them as the
@@ -112,6 +199,7 @@ export function findByFullName(fullName: string | null | undefined): TrackedRepo
 
 export const onChange = changes.on;
 export const onSelectionChange = selectionChanges.on;
+export const onClaimsSettled = claimsSettled.on;
 
 /** Repo IDs currently included in the rail filter. */
 export function selectedRepoIds(): Set<number> {
@@ -130,7 +218,10 @@ export function selectedFullNames(): Set<string> {
 }
 
 /** Toggle a tracked repo's membership in the filter set. Returns the new
- *  selected set. A repoId not currently tracked is ignored. */
+ *  selected set. A repoId not currently tracked is ignored. The
+ *  server-side `user_repos` claim is reconciled by a single subscriber on
+ *  `selectionChanges` (see below) — UI handlers stay sync and unaware of
+ *  the network round-trip. */
 export function toggleSelected(repoId: number): Set<number> {
   if (!tracked.some((t) => t.repoId === repoId)) return selectedIds;
   if (selectedIds.has(repoId)) selectedIds.delete(repoId);
@@ -236,6 +327,10 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
   // about it right now." Pruning in `apply()` handles the reverse.
   selectedIds.add(entry.repoId);
   persistSelection();
+  // We just claimed this repo eagerly (above) so the user sees errors
+  // immediately. Tell the reconciler about it so the subsequent
+  // selectionChanges emit doesn't trigger a redundant re-claim.
+  syncedRepoIds.add(entry.repoId);
   apply(next);
   selectionChanges.emit(new Set(selectedIds));
   return entry;
@@ -246,6 +341,8 @@ export async function removeLocalRepo(repoId: number): Promise<TrackedRepo[]> {
   const next = tracked.filter((t) => t.repoId !== repoId);
   if (next.length === tracked.length) return tracked;
   await syncDeviceRepos(next);
+  // `apply` prunes selectedIds for the removed repo, which fires
+  // selectionChanges → the claim reconciler unclaims it server-side.
   apply(next);
   return tracked;
 }

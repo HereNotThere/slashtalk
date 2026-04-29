@@ -8,7 +8,7 @@ import * as peerLocations from "../peerLocations";
 import * as peerPresence from "../peerPresence";
 import * as uploader from "../uploader";
 import * as ws from "../ws";
-import * as info from "../windows/info";
+import { clearDashboardCache } from "../windows/info";
 import * as spotifyToggle from "./spotify-toggle";
 import { broadcast } from "../windows/broadcast";
 import { getMainWindow } from "../windows/main";
@@ -33,7 +33,12 @@ function applySyncForAuth(signedIn: boolean): void {
     peerPresence.stop();
     peerLocations.stop();
     ws.stop();
-    info.clearQuestionsCache();
+    // Drop the per-user dashboard cache so a sign-out → different-user
+    // sign-in doesn't briefly serve the prior user's PRs/standup. The
+    // selectionChanges path during re-sign-in *would* eventually clear it,
+    // but the window between sign-in and the first claim-reconcile leaves
+    // stale data accessible.
+    clearDashboardCache();
   }
 }
 

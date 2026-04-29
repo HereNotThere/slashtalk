@@ -1,44 +1,98 @@
 import { Fragment, useState, type CSSProperties, type MouseEvent } from "react";
 import { BoltIcon, ChatBubbleLeftIcon, ClockIcon, FolderIcon } from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
-import type { EventSource, TokenUsage } from "@slashtalk/shared";
-import type { InfoSession } from "../../shared/types";
+import type { EventSource, TokenUsage, UserPr } from "@slashtalk/shared";
+import type { InfoDashboardData, InfoSession } from "../../shared/types";
 import { ClaudeIcon, OpenAIIcon } from "../shared/icons";
+import { Markdown } from "../shared/Markdown";
 import { relativeTime } from "../shared/relativeTime";
 import { AskInput } from "./AskInline";
-import { MOCK_PRS, MOCK_STANDUP, type MockPr } from "./mock-data";
 
-const PR_STATE_COLOR: Record<MockPr["state"], string> = {
+const PR_STATE_COLOR: Record<UserPr["state"], string> = {
   open: "text-success",
   merged: "text-info",
   closed: "text-danger",
-  draft: "text-muted",
 };
 
-const PR_STATE_LABEL: Record<MockPr["state"], string> = {
+const PR_STATE_LABEL: Record<UserPr["state"], string> = {
   open: "open",
   merged: "merged",
   closed: "closed",
-  draft: "draft",
 };
 
 const NOW_WINDOW_MS = 2 * 60 * 60 * 1000; // last 2 hours
 
-export function HierarchyDashboard({ sessions }: { sessions: InfoSession[] | null }): JSX.Element {
+export function HierarchyDashboard({
+  sessions,
+  dashboard,
+  dashboardFetching,
+  subjectLabel,
+}: {
+  sessions: InfoSession[] | null;
+  dashboard: InfoDashboardData | null;
+  /** True between fetch-start and fetch-settle on main. Drives the
+   *  shimmering "Fetching…" placeholder so an in-flight refresh isn't
+   *  misread as "loaded but empty". */
+  dashboardFetching: boolean;
+  /** Possessive used in ask-a-question context labels — "my" for self,
+   *  "<login>'s" for peers. Threaded through so the prompt shipped to
+   *  /api/chat/ask reads naturally regardless of whose card is open. */
+  subjectLabel: string;
+}): JSX.Element {
   const nowSession = pickNowSession(sessions);
+  // Self-mode: server tells us when the user has no claimed user_repos. In
+  // that state, every section below would be blank and confusing — surface a
+  // single CTA pointing at the main window where repos are picked.
+  if (dashboard?.noClaimedRepos) {
+    return (
+      <>
+        <Divider />
+        <NoRepoSection />
+      </>
+    );
+  }
   return (
     <>
       <Divider />
       {nowSession && (
         <>
-          <NowSection session={nowSession} />
+          <NowSection session={nowSession} subjectLabel={subjectLabel} />
           <Divider />
         </>
       )}
-      <PastDaySection />
+      <PastDaySection
+        summary={dashboard?.standup ?? null}
+        // `loading` only drives the shimmer when there's no summary to show.
+        // PastDaySection prefers a stale summary over the shimmer so a
+        // background refetch doesn't hide the prior blurb (SWR — see
+        // docs/info-card.md).
+        loading={dashboard === null || dashboardFetching}
+        subjectLabel={subjectLabel}
+      />
       <Divider />
-      <PrsSection />
+      <PrsSection prs={dashboard?.prs ?? null} />
     </>
+  );
+}
+
+function NoRepoSection(): JSX.Element {
+  return (
+    <div className="px-4 py-3">
+      <p className="text-sm text-fg/90 leading-snug">No repos connected yet.</p>
+      <p className="mt-1 text-xs text-subtle leading-snug">
+        Connect a repo to see your standup and PRs here.
+      </p>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void window.chatheads.openMain();
+        }}
+        className="mt-2.5 inline-flex items-center gap-1 px-2.5 h-7 rounded-full bg-primary text-primary-fg text-xs font-medium hover:bg-primary-hover transition-colors cursor-pointer"
+      >
+        Open settings
+      </button>
+    </div>
   );
 }
 
@@ -108,15 +162,22 @@ function pickNowSession(sessions: InfoSession[] | null): InfoSession | null {
   return bestLive ?? bestRecent;
 }
 
-function NowSection({ session }: { session: InfoSession }): JSX.Element {
+function NowSection({
+  session,
+  subjectLabel,
+}: {
+  session: InfoSession;
+  subjectLabel: string;
+}): JSX.Element {
   const [editing, setEditing] = useState(false);
   const status = sessionStatus(session);
   const repo = repoLabel(session);
   const tokens = fmtTokens(session.tokens);
-  // Prefer the analyzer's 1-2 sentence description; fall back to the user's
-  // most recent prompt if a description hasn't been generated yet.
-  const summary = session.description ?? session.lastUserPrompt ?? null;
-  const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
+  // Only show the analyzer's 1-2 sentence description. Never fall back to the
+  // raw user prompt — surfacing what someone literally typed into Claude Code
+  // verbatim feels surveillance-y, especially on peer cards.
+  const summary = session.description ?? null;
+  const title = session.title ?? "Untitled session";
   return (
     <div>
       <div className="px-4 pt-3 pb-1.5 flex items-center gap-1.5">
@@ -126,11 +187,15 @@ function NowSection({ session }: { session: InfoSession }): JSX.Element {
       <div className="px-4 pb-3">
         <div className="flex items-start gap-2.5">
           <div className="flex-1 min-w-0">
-            {summary && <p className="text-sm text-fg leading-snug">{summary}</p>}
+            <p className="text-sm leading-snug">
+              {summary ? (
+                <span className="text-fg">{summary}</span>
+              ) : (
+                <span className="text-subtle italic">Summarizing…</span>
+              )}
+            </p>
             {(repo || tokens || status) && (
-              <div
-                className={`${summary ? "mt-1" : ""} flex items-center gap-2 text-[11px] text-subtle min-w-0`}
-              >
+              <div className={`mt-1 flex items-center gap-2 text-[11px] text-subtle min-w-0`}>
                 {repo && (
                   <span className="inline-flex items-center gap-1 min-w-0">
                     <FolderIcon className="w-3.5 h-3.5 shrink-0" aria-hidden />
@@ -155,7 +220,7 @@ function NowSection({ session }: { session: InfoSession }): JSX.Element {
         </div>
         {editing && (
           <AskInput
-            contextLabel={`About my current session "${title}"${repo ? ` in ${repo}` : ""}:`}
+            contextLabel={`About ${subjectLabel} current session "${title}"${repo ? ` in ${repo}` : ""}:`}
             placeholder="Ask about this session…"
             onClose={() => setEditing(false)}
           />
@@ -165,23 +230,43 @@ function NowSection({ session }: { session: InfoSession }): JSX.Element {
   );
 }
 
-function PastDaySection(): JSX.Element {
+function PastDaySection({
+  summary,
+  loading,
+  subjectLabel,
+}: {
+  summary: string | null;
+  loading: boolean;
+  subjectLabel: string;
+}): JSX.Element {
   const [editing, setEditing] = useState(false);
   return (
     <div>
       <div className="px-4 pt-3 pb-1.5 flex items-center gap-1.5">
         <ClockIcon className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden />
-        <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Past Day</span>
+        <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Today</span>
       </div>
       <div className="px-4 pb-3">
         <div className="flex items-end gap-2">
-          <p className="flex-1 text-sm text-fg/90 leading-snug">{MOCK_STANDUP}</p>
+          <div className="flex-1 text-sm text-fg/90 leading-snug">
+            {summary ? (
+              <Markdown inline className="text-sm leading-snug">
+                {summary}
+              </Markdown>
+            ) : loading ? (
+              <span className="text-subtle">
+                <ShimmerText text="Fetching…" />
+              </span>
+            ) : (
+              <span className="text-subtle">Nothing shipped yet today.</span>
+            )}
+          </div>
           <AskTrigger onClick={() => setEditing(true)} className="-mb-0.5 -mr-1" />
         </div>
         {editing && (
           <AskInput
-            contextLabel="About my past day:"
-            placeholder="Ask about your day…"
+            contextLabel={`About ${subjectLabel} day so far:`}
+            placeholder="Ask about today…"
             onClose={() => setEditing(false)}
           />
         )}
@@ -190,21 +275,27 @@ function PastDaySection(): JSX.Element {
   );
 }
 
-function PrsSection(): JSX.Element {
+function PrsSection({ prs }: { prs: UserPr[] | null }): JSX.Element {
   return (
     <div>
       <PlainHeader label="PRs pushed" />
-      {MOCK_PRS.map((pr, i) => (
-        <Fragment key={pr.number}>
-          {i > 0 && <div className="mx-4 h-px bg-divider/60" />}
-          <PrRow pr={pr} />
-        </Fragment>
-      ))}
+      {prs === null ? (
+        <div className="px-4 py-2.5 text-xs text-subtle">Loading…</div>
+      ) : prs.length === 0 ? (
+        <div className="px-4 py-2.5 text-xs text-subtle">No PRs in this window.</div>
+      ) : (
+        prs.map((pr, i) => (
+          <Fragment key={`${pr.repoFullName}#${pr.number}`}>
+            {i > 0 && <div className="mx-4 h-px bg-divider/60" />}
+            <PrRow pr={pr} />
+          </Fragment>
+        ))
+      )}
     </div>
   );
 }
 
-function PrRow({ pr }: { pr: MockPr }): JSX.Element {
+function PrRow({ pr }: { pr: UserPr }): JSX.Element {
   const [editing, setEditing] = useState(false);
   const openPr = (): void => {
     void window.chatheads.openExternal(pr.url);
@@ -233,7 +324,7 @@ function PrRow({ pr }: { pr: MockPr }): JSX.Element {
             <span aria-hidden>·</span>
             <span>{PR_STATE_LABEL[pr.state]}</span>
             <span aria-hidden>·</span>
-            <span>{relativeTime(pr.ts)}</span>
+            <span>{relativeTime(pr.updatedAt)}</span>
           </div>
         </div>
         <AskTrigger onClick={() => setEditing(true)} className="self-end -mb-0.5 -mr-1" />
@@ -312,8 +403,7 @@ function ProviderIcon({ source }: { source: EventSource }): JSX.Element {
   );
 }
 
-function WorkingIndicator(): JSX.Element {
-  const text = "working now...";
+function ShimmerText({ text }: { text: string }): JSX.Element {
   const duration = 1.6;
   const step = 0.08;
   return (
@@ -333,6 +423,10 @@ function WorkingIndicator(): JSX.Element {
       })}
     </span>
   );
+}
+
+function WorkingIndicator(): JSX.Element {
+  return <ShimmerText text="working now..." />;
 }
 
 function PrIcon({ className }: { className?: string }): JSX.Element {

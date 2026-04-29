@@ -18,12 +18,15 @@ import type {
   ChatAskResponse,
   ChatHistoryResponse,
   ChatMessage,
+  DashboardScope,
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
   SessionSnapshot,
   SpotifyPresence,
+  StandupResponse,
   SyncStateEntry,
+  UserPrsResponse,
 } from "@slashtalk/shared";
 import type {
   BackendAuthState,
@@ -622,6 +625,16 @@ export async function claimRepo(fullName: string): Promise<RepoSummary> {
   }
 }
 
+/** Drop the caller's `user_repos` row for this repo. Pairs with `claimRepo`
+ *  — without this, "remove from settings" only nukes the local path, leaving
+ *  the server-side claim and so feed/dashboard/PR-poller still see the repo
+ *  as theirs. */
+export async function unclaimRepo(repoId: number): Promise<void> {
+  await jsonFetch<{ ok: boolean }>(`/api/me/repos/${encodeURIComponent(String(repoId))}`, {
+    method: "DELETE",
+  });
+}
+
 interface ClaimErrorBody {
   error?: string;
   message?: string;
@@ -660,6 +673,20 @@ export function listFeedSessions(): Promise<FeedSessionSnapshot[]> {
 export function listFeedSessionsForUser(login: string): Promise<FeedSessionSnapshot[]> {
   const qs = new URLSearchParams({ user: login });
   return jsonFetch<FeedSessionSnapshot[]>(`/api/feed?${qs}`, { method: "GET" });
+}
+
+export function fetchUserPrs(login: string, scope: DashboardScope): Promise<UserPrsResponse> {
+  const qs = new URLSearchParams({ scope });
+  return jsonFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs?${qs}`, {
+    method: "GET",
+  });
+}
+
+export function fetchUserStandup(login: string, scope: DashboardScope): Promise<StandupResponse> {
+  const qs = new URLSearchParams({ scope });
+  return jsonFetch<StandupResponse>(`/api/users/${encodeURIComponent(login)}/standup?${qs}`, {
+    method: "GET",
+  });
 }
 
 export function listDeviceRepos(): Promise<
@@ -754,12 +781,6 @@ export async function finalizeDelegatedChat(input: {
       body: { messageId: input.messageId, answer: input.answer },
     },
   );
-}
-
-export async function fetchQuestionsForLogin(login: string): Promise<ChatHistoryResponse> {
-  return jsonFetch<ChatHistoryResponse>(`/api/users/${encodeURIComponent(login)}/questions`, {
-    method: "GET",
-  });
 }
 
 export async function fetchChatGerunds(prompt: string): Promise<string[]> {

@@ -2,7 +2,6 @@
 // Any IPC contract lives here, so changes are caught by the compiler on both sides.
 
 import type {
-  ChatThread,
   ManagedAgentSessionRow,
   FeedSessionSnapshot,
   SessionSnapshot,
@@ -22,7 +21,7 @@ export type Avatar = { type: "emoji"; value: string } | { type: "remote"; value:
 export interface ChatHead {
   id: string;
   /** Picks the info-popover layout and routes session fetches. */
-  kind: "user" | "agent" | "demo";
+  kind: "user" | "agent";
   label: string;
   tint: string;
   avatar: Avatar;
@@ -79,10 +78,23 @@ export interface InfoShowPayload {
   spotify: SpotifyPresence | null;
   location: UserLocation | null;
   isSelf: boolean;
-  /** Cached "Asked Slashtalk" threads for this user (or null when main's
-   *  cache is cold; renderer paints loading then a follow-up info:show
-   *  fills it in). */
-  questions: { login: string; threads: ChatThread[] } | null;
+  /** PRs + Claude-composed standup for the head's user. Null while main's
+   *  cache is cold; the next push lands when the parallel fetch settles.
+   *  May also carry stale data from the previous open (stale-while-revalidate). */
+  dashboard: InfoDashboardData | null;
+  /** True between fetch-start and fetch-settle. Lets the renderer distinguish
+   *  "loaded, genuinely empty" (show "Nothing shipped yet today.") from
+   *  "still fetching, displayed data may be stale or null" (show shimmer).
+   *  Set by main: true on the initial show push, false on the post-fetch push. */
+  dashboardFetching: boolean;
+}
+
+export interface InfoDashboardData {
+  prs: import("@slashtalk/shared").UserPr[];
+  standup: string | null;
+  /** Self-mode signal: caller has no claimed `user_repos`. The renderer
+   *  shows a "connect a repo" CTA instead of empty PR/standup placeholders. */
+  noClaimedRepos: boolean;
 }
 
 // Signed-in identity for the MCP/agents shim. Token stays main-side.
@@ -493,13 +505,6 @@ export interface ChatHeadsBridge {
   // Caller's persisted Q&A threads, newest-first. Cards are pre-hydrated and
   // already gated by the caller's user_repos.
   fetchChatHistory: () => Promise<import("@slashtalk/shared").ChatHistoryResponse>;
-
-  // Threads asked by the named user, gated by the peer-visibility rules
-  // (asker shares ≥1 repo with caller; cited threads keep only viewer-visible
-  // citations). Used by the per-user info window.
-  fetchQuestionsForLogin: (
-    login: string,
-  ) => Promise<import("@slashtalk/shared").ChatHistoryResponse>;
 
   // Open a saved thread back up in the response window — used by the
   // "Recent questions" panel and the in-window history drawer.

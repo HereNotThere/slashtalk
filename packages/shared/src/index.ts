@@ -74,6 +74,45 @@ export interface SessionPr {
   authorLogin: string;
 }
 
+/** Time window for the dashboard endpoints. "today" uses the *target* user's
+ *  IANA timezone to compute the local 00:00 boundary; "past24h" is now - 24h. */
+export type DashboardScope = "today" | "past24h";
+
+/** A PR authored by a specific user inside the dashboard window. Shape
+ *  mirrors what the info-card "PRs pushed" section needs. The endpoint that
+ *  returns these gates by `user_repos` overlap between caller and target so
+ *  callers only see PRs on repos they share with the target. */
+export interface UserPr {
+  number: number;
+  title: string;
+  url: string;
+  repoFullName: string;
+  state: "open" | "closed" | "merged";
+  updatedAt: string;
+}
+
+export interface UserPrsResponse {
+  prs: UserPr[];
+  scope: DashboardScope;
+  since: string;
+  /** True only on the self path when the caller has no claimed `user_repos`
+   *  rows. Renderers should surface a "claim a repo" CTA rather than an empty
+   *  list — without this signal, "0 PRs" is ambiguous (genuinely quiet day vs.
+   *  no repos selected). Never set for peer queries. */
+  noClaimedRepos?: boolean;
+}
+
+/** LLM-composed standup blurb for a specific user. `summary` is null when
+ *  the window has nothing substantive to summarize (no shipped PRs, no
+ *  rolling-summary insights). */
+export interface StandupResponse {
+  summary: string | null;
+  scope: DashboardScope;
+  since: string;
+  /** See `UserPrsResponse.noClaimedRepos`. */
+  noClaimedRepos?: boolean;
+}
+
 /** A user prompt captured at ingest — what the developer asked for. */
 export interface RecentPrompt {
   ts: string;

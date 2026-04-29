@@ -62,9 +62,10 @@ export function HierarchyDashboard({
       )}
       <PastDaySection
         summary={dashboard?.standup ?? null}
-        // Show the shimmer whenever main is still fetching (initial cold load
-        // or background refresh). Only fall through to the "Nothing shipped"
-        // empty state once a fetch has actually settled with no summary.
+        // `loading` only drives the shimmer when there's no summary to show.
+        // PastDaySection prefers a stale summary over the shimmer so a
+        // background refetch doesn't hide the prior blurb (SWR — see
+        // docs/info-card.md).
         loading={dashboard === null || dashboardFetching}
         subjectLabel={subjectLabel}
       />
@@ -248,14 +249,14 @@ function PastDaySection({
       <div className="px-4 pb-3">
         <div className="flex items-end gap-2">
           <div className="flex-1 text-sm text-fg/90 leading-snug">
-            {loading ? (
-              <span className="text-subtle">
-                <ShimmerText text="Fetching…" />
-              </span>
-            ) : summary ? (
+            {summary ? (
               <Markdown inline className="text-sm leading-snug">
                 {summary}
               </Markdown>
+            ) : loading ? (
+              <span className="text-subtle">
+                <ShimmerText text="Fetching…" />
+              </span>
             ) : (
               <span className="text-subtle">Nothing shipped yet today.</span>
             )}

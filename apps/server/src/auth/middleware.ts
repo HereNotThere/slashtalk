@@ -20,6 +20,7 @@ const authUserColumns = {
   displayName: users.displayName,
   githubToken: users.githubToken,
   credentialsRevokedAt: users.credentialsRevokedAt,
+  timezone: users.timezone,
   createdAt: users.createdAt,
   updatedAt: users.updatedAt,
 };

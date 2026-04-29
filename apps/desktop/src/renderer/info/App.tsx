@@ -1,45 +1,25 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowRightIcon } from "@heroicons/react/20/solid";
-import { ChatBubbleLeftIcon, FolderIcon } from "@heroicons/react/24/outline";
-import { SessionState } from "@slashtalk/shared";
-import type {
-  ChatThread,
-  EventSource,
-  RecentPrompt,
-  SpotifyPresence,
-  TokenUsage,
-} from "@slashtalk/shared";
-import type { ChatHead, InfoSession, UserLocation } from "../../shared/types";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { SpotifyPresence, TokenUsage } from "@slashtalk/shared";
+import type { ChatHead, InfoDashboardData, InfoSession, UserLocation } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { HierarchyDashboard } from "./HierarchyDashboard";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
-import { Markdown } from "../shared/Markdown";
-import { ClaudeIcon, OpenAIIcon, SpotifyIcon } from "../shared/icons";
-import { relativeTime } from "../shared/relativeTime";
+import { ClaudeIcon, SpotifyIcon } from "../shared/icons";
 
 const REFRESH_MS = 15_000;
 
 export function App(): JSX.Element {
   const [head, setHead] = useState<ChatHead | null>(null);
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
-  // Questions are keyed by the login they belong to. The render guard checks
-  // `login === head.label` so a head switch can never momentarily attribute
-  // one user's questions to another while the next fetch is in flight.
-  const [questions, setQuestions] = useState<{
-    login: string;
-    threads: ChatThread[];
-  } | null>(null);
   const [visible, setVisible] = useState(false);
-  const [expandRequest, setExpandRequest] = useState<{
-    id: string;
-    nonce: number;
-  } | null>(null);
   const [spotify, setSpotify] = useState<SpotifyPresence | null>(null);
   const [location, setLocation] = useState<UserLocation | null>(null);
   const [isSelf, setIsSelf] = useState(false);
+  const [dashboard, setDashboard] = useState<InfoDashboardData | null>(null);
+  const [dashboardFetching, setDashboardFetching] = useState(false);
   // Bumped on every `info:show` to drive the post-commit ack effect. Lets us
-  // ack same-head re-shows (e.g. expand-on-click) where head?.id is unchanged.
+  // ack same-head re-shows where head?.id is unchanged.
   const [showNonce, setShowNonce] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -54,19 +34,9 @@ export function App(): JSX.Element {
       setSpotify(p.spotify);
       setLocation(p.location);
       setIsSelf(p.isSelf);
-      // Apply main's question cache snapshot. Null means "main hasn't cached
-      // yet" — the load effect below will fetch and the 15s timer keeps it
-      // fresh thereafter.
-      setQuestions(p.questions);
+      setDashboard(p.dashboard);
+      setDashboardFetching(p.dashboardFetching);
       setVisible(true);
-      // Re-request even when id matches a prior request — clicking the same
-      // card twice should re-expand if the user collapsed it in between.
-      if (p.expandSessionId) {
-        setExpandRequest((cur) => ({
-          id: p.expandSessionId!,
-          nonce: (cur?.nonce ?? 0) + 1,
-        }));
-      }
       setShowNonce((n) => n + 1);
     });
     // Keep head/sessions/spotify on hide so the last content fades out instead
@@ -103,55 +73,27 @@ export function App(): JSX.Element {
     if (!head) return;
     if (head.kind === "agent") {
       setSessions([]);
-      setQuestions({ login: head.label, threads: [] });
       return;
-    }
-    if (head.kind === "demo") {
-      // Demo head has no real GitHub login, so spotify/questions endpoints
-      // would 404. Pull sessions only — main routes the demo id to listOwn.
-      let cancelled = false;
-      const load = async (): Promise<void> => {
-        try {
-          const rows = await window.chatheads.listSessionsForHead(head.id);
-          if (!cancelled) setSessions(rows);
-        } catch {
-          if (!cancelled) setSessions([]);
-        }
-      };
-      void load();
-      const timer = setInterval(() => void load(), REFRESH_MS);
-      return () => {
-        cancelled = true;
-        clearInterval(timer);
-      };
     }
     let cancelled = false;
     const headLogin = head.label;
     const load = async (): Promise<void> => {
       try {
-        const [rows, sp, qs] = await Promise.all([
+        const [rows, sp] = await Promise.all([
           window.chatheads.listSessionsForHead(head.id),
           window.chatheads.getSpotifyForLogin(headLogin),
-          // Soft-fail: a 403 (no shared repo) shouldn't break the panel.
-          window.chatheads.fetchQuestionsForLogin(headLogin).catch(() => ({ threads: [] })),
         ]);
         if (cancelled) return;
         setSessions(rows);
         setSpotify(sp);
-        setQuestions({ login: headLogin, threads: qs.threads });
       } catch {
-        if (!cancelled) {
-          setSessions([]);
-          setQuestions({ login: headLogin, threads: [] });
-        }
+        if (!cancelled) setSessions([]);
       }
     };
     // Sessions may be preloaded by main via onInfoShow — skip the redundant
-    // refetch in that case. Questions are never preloaded, so any time the
-    // head changes (or first-mount), kick off an immediate load. Without
-    // this, switching heads leaves the previous user's questions on screen
-    // for up to REFRESH_MS until the interval fires.
-    if (sessions === null || questions?.login !== headLogin) void load();
+    // refetch in that case. Always start the 15s tick so the "Now" status
+    // stays live.
+    if (sessions === null) void load();
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
       cancelled = true;
@@ -197,13 +139,6 @@ export function App(): JSX.Element {
       <div ref={contentRef}>
         {head?.kind === "agent" ? (
           <AgentPanel head={head} />
-        ) : head?.kind === "demo" ? (
-          // Demo previews the new hierarchy against the viewer's data, so
-          // borrow the self-mode location/time/weather logic in UserHeader.
-          <>
-            <UserHeader head={head} sessions={sessions} location={location} isSelf={true} />
-            <HierarchyDashboard sessions={sessions} />
-          </>
         ) : (
           <>
             <UserHeader
@@ -213,20 +148,12 @@ export function App(): JSX.Element {
               isSelf={isSelf}
               spotify={spotify}
             />
-            <Divider />
-            <SessionsSection
-              key={head?.id ?? "no-head"}
+            <HierarchyDashboard
               sessions={sessions}
-              expandRequest={expandRequest}
-              collisionFile={head?.collisionAt != null ? (head.collisionFile ?? null) : null}
-              collisionLogin={head?.label ?? null}
+              dashboard={dashboard}
+              dashboardFetching={dashboardFetching}
+              subjectLabel={isSelf ? "my" : `${head?.label ?? "their"}'s`}
             />
-            {questions && questions.login === head?.label && questions.threads.length > 0 && (
-              <>
-                <Divider />
-                <QuestionsSection key={head.id} threads={questions.threads} />
-              </>
-            )}
           </>
         )}
       </div>
@@ -257,10 +184,6 @@ function NowPlayingRow({ track }: { track: SpotifyPresence }): JSX.Element {
   );
 }
 
-function Divider(): JSX.Element {
-  return <div className="mx-4 h-px bg-divider" />;
-}
-
 function formatHeaderTime(timeZone: string | null | undefined): string | null {
   try {
     return new Date().toLocaleTimeString([], {
@@ -271,6 +194,16 @@ function formatHeaderTime(timeZone: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+function headerTime(
+  showLocationRow: boolean,
+  isSelf: boolean,
+  peerTz: string | null,
+): string | null {
+  if (!showLocationRow) return null;
+  if (isSelf) return formatHeaderTime(null);
+  return peerTz ? formatHeaderTime(peerTz) : null;
 }
 
 function UserHeader({
@@ -292,19 +225,11 @@ function UserHeader({
   // to local would mislabel the peer's card with our clock.
   const { city, icon } = useLocationWeather(isSelf ? undefined : location);
   const showLocationRow = isSelf || location !== null;
-  // Self: device's local tz (stale peer-poll cache could otherwise lock the
-  // clock to the previously-persisted tz across travel).
-  // Peer with no tz: skip the clock — falling back to undefined would render
-  // the viewer's local tz and mislabel it as the peer's.
-  // Peer with tz: wrap in try/catch (formatHeaderTime) so a malformed value
-  // drops the clock instead of crashing the card subtree.
-  const time = !showLocationRow
-    ? null
-    : isSelf
-      ? formatHeaderTime(null)
-      : location?.timezone
-        ? formatHeaderTime(location.timezone)
-        : null;
+  // Self uses the device's local tz so travel doesn't lock the clock to a
+  // stale peer-poll cache. For peers, fall back to skipping the clock when
+  // the server hasn't sent a tz yet — using the viewer's local would
+  // mislabel it as the peer's.
+  const time = headerTime(showLocationRow, isSelf, location?.timezone ?? null);
   const totalTokensLabel = fmtTokens(sumSessionTokens(sessions));
   return (
     <div className="flex items-start gap-3 px-4 pt-4 pb-3">
@@ -372,435 +297,6 @@ function Avatar({ head }: { head: ChatHead | null }): JSX.Element {
   );
 }
 
-function SubHeader({ children }: { children: string }): JSX.Element {
-  return (
-    <div className="text-xs font-semibold tracking-wider uppercase text-subtle">{children}</div>
-  );
-}
-
-const DEFAULT_SESSION_LIMIT = 5;
-
-function SessionsSection({
-  sessions,
-  expandRequest,
-  collisionFile,
-  collisionLogin,
-}: {
-  sessions: InfoSession[] | null;
-  expandRequest: { id: string; nonce: number } | null;
-  collisionFile: string | null;
-  collisionLogin: string | null;
-}): JSX.Element {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
-
-  useEffect(() => {
-    if (!expandRequest || !sessions) return;
-    const idx = sessions.findIndex((s) => s.id === expandRequest.id);
-    if (idx < 0) return;
-    if (idx >= DEFAULT_SESSION_LIMIT) setShowAll(true);
-    setExpandedId(expandRequest.id);
-  }, [expandRequest, sessions]);
-
-  if (sessions == null) {
-    return <div className="px-4 py-3 text-sm text-subtle min-h-[60px]">Loading…</div>;
-  }
-  if (sessions.length === 0) {
-    return <div className="px-4 py-3 text-sm text-subtle min-h-[60px]">No sessions yet.</div>;
-  }
-  const visible =
-    showAll || sessions.length <= DEFAULT_SESSION_LIMIT
-      ? sessions
-      : sessions.slice(0, DEFAULT_SESSION_LIMIT);
-  const hasMore = sessions.length > DEFAULT_SESSION_LIMIT;
-  return (
-    <div>
-      <SessionList
-        sessions={visible}
-        expandedId={expandedId}
-        onToggle={(id) => setExpandedId((cur) => (cur === id ? null : id))}
-        collisionFile={collisionFile}
-        collisionLogin={collisionLogin}
-      />
-      {hasMore && (
-        <button
-          type="button"
-          onClick={() => setShowAll((v) => !v)}
-          className="w-full px-4 pt-1 pb-3 text-center text-xs font-medium text-muted hover:text-fg hover:bg-surface-alt/60 transition-colors cursor-pointer"
-        >
-          {showAll ? "Show less" : `Show all (${sessions.length})`}
-        </button>
-      )}
-    </div>
-  );
-}
-
-const DEFAULT_QUESTIONS_LIMIT = 5;
-
-function QuestionsSection({ threads }: { threads: ChatThread[] }): JSX.Element {
-  const [showAll, setShowAll] = useState(false);
-  const visible =
-    showAll || threads.length <= DEFAULT_QUESTIONS_LIMIT
-      ? threads
-      : threads.slice(0, DEFAULT_QUESTIONS_LIMIT);
-  const hasMore = threads.length > DEFAULT_QUESTIONS_LIMIT;
-  return (
-    <div>
-      <div className="px-4 pt-3 pb-2">
-        <SubHeader>Asked Slashtalk</SubHeader>
-      </div>
-      {visible.map((t) => (
-        <QuestionRow key={t.threadId} thread={t} />
-      ))}
-      {hasMore && (
-        <>
-          <div className="mx-4 h-px bg-divider" />
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            className="w-full px-4 pt-1 pb-3 text-center text-xs font-medium text-muted hover:text-fg hover:bg-surface-alt/60 transition-colors cursor-pointer"
-          >
-            {showAll ? "Show less" : `Show all (${threads.length})`}
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-function QuestionRow({ thread }: { thread: ChatThread }): JSX.Element {
-  const open = (): void => {
-    void window.chatheads.openThread(thread);
-  };
-  const turnSuffix = thread.turns.length > 1 ? ` · ${thread.turns.length} turns` : "";
-  return (
-    <button
-      type="button"
-      onClick={open}
-      className="w-full text-left px-4 py-3 hover:bg-surface-alt/60 transition-colors flex items-start gap-2.5"
-    >
-      <ChatBubbleLeftIcon className="w-4 h-4 mt-0.5 shrink-0 text-subtle" aria-hidden />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm text-fg line-clamp-2">{thread.title}</div>
-        <div className="text-xs text-subtle mt-0.5">
-          {relativeTime(thread.updatedAt)}
-          {turnSuffix}
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function SessionList({
-  sessions,
-  expandedId,
-  onToggle,
-  collisionFile,
-  collisionLogin,
-}: {
-  sessions: InfoSession[];
-  expandedId: string | null;
-  onToggle: (id: string) => void;
-  collisionFile: string | null;
-  collisionLogin: string | null;
-}): JSX.Element {
-  return (
-    <>
-      {sessions.map((s, i) => (
-        <Fragment key={s.id}>
-          {i > 0 && <div className="mx-4 h-px bg-divider" />}
-          <SessionRow
-            session={s}
-            expanded={expandedId === s.id}
-            onToggle={() => onToggle(s.id)}
-            collisionFile={collisionFile}
-            collisionLogin={collisionLogin}
-          />
-        </Fragment>
-      ))}
-    </>
-  );
-}
-
-function repoLabel(s: InfoSession): string | null {
-  if ("repo_full_name" in s && s.repo_full_name) {
-    const slash = s.repo_full_name.lastIndexOf("/");
-    return slash >= 0 ? s.repo_full_name.slice(slash + 1) : s.repo_full_name;
-  }
-  const parts = s.project.split(/[-/]/).filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1]! : null;
-}
-
-function sessionTouchesFile(session: InfoSession, filePath: string): boolean {
-  const sets = [session.topFilesEdited, session.topFilesWritten];
-  for (const set of sets) {
-    if (!Array.isArray(set)) continue;
-    for (const entry of set) {
-      if (Array.isArray(entry) && entry[0] === filePath) return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Trim an absolute file path to start at the repo root, e.g.
- * `/Users/erik/code/slashtalk/apps/server/src/x.ts` →
- * `/slashtalk/apps/server/src/x.ts`. Everything before the repo dir is
- * developer-machine-specific and irrelevant to readers.
- *
- * Resolution order:
- *   1. Strip session.cwd as a prefix (most precise — that's literally the
- *      repo root on the *other* machine).
- *   2. Otherwise, look up the repo basename from `repo_full_name`/`cwd`
- *      and slice from its last occurrence in the path.
- */
-function repoBasenameFor(session: InfoSession): string | null {
-  if ("repo_full_name" in session && session.repo_full_name) {
-    const slash = session.repo_full_name.lastIndexOf("/");
-    return slash >= 0 ? session.repo_full_name.slice(slash + 1) : session.repo_full_name;
-  }
-  if (session.cwd) {
-    const parts = session.cwd.replace(/\\/g, "/").split("/").filter(Boolean);
-    return parts.length > 0 ? (parts[parts.length - 1] ?? null) : null;
-  }
-  return null;
-}
-
-function trimToRepoPath(filePath: string, session: InfoSession): string {
-  const norm = filePath.replace(/\\/g, "/");
-
-  if (session.cwd) {
-    const cwd = session.cwd.replace(/\\/g, "/").replace(/\/+$/, "");
-    if (norm.startsWith(cwd + "/")) {
-      const repoBasename = repoBasenameFor(session);
-      const tail = norm.slice(cwd.length); // starts with "/"
-      return repoBasename ? `/${repoBasename}${tail}` : tail;
-    }
-  }
-
-  const repoBasename = repoBasenameFor(session);
-  if (repoBasename) {
-    const needle = `/${repoBasename}/`;
-    const idx = norm.lastIndexOf(needle);
-    if (idx >= 0) return norm.slice(idx);
-  }
-  return norm;
-}
-
-function SessionRow({
-  session,
-  expanded,
-  onToggle,
-  collisionFile,
-  collisionLogin,
-}: {
-  session: InfoSession;
-  expanded: boolean;
-  onToggle: () => void;
-  collisionFile: string | null;
-  collisionLogin: string | null;
-}): JSX.Element {
-  const repo = repoLabel(session);
-  const title = session.title ?? session.lastUserPrompt ?? "Untitled session";
-  const tokenStr = fmtTokens(session.tokens);
-  const tokensLabel = tokenStr ? `${tokenStr} tokens` : null;
-  const status = statusLabel(session);
-  // Only flag collisions on sessions that aren't already wrapped — an ENDED
-  // session touching the same file is just historical, not a real conflict.
-  const sessionLive = session.state !== SessionState.ENDED;
-  const colliding =
-    collisionFile != null && sessionLive && sessionTouchesFile(session, collisionFile);
-
-  // Border priority: collision (outranks expanded) > expanded > none.
-  const borderClass = colliding
-    ? "border-danger"
-    : expanded
-      ? "border-success/70"
-      : "border-transparent";
-
-  return (
-    <div className={expanded ? "bg-surface-alt" : undefined}>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        className={`w-full text-left px-4 py-3 cursor-pointer hover:bg-surface-alt/60 transition-colors flex items-start gap-2 border-l-2 ${borderClass}`}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="text-base font-medium text-fg truncate">{title}</div>
-          {session.description && (
-            <div className="mt-1 text-sm text-muted line-clamp-2">{session.description}</div>
-          )}
-          {colliding && collisionFile && (
-            // Sits above the tokens row — reads as another piece of "where this
-            // session is" metadata. Subtle danger tint (no border), explicit
-            // Also-editing prefix, full path that wraps if long, dedicated ×
-            // dismiss top-right.
-            <div className="mt-1.5 flex items-start gap-1.5 px-2 py-1 rounded bg-danger/10">
-              {/* mt-[5px] aligns the 8px dot's center with the first text line. */}
-              <span
-                aria-hidden
-                className="collision-dot shrink-0 inline-block w-2 h-2 rounded-full mt-[5px]"
-              />
-              <div className="text-[12px] leading-snug min-w-0 flex-1">
-                <span className="text-danger font-medium">Also editing </span>
-                <span className="font-mono text-fg/90 break-all">
-                  {trimToRepoPath(collisionFile, session)}
-                </span>
-              </div>
-              {collisionLogin && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void window.chatheads.collision.dismiss(collisionLogin);
-                  }}
-                  aria-label="Dismiss collision warning"
-                  title="Dismiss"
-                  className="shrink-0 -mr-1 px-1.5 py-0 text-[14px] leading-none text-subtle hover:text-fg rounded cursor-pointer"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          )}
-          {(status !== null || tokensLabel !== null || repo !== null) && (
-            <div className="mt-1 flex items-center gap-3 text-xs text-subtle min-w-0">
-              {repo && (
-                <span className="inline-flex items-center gap-1 min-w-0">
-                  <FolderIcon className="w-3.5 h-3.5 shrink-0" aria-hidden />
-                  <span className="font-mono truncate text-fg/75">{repo}</span>
-                </span>
-              )}
-              {tokensLabel && (
-                <span className="inline-flex items-center gap-1 shrink-0">
-                  <ProviderIcon source={session.source} />
-                  <span>{tokensLabel}</span>
-                </span>
-              )}
-              {status && (
-                <span className={`shrink-0 ml-auto ${status.isLive ? "text-info" : ""}`}>
-                  {status.isLive ? <WorkingIndicator /> : status.text}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </button>
-      {/* Anchor rendered as a sibling of the toggle button so we don't nest
-          interactive elements (browsers auto-correct / drop the inner one). */}
-      {session.pr && (
-        <div className="px-4 -mt-1 pb-3">
-          <PrLink pr={session.pr} />
-        </div>
-      )}
-      {expanded && <ExpandedSession session={session} />}
-    </div>
-  );
-}
-
-const PR_STATE_COLOR: Record<NonNullable<InfoSession["pr"]>["state"], string> = {
-  open: "text-success",
-  merged: "text-info",
-  closed: "text-danger",
-};
-
-function PrLink({ pr }: { pr: NonNullable<InfoSession["pr"]> }): JSX.Element {
-  return (
-    <a
-      href={pr.url}
-      target="_blank"
-      rel="noreferrer noopener"
-      onClick={(e) => e.stopPropagation()}
-      className="flex items-center gap-1.5 text-[11.5px] hover:underline min-w-0"
-      title={pr.title}
-    >
-      <PrIcon className={`shrink-0 ${PR_STATE_COLOR[pr.state]}`} />
-      <span className={`${PR_STATE_COLOR[pr.state]} font-medium shrink-0`}>PR #{pr.number}</span>
-      <span className="text-muted truncate min-w-0">{pr.title}</span>
-      {pr.state !== "open" && <span className="text-subtle shrink-0">· {pr.state}</span>}
-    </a>
-  );
-}
-
-function PrIcon({ className }: { className?: string }): JSX.Element {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="currentColor"
-      className={className}
-      aria-hidden
-    >
-      <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" />
-    </svg>
-  );
-}
-
-function ExpandedSession({ session }: { session: InfoSession }): JSX.Element {
-  const summary =
-    session.rollingSummary ??
-    (session.lastUserPrompt && session.lastUserPrompt !== session.title
-      ? session.lastUserPrompt
-      : null);
-  const highlights = Array.isArray(session.highlights) ? session.highlights : [];
-  // Latest activity is the developer's recent prompts — what they asked for —
-  // not the mixed event ring buffer (which surfaces tool calls / git plumbing).
-  const recentPrompts = Array.isArray(session.recentPrompts) ? session.recentPrompts : [];
-  const hasAnything = Boolean(summary) || highlights.length > 0 || recentPrompts.length > 0;
-  return (
-    <div className="px-4 pb-4 space-y-3">
-      {summary && (
-        <div>
-          <SubHeader>Summary</SubHeader>
-          <Markdown className="mt-1 text-base [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
-            {summary}
-          </Markdown>
-        </div>
-      )}
-      {highlights.length > 0 && (
-        <div>
-          <SubHeader>Highlights</SubHeader>
-          <ul className="mt-1 text-sm text-fg/90 space-y-0.5 list-disc list-inside marker:text-subtle">
-            {highlights.map((h, i) => (
-              <li key={i}>
-                <Markdown inline>{h}</Markdown>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {recentPrompts.length > 0 && (
-        <div>
-          <SubHeader>Latest activity</SubHeader>
-          <div className="mt-1 space-y-3">
-            {recentPrompts
-              .slice(-4)
-              .reverse()
-              .map((p, i) => (
-                <PromptRow key={i} prompt={p} />
-              ))}
-          </div>
-        </div>
-      )}
-      {!hasAnything && <div className="text-sm text-subtle">No activity yet.</div>}
-    </div>
-  );
-}
-
-function PromptRow({ prompt }: { prompt: RecentPrompt }): JSX.Element {
-  return (
-    <div className="flex items-start gap-2">
-      <ArrowRightIcon className="w-3.5 h-3.5 text-subtle shrink-0 mt-0.5" aria-hidden />
-      <div className="flex-1 min-w-0">
-        <div className="text-base text-fg leading-snug break-words line-clamp-3">{prompt.text}</div>
-        <div className="mt-0.5 text-xs text-subtle">{fmtAgo(prompt.ts)}</div>
-      </div>
-    </div>
-  );
-}
-
 function fmtTokens(tokens: TokenUsage | undefined): string | null {
   if (!tokens) return null;
   // Exclude cacheRead: with prompt caching, the same cached prefix is re-read
@@ -811,87 +307,4 @@ function fmtTokens(tokens: TokenUsage | undefined): string | null {
   if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}M`;
   if (total >= 1_000) return `${(total / 1_000).toFixed(1)}k`;
   return `${total}`;
-}
-
-interface StatusInfo {
-  text: string;
-  isLive: boolean;
-}
-
-function statusLabel(s: InfoSession): StatusInfo | null {
-  switch (s.state) {
-    case SessionState.BUSY:
-    case SessionState.ACTIVE:
-      return { text: "working now", isLive: true };
-    case SessionState.IDLE:
-      return {
-        text: s.idleS != null ? `idle ${fmtDuration(s.idleS)}` : "idle",
-        isLive: false,
-      };
-    case SessionState.RECENT:
-      return s.lastTs ? { text: `paused ${fmtAgo(s.lastTs)}`, isLive: false } : null;
-    case SessionState.ENDED:
-      return s.lastTs ? { text: `ended ${fmtAgo(s.lastTs)}`, isLive: false } : null;
-    default:
-      return null;
-  }
-}
-
-function WorkingIndicator(): JSX.Element {
-  const text = "working now...";
-  const duration = 1.6;
-  const step = 0.08;
-  return (
-    <span aria-label={text}>
-      {Array.from(text).map((ch, i) => {
-        const style: CSSProperties = {
-          animation: `shimmer-char ${duration}s ease-in-out infinite`,
-          animationDelay: `${i * step}s`,
-          display: "inline-block",
-          whiteSpace: "pre",
-        };
-        return (
-          <span key={i} style={style} aria-hidden>
-            {ch}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
-function ProviderIcon({ source }: { source: EventSource }): JSX.Element {
-  const label = source === "codex" ? "OpenAI Codex" : "Claude Code";
-  return (
-    <span className="shrink-0 text-subtle" title={label} aria-label={label}>
-      {source === "codex" ? <OpenAIIcon /> : <ClaudeIcon />}
-    </span>
-  );
-}
-
-function fmtDuration(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  if (h < 24) return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
-}
-
-function fmtAgo(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
-  const s = Math.max(0, Math.floor(diff / 1000));
-  if (s < 30) return "just now";
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  const roundedH = rem >= 30 ? h + 1 : h;
-  if (roundedH < 24) return `${roundedH}h ago`;
-  const d = Math.floor(roundedH / 24);
-  return `${d}d ago`;
 }

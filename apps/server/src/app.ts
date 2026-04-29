@@ -9,6 +9,7 @@ import { sessionRoutes } from "./sessions/routes";
 import { userRoutes, deviceReposRoutes, userLocationRoutes } from "./user/routes";
 import { claimRoutes } from "./user/claim";
 import { orgsRoutes } from "./user/orgs";
+import { dashboardRoutes } from "./user/dashboard";
 import { chatRoutes } from "./chat/routes";
 import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
 import { managedAgentSessionRoutes } from "./managed-agent-sessions/routes";
@@ -52,6 +53,7 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(orgsRoutes(db))
     .use(deviceReposRoutes(db))
     .use(userLocationRoutes(db))
+    .use(dashboardRoutes(db, { redis }))
     .use(chatRoutes(db, redis))
     .use(managedAgentSessionRoutes(db))
     .use(mcpOAuthRoutes(db))

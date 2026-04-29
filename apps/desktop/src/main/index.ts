@@ -8,6 +8,7 @@ import * as chatheadsAuth from "./chatheadsAuth";
 import * as selfSession from "./selfSession";
 import { createLocalMcpProxy } from "./localMcpProxy";
 import { getLocalMcpProxySecret } from "./localMcpProxySecret";
+import { apiBaseUrl } from "./config";
 import * as anthropic from "./anthropic";
 import * as githubAuth from "./githubDeviceAuth";
 import * as peerPresence from "./peerPresence";
@@ -210,12 +211,7 @@ ipcMain.handle(
     messages: Parameters<typeof backend.askChat>[0],
     threadId?: Parameters<typeof backend.askChat>[1],
   ) => {
-    const result = await backend.askChat(messages, threadId);
-    // The asker's question list just changed — drop the cache so the next
-    // hover on their bubble (or rail self-bubble) refetches.
-    const state = backend.getAuthState();
-    if (state.signedIn) info.invalidateQuestionsForLogin(state.user.githubLogin);
-    return result;
+    return backend.askChat(messages, threadId);
   },
 );
 
@@ -353,6 +349,7 @@ configureRailVisibility({
 app
   .whenReady()
   .then(async () => {
+    console.log(`[startup] apiBaseUrl=${apiBaseUrl()}`);
     // Ensure Slashtalk shows in Cmd+Tab and the Dock. macOS default is
     // "regular" but we set it explicitly, and force-show the dock icon in case
     // something demoted us to accessory mode.

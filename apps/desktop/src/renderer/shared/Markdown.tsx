@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, type AnchorHTMLAttributes, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -14,7 +14,25 @@ const MARKDOWN_CLASSES =
   "[&_a]:text-primary [&_a]:underline hover:[&_a]:text-primary-hover " +
   "[&_strong]:font-semibold [&_strong]:text-fg";
 
-const INLINE_COMPONENTS = { p: Fragment };
+function ExternalLink({
+  href,
+  children,
+  ...rest
+}: AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element {
+  const onClick = (e: MouseEvent<HTMLAnchorElement>): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (href) void window.chatheads.openExternal(href);
+  };
+  return (
+    <a {...rest} href={href} onClick={onClick}>
+      {children}
+    </a>
+  );
+}
+
+const BLOCK_COMPONENTS = { a: ExternalLink };
+const INLINE_COMPONENTS = { p: Fragment, a: ExternalLink };
 
 export function Markdown({
   children,
@@ -29,7 +47,7 @@ export function Markdown({
   const markdown = (
     <ReactMarkdown
       remarkPlugins={REMARK_PLUGINS}
-      components={inline ? INLINE_COMPONENTS : undefined}
+      components={inline ? INLINE_COMPONENTS : BLOCK_COMPONENTS}
     >
       {children}
     </ReactMarkdown>

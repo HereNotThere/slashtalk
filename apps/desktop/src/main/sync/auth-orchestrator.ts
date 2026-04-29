@@ -8,7 +8,6 @@ import * as peerLocations from "../peerLocations";
 import * as peerPresence from "../peerPresence";
 import * as uploader from "../uploader";
 import * as ws from "../ws";
-import * as info from "../windows/info";
 import * as spotifyToggle from "./spotify-toggle";
 import { broadcast } from "../windows/broadcast";
 import { getMainWindow } from "../windows/main";
@@ -33,7 +32,6 @@ function applySyncForAuth(signedIn: boolean): void {
     peerPresence.stop();
     peerLocations.stop();
     ws.stop();
-    info.clearQuestionsCache();
   }
 }
 

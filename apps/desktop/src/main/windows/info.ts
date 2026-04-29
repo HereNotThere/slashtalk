@@ -1,7 +1,8 @@
 import { BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
-import type { ChatHead, InfoSession } from "../../shared/types";
-import type { ChatThread } from "@slashtalk/shared";
+import type { ChatHead, InfoDashboardData, InfoSession } from "../../shared/types";
+import type { DashboardScope } from "@slashtalk/shared";
 import * as backend from "../backend";
+import * as localRepos from "../localRepos";
 import * as rail from "../rail";
 import * as peerPresence from "../peerPresence";
 import * as peerLocations from "../peerLocations";
@@ -55,6 +56,13 @@ const INFO_SHOW_READY_TIMEOUT_MS = 80;
 // at most once per REFRESH_DEBOUNCE_MS regardless of WS traffic.
 const REFRESH_DEBOUNCE_MS = 300;
 
+// Time-window scopes for the dashboard sections. Hardcoded flags — flip to
+// "past24h" to switch a section to a rolling 24h window instead of the
+// target's local "today" boundary. Each section's scope is independent so
+// the two can evolve at different cadences.
+const DASHBOARD_PRS_SCOPE: DashboardScope = "today";
+const DASHBOARD_STANDUP_SCOPE: DashboardScope = "today";
+
 let deps: InfoDeps;
 let infoWindow: BrowserWindow | null = null;
 
@@ -85,17 +93,24 @@ let selectedBubbleScreen: { x: number; y: number } | null = null;
 
 const sessionCache = new Map<string, InfoSession[]>();
 
-// Mirrors sessionCache but for the "Asked Slashtalk" panel, keyed by github
-// login (not head id, because peer questions are scoped per user across all
-// repos). Populated lazily on the first hover for a user and re-populated by
-// the renderer's 15s refresh through `chat:questionsForLogin`. Without this,
-// every hover refetched the same threads end-to-end and a section visibly
-// popped in mid-show.
-const questionsCache = new Map<string, ChatThread[]>();
+// Per-login dashboard cache covering both PRs and standup for that user.
+// Keyed by github login because the data is target-specific (a PR list /
+// standup blurb is about that user's day). Cleared inline by refreshNow on
+// session updates for the currently-shown head. Server caches the standup
+// for ~5 min so the cost of a refetch is mostly the DB round-trip.
+const dashboardCache = new Map<string, InfoDashboardData>();
+const dashboardInFlight = new Map<string, Promise<InfoDashboardData>>();
 
-// Coalesce concurrent callers (showInfo's bg fetch + the renderer's load
-// effect on cache miss) onto one HTTP request.
-const questionsInFlight = new Map<string, Promise<ChatThread[]>>();
+// When the user toggles which local repos are tracked, the server's view of
+// `user_repos` may also have shifted (claim on add, prior unclaim, etc.).
+// Wipe the cache wholesale so the next hover refetches and picks up either a
+// fresh standup or the `noClaimedRepos` empty-state CTA. Cheap: at most one
+// HTTP roundtrip per visible login on next paint.
+localRepos.onSelectionChange(() => {
+  if (dashboardCache.size === 0) return;
+  console.log(`[info] dashboard cache cleared on selection change (had=${dashboardCache.size})`);
+  dashboardCache.clear();
+});
 
 type InfoShowReadyResolver = (height: number | null) => void;
 // FIFO queue: each ack drains exactly one resolver so concurrent showInfo
@@ -124,14 +139,6 @@ export function getCachedSessions(headId: string): InfoSession[] | undefined {
 
 export function invalidateSessionCache(headId: string): void {
   sessionCache.delete(headId);
-}
-
-export function invalidateQuestionsForLogin(login: string): void {
-  questionsCache.delete(login);
-}
-
-export function clearQuestionsCache(): void {
-  questionsCache.clear();
 }
 
 // ---------- Window plumbing ----------
@@ -280,11 +287,12 @@ function pushInfoShowSnapshot(
   win: BrowserWindow | null,
   head: ChatHead,
   expandSessionId?: string,
+  dashboardFetching: boolean = false,
 ): void {
   if (!win || win.isDestroyed()) return;
   if (selectedHeadId !== head.id) return;
   const login = rail.parseUserHeadId(head.id);
-  const cachedQuestions = login ? questionsCache.get(login) : null;
+  const dashboard = login ? (dashboardCache.get(login) ?? null) : null;
   win.webContents.send("info:show", {
     head,
     sessions: sessionCache.get(head.id) ?? null,
@@ -292,7 +300,8 @@ function pushInfoShowSnapshot(
     spotify: login ? (peerPresence.get(login) ?? null) : null,
     location: login ? (peerLocations.get(login) ?? null) : null,
     isSelf: backend.isSelf(login),
-    questions: login && cachedQuestions ? { login, threads: cachedQuestions } : null,
+    dashboard,
+    dashboardFetching,
   });
 }
 
@@ -337,8 +346,11 @@ async function showInfo(
   const firstShow = !win.isVisible();
   // Send the current cache snapshot immediately. Cache misses surface as null
   // and the renderer paints loading placeholders; the background fetches
-  // below resolve and re-push with the same snapshot helper.
-  pushInfoShowSnapshot(win, head, expandSessionId);
+  // below resolve and re-push with the same snapshot helper. We always
+  // refetch the dashboard on show (see below), so flag `dashboardFetching`
+  // here so the renderer can shimmer instead of treating any cached
+  // `summary: null` as "genuinely empty".
+  pushInfoShowSnapshot(win, head, expandSessionId, login != null);
 
   // Wait for the renderer's measured-height ack so position+content land on
   // the same paint frame and the bottom-clamp uses the right height (no
@@ -356,13 +368,22 @@ async function showInfo(
   broadcast("info:state", { visible: true, headId: head.id }, deps.getOverlay());
 
   // Fetch any cache misses in parallel and push the merged snapshot once
-  // both settle, so the renderer doesn't ping-pong through two resize cycles.
+  // all settle, so the renderer doesn't ping-pong through two resize cycles.
   // Drop expandSessionId on the follow-up: the initial push already carried
   // it, and re-sending bumps expandRequest.nonce in the renderer, which
   // re-expands a session the user may have manually collapsed mid-fetch.
   const pending: Promise<unknown>[] = [];
   if (!sessionCache.has(head.id)) pending.push(fetchSessionsForHead(head.id));
-  if (login && !questionsCache.has(login)) pending.push(fetchQuestionsForLoginCached(login));
+  // Dashboard is always refetched on show (stale-while-revalidate): the cache
+  // gives the renderer something to paint immediately via the snapshot push
+  // above, but server-side state (claimed repos, freshly-merged PRs, standup
+  // TTL) can shift between hovers in ways the desktop has no event for. The
+  // cost is one HTTP roundtrip per hover; the server's own LLM cache absorbs
+  // the heavy work.
+  if (login) {
+    dashboardCache.delete(login);
+    pending.push(fetchDashboardForLogin(login));
+  }
   if (pending.length > 0) {
     void Promise.all(pending).then(() => {
       pushInfoShowSnapshot(infoWindow, head, undefined);
@@ -434,18 +455,6 @@ export async function fetchSessionsForHead(headId: string): Promise<InfoSession[
   const state = backend.getAuthState();
   if (!state.signedIn) return [];
 
-  // Demo head previews the new hierarchy against the viewer's own data so the
-  // "Now" section can light up when they actually have a live session.
-  if (rail.isDemoHeadId(headId)) {
-    try {
-      const sessions = await backend.listOwnSessions();
-      sessionCache.set(headId, sessions);
-      return sessions;
-    } catch {
-      return [];
-    }
-  }
-
   const login = rail.parseUserHeadId(headId);
   if (login) {
     try {
@@ -463,22 +472,40 @@ export async function fetchSessionsForHead(headId: string): Promise<InfoSession[
   return [];
 }
 
-async function fetchQuestionsForLoginCached(login: string): Promise<ChatThread[]> {
-  const cached = questionsCache.get(login);
+async function fetchDashboardForLogin(login: string): Promise<InfoDashboardData> {
+  const cached = dashboardCache.get(login);
   if (cached) return cached;
-  const inFlight = questionsInFlight.get(login);
+  const inFlight = dashboardInFlight.get(login);
   if (inFlight) return inFlight;
-  const promise = backend
-    .fetchQuestionsForLogin(login)
-    .then((res) => {
-      questionsCache.set(login, res.threads);
-      return res.threads;
-    })
-    .catch(() => [] as ChatThread[])
-    .finally(() => {
-      questionsInFlight.delete(login);
-    });
-  questionsInFlight.set(login, promise);
+
+  const promise = (async () => {
+    // PRs and standup run independently — one failing shouldn't blank the
+    // other. Settle both, then merge.
+    const [prsRes, standupRes] = await Promise.allSettled([
+      backend.fetchUserPrs(login, DASHBOARD_PRS_SCOPE),
+      backend.fetchUserStandup(login, DASHBOARD_STANDUP_SCOPE),
+    ]);
+    if (prsRes.status === "rejected") {
+      console.warn(`[info] dashboard prs fetch failed login=${login}:`, prsRes.reason);
+    }
+    if (standupRes.status === "rejected") {
+      console.warn(`[info] dashboard standup fetch failed login=${login}:`, standupRes.reason);
+    }
+    const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
+    const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
+    // Either endpoint setting the flag is enough — both return it in lockstep
+    // for the self-empty-repos case, but we OR rather than AND so a single
+    // failed leg doesn't silently drop the CTA.
+    const noClaimedRepos =
+      (prsRes.status === "fulfilled" && prsRes.value.noClaimedRepos === true) ||
+      (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
+    const data: InfoDashboardData = { prs, standup, noClaimedRepos };
+    dashboardCache.set(login, data);
+    return data;
+  })().finally(() => {
+    dashboardInFlight.delete(login);
+  });
+  dashboardInFlight.set(login, promise);
   return promise;
 }
 
@@ -511,8 +538,17 @@ async function refreshNow(): Promise<void> {
   if (!head) return;
   // Only drop the selected head's cache; other heads stay warm until clicked.
   sessionCache.delete(head.id);
+  const login = rail.parseUserHeadId(head.id);
+  if (login) {
+    // The dashboard derives from sessions and PRs — invalidate the slot for
+    // this user so a session_updated propagates into the next paint.
+    dashboardCache.delete(login);
+  }
   try {
-    await fetchSessionsForHead(head.id);
+    await Promise.all([
+      fetchSessionsForHead(head.id),
+      login ? fetchDashboardForLogin(login) : Promise.resolve(),
+    ]);
     pushInfoShowSnapshot(infoWindow, head, undefined);
   } catch (e) {
     console.warn("[ws] refreshInfoNow failed:", e);
@@ -608,18 +644,6 @@ export function registerInfo(d: InfoDeps): void {
       void showInfo(headId, undefined, payload.sessionId);
     },
   );
-
-  // Renderer's 15s refresh wants fresh data, but also fires the same fetcher
-  // on initial load when main hasn't cached yet. Dedupe against any in-flight
-  // fetch (so showInfo's bg fetch + this IPC share one HTTP request); fall
-  // back to a fresh fetch when nothing's pending so the 15s tick stays live.
-  ipcMain.handle("chat:questionsForLogin", async (_e, login: string) => {
-    const inFlight = questionsInFlight.get(login);
-    if (inFlight) return { threads: await inFlight };
-    const res = await backend.fetchQuestionsForLogin(login);
-    questionsCache.set(login, res.threads);
-    return res;
-  });
 
   // Push a presence update into the info window only while it's showing the
   // head whose login just changed. Fallback poll lives in the renderer.

@@ -161,11 +161,6 @@ const bridge: ChatHeadsBridge = {
   fetchChatHistory: () =>
     ipcRenderer.invoke("chat:history") as Promise<import("@slashtalk/shared").ChatHistoryResponse>,
 
-  fetchQuestionsForLogin: (login: string) =>
-    ipcRenderer.invoke("chat:questionsForLogin", login) as Promise<
-      import("@slashtalk/shared").ChatHistoryResponse
-    >,
-
   openThread: (thread) => ipcRenderer.invoke("response:openThread", thread) as Promise<void>,
 
   openSessionCard: (payload) =>

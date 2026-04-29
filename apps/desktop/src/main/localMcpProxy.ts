@@ -1,14 +1,16 @@
 import http from "node:http";
+import { EventEmitter } from "node:events";
 import type { AddressInfo } from "node:net";
-import {
-  LOCAL_PROXY_SECRET_HEADER,
-  localMcpPort,
-  localProxyMcpUrl,
-  remoteMcpUrl,
-} from "./installMcp";
+import { LOCAL_PROXY_SECRET_HEADER, remoteMcpUrl } from "./installMcp";
+import { localMcpPortOverride } from "./config";
+
+type MaybePromise<T> = T | Promise<T>;
 
 interface LocalMcpProxyDeps {
   port?: number;
+  getSavedPort?: () => MaybePromise<number | null>;
+  saveBoundPort?: (port: number) => MaybePromise<void>;
+  rotateProxySecret?: () => MaybePromise<unknown>;
   getToken?: () => string | null;
   getProxySecret?: () => string | null;
   remoteMcpUrl?: () => string;
@@ -19,6 +21,8 @@ export interface LocalMcpProxy {
   stop: () => Promise<void>;
   url: () => string;
   isRunning: () => boolean;
+  on: (event: "port-changed", listener: (port: number) => void) => LocalMcpProxy;
+  off: (event: "port-changed", listener: (port: number) => void) => LocalMcpProxy;
 }
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -93,9 +97,57 @@ function copyResponseHeaders(upstream: Response, res: http.ServerResponse): void
   });
 }
 
+async function defaultGetSavedPort(): Promise<number | null> {
+  const { getSavedLocalMcpPort } = await import("./localMcpProxyPort");
+  return getSavedLocalMcpPort();
+}
+
+async function defaultSaveBoundPort(port: number): Promise<void> {
+  const { saveSavedLocalMcpPort } = await import("./localMcpProxyPort");
+  saveSavedLocalMcpPort(port);
+}
+
+function listenOn(
+  port: number,
+  handler: http.RequestListener,
+): Promise<{
+  server: http.Server;
+  port: number;
+}> {
+  const next = http.createServer(handler);
+  return new Promise((resolve, reject) => {
+    const onError = (err: Error) => {
+      next.off("listening", onListening);
+      reject(err);
+    };
+    const onListening = () => {
+      next.off("error", onError);
+      const addr = next.address() as AddressInfo | null;
+      if (!addr?.port) {
+        next.close();
+        reject(new Error("Local MCP proxy bound without a TCP port"));
+        return;
+      }
+      resolve({ server: next, port: addr.port });
+    };
+
+    next.once("error", onError);
+    next.once("listening", onListening);
+    next.listen(port, "127.0.0.1");
+  });
+}
+
+function urlForPort(port: number): string {
+  return `http://127.0.0.1:${port}/mcp`;
+}
+
 export function createLocalMcpProxy(deps: LocalMcpProxyDeps = {}): LocalMcpProxy {
   let server: http.Server | null = null;
-  let boundPort = deps.port ?? localMcpPort();
+  let boundPort: number | null = null;
+  const events = new EventEmitter();
+  const getSavedPort = deps.getSavedPort ?? defaultGetSavedPort;
+  const saveBoundPort = deps.saveBoundPort ?? defaultSaveBoundPort;
+  const rotateProxySecret = deps.rotateProxySecret ?? (() => undefined);
   const getToken = deps.getToken ?? (() => null);
   const getProxySecret = deps.getProxySecret ?? (() => null);
   const getRemoteMcpUrl = deps.remoteMcpUrl ?? remoteMcpUrl;
@@ -182,20 +234,32 @@ export function createLocalMcpProxy(deps: LocalMcpProxyDeps = {}): LocalMcpProxy
   return {
     async start() {
       if (server) return;
-      const next = http.createServer((req, res) => void handle(req, res));
-      await new Promise<void>((resolve, reject) => {
-        next.once("error", reject);
-        next.listen(boundPort, "127.0.0.1", () => {
-          next.off("error", reject);
-          const addr = next.address() as AddressInfo | null;
-          if (addr?.port) boundPort = addr.port;
-          server = next;
-          console.log("[localMcpProxy] listening", {
-            url: deps.port === undefined ? localProxyMcpUrl() : `http://127.0.0.1:${boundPort}/mcp`,
-          });
-          resolve();
-        });
-      });
+      const explicitPort = deps.port;
+      const envPort = explicitPort === undefined ? localMcpPortOverride() : null;
+      const savedPort =
+        explicitPort === undefined && envPort === null ? await getSavedPort() : null;
+      const preferredPort = explicitPort ?? envPort ?? savedPort ?? 0;
+      const explicitPreference = explicitPort !== undefined || envPort !== null;
+
+      let usedFallbackPort = false;
+      const bound = await listenOn(preferredPort, (req, res) => void handle(req, res)).catch(
+        async (err: NodeJS.ErrnoException) => {
+          if (err.code !== "EADDRINUSE" || explicitPreference) throw err;
+          usedFallbackPort = true;
+          return listenOn(0, (req, res) => void handle(req, res));
+        },
+      );
+
+      server = bound.server;
+      boundPort = bound.port;
+      const savedChanged = savedPort !== boundPort;
+      if (!explicitPreference && savedChanged) {
+        if (usedFallbackPort) await rotateProxySecret();
+        await saveBoundPort(boundPort);
+        events.emit("port-changed", boundPort);
+      }
+
+      console.log("[localMcpProxy] listening", { url: urlForPort(boundPort) });
     },
 
     async stop() {
@@ -208,12 +272,22 @@ export function createLocalMcpProxy(deps: LocalMcpProxyDeps = {}): LocalMcpProxy
     },
 
     url() {
-      if (deps.port === undefined) return localProxyMcpUrl();
-      return `http://127.0.0.1:${boundPort}/mcp`;
+      if (boundPort === null) throw new Error("Local MCP proxy is not ready");
+      return urlForPort(boundPort);
     },
 
     isRunning() {
       return Boolean(server);
+    },
+
+    on(event, listener) {
+      events.on(event, listener);
+      return this;
+    },
+
+    off(event, listener) {
+      events.off(event, listener);
+      return this;
     },
   };
 }

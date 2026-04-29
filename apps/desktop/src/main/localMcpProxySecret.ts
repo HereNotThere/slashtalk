@@ -18,3 +18,9 @@ export function getLocalMcpProxySecret(): string {
   saveEncrypted(STORE_KEY, { secret: cachedSecret });
   return cachedSecret;
 }
+
+export function rotateLocalMcpProxySecret(): string {
+  cachedSecret = randomBytes(32).toString("base64url");
+  saveEncrypted(STORE_KEY, { secret: cachedSecret });
+  return cachedSecret;
+}

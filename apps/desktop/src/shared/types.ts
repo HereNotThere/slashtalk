@@ -340,6 +340,8 @@ export interface McpInstallOptions {
 export interface McpTargetState {
   installed: boolean;
   path: string;
+  mode?: McpInstallMode | "unknown";
+  url?: string | null;
 }
 
 export interface McpInstallStatus {

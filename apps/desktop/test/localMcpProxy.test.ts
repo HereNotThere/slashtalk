@@ -29,6 +29,162 @@ function listen(
 }
 
 describe("localMcpProxy", () => {
+  it("throws when url is read before the proxy starts", () => {
+    const proxy = createLocalMcpProxy({
+      port: 0,
+      getToken: () => "safe-storage-token",
+      getProxySecret: () => "local-proxy-secret",
+      remoteMcpUrl: () => "https://api.example.com/mcp",
+    });
+
+    expect(() => proxy.url()).toThrow("not ready");
+  });
+
+  it("binds port-zero on first start and persists the chosen port", async () => {
+    let savedPort: number | null = null;
+    const proxy = createLocalMcpProxy({
+      getSavedPort: () => null,
+      saveBoundPort: (port) => {
+        savedPort = port;
+      },
+      getToken: () => "safe-storage-token",
+      getProxySecret: () => "local-proxy-secret",
+      remoteMcpUrl: () => "https://api.example.com/mcp",
+    });
+    await proxy.start();
+    closers.push(() => proxy.stop());
+
+    const url = new URL(proxy.url());
+    expect(url.hostname).toBe("127.0.0.1");
+    expect(Number(url.port)).toBeGreaterThan(0);
+    expect(savedPort).toBe(Number(url.port));
+  });
+
+  it("reuses a saved port on the next start", async () => {
+    let savedPort: number | null = null;
+    const first = createLocalMcpProxy({
+      getSavedPort: () => savedPort,
+      saveBoundPort: (port) => {
+        savedPort = port;
+      },
+      getToken: () => "safe-storage-token",
+      getProxySecret: () => "local-proxy-secret",
+      remoteMcpUrl: () => "https://api.example.com/mcp",
+    });
+    await first.start();
+    const firstPort = Number(new URL(first.url()).port);
+    await first.stop();
+
+    const second = createLocalMcpProxy({
+      getSavedPort: () => savedPort,
+      saveBoundPort: (port) => {
+        savedPort = port;
+      },
+      getToken: () => "safe-storage-token",
+      getProxySecret: () => "local-proxy-secret",
+      remoteMcpUrl: () => "https://api.example.com/mcp",
+    });
+    await second.start();
+    closers.push(() => second.stop());
+
+    expect(Number(new URL(second.url()).port)).toBe(firstPort);
+  });
+
+  it("falls back to port-zero when a saved port is occupied", async () => {
+    const sentinel = await listen((_req, res) => {
+      res.writeHead(200);
+      res.end();
+    });
+    closers.push(sentinel.close);
+    const occupiedPort = Number(new URL(sentinel.url).port);
+    let savedPort: number | null = occupiedPort;
+    let changedPort: number | null = null;
+    const proxy = createLocalMcpProxy({
+      getSavedPort: () => savedPort,
+      saveBoundPort: (port) => {
+        savedPort = port;
+      },
+      getToken: () => "safe-storage-token",
+      getProxySecret: () => "local-proxy-secret",
+      remoteMcpUrl: () => "https://api.example.com/mcp",
+    });
+    proxy.on("port-changed", (port) => {
+      changedPort = port;
+    });
+
+    await proxy.start();
+    closers.push(() => proxy.stop());
+
+    const actualPort = Number(new URL(proxy.url()).port);
+    expect(actualPort).not.toBe(occupiedPort);
+    expect(savedPort).toBe(actualPort);
+    expect(changedPort).toBe(actualPort);
+  });
+
+  it("rotates the proxy secret when a saved port is occupied", async () => {
+    const sentinel = await listen((_req, res) => {
+      res.writeHead(200);
+      res.end();
+    });
+    closers.push(sentinel.close);
+    const upstream = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    closers.push(upstream.close);
+    let secret = "old-local-proxy-secret";
+    const proxy = createLocalMcpProxy({
+      getSavedPort: () => Number(new URL(sentinel.url).port),
+      saveBoundPort: () => undefined,
+      rotateProxySecret: () => {
+        secret = "new-local-proxy-secret";
+      },
+      getToken: () => "safe-storage-token",
+      getProxySecret: () => secret,
+      remoteMcpUrl: () => upstream.url,
+    });
+
+    await proxy.start();
+    closers.push(() => proxy.stop());
+
+    const oldSecretResponse = await fetch(proxy.url(), {
+      method: "POST",
+      headers: { "X-Slashtalk-Proxy-Token": "old-local-proxy-secret" },
+      body: "{}",
+    });
+    expect(oldSecretResponse.status).toBe(401);
+    const newSecretResponse = await fetch(proxy.url(), {
+      method: "POST",
+      headers: { "X-Slashtalk-Proxy-Token": "new-local-proxy-secret" },
+      body: "{}",
+    });
+    expect(newSecretResponse.status).toBe(200);
+  });
+
+  it("uses the env override before the saved port and fails if the override is occupied", async () => {
+    const sentinel = await listen((_req, res) => {
+      res.writeHead(200);
+      res.end();
+    });
+    closers.push(sentinel.close);
+    process.env["SLASHTALK_LOCAL_MCP_PORT"] = String(Number(new URL(sentinel.url).port));
+    const proxy = createLocalMcpProxy({
+      getSavedPort: () => 54321,
+      saveBoundPort: () => {
+        throw new Error("saved port should not be updated for env override");
+      },
+      getToken: () => "safe-storage-token",
+      getProxySecret: () => "local-proxy-secret",
+      remoteMcpUrl: () => "https://api.example.com/mcp",
+    });
+
+    try {
+      await expect(proxy.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
+    } finally {
+      delete process.env["SLASHTALK_LOCAL_MCP_PORT"];
+    }
+  });
+
   it("injects the current token and strips inbound authorization", async () => {
     let upstreamAuth: string | undefined;
     let upstreamSession: string | undefined;

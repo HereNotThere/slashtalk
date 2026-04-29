@@ -5,13 +5,24 @@ import type {
   ManagedAgentSessionRow,
   FeedSessionSnapshot,
   ProjectOverviewResponse,
+  QuotaByLogin,
+  QuotaPresence,
+  QuotaSource,
+  QuotaWindow,
   SessionSnapshot,
   SpotifyPresence,
 } from "@slashtalk/shared";
 
 // Re-export for convenience: renderers import from this module, not from
 // @slashtalk/shared directly.
-export type { ManagedAgentSessionRow, SpotifyPresence };
+export type {
+  ManagedAgentSessionRow,
+  QuotaByLogin,
+  QuotaPresence,
+  QuotaSource,
+  QuotaWindow,
+  SpotifyPresence,
+};
 
 // Sessions surfaced to the info window: own sessions (SessionSnapshot) and
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
@@ -81,6 +92,9 @@ export interface InfoShowPayload {
   /** Session the caller wants auto-expanded on open (e.g. from a chat card click). */
   expandSessionId?: string | null;
   spotify: SpotifyPresence | null;
+  /** Per-source CLI quota for the head's user; null when the main-process
+   *  presence cache is cold or the user has nothing reporting. */
+  quota: QuotaByLogin | null;
   location: UserLocation | null;
   isSelf: boolean;
   /** PRs + Claude-composed standup for the head's user. Null while main's
@@ -562,16 +576,21 @@ export interface ChatHeadsBridge {
   dragEnd: () => Promise<void>;
 
   // Info window (main → info renderer). Sessions are prefetched in main so
-  // the renderer can paint in one pass at the correct height. `spotify` is
-  // whatever the main-process peerPresence poller last saw for this head.
-  // `location` is the head's persisted timezone+city (null until the user
-  // has reported it). `isSelf` switches the renderer to local-resolve mode.
+  // the renderer can paint in one pass at the correct height. `spotify` and
+  // `quota` are whatever the main-process peerPresence poller last saw for
+  // this head. `location` is the head's persisted timezone+city (null until
+  // the user has reported it). `isSelf` switches the renderer to local-resolve
+  // mode.
   onInfoShow: (cb: (payload: InfoShowPayload) => void) => Unsubscribe;
   onInfoHide: (cb: () => void) => Unsubscribe;
-  /** Pushed from main when the currently-shown head's Spotify presence
-   *  changes between polls. Scoped to the visible head already. */
+  /** Pushed from main when the currently-shown head's presence changes
+   *  between polls. Scoped to the visible head already. */
   onInfoPresence: (
-    cb: (payload: { login: string; spotify: SpotifyPresence | null }) => void,
+    cb: (payload: {
+      login: string;
+      spotify: SpotifyPresence | null;
+      quota: QuotaByLogin | null;
+    }) => void,
   ) => Unsubscribe;
   hideInfo: () => Promise<void>;
 
@@ -582,6 +601,9 @@ export interface ChatHeadsBridge {
 
   /** Latest cached Spotify presence for `login` from the main-process poller. */
   getSpotifyForLogin: (login: string) => Promise<SpotifyPresence | null>;
+
+  /** Latest cached per-source quota presence for `login`. */
+  getQuotaForLogin: (login: string) => Promise<QuotaByLogin | null>;
 
   // Tray popup actions
   openMain: () => Promise<void>;

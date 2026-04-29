@@ -9,11 +9,19 @@
 
 import { Elysia, t } from "elysia";
 import { eq, inArray } from "drizzle-orm";
-import type { SpotifyPresence } from "@slashtalk/shared";
+import type {
+  PeerPresenceEntry,
+  PeerPresenceResponse,
+  QuotaByLogin,
+  QuotaPresence,
+  QuotaSource,
+  SpotifyPresence,
+} from "@slashtalk/shared";
 import type { Database } from "../db";
 import { apiKeyAuth, jwtAuth } from "../auth/middleware";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { userRepos, users } from "../db/schema";
+import { publishQuotaUpdate, quotaKey, QUOTA_SOURCES, writeAndPublishQuotaPresence } from "./quota";
 
 const TTL_SECONDS = 120;
 
@@ -97,12 +105,82 @@ async function getPeerUserIds(db: Database, userId: number): Promise<number[]> {
   return [...new Set([userId, ...peerRows.map((r) => r.userId)])];
 }
 
+// Sources the POST endpoint will accept. Mirrors QUOTA_SOURCES but exposed as
+// a t.Union for elysia validation. Sources outside this set are rejected with
+// 422 — keeps the wire contract honest with what the read path will surface.
+const acceptedQuotaSourceSchema = t.Union(QUOTA_SOURCES.map((s) => t.Literal(s)));
+
+const quotaWindowSchema = t.Object({
+  label: t.String(),
+  usedPercent: t.Union([t.Null(), t.Number()]),
+  resetsAt: t.Union([t.Null(), t.String()]),
+});
+
+const quotaBodySchema = t.Object({
+  source: acceptedQuotaSourceSchema,
+  // null = clear my quota for this source. Passed-through wins out over
+  // arguing about whether 0% means "no quota left" vs "no data".
+  presence: t.Union([
+    t.Null(),
+    t.Object({
+      plan: t.Union([t.Null(), t.String()]),
+      windows: t.Array(quotaWindowSchema),
+    }),
+  ]),
+});
+
+export const quotaPresenceRoutes = (db: Database, redis: RedisBridge) =>
+  new Elysia({ prefix: "/v1", name: "quota-presence" }).use(apiKeyAuth).post(
+    "/presence/quota",
+    async ({ body, user }) => {
+      if (body.presence === null) {
+        await redis.del(quotaKey(user.id, body.source));
+        await publishQuotaUpdate(db, redis, user.id, user.githubLogin, body.source, null);
+        return { ok: true as const };
+      }
+      const stamped: QuotaPresence = {
+        source: body.source,
+        plan: body.presence.plan,
+        windows: body.presence.windows,
+        updatedAt: new Date().toISOString(),
+      };
+      await writeAndPublishQuotaPresence(db, redis, user.id, user.githubLogin, stamped);
+      return { ok: true as const };
+    },
+    { body: quotaBodySchema },
+  );
+
+async function loadPeerEntry(
+  redis: RedisBridge,
+  userId: number,
+): Promise<PeerPresenceEntry | null> {
+  const [spotify, ...quotaResults] = await Promise.all([
+    redis.getJson<SpotifyPresence>(key(userId)),
+    ...QUOTA_SOURCES.map((s) => redis.getJson<QuotaPresence>(quotaKey(userId, s))),
+  ]);
+
+  let quota: QuotaByLogin | undefined;
+  for (let i = 0; i < QUOTA_SOURCES.length; i++) {
+    const q = quotaResults[i];
+    if (q) {
+      quota ??= {};
+      quota[QUOTA_SOURCES[i]!] = q;
+    }
+  }
+
+  if (!spotify && !quota) return null;
+  const entry: PeerPresenceEntry = {};
+  if (spotify) entry.spotify = spotify;
+  if (quota) entry.quota = quota;
+  return entry;
+}
+
 export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
   new Elysia({ prefix: "/api", name: "presence-read" })
     .use(jwtAuth)
-    .get("/presence/peers", async ({ user }) => {
+    .get("/presence/peers", async ({ user }): Promise<PeerPresenceResponse> => {
       const ids = await getPeerUserIds(db, user.id);
-      if (ids.length === 0) return {} as Record<string, SpotifyPresence>;
+      if (ids.length === 0) return {};
 
       const userRows = await db
         .select({ id: users.id, githubLogin: users.githubLogin })
@@ -111,13 +189,13 @@ export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>
 
       const entries = await Promise.all(
         userRows.map(async (u) => {
-          const presence = await redis.getJson<SpotifyPresence>(key(u.id));
-          return [u.githubLogin, presence] as const;
+          const entry = await loadPeerEntry(redis, u.id);
+          return [u.githubLogin, entry] as const;
         }),
       );
-      const result: Record<string, SpotifyPresence> = {};
-      for (const [login, presence] of entries) {
-        if (presence) result[login] = presence;
+      const result: PeerPresenceResponse = {};
+      for (const [login, entry] of entries) {
+        if (entry) result[login] = entry;
       }
       return result;
     })

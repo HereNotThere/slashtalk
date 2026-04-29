@@ -335,7 +335,8 @@ function pushInfoShowSnapshot(
     head,
     sessions: sessionCache.get(head.id) ?? null,
     expandSessionId: expandSessionId ?? null,
-    spotify: login ? (peerPresence.get(login) ?? null) : null,
+    spotify: login ? peerPresence.getSpotify(login) : null,
+    quota: login ? peerPresence.getQuota(login) : null,
     location: login ? (peerLocations.get(login) ?? null) : null,
     isSelf: backend.isSelf(login),
     dashboard,
@@ -807,10 +808,14 @@ export function registerInfo(d: InfoDeps): void {
 
   // Push a presence update into the info window only while it's showing the
   // head whose login just changed. Fallback poll lives in the renderer.
-  peerPresence.onChange(({ login, presence }) => {
+  peerPresence.onChange(({ login, entry }) => {
     if (!infoWindow || infoWindow.isDestroyed() || !selectedHeadId) return;
     const shownLogin = rail.parseUserHeadId(selectedHeadId);
     if (shownLogin !== login) return;
-    infoWindow.webContents.send("info:presence", { login, spotify: presence });
+    infoWindow.webContents.send("info:presence", {
+      login,
+      spotify: entry?.spotify ?? null,
+      quota: entry?.quota ?? null,
+    });
   });
 }

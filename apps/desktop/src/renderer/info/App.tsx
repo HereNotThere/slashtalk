@@ -1,5 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ProjectOverviewResponse, SpotifyPresence, TokenUsage } from "@slashtalk/shared";
+import type {
+  ProjectOverviewResponse,
+  QuotaByLogin,
+  QuotaPresence,
+  SpotifyPresence,
+  TokenUsage,
+} from "@slashtalk/shared";
 import type { ChatHead, InfoDashboardData, InfoSession, UserLocation } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { HierarchyDashboard } from "./HierarchyDashboard";
@@ -15,6 +21,7 @@ export function App(): JSX.Element {
   const [sessions, setSessions] = useState<InfoSession[] | null>(null);
   const [visible, setVisible] = useState(false);
   const [spotify, setSpotify] = useState<SpotifyPresence | null>(null);
+  const [quota, setQuota] = useState<QuotaByLogin | null>(null);
   const [location, setLocation] = useState<UserLocation | null>(null);
   const [isSelf, setIsSelf] = useState(false);
   const [dashboard, setDashboard] = useState<InfoDashboardData | null>(null);
@@ -35,6 +42,7 @@ export function App(): JSX.Element {
       setHead(p.head);
       setSessions(p.sessions);
       setSpotify(p.spotify);
+      setQuota(p.quota);
       setLocation(p.location);
       setIsSelf(p.isSelf);
       setDashboard(p.dashboard);
@@ -51,7 +59,10 @@ export function App(): JSX.Element {
       // Main already filtered to the visible head, but double-check in case
       // a hide → show raced between the two events.
       setHead((h) => {
-        if (h && h.label === p.login) setSpotify(p.spotify);
+        if (h && h.label === p.login) {
+          setSpotify(p.spotify);
+          setQuota(p.quota);
+        }
         return h;
       });
     });
@@ -86,13 +97,15 @@ export function App(): JSX.Element {
     const headLogin = head.label;
     const load = async (): Promise<void> => {
       try {
-        const [rows, sp] = await Promise.all([
+        const [rows, sp, qu] = await Promise.all([
           window.chatheads.listSessionsForHead(head.id),
           window.chatheads.getSpotifyForLogin(headLogin),
+          window.chatheads.getQuotaForLogin(headLogin),
         ]);
         if (cancelled) return;
         setSessions(rows);
         setSpotify(sp);
+        setQuota(qu);
       } catch {
         if (!cancelled) setSessions([]);
       }
@@ -160,6 +173,7 @@ export function App(): JSX.Element {
               location={location}
               isSelf={isSelf}
               spotify={spotify}
+              quota={quota}
             />
             <HierarchyDashboard
               sessions={sessions}
@@ -170,6 +184,82 @@ export function App(): JSX.Element {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function sourceLabel(source: QuotaPresence["source"]): string {
+  if (source === "claude") return "Claude";
+  if (source === "codex") return "Codex";
+  return "Cursor";
+}
+
+function fmtResetsIn(resetsAt: string | null): string | null {
+  if (!resetsAt) return null;
+  // The wire schema accepts any string for resetsAt, so a buggy collector or
+  // a future source could hand us garbage. Detect the unparseable case
+  // explicitly — otherwise NaN math falls through to "now", which would lie
+  // to the user about a window having just reset.
+  const t = new Date(resetsAt).getTime();
+  if (!Number.isFinite(t)) return null;
+  const ms = t - Date.now();
+  if (ms <= 0) return "now";
+  // Compute every unit from `ms` directly (not from the next-larger unit's
+  // already-rounded value) — otherwise compounding rounding can skip a label.
+  // E.g. 47.5h via Math.round(mins/60) becomes 48, but `hours < 48` is false,
+  // so the display jumps "47h" → "2d" with "48h" never appearing. `floor`
+  // gives stable, downward-biased "time-until" semantics: each label sticks
+  // until you actually cross into the next unit.
+  const mins = Math.floor(ms / 60_000);
+  if (mins <= 0) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 48) return `${hours}h`;
+  const days = Math.floor(ms / 86_400_000);
+  return `${days}d`;
+}
+
+function Quotas({ quota }: { quota: QuotaByLogin }): JSX.Element | null {
+  const sources = Object.values(quota).filter((q): q is QuotaPresence => Boolean(q));
+  if (sources.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      {sources.map((q) => (
+        <QuotaRow key={q.source} quota={q} />
+      ))}
+    </div>
+  );
+}
+
+function QuotaRow({ quota }: { quota: QuotaPresence }): JSX.Element {
+  const hasWindows = quota.windows.length > 0;
+  return (
+    <div className="flex items-center gap-2 text-sm leading-tight min-w-0">
+      <span className="text-fg font-medium shrink-0">{sourceLabel(quota.source)}</span>
+      {quota.plan && (
+        <>
+          <span className="text-subtle shrink-0">·</span>
+          <span className="text-muted shrink-0 capitalize">{quota.plan}</span>
+        </>
+      )}
+      {hasWindows && (
+        <>
+          <span className="text-subtle shrink-0">·</span>
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            {quota.windows.map((w, i) => {
+              const used = w.usedPercent ?? null;
+              const resetIn = fmtResetsIn(w.resetsAt);
+              return (
+                <span key={`${w.label}-${i}`} className="text-muted whitespace-nowrap">
+                  <span className="text-fg">{used !== null ? `${Math.round(used)}%` : "—"}</span>
+                  <span className="text-subtle"> {w.label}</span>
+                  {resetIn && <span className="text-subtle"> · resets {resetIn}</span>}
+                </span>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -225,12 +315,14 @@ function UserHeader({
   location,
   isSelf,
   spotify,
+  quota,
 }: {
   head: ChatHead | null;
   sessions: InfoSession[] | null;
   location: UserLocation | null;
   isSelf: boolean;
   spotify?: SpotifyPresence | null;
+  quota?: QuotaByLogin | null;
 }): JSX.Element {
   const name = head?.label ?? "—";
   // Self: resolve locally as before. Peer with data: show their tz/city.
@@ -268,6 +360,7 @@ function UserHeader({
           </div>
         )}
         {spotify && <NowPlayingRow track={spotify} />}
+        {quota && <Quotas quota={quota} />}
       </div>
     </div>
   );

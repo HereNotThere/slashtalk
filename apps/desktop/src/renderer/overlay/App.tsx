@@ -402,13 +402,6 @@ export function App(): JSX.Element {
   const bubblePadClass = isHorizontal ? "shrink-0 px-[7px] py-3" : "shrink-0 py-[7px] px-3";
   return (
     <div ref={stackRef} className={stackClass}>
-      <div
-        className={bubblePadClass}
-        onMouseEnter={handleSearchBubbleEnter}
-        onMouseLeave={hoverLeaveBubble}
-      >
-        <SearchBubble open={chatOpen} />
-      </div>
       {self && (
         <div
           key={self.id}
@@ -501,6 +494,13 @@ export function App(): JSX.Element {
           )}
         </div>
       )}
+      <div
+        className={bubblePadClass}
+        onMouseEnter={handleSearchBubbleEnter}
+        onMouseLeave={hoverLeaveBubble}
+      >
+        <SearchBubble open={chatOpen} />
+      </div>
     </div>
   );
 }

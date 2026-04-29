@@ -7,14 +7,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { localMcpPort, mcpUrl as configMcpUrl } from "./config";
+import { randomBytes } from "node:crypto";
+import { mcpUrl as configMcpUrl } from "./config";
 
 export type McpTarget = "claude-code" | "codex";
 export type McpInstallMode = "local-proxy" | "legacy-bearer";
+export type McpInstalledMode = McpInstallMode | "unknown";
 
 export interface TargetState {
   installed: boolean;
   path: string;
+  mode?: McpInstalledMode;
+  url?: string | null;
 }
 
 export interface InstallStatus {
@@ -46,22 +50,21 @@ export interface Installer {
   ) => Promise<TargetState>;
   uninstall: (target: McpTarget) => Promise<TargetState>;
   status: () => Promise<InstallStatus>;
+  reconcileLocalProxyConfigs: () => Promise<InstallStatus>;
   mcpUrl: () => string;
   remoteMcpUrl: () => string;
 }
 
 const MCP_KEY = "slashtalk-mcp";
 export const LOCAL_PROXY_SECRET_HEADER = "X-Slashtalk-Proxy-Token";
-export { DEFAULT_LOCAL_MCP_PORT } from "./config";
-export { localMcpPort };
 let fallbackLocalProxySecret: string | null = null;
 
-export function localProxyMcpUrl(): string {
-  return `http://127.0.0.1:${localMcpPort()}/mcp`;
+function missingLocalProxyUrl(): string {
+  throw new Error("local MCP proxy URL is not configured");
 }
 
 function defaultLocalProxySecret(): string {
-  fallbackLocalProxySecret ??= crypto.randomUUID();
+  fallbackLocalProxySecret ??= randomBytes(32).toString("base64url");
   return fallbackLocalProxySecret;
 }
 
@@ -88,6 +91,18 @@ function targetPath(target: McpTarget, homeDir: string): string {
   if (target === "claude-code") return path.join(homeDir, ".claude.json");
   if (target === "codex") return path.join(homeDir, ".codex", "config.toml");
   throw new Error(`unknown target: ${target as string}`);
+}
+
+function objectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function headerValue(headers: Record<string, unknown>, name: string): unknown {
+  const expected = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === expected) return value;
+  }
+  return undefined;
 }
 
 function claudeEntry(
@@ -164,6 +179,36 @@ function removeSlashtalkCodexSection(text: string): string {
   return out.join("\n").trimEnd();
 }
 
+function slashtalkCodexSection(text: string): string[] | null {
+  const lines = text.split(/\r?\n/);
+  const section: string[] = [];
+  let collecting = false;
+
+  for (const line of lines) {
+    if (isTomlSection(line)) {
+      if (collecting) break;
+      collecting = isSlashtalkCodexSection(line);
+    }
+    if (collecting) section.push(line);
+  }
+
+  return section.length > 0 ? section : null;
+}
+
+function tomlStringValue(lines: string[], key: string): string | null {
+  for (const line of lines) {
+    const match = line.match(new RegExp(`^\\s*${key}\\s*=\\s*(.+?)\\s*$`));
+    if (!match) continue;
+    try {
+      const parsed = JSON.parse(match[1]) as unknown;
+      return typeof parsed === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function codexEntry(localUrl: string, proxySecret: string): string {
   return [
     "[mcp_servers.slashtalk-mcp]",
@@ -197,22 +242,56 @@ async function installCodex(file: string, localUrl: string, proxySecret: string)
 
 export function createInstaller(deps: InstallerDeps = {}): Installer {
   const homeDir = deps.homeDir ?? os.homedir();
-  const getLocalProxyUrl = deps.localProxyUrl ?? localProxyMcpUrl;
+  const getLocalProxyUrl = deps.localProxyUrl ?? missingLocalProxyUrl;
   const getLocalProxySecret = deps.localProxySecret ?? defaultLocalProxySecret;
   const getRemoteMcpUrl = deps.remoteMcpUrl ?? configMcpUrl;
+
+  const inspectClaude = async (): Promise<TargetState> => {
+    const file = targetPath("claude-code", homeDir);
+    try {
+      const config = await readJsonConfig(file);
+      const entry = config.mcpServers?.[MCP_KEY];
+      if (!objectRecord(entry)) return { installed: false, path: file };
+
+      const headers = objectRecord(entry.headers) ? entry.headers : {};
+      const url = typeof entry.url === "string" ? entry.url : null;
+      const mode =
+        typeof headerValue(headers, LOCAL_PROXY_SECRET_HEADER) === "string"
+          ? "local-proxy"
+          : typeof headerValue(headers, "Authorization") === "string" || url === getRemoteMcpUrl()
+            ? "legacy-bearer"
+            : "unknown";
+      return { installed: true, path: file, mode, url };
+    } catch {
+      return { installed: false, path: file };
+    }
+  };
+
+  const inspectCodex = async (): Promise<TargetState> => {
+    const file = targetPath("codex", homeDir);
+    try {
+      const text = await readTomlConfig(file);
+      const section = slashtalkCodexSection(text);
+      if (!section) return { installed: false, path: file };
+      return {
+        installed: true,
+        path: file,
+        mode: "local-proxy",
+        url: tomlStringValue(section, "url"),
+      };
+    } catch {
+      return { installed: false, path: file };
+    }
+  };
 
   return {
     async install(target, optionsOrToken) {
       const file = targetPath(target, homeDir);
       const options = normalizeOptions(optionsOrToken);
       if (target === "claude-code") {
-        await installClaudeCode(
-          file,
-          options,
-          getLocalProxyUrl(),
-          getRemoteMcpUrl(),
-          getLocalProxySecret(),
-        );
+        const localUrl = options.mode === "local-proxy" ? getLocalProxyUrl() : "";
+        const proxySecret = options.mode === "local-proxy" ? getLocalProxySecret() : "";
+        await installClaudeCode(file, options, localUrl, getRemoteMcpUrl(), proxySecret);
       } else {
         if (options.mode === "legacy-bearer") {
           throw new Error("Codex legacy-bearer install is intentionally unsupported");
@@ -238,32 +317,23 @@ export function createInstaller(deps: InstallerDeps = {}): Installer {
     },
 
     async status() {
-      const checkClaude = async (): Promise<TargetState> => {
-        const file = targetPath("claude-code", homeDir);
-        try {
-          const config = await readJsonConfig(file);
-          return {
-            installed: Boolean(config.mcpServers && MCP_KEY in config.mcpServers),
-            path: file,
-          };
-        } catch {
-          return { installed: false, path: file };
-        }
-      };
-      const checkCodex = async (): Promise<TargetState> => {
-        const file = targetPath("codex", homeDir);
-        try {
-          const text = await readTomlConfig(file);
-          return {
-            installed: text.split(/\r?\n/).some(isSlashtalkCodexSection),
-            path: file,
-          };
-        } catch {
-          return { installed: false, path: file };
-        }
-      };
-      const [claudeCode, codex] = await Promise.all([checkClaude(), checkCodex()]);
+      const [claudeCode, codex] = await Promise.all([inspectClaude(), inspectCodex()]);
       return { claudeCode, codex };
+    },
+
+    async reconcileLocalProxyConfigs() {
+      const status = await this.status();
+      const liveUrl = getLocalProxyUrl();
+      const targets: Array<[McpTarget, TargetState]> = [
+        ["claude-code", status.claudeCode],
+        ["codex", status.codex],
+      ];
+      for (const [target, state] of targets) {
+        if (state.installed && state.mode === "local-proxy" && state.url !== liveUrl) {
+          await this.install(target, { mode: "local-proxy" });
+        }
+      }
+      return this.status();
     },
 
     mcpUrl: getLocalProxyUrl,
@@ -280,5 +350,7 @@ export function configureInstaller(deps: InstallerDeps): void {
 export const install: Installer["install"] = (...args) => defaultInstaller.install(...args);
 export const uninstall: Installer["uninstall"] = (...args) => defaultInstaller.uninstall(...args);
 export const status: Installer["status"] = () => defaultInstaller.status();
+export const reconcileLocalProxyConfigs: Installer["reconcileLocalProxyConfigs"] = () =>
+  defaultInstaller.reconcileLocalProxyConfigs();
 export const mcpUrl: Installer["mcpUrl"] = () => defaultInstaller.mcpUrl();
 export const remoteMcpUrl: Installer["remoteMcpUrl"] = () => defaultInstaller.remoteMcpUrl();

@@ -46,3 +46,8 @@ export function del(key: string): void {
   delete cache![key];
   save();
 }
+
+export function resetStoreForTests(): void {
+  cache = null;
+  filePath = null;
+}

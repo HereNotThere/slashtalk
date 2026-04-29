@@ -1,5 +1,11 @@
 import { app, BrowserWindow, ipcMain, globalShortcut } from "electron";
-import type { ChatHead, McpTarget, ResponseOpenPayload } from "../shared/types";
+import type {
+  ChatHead,
+  McpInstallMode,
+  McpInstallOptions,
+  McpTarget,
+  ResponseOpenPayload,
+} from "../shared/types";
 import * as backend from "./backend";
 import * as localRepos from "./localRepos";
 import * as rail from "./rail";
@@ -7,7 +13,7 @@ import * as installMcp from "./installMcp";
 import * as chatheadsAuth from "./chatheadsAuth";
 import * as selfSession from "./selfSession";
 import { createLocalMcpProxy } from "./localMcpProxy";
-import { getLocalMcpProxySecret } from "./localMcpProxySecret";
+import { getLocalMcpProxySecret, rotateLocalMcpProxySecret } from "./localMcpProxySecret";
 import { apiBaseUrl } from "./config";
 import * as anthropic from "./anthropic";
 import * as githubAuth from "./githubDeviceAuth";
@@ -78,20 +84,61 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
-installMcp.configureInstaller({
-  localProxySecret: getLocalMcpProxySecret,
-});
-
 const mcpProxy = createLocalMcpProxy({
   getToken: backend.getApiKey,
   getProxySecret: getLocalMcpProxySecret,
+  rotateProxySecret: rotateLocalMcpProxySecret,
   remoteMcpUrl: installMcp.remoteMcpUrl,
+});
+
+installMcp.configureInstaller({
+  localProxySecret: getLocalMcpProxySecret,
+  localProxyUrl: mcpProxy.url,
 });
 
 const RESIZE_MIN = 60;
 const RESIZE_MAX = 1200;
 
 let heads: ChatHead[] = [];
+let mcpProxyReady: Promise<void> | null = null;
+
+function startMcpProxy(): Promise<void> {
+  if (mcpProxyReady) return mcpProxyReady;
+
+  mcpProxyReady = mcpProxy.start();
+  void mcpProxyReady.catch((err) => {
+    mcpProxyReady = null;
+    console.warn("[localMcpProxy] start failed:", err);
+  });
+  void mcpProxyReady
+    .then(async () => {
+      try {
+        await installMcp.reconcileLocalProxyConfigs();
+      } catch (err) {
+        console.warn("[localMcpProxy] config reconcile failed:", err);
+      }
+    })
+    .catch(() => undefined);
+  return mcpProxyReady;
+}
+
+function waitForMcpProxyReady(): Promise<void> {
+  return mcpProxyReady ?? startMcpProxy();
+}
+
+function parseMcpInstallMode(value: unknown): McpInstallMode | undefined {
+  if (value === undefined) return undefined;
+  if (value === "local-proxy" || value === "legacy-bearer") return value;
+  throw new Error(`Invalid MCP install mode: ${String(value)}`);
+}
+
+function parseMcpInstallOptions(options: unknown): McpInstallOptions | undefined {
+  if (options === undefined) return undefined;
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new Error("Invalid MCP install options");
+  }
+  return { mode: parseMcpInstallMode((options as Record<string, unknown>).mode) };
+}
 
 function broadcastHeads(): void {
   broadcast(
@@ -250,12 +297,15 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
   }
 });
 
-ipcMain.handle("mcp:install", (_e, target: McpTarget, options?: unknown) =>
-  installMcp.install(target, options as Parameters<typeof installMcp.install>[1]),
+ipcMain.handle("mcp:install", async (_e, target: McpTarget, options?: unknown) =>
+  waitForMcpProxyReady().then(() => installMcp.install(target, parseMcpInstallOptions(options))),
 );
 ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) => installMcp.uninstall(target));
 ipcMain.handle("mcp:status", () => installMcp.status());
-ipcMain.handle("mcp:url", () => installMcp.mcpUrl());
+ipcMain.handle("mcp:url", async () => {
+  await waitForMcpProxyReady();
+  return installMcp.mcpUrl();
+});
 ipcMain.handle("mcp:detailForHead", (_e, _headId: string) => {
   void _e;
   void _headId;
@@ -367,7 +417,10 @@ app
     anthropic.restore();
     githubAuth.restore();
     localRepos.restore();
-    void mcpProxy.start().catch((err) => console.warn("[localMcpProxy] start failed:", err));
+    mcpProxy.on("port-changed", (port) => {
+      console.log("[localMcpProxy] persisted port changed", { port });
+    });
+    startMcpProxy();
     // In session-only mode the tray click is the user's escape hatch: it
     // force-shows the rail and resets the 15-min grace timer. Outside that
     // mode the lastActivityTs bump is inert — resolveRailVisibility ignores

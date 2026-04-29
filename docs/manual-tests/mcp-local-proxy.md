@@ -17,10 +17,10 @@ bun run dev
 Expected desktop log:
 
 ```text
-[localMcpProxy] listening { url: "http://127.0.0.1:37613/mcp" }
+[localMcpProxy] listening { url: "http://127.0.0.1:<port>/mcp" }
 ```
 
-If `37613` is already in use, pick a stable test port before starting the desktop:
+Use the logged URL as `<local-proxy-url>` in the commands below. The desktop binds an ephemeral port on first launch, persists it in userData, and reuses it on later launches. To pin a port for local testing, set the override before starting the desktop:
 
 ```sh
 export SLASHTALK_LOCAL_MCP_PORT=37614
@@ -37,7 +37,7 @@ The desktop auto-installs the Claude Code entry after sign-in. Confirm `~/.claud
   "mcpServers": {
     "slashtalk-mcp": {
       "type": "http",
-      "url": "http://127.0.0.1:37613/mcp",
+      "url": "<local-proxy-url>",
       "headers": {
         "X-Slashtalk-Proxy-Token": "<local-proxy-secret>"
       }
@@ -56,7 +56,7 @@ Confirm `~/.codex/config.toml` contains:
 
 ```toml
 [mcp_servers.slashtalk-mcp]
-url = "http://127.0.0.1:37613/mcp"
+url = "<local-proxy-url>"
 enabled = true
 http_headers = { "X-Slashtalk-Proxy-Token" = "<local-proxy-secret>" }
 ```
@@ -68,7 +68,7 @@ There should be no `Authorization`, `env_http_headers`, `bearer_token_env_var`, 
 With the desktop signed in and running, initialize MCP through the local proxy:
 
 ```sh
-curl -i http://127.0.0.1:37613/mcp \
+curl -i <local-proxy-url> \
   -X POST \
   -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
   -H 'content-type: application/json' \
@@ -87,7 +87,7 @@ Expected:
 Use the returned session id to list tools:
 
 ```sh
-curl -i http://127.0.0.1:37613/mcp \
+curl -i <local-proxy-url> \
   -X POST \
   -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
   -H 'content-type: application/json' \
@@ -102,7 +102,7 @@ Expected body includes `get_team_activity` and `get_session`, and does not inclu
 Call the team activity tool through the proxy:
 
 ```sh
-curl -i http://127.0.0.1:37613/mcp \
+curl -i <local-proxy-url> \
   -X POST \
   -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
   -H 'content-type: application/json' \
@@ -121,22 +121,63 @@ Claude Code:
 1. Restart Claude Code after the config update.
 2. Open `/mcp`.
 3. Select `slashtalk-mcp`.
-4. Confirm it shows connected at `http://127.0.0.1:37613/mcp`.
+4. Confirm it shows connected at `<local-proxy-url>`.
 5. Confirm auth is not an OAuth browser flow in this phase; the desktop proxy is providing the server bearer.
 
 Codex:
 
 1. Restart Codex after the config update.
 2. Open `/mcp` in the TUI.
-3. Confirm `slashtalk-mcp` is enabled and points at `http://127.0.0.1:37613/mcp`.
+3. Confirm `slashtalk-mcp` is enabled and points at `<local-proxy-url>`.
 4. Confirm server logs include `mcp_session_opened` with Codex client info when Codex connects.
+
+## Desktop Restart Preserves Connection
+
+1. Install the Claude Code MCP entry from the running desktop app.
+2. Open Claude Code, run `/mcp`, and confirm `slashtalk-mcp` is connected at `<local-proxy-url>`.
+3. Quit Slashtalk Desktop.
+4. Relaunch Slashtalk Desktop without changing `SLASHTALK_LOCAL_MCP_PORT`.
+5. Confirm the desktop log shows the same `<local-proxy-url>`.
+6. In the same Claude Code session, confirm `slashtalk-mcp` reconnects without re-running install.
+
+Expected: the bound port is reused and the existing Claude Code session recovers after the desktop proxy is back.
+
+## Saved-Port Collision Recovery
+
+1. Record the saved `<local-proxy-url>` from the desktop log.
+2. Quit Slashtalk Desktop.
+3. Occupy the saved port from another terminal:
+
+   ```sh
+   nc -l <saved-port>
+   ```
+
+4. Relaunch Slashtalk Desktop.
+5. Confirm the desktop starts, logs a different `<local-proxy-url>`, and rewrites installed local-proxy client configs to that URL with a new local proxy secret.
+6. Confirm `curl <new-local-proxy-url>` with the new local proxy secret reaches the proxy, while the previous secret returns `401`.
+
+Expected: saved-port `EADDRINUSE` falls back to port-zero, rotates the local proxy admission secret, persists the new port, and reconciles installed local-proxy config. Existing Claude Code legacy-bearer installs should not be converted.
+
+## Recovery: ECONNREFUSED on slashtalk-mcp
+
+Claude Code and Codex do not currently expose a supported per-server config field for custom offline recovery copy. If either client reports a raw transport error such as `ECONNREFUSED` for `slashtalk-mcp`, verify the desktop-local proxy is running:
+
+1. Start or relaunch Slashtalk Desktop.
+2. Confirm the desktop log includes `[localMcpProxy] listening`.
+3. Confirm `~/.claude.json` or `~/.codex/config.toml` points `slashtalk-mcp` at the logged `<local-proxy-url>`.
+4. Retry `/mcp` in Claude Code or Codex.
+
+Manual evidence to record during verification:
+
+- Claude Code offline error text: `<record observed text>`
+- Codex offline error text: `<record observed text>`
 
 ## Negative Checks
 
 Sign out of the desktop, keep it running, then call the local proxy:
 
 ```sh
-curl -i http://127.0.0.1:37613/mcp \
+curl -i <local-proxy-url> \
   -X POST \
   -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
   --data '{}'
@@ -151,7 +192,7 @@ Expected:
 Then sign back in and call the proxy without the local proxy admission secret:
 
 ```sh
-curl -i http://127.0.0.1:37613/mcp -X POST --data '{}'
+curl -i <local-proxy-url> -X POST --data '{}'
 ```
 
 Expected:
@@ -162,7 +203,7 @@ Expected:
 Then call the proxy with a deliberately wrong incoming bearer but the correct proxy admission secret:
 
 ```sh
-curl -i http://127.0.0.1:37613/mcp \
+curl -i <local-proxy-url> \
   -X POST \
   -H 'X-Slashtalk-Proxy-Token: <local-proxy-secret>' \
   -H 'authorization: Bearer wrong-token' \

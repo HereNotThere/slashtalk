@@ -3,10 +3,10 @@
 // `import.meta.env.MAIN_VITE_X` baked in at build time by electron-vite →
 // hard-coded default. Centralizing the resolution avoids drift between the
 // 3+ sites that previously each redeclared their own `BAKED_*` constants and
-// fallback chains.
+// fallback chains. The local MCP proxy default is port-zero; persisted runtime
+// port reuse lives in localMcpProxyPort.ts, not env config.
 
 const DEFAULT_API_BASE_URL = "https://slashtalk.onrender.com";
-export const DEFAULT_LOCAL_MCP_PORT = 37613;
 
 const BAKED_API_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as string | undefined;
 const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as string | undefined;
@@ -20,11 +20,11 @@ export function mcpUrl(): string {
   return process.env["SLASHTALK_MCP_URL"] ?? BAKED_MCP_URL ?? `${apiBaseUrl()}/mcp`;
 }
 
-export function localMcpPort(): number {
+export function localMcpPortOverride(): number | null {
   const raw = process.env["SLASHTALK_LOCAL_MCP_PORT"];
-  if (!raw) return DEFAULT_LOCAL_MCP_PORT;
+  if (!raw) return null;
   const port = Number(raw);
-  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
     throw new Error(`Invalid SLASHTALK_LOCAL_MCP_PORT: ${raw}`);
   }
   return port;

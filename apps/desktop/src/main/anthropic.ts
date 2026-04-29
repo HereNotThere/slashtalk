@@ -61,7 +61,7 @@ export async function setApiKey(key: string): Promise<void> {
     await probe.models.list({ limit: 1 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Key rejected by Anthropic API: ${msg}`);
+    throw new Error(`Key rejected by Anthropic API: ${msg}`, { cause: err });
   }
 
   const wasConfigured = isConfigured();

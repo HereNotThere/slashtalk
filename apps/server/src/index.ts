@@ -5,6 +5,13 @@ import { createApp } from "./app";
 import { startScheduler } from "./analyzers";
 import { startPrPoller } from "./social/pr-poller";
 
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandledRejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] uncaughtException:", err);
+});
+
 const redis = new RedisBridge();
 await redis.connect();
 

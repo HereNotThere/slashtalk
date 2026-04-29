@@ -211,7 +211,7 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
       if (err.kind === "token_expired") {
         void backend.signOut().catch(() => {});
       }
-      throw new Error(err.message);
+      throw new Error(err.message, { cause: err });
     }
     throw err;
   }

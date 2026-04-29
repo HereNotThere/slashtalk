@@ -155,6 +155,14 @@ function broadcastChatVisible(visible: boolean): void {
   broadcast("chat:state", { visible }, overlay.getOverlayWindow());
 }
 
+async function broadcastMcpStatus(): Promise<void> {
+  try {
+    broadcast("mcp:status", await installMcp.status(), getMainWindow(), getTrayPopup());
+  } catch (err) {
+    console.warn("[mcp] status broadcast failed:", err);
+  }
+}
+
 // -------- IPC --------
 
 ipcMain.handle("heads:list", (): ChatHead[] => heads);
@@ -297,10 +305,21 @@ ipcMain.handle("window:requestResize", (e, height: number): void => {
   }
 });
 
-ipcMain.handle("mcp:install", async (_e, target: McpTarget, options?: unknown) =>
-  waitForMcpProxyReady().then(() => installMcp.install(target, parseMcpInstallOptions(options))),
-);
-ipcMain.handle("mcp:uninstall", (_e, target: McpTarget) => installMcp.uninstall(target));
+ipcMain.handle("mcp:install", async (_e, target: McpTarget, options?: unknown) => {
+  try {
+    await waitForMcpProxyReady();
+    return await installMcp.install(target, parseMcpInstallOptions(options));
+  } finally {
+    await broadcastMcpStatus();
+  }
+});
+ipcMain.handle("mcp:uninstall", async (_e, target: McpTarget) => {
+  try {
+    return await installMcp.uninstall(target);
+  } finally {
+    await broadcastMcpStatus();
+  }
+});
 ipcMain.handle("mcp:status", () => installMcp.status());
 ipcMain.handle("mcp:url", async () => {
   await waitForMcpProxyReady();

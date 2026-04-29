@@ -51,6 +51,7 @@ const bridge: ChatHeadsBridge = {
     uninstall: (target: McpTarget) =>
       ipcRenderer.invoke("mcp:uninstall", target) as Promise<McpTargetState>,
     status: () => ipcRenderer.invoke("mcp:status") as Promise<McpInstallStatus>,
+    onStatusChange: (cb) => subscribe<McpInstallStatus>("mcp:status", cb),
     url: () => ipcRenderer.invoke("mcp:url") as Promise<string>,
     detailForHead: (headId) =>
       ipcRenderer.invoke("mcp:detailForHead", headId) as Promise<McpPresenceDetail | null>,

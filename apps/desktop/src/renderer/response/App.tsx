@@ -20,6 +20,7 @@ import type {
   ChatDelegateEvent,
   ChatHead,
   DelegatedChatRequest,
+  DelegatedChatResponse,
   ResponseOpenPayload,
   TrackedRepo,
 } from "../../shared/types";
@@ -343,7 +344,19 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     // just doesn't pollute the new conversation.
     const myToken = askTokenRef.current;
     setDelegateRun({ messageId: req.messageId, statusLine: "Investigating…" });
-    const res = await window.chatheads.runDelegatedChat(req);
+    let res: DelegatedChatResponse;
+    try {
+      res = await window.chatheads.runDelegatedChat(req);
+    } catch (err) {
+      // Catch needed because delegateRun is what gates `inputBusy` — an
+      // unhandled rejection would leave the input permanently locked.
+      setDelegateRun((prev) => (prev?.messageId === req.messageId ? null : prev));
+      if (askTokenRef.current === myToken) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message || "Delegated chat failed");
+      }
+      return;
+    }
     if (askTokenRef.current !== myToken) {
       // Drop the spinner if it's still tied to this run. Match by messageId
       // so we don't clobber a newer delegation that happens to have started

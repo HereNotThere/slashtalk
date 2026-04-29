@@ -57,7 +57,41 @@ Install deps from repo root: `bun install` (this is a workspace package, do not 
 
 ## Packaging (electron-builder)
 
-Config is inline in `package.json` under the `build` key. macOS output is an unsigned `.dmg` (`identity: null`); no Apple Developer cert wired up. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). App icon lives at `build/icon.icns` (auto-picked by electron-builder) — regenerate from `build/icon.svg` via the `rsvg-convert` + `iconutil` steps noted in Layout if the logo changes.
+Config is inline in `package.json` under the `build` key. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). App icon lives at `build/icon.icns` (auto-picked by electron-builder) — regenerate from `build/icon.svg` via the `rsvg-convert` + `iconutil` steps noted in Layout if the logo changes.
+
+### macOS signing + notarization
+
+The `mac` block expects a Developer ID Application cert (signing) and Apple notarization credentials. Entitlements live at [`build/entitlements.mac.plist`](build/entitlements.mac.plist) — hardened runtime is on, with the JIT / unsigned-memory / library-validation / dyld-env entitlements that Electron + `koffi` (used by `src/main/macCorners.ts`) require. `notarize: true` lets electron-builder pick up credentials from the environment.
+
+Set these env vars before `bun run dist:mac`:
+
+```bash
+# Signing (Developer ID Application cert exported as .p12)
+export CSC_LINK=/path/to/cert.p12          # or base64 of the .p12
+export CSC_KEY_PASSWORD=...
+
+# Notarization — pick ONE of these two sets:
+
+# (a) App Store Connect API key (recommended for CI)
+export APPLE_API_KEY=/path/to/AuthKey_XXX.p8
+export APPLE_API_KEY_ID=XXXXXXXXXX
+export APPLE_API_ISSUER=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+# (b) Apple ID + app-specific password
+export APPLE_ID=you@example.com
+export APPLE_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx
+export APPLE_TEAM_ID=XXXXXXXXXX
+```
+
+Verify the output:
+
+```bash
+codesign -dv --verbose=4 dist/mac/Slashtalk.app
+spctl -a -vvv -t install dist/Slashtalk-*.dmg
+xcrun stapler validate dist/Slashtalk-*.dmg
+```
+
+To build unsigned locally (skip the cert + notarize), unset `CSC_LINK` and pass `--config.mac.identity=null --config.mac.notarize=false` to electron-builder, or temporarily flip `notarize` off in `package.json`.
 
 ## Before committing
 

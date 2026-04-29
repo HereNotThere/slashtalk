@@ -192,6 +192,66 @@ Notes:
 - For a hosted-API + local-everything-else dev session, comment the local
   URLs out and the desktop falls back to the hosted defaults.
 
+## Releasing the desktop app
+
+Desktop releases are driven by [changesets](https://github.com/changesets/changesets). Only `@slashtalk/electron` is versioned — server, web, website, and shared packages are listed in `ignore` in [`.changeset/config.json`](.changeset/config.json).
+
+### Author flow
+
+1. Make a desktop change in a feature branch.
+2. From the repo root, create a changeset:
+   ```sh
+   bun run changeset
+   ```
+   Pick `@slashtalk/electron`, choose a bump type (`patch` / `minor` / `major`), and write a one-line summary. Commit the generated `.changeset/*.md` alongside your code.
+3. Open and merge the PR to `main`.
+
+### What CI does
+
+The [`release` workflow](.github/workflows/release.yml) runs on every push to `main`:
+
+1. **`release` job** (ubuntu) — runs `changesets/action`. If pending changesets exist, it opens (or updates) a `chore: version packages` PR that bumps `apps/desktop/package.json` and updates the changelog.
+2. When that PR is merged, the same job runs `changeset tag` and pushes the new tag (`@slashtalk/electron@<version>`).
+3. **`build-mac` job** (macos-latest) — gated on the publish output. Currently runs `bun run dist:mac:unsigned` which produces an **unsigned** `.dmg` (no Developer ID cert + no Apple notarization). Once cert + API key secrets are in place, switch the step back to `bun run dist:mac` and re-add the env block (`CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`) — see the TODO in `.github/workflows/release.yml`. The signed flow uses hardened runtime + entitlements at [`apps/desktop/build/entitlements.mac.plist`](apps/desktop/build/entitlements.mac.plist).
+4. Two DMGs are built and uploaded to a fresh GitHub Release: `Slashtalk-mac-arm64.dmg` (Apple Silicon) and `Slashtalk-mac-x64.dmg` (Intel). Stable filenames come from the `artifactName` template in `apps/desktop/package.json`.
+
+Until the build is signed, downloaders will see a Gatekeeper warning ("Slashtalk can't be opened because Apple cannot check it for malicious software"). They can right-click the app → **Open** → **Open** to bypass, or run `xattr -cr /Applications/Slashtalk.app` once after copying it from the DMG.
+
+### Stable download URLs
+
+The website (or anywhere else) should link to one of these:
+
+```
+https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-arm64.dmg   # Apple Silicon
+https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-x64.dmg     # Intel
+```
+
+GitHub redirects these to the most recent release's assets, so the URLs never have to change. A Download button can use `navigator.userAgent` (look for `arm64` / `Intel`) to pick the right one, or default to arm64 with a small "Intel Mac?" link beside it.
+
+### Required repo secrets
+
+| Secret                 | What it is                                                          |
+| ---------------------- | ------------------------------------------------------------------- |
+| `MAC_CERT_BASE64`      | `base64 -i DeveloperID.p12` of the Developer ID Application cert    |
+| `MAC_CERT_PASSWORD`    | Password for the `.p12`                                             |
+| `APPLE_API_KEY_BASE64` | `base64 -i AuthKey_XXXX.p8` from App Store Connect                  |
+| `APPLE_API_KEY_ID`     | Key ID shown next to the key in App Store Connect                   |
+| `APPLE_API_ISSUER`     | Issuer ID at the top of App Store Connect → Users and Access → Keys |
+
+The cert is bound to your Apple Developer team; the API key drives notarization. To rotate either, regenerate, re-base64, and update the secret.
+
+### Manual / unsigned local build
+
+For day-to-day local packaging without going through Apple, unset `CSC_LINK` and override the mac config:
+
+```sh
+cd apps/desktop
+bun run build
+bunx electron-builder --mac --config.mac.identity=null --config.mac.notarize=false
+```
+
+This produces an unsigned `.dmg` in `apps/desktop/dist/` that macOS will Gatekeeper-block on first launch (right-click → Open to bypass) — fine for testing, not for distribution.
+
 ## Project structure
 
 See [`AGENTS.md`](AGENTS.md) for the full map and per-workspace pointers.
@@ -221,11 +281,13 @@ slashtalk/
 
 ## Key scripts
 
-| Command               | Directory     | Description                 |
-| --------------------- | ------------- | --------------------------- |
-| `bun run dev`         | `apps/server` | Start with file watching    |
-| `bun run start`       | `apps/server` | Start without watching      |
-| `bun run db:generate` | `apps/server` | Generate Drizzle migrations |
-| `bun run db:migrate`  | `apps/server` | Apply migrations            |
-| `bun run typecheck`   | `apps/server` | TypeScript type check       |
-| `bun test`            | `apps/server` | Run test suite              |
+| Command               | Directory      | Description                                     |
+| --------------------- | -------------- | ----------------------------------------------- |
+| `bun run dev`         | `apps/server`  | Start with file watching                        |
+| `bun run start`       | `apps/server`  | Start without watching                          |
+| `bun run db:generate` | `apps/server`  | Generate Drizzle migrations                     |
+| `bun run db:migrate`  | `apps/server`  | Apply migrations                                |
+| `bun run typecheck`   | `apps/server`  | TypeScript type check                           |
+| `bun test`            | `apps/server`  | Run test suite                                  |
+| `bun run changeset`   | repo root      | Author a desktop release changeset              |
+| `bun run dist:mac`    | `apps/desktop` | Build, sign, notarize, and package macOS `.dmg` |

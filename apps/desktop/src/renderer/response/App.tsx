@@ -344,7 +344,13 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     const myToken = askTokenRef.current;
     setDelegateRun({ messageId: req.messageId, statusLine: "Investigating…" });
     const res = await window.chatheads.runDelegatedChat(req);
-    if (askTokenRef.current !== myToken) return;
+    if (askTokenRef.current !== myToken) {
+      // Drop the spinner if it's still tied to this run. Match by messageId
+      // so we don't clobber a newer delegation that happens to have started
+      // while we were awaiting (it would have overwritten delegateRun).
+      setDelegateRun((prev) => (prev?.messageId === req.messageId ? null : prev));
+      return;
+    }
     if (res.kind === "needs-repo") {
       setDelegateRun(null);
       setRepoPicker({ candidates: res.candidates, pendingReq: req });

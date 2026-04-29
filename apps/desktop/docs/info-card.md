@@ -8,12 +8,41 @@ This doc exists because the card has grown several conditional surfaces (header 
 
 The renderer in [`src/renderer/info/App.tsx`](../src/renderer/info/App.tsx) branches on `head.kind`:
 
-| Kind    | Layout (top → bottom)                                                       | Source file                                                            |
-| ------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `agent` | `AgentPanel` only — managed-agent status, no header                         | [`AgentPanel.tsx`](../src/renderer/info/AgentPanel.tsx)                |
-| `user`  | `UserHeader` → `HierarchyDashboard` (Now / Today / PRs)                     | [`HierarchyDashboard.tsx`](../src/renderer/info/HierarchyDashboard.tsx) |
+| Kind      | Layout (top → bottom)                                                                | Source file                                                              |
+| --------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `agent`   | `AgentPanel` only — managed-agent status, no header                                  | [`AgentPanel.tsx`](../src/renderer/info/AgentPanel.tsx)                  |
+| `user`    | `UserHeader` → `HierarchyDashboard` (Now / Today / PRs)                              | [`HierarchyDashboard.tsx`](../src/renderer/info/HierarchyDashboard.tsx)  |
+| `project` | `ProjectHeader` → Pulse → emergent buckets → Active people strip → `AskInput`        | [`ProjectDashboard.tsx`](../src/renderer/info/ProjectDashboard.tsx)      |
 
 The `user` kind covers both the signed-in user (self) and peers; data sources are identical (`/api/users/:login/*`) and the renderer threads `isSelf` only into `UserHeader` for the self-mode location/time fallback.
+
+The `project` kind is **synthetic** — these heads never live in the rail's `heads` list. They're constructed inline by [`showProjectInfo()`](../src/main/windows/info.ts) from a repo full-name and rendered through the same info window as the user/agent kinds. The trigger is the rail's [`SearchBubble`](../src/renderer/overlay/App.tsx) on hover; click still opens the chat-search popover, so hover and click coexist on the same icon.
+
+## The project layout
+
+`ProjectDashboard` renders four stacked sections:
+
+```
+┌─────────────────────────────────┐
+│ ProjectHeader  (repo, N active) │
+├─────────────────────────────────┤
+│ Pulse  (one-line, directional)  │  ← LLM-composed, shimmers while fetching
+├─────────────────────────────────┤
+│ Buckets  (collapsed list)       │  ← emergent categories — names vary per
+│   infra · 4 PRs · 2 authors ▸   │     call, no fixed taxonomy. Click expands
+│   docs  · 2 PRs · 1 author  ▸   │     to inline PR rows.
+├─────────────────────────────────┤
+│ Active  (avatar strip)          │  ← user_repos members in window. Click
+├─────────────────────────────────┤    swaps the popover to that user's
+│ Ask about <repo>…           ↵   │    HierarchyDashboard via `showInfo`.
+└─────────────────────────────────┘
+```
+
+Pulse + buckets come from a single Haiku call that takes the in-window PR set as input and emits both fields together (no separate "summarize then bucket" pipeline). The bucket names are emergent — a docs-sprint repo might produce `docs / examples / typos`, an infra repo `terraform / k8s / observability`. See `OVERVIEW_SYSTEM` in [`apps/server/src/repo/overview.ts`](../../../apps/server/src/repo/overview.ts).
+
+### Active people derivation
+
+Active = users who authored a PR or had a session inside the window, **and** who are claimed via `user_repos` for this repo. The `user_repos` filter enforces [core-beliefs #13](../../../docs/design-docs/core-beliefs.md#13-user_repos-is-the-only-authorization-for-cross-user-reads) — peers only become clickable through claimed shared access. External PR authors (not in `user_repos`) still appear inline on PR rows but not in the Active strip, since the strip is the click-into-their-card surface and that requires a real user record.
 
 ## The hierarchy layout
 
@@ -98,6 +127,8 @@ info renderer (info/App.tsx)
 | `sessionCache: Map<headId, …>`               | `windows/info.ts`   | Per head on `session_updated` for that head; cleared on logout                                             |
 | `dashboardCache: Map<login, …>`              | `windows/info.ts`   | Used as a **stale-while-revalidate** slot: every `showInfo` deletes the entry and refetches, so the renderer paints from the previous snapshot for instant feedback and re-renders once the fresh data lands. Also wholesale-cleared on `localRepos.onSelectionChange` and per-login on `session_updated` for the currently-shown head |
 | `standupCache` (server)                      | `user/dashboard.ts` | TTL: 5 min per `(callerId, targetId, scope)`. Saves Anthropic budget on rapid re-hovers and peer re-views. **Bypassed and lazily deleted when `visibleRepoIds.length === 0`** (see "no claimed repos" below) so unclaiming all repos doesn't keep serving the pre-unclaim summary for up to 5 minutes |
+| `projectOverviewCache: Map<repoFullName, …>` | `windows/info.ts`   | Same SWR pattern as `dashboardCache`. Per-repo invalidation on `pr_activity` (the `repoFullName` arrives on the WS message). Wholesale-cleared on `localRepos.onSelectionChange` since the access gate is `user_repos` and a claim flip changes which overviews are reachable |
+| `overviewCache` (server)                     | `repo/overview.ts`  | TTL: 5 min, keyed by `(callerId, repoId, scope, prsHash)`. The `prsHash` is a fingerprint of the in-window PR set's `(number, state, updatedAt)` tuples — a single PR transition (open→merged, edit, etc.) bumps the hash so the next request misses the cache naturally and reruns the LLM. Active-people are NOT cached; the cached body's `active` field is overlaid with this request's fresh rollup so the avatar strip never goes stale |
 
 Sessions and the dashboard are fetched in parallel with the initial snapshot push so the renderer paints loading placeholders, then re-renders once data lands. `info:show` ships with whatever's currently cached (often `null` on first hover) and a follow-up push lands when the parallel fetches settle.
 

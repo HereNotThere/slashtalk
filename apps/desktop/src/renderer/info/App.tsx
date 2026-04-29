@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { SpotifyPresence, TokenUsage } from "@slashtalk/shared";
+import type { ProjectOverviewResponse, SpotifyPresence, TokenUsage } from "@slashtalk/shared";
 import type { ChatHead, InfoDashboardData, InfoSession, UserLocation } from "../../shared/types";
 import { AgentPanel } from "./AgentPanel";
 import { HierarchyDashboard } from "./HierarchyDashboard";
+import { ProjectDashboard } from "./ProjectDashboard";
 import { useAutoResize } from "../shared/useAutoResize";
 import { useLocationWeather } from "../shared/useLocationWeather";
 import { ClaudeIcon, SpotifyIcon } from "../shared/icons";
@@ -18,6 +19,8 @@ export function App(): JSX.Element {
   const [isSelf, setIsSelf] = useState(false);
   const [dashboard, setDashboard] = useState<InfoDashboardData | null>(null);
   const [dashboardFetching, setDashboardFetching] = useState(false);
+  const [projectOverview, setProjectOverview] = useState<ProjectOverviewResponse | null>(null);
+  const [projectOverviewFetching, setProjectOverviewFetching] = useState(false);
   // Bumped on every `info:show` to drive the post-commit ack effect. Lets us
   // ack same-head re-shows where head?.id is unchanged.
   const [showNonce, setShowNonce] = useState(0);
@@ -36,6 +39,8 @@ export function App(): JSX.Element {
       setIsSelf(p.isSelf);
       setDashboard(p.dashboard);
       setDashboardFetching(p.dashboardFetching);
+      setProjectOverview(p.projectOverview);
+      setProjectOverviewFetching(p.projectOverviewFetching);
       setVisible(true);
       setShowNonce((n) => n + 1);
     });
@@ -71,7 +76,9 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!head) return;
-    if (head.kind === "agent") {
+    if (head.kind === "agent" || head.kind === "project") {
+      // Project heads don't have per-head sessions; agent heads route their
+      // own data path. Skip the user-flavored session refresh loop.
       setSessions([]);
       return;
     }
@@ -139,6 +146,12 @@ export function App(): JSX.Element {
       <div ref={contentRef}>
         {head?.kind === "agent" ? (
           <AgentPanel head={head} />
+        ) : head?.kind === "project" ? (
+          <ProjectDashboard
+            repoFullName={head.repoFullName ?? head.label}
+            overview={projectOverview}
+            fetching={projectOverviewFetching}
+          />
         ) : (
           <>
             <UserHeader

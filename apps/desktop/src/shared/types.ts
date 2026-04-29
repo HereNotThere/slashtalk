@@ -4,6 +4,7 @@
 import type {
   ManagedAgentSessionRow,
   FeedSessionSnapshot,
+  ProjectOverviewResponse,
   SessionSnapshot,
   SpotifyPresence,
 } from "@slashtalk/shared";
@@ -20,8 +21,12 @@ export type Avatar = { type: "emoji"; value: string } | { type: "remote"; value:
 
 export interface ChatHead {
   id: string;
-  /** Picks the info-popover layout and routes session fetches. */
-  kind: "user" | "agent";
+  /** Picks the info-popover layout and routes session fetches. `project` heads
+   *  are synthetic — they don't render on the rail, they're constructed by
+   *  `showProjectInfo` and live only inside the info window. */
+  kind: "user" | "agent" | "project";
+  /** Set on `kind: "project"` heads — the repo this card is about. */
+  repoFullName?: string;
   label: string;
   tint: string;
   avatar: Avatar;
@@ -87,6 +92,12 @@ export interface InfoShowPayload {
    *  "still fetching, displayed data may be stale or null" (show shimmer).
    *  Set by main: true on the initial show push, false on the post-fetch push. */
   dashboardFetching: boolean;
+  /** Pulse + buckets + active-people rollup for the head's repo. Set when
+   *  `head.kind === "project"`; null otherwise or while the cache is cold.
+   *  Same SWR semantics as `dashboard`. */
+  projectOverview: ProjectOverviewResponse | null;
+  /** Mirrors `dashboardFetching` for the project surface. */
+  projectOverviewFetching: boolean;
 }
 
 /** Local `gh` CLI state at PR-fetch time. "ready" → prs is authoritative.
@@ -471,6 +482,10 @@ export interface ChatHeadsBridge {
   // Both axes of the bubble's screen-space top-left are reported so main can
   // align the popover against whichever axis matches the current dock.
   showInfo: (headId: string, bubbleScreen?: { x: number; y: number }) => Promise<void>;
+  /** Hover-show a project-card popover anchored to a non-rail-bubble element
+   *  (e.g. the SearchBubble). Synthesizes a `kind: "project"` ChatHead from
+   *  the repo full-name; main handles cache + fetch + position. */
+  showProjectInfo: (repoFullName: string, bubbleScreen?: { x: number; y: number }) => Promise<void>;
   infoHoverEnter: () => Promise<void>;
   infoHoverLeave: () => Promise<void>;
   /** Renderer ack: the latest `info:show` payload has been committed and

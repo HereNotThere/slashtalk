@@ -444,9 +444,15 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     }
   }
 
+  // Treated as "busy" for input gating: an in-flight delegation has already
+  // cleared `loading` (ask's finally fired before runDelegated returned),
+  // but a follow-up here would bump askTokenRef and silently drop the
+  // delegation answer — leaving "Looking deeper…" stranded forever.
+  const inputBusy = loading || delegateRun !== null;
+
   function handleFollowUpSend(): void {
     const trimmed = followUp.trim();
-    if (!trimmed || loading) return;
+    if (!trimmed || inputBusy) return;
     const next: ChatMessage[] = [...messages, { role: "user", content: trimmed }];
     setMessages(next);
     setFollowUp("");
@@ -575,8 +581,8 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
                   handleFollowUpSend();
                 }
               }}
-              placeholder={loading ? "Waiting for reply..." : "Ask anything"}
-              disabled={loading}
+              placeholder={inputBusy ? "Waiting for reply..." : "Ask anything"}
+              disabled={inputBusy}
               className="flex-1 min-w-0 bg-transparent border-none outline-none py-2 text-fg text-base leading-snug placeholder:text-subtle disabled:opacity-60"
             />
             <Button
@@ -584,7 +590,7 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
               size="md"
               round
               onClick={handleFollowUpSend}
-              disabled={loading || !followUp.trim()}
+              disabled={inputBusy || !followUp.trim()}
               aria-label="Send"
               icon={<PaperAirplaneIcon className="w-4 h-4" />}
             />

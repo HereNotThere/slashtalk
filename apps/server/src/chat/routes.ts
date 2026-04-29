@@ -128,7 +128,10 @@ export const chatRoutes = (db: Database, redis: RedisBridge) =>
         try {
           const updated = await db
             .update(chatMessages)
-            .set({ answer: trimmed })
+            // Clear `delegation` so the row stops being eligible for
+            // re-finalization (the WHERE below uses isNotNull as a guard).
+            // Also distinguishes completed runs from pending ones in queries.
+            .set({ answer: trimmed, delegation: null })
             .where(
               and(
                 eq(chatMessages.id, body.messageId),

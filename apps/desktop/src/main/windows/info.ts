@@ -283,17 +283,19 @@ function positionInfo(headId: string, bubbleScreen?: { x: number; y: number }): 
 }
 
 // Sends an info:show with whatever's currently in main's caches. No-op if a
-// newer hover has taken over (head no longer selected).
+// newer hover has taken over (head no longer selected). `dashboardFetching`
+// is derived from `dashboardInFlight` so a superseded promise's settled push
+// can't accidentally mark a still-pending newer fetch as "done."
 function pushInfoShowSnapshot(
   win: BrowserWindow | null,
   head: ChatHead,
   expandSessionId?: string,
-  dashboardFetching: boolean = false,
 ): void {
   if (!win || win.isDestroyed()) return;
   if (selectedHeadId !== head.id) return;
   const login = rail.parseUserHeadId(head.id);
   const dashboard = login ? (dashboardCache.get(login) ?? null) : null;
+  const dashboardFetching = login ? dashboardInFlight.has(login) : false;
   win.webContents.send("info:show", {
     head,
     sessions: sessionCache.get(head.id) ?? null,
@@ -345,13 +347,14 @@ async function showInfo(
 
   const login = rail.parseUserHeadId(head.id);
   const firstShow = !win.isVisible();
-  // Send the current cache snapshot immediately. Cache misses surface as null
-  // and the renderer paints loading placeholders; the background fetches
-  // below resolve and re-push with the same snapshot helper. We always
-  // refetch the dashboard on show (see below), so flag `dashboardFetching`
-  // here so the renderer can shimmer instead of treating any cached
-  // `summary: null` as "genuinely empty".
-  pushInfoShowSnapshot(win, head, expandSessionId, login != null);
+  // Kick off the dashboard refetch *before* the snapshot push so
+  // `dashboardInFlight` is populated by the time the snapshot reads it.
+  // Otherwise the renderer would treat any cached `summary: null` as
+  // "genuinely empty" instead of showing the shimmer. SWR pattern: the
+  // snapshot still paints the previous cache entry; the fetch lands later
+  // and re-pushes the fresh value.
+  const dashboardPromise = login ? fetchDashboardForLogin(login, { force: true }) : null;
+  pushInfoShowSnapshot(win, head, expandSessionId);
 
   // Wait for the renderer's measured-height ack so position+content land on
   // the same paint frame and the bottom-clamp uses the right height (no
@@ -375,15 +378,7 @@ async function showInfo(
   // re-expands a session the user may have manually collapsed mid-fetch.
   const pending: Promise<unknown>[] = [];
   if (!sessionCache.has(head.id)) pending.push(fetchSessionsForHead(head.id));
-  // Dashboard is always refetched on show (stale-while-revalidate): the
-  // snapshot push above already painted the previous cache entry for instant
-  // feedback, and `force: true` makes the new fetch bypass both cache and
-  // any pre-existing in-flight (which could have started before an
-  // invalidating event the desktop has no signal for). The cost is one HTTP
-  // roundtrip per hover; the server's own LLM cache absorbs the heavy work.
-  if (login) {
-    pending.push(fetchDashboardForLogin(login, { force: true }));
-  }
+  if (dashboardPromise) pending.push(dashboardPromise);
   if (pending.length > 0) {
     void Promise.all(pending).then(() => {
       pushInfoShowSnapshot(infoWindow, head, undefined);
@@ -486,9 +481,12 @@ async function fetchDashboardForLogin(
     if (inFlight) return inFlight;
   }
 
-  const promise = (async () => {
-    // PRs and standup run independently — one failing shouldn't blank the
-    // other. Settle both, then merge.
+  // Build the result without writing cache or in-flight tracking inside the
+  // IIFE — the caller-visible promise resolves with the data; mutation of
+  // shared state happens in the .then below, gated on still being the
+  // active in-flight. This prevents a superseded promise (bumped by a
+  // forced refetch) from clobbering newer data.
+  const promise = (async (): Promise<InfoDashboardData> => {
     const [prsRes, standupRes] = await Promise.allSettled([
       backend.fetchUserPrs(login, DASHBOARD_PRS_SCOPE),
       backend.fetchUserStandup(login, DASHBOARD_STANDUP_SCOPE),
@@ -501,25 +499,23 @@ async function fetchDashboardForLogin(
     }
     const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
     const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
-    // Either endpoint setting the flag is enough — both return it in lockstep
-    // for the self-empty-repos case, but we OR rather than AND so a single
-    // failed leg doesn't silently drop the CTA.
     const noClaimedRepos =
       (prsRes.status === "fulfilled" && prsRes.value.noClaimedRepos === true) ||
       (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
-    const data: InfoDashboardData = { prs, standup, noClaimedRepos };
-    dashboardCache.set(login, data);
-    return data;
+    return { prs, standup, noClaimedRepos };
   })();
   dashboardInFlight.set(login, promise);
-  // Only delete our slot if we're still the active in-flight. A forced
-  // refetch may have replaced us with a newer promise; in that case the
-  // newer one owns cleanup.
-  void promise.finally(() => {
-    if (dashboardInFlight.get(login) === promise) {
-      dashboardInFlight.delete(login);
-    }
-  });
+  void promise
+    .then((data) => {
+      if (dashboardInFlight.get(login) === promise) {
+        dashboardCache.set(login, data);
+      }
+    })
+    .finally(() => {
+      if (dashboardInFlight.get(login) === promise) {
+        dashboardInFlight.delete(login);
+      }
+    });
   return promise;
 }
 

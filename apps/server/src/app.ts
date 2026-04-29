@@ -20,6 +20,7 @@ import { mcpOAuthRoutes } from "./oauth/mcp";
 import { wsHandler } from "./ws/handler";
 import { webAppRoutes } from "./web/routes";
 import { blogRoutes } from "./web/blog-routes";
+import { landingRoutes } from "./landing/routes";
 import type { RedisBridge } from "./ws/redis-bridge";
 
 const INSTALL_SCRIPT = await Bun.file(
@@ -68,5 +69,6 @@ export function createApp(db: Database, redis: RedisBridge) {
     .use(mcpRoutes())
     .use(spotifyPresenceRoutes(db, redis))
     .use(presenceReadRoutes(db, redis))
-    .use(wsHandler(db, redis));
+    .use(wsHandler(db, redis))
+    .use(landingRoutes());
 }

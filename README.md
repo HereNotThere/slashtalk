@@ -215,7 +215,8 @@ slashtalk/
     ├── server/             # ElysiaJS backend (auth, ingest, sessions, ws, analyzers)
     ├── desktop/            # Electron overlay, 6 renderer windows + tray/dock chrome
     ├── web/                # Installable React PWA — served by server under /app/*
-    └── blog/               # Public Astro blog/marketing site — served by server under /blog/*
+    ├── landing/            # Public Astro marketing homepage — served by server at /
+    └── blog/               # Public Astro blog — served by server under /blog/*
 ```
 
 ## Key scripts

@@ -41,9 +41,11 @@ src/
 ├── presence/
 │   └── routes.ts    # POST /v1/presence/spotify, GET /api/presence/peers; publishes to user:<id> + repo:<id>
 ├── web/
-│   ├── shared.ts        # path sanitization, MIME map, fileResponse — used by both static handlers
+│   ├── shared.ts        # path sanitization, MIME map, fileResponse — used by all static handlers
 │   ├── routes.ts        # GET /app and /app/* static serving for the installable PWA
 │   └── blog-routes.ts   # GET /blog and /blog/* static serving for the public Astro blog
+├── landing/
+│   └── routes.ts    # GET / + landing assets (apps/landing/dist) for the marketing homepage
 ├── managed-agent-sessions/
 │   └── routes.ts    # PUT/GET /v1/managed-agent-sessions (apiKeyAuth)
 ├── mcp/

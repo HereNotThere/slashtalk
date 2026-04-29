@@ -1,0 +1,368 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout>
+	<div class="min-h-screen bg-white text-neutral-900">
+		<header
+			class="mx-auto flex max-w-6xl items-center justify-between px-6 py-6"
+		>
+			<a href="/" class="flex items-center gap-2.5">
+				<img
+					src="/favicon.svg"
+					alt=""
+					width="28"
+					height="28"
+					class="rounded-md"
+				/>
+				<span class="text-base font-semibold tracking-tight"
+					>Slashtalk</span
+				>
+			</a>
+			<nav class="flex items-center gap-2 sm:gap-7">
+				<a
+					href="/blog"
+					class="hidden text-sm font-medium text-neutral-600 transition hover:text-neutral-900 sm:inline"
+					>Blog</a
+				>
+				<a
+					href="https://github.com/HereNotThere/slashtalk"
+					class="hidden text-sm font-medium text-neutral-600 transition hover:text-neutral-900 sm:inline"
+					>GitHub</a
+				>
+				<button
+					type="button"
+					data-download
+					class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
+				>
+					Download
+				</button>
+			</nav>
+		</header>
+
+		<section
+			class="mx-auto max-w-6xl px-6 pt-16 pb-12 text-center sm:pt-28 sm:pb-20"
+		>
+			<p
+				class="mb-6 text-xs font-medium tracking-[0.18em] text-neutral-500 uppercase"
+			>
+				For small remote teams shipping fast
+			</p>
+			<h1
+				class="mx-auto max-w-5xl text-5xl font-semibold tracking-tighter text-balance text-neutral-900 sm:text-7xl lg:text-[5.5rem] lg:leading-[0.95]"
+			>
+				Coordination,
+				<span
+					style="font-family: var(--font-serif);"
+					class="font-normal text-neutral-500 italic"
+				>
+					without
+				</span>
+				the meetings.
+			</h1>
+			<p
+				class="mx-auto mt-8 max-w-2xl text-lg leading-relaxed text-balance text-neutral-600 sm:text-xl"
+			>
+				A floating dock that shows what your team is shipping —
+				recent PRs, live coding sessions, file conflicts before
+				they happen. So you can stop asking
+				<em class="text-neutral-900">"what are you working on?"</em>
+			</p>
+			<div
+				class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
+			>
+				<button
+					type="button"
+					data-download
+					class="inline-flex items-center gap-2.5 rounded-full bg-neutral-900 px-7 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-neutral-700"
+				>
+					<svg
+						viewBox="0 0 24 24"
+						fill="currentColor"
+						width="18"
+						height="18"
+						aria-hidden="true"
+					>
+						<path
+							d="M16.365 1.43c0 1.14-.46 2.235-1.21 3.034-.808.86-2.121 1.527-3.207 1.443-.142-1.078.452-2.21 1.18-2.92.815-.79 2.21-1.398 3.237-1.557zm3.926 17.14c-.612 1.345-.905 1.946-1.694 3.137-1.103 1.661-2.66 3.731-4.59 3.748-1.715.016-2.156-1.122-4.485-1.107-2.328.014-2.812 1.13-4.527 1.114-1.93-.018-3.404-1.882-4.508-3.543-3.085-4.65-3.41-10.106-1.506-13.005 1.353-2.06 3.488-3.265 5.495-3.265 2.043 0 3.328 1.122 5.022 1.122 1.643 0 2.643-1.124 5.014-1.124 1.789 0 3.685.974 5.034 2.66-4.426 2.42-3.703 8.747.745 10.263z"
+						></path>
+					</svg>
+					Download for macOS
+				</button>
+				<a
+					href="/blog"
+					class="text-base font-medium text-neutral-700 transition hover:text-neutral-900"
+				>
+					Read the story →
+				</a>
+			</div>
+			<p class="mt-5 text-sm text-neutral-500">
+				Free · macOS 13+ · Apple Silicon &amp; Intel
+			</p>
+		</section>
+
+		<section class="mx-auto max-w-6xl px-6 pb-24 sm:pb-32">
+			<figure
+				class="overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50 shadow-sm"
+			>
+				<img
+					src="/screenshot-dock.png"
+					alt="The Slashtalk dock — a row of teammate avatars floating above your other apps."
+					class="w-full"
+				/>
+			</figure>
+		</section>
+
+		<section
+			class="mx-auto max-w-6xl space-y-32 px-6 pb-24 sm:pb-32"
+		>
+			<div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
+				<div>
+					<p
+						class="mb-4 text-xs font-medium tracking-[0.18em] text-neutral-500 uppercase"
+					>
+						Teammates
+					</p>
+					<h2
+						class="text-4xl font-semibold tracking-tight text-balance text-neutral-900 sm:text-5xl"
+					>
+						Each card is a teammate,
+						<span
+							style="font-family: var(--font-serif);"
+							class="font-normal italic"
+						>
+							working
+						</span>
+						.
+					</h2>
+					<p
+						class="mt-6 text-lg leading-relaxed text-neutral-600"
+					>
+						Recent PRs. Current branch. Live Claude and Codex
+						sessions. The question
+						<em class="text-neutral-900">"what are you working on?"</em>
+						stops getting asked, because the answer is always
+						on your dock.
+					</p>
+				</div>
+				<figure class="lg:order-last">
+					<img
+						src="/screenshot-card.png"
+						alt="A teammate card showing recent sessions, current branch, and token usage."
+						class="mx-auto w-full max-w-sm rounded-2xl"
+					/>
+				</figure>
+			</div>
+
+			<div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
+				<figure>
+					<img
+						src="/screenshot-ask.png"
+						alt="The Ask window — a chat interface synthesizing what the team shipped this week."
+						class="w-full rounded-2xl border border-neutral-200"
+					/>
+				</figure>
+				<div>
+					<p
+						class="mb-4 text-xs font-medium tracking-[0.18em] text-neutral-500 uppercase"
+					>
+						Ask
+					</p>
+					<h2
+						class="text-4xl font-semibold tracking-tight text-balance text-neutral-900 sm:text-5xl"
+					>
+						Answers from
+						<span
+							style="font-family: var(--font-serif);"
+							class="font-normal italic"
+						>
+							real code
+						</span>
+						.
+					</h2>
+					<p
+						class="mt-6 text-lg leading-relaxed text-neutral-600"
+					>
+						PMs and CEOs constantly pinging engineers? They can
+						just ask the dock. Slashtalk synthesizes from
+						sessions and PRs in flight — not guesses, not
+						standup notes from yesterday.
+					</p>
+				</div>
+			</div>
+
+			<div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
+				<div>
+					<p
+						class="mb-4 text-xs font-medium tracking-[0.18em] text-neutral-500 uppercase"
+					>
+						Conflicts
+					</p>
+					<h2
+						class="text-4xl font-semibold tracking-tight text-balance text-neutral-900 sm:text-5xl"
+					>
+						Catch collisions in the
+						<span
+							style="font-family: var(--font-serif);"
+							class="font-normal italic"
+						>
+							five minutes
+						</span>
+						they're being created.
+					</h2>
+					<p
+						class="mt-6 text-lg leading-relaxed text-neutral-600"
+					>
+						When two of you start editing files about to
+						collide, both cards flag it. No more
+						<em class="text-neutral-900">"oh, you were on
+							that?"</em> the morning after.
+					</p>
+				</div>
+				<div
+					class="rounded-2xl border border-neutral-200 bg-gradient-to-br from-neutral-50 to-white p-8 lg:order-last"
+				>
+					<div class="space-y-2 font-mono text-sm text-neutral-700">
+						<div class="flex items-center gap-3">
+							<span
+								class="inline-block size-2 rounded-full bg-amber-500"
+							></span>
+							<span
+								>jamie ·
+								<span class="text-neutral-500"
+									>apps/server/src/auth.ts</span
+								></span
+							>
+						</div>
+						<div class="flex items-center gap-3">
+							<span
+								class="inline-block size-2 rounded-full bg-amber-500"
+							></span>
+							<span
+								>alex ·
+								<span class="text-neutral-500"
+									>apps/server/src/auth.ts</span
+								></span
+							>
+						</div>
+						<div
+							class="mt-3 ml-5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+						>
+							same file, different branches — talk before
+							you push
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<section
+			class="mx-auto max-w-3xl px-6 pb-24 text-center sm:pb-32"
+		>
+			<h2
+				class="text-4xl font-semibold tracking-tight text-balance text-neutral-900 sm:text-5xl"
+			>
+				And we left the chat
+				<span
+					style="font-family: var(--font-serif);"
+					class="font-normal italic"
+				>
+					out
+				</span>
+				.
+			</h2>
+			<p
+				class="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-neutral-600"
+			>
+				You already have enough messaging apps. Slashtalk is
+				presence — the awareness layer. You ping the people, you
+				don't ping the dock.
+			</p>
+		</section>
+
+		<section class="mx-auto max-w-6xl px-6 pb-24 sm:pb-32">
+			<div
+				class="rounded-3xl bg-neutral-900 px-8 py-16 text-center sm:px-16 sm:py-24"
+			>
+				<h2
+					class="text-4xl font-semibold tracking-tighter text-balance text-white sm:text-6xl"
+				>
+					Ship more.
+					<br />
+					<span
+						style="font-family: var(--font-serif);"
+						class="font-normal text-neutral-400 italic"
+					>
+						Interrupt less.
+					</span>
+				</h2>
+				<div
+					class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
+				>
+					<button
+						type="button"
+						data-download
+						class="inline-flex items-center gap-2.5 rounded-full bg-white px-7 py-3.5 text-base font-medium text-neutral-900 transition hover:bg-neutral-100"
+					>
+						<svg
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							width="18"
+							height="18"
+							aria-hidden="true"
+						>
+							<path
+								d="M16.365 1.43c0 1.14-.46 2.235-1.21 3.034-.808.86-2.121 1.527-3.207 1.443-.142-1.078.452-2.21 1.18-2.92.815-.79 2.21-1.398 3.237-1.557zm3.926 17.14c-.612 1.345-.905 1.946-1.694 3.137-1.103 1.661-2.66 3.731-4.59 3.748-1.715.016-2.156-1.122-4.485-1.107-2.328.014-2.812 1.13-4.527 1.114-1.93-.018-3.404-1.882-4.508-3.543-3.085-4.65-3.41-10.106-1.506-13.005 1.353-2.06 3.488-3.265 5.495-3.265 2.043 0 3.328 1.122 5.022 1.122 1.643 0 2.643-1.124 5.014-1.124 1.789 0 3.685.974 5.034 2.66-4.426 2.42-3.703 8.747.745 10.263z"
+							></path>
+						</svg>
+						Download for macOS
+					</button>
+					<a
+						href="/blog"
+						class="text-base font-medium text-neutral-300 transition hover:text-white"
+					>
+						Read the story →
+					</a>
+				</div>
+				<p class="mt-5 text-sm text-neutral-500">
+					Free · macOS 13+
+				</p>
+			</div>
+		</section>
+
+		<footer
+			class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 border-t border-neutral-200 px-6 py-8 text-sm text-neutral-500 sm:flex-row"
+		>
+			<div>
+				Slashtalk — from <a
+					href="https://x.com/TownsLabs"
+					class="text-neutral-700 underline decoration-neutral-300 underline-offset-4 transition hover:decoration-neutral-700"
+					>Towns Labs</a
+				>
+			</div>
+			<div class="flex items-center gap-6">
+				<a href="/blog" class="transition hover:text-neutral-900"
+					>Blog</a
+				>
+				<a
+					href="https://github.com/HereNotThere/slashtalk"
+					class="transition hover:text-neutral-900">GitHub</a
+				>
+				<a
+					href="https://x.com/TownsLabs"
+					class="transition hover:text-neutral-900">Twitter</a
+				>
+			</div>
+		</footer>
+	</div>
+</Layout>
+
+<script>
+	document
+		.querySelectorAll<HTMLButtonElement>('[data-download]')
+		.forEach((button) => {
+			button.addEventListener('click', () => {
+				console.log('[slashtalk] Download for macOS clicked');
+			});
+		});
+</script>

@@ -112,9 +112,17 @@ Background LLM scheduler that produces session insights (title/description, roll
 
 Static-file serving for the installable browser app and the public blog.
 
-- **Files:** `web/routes.ts` serves `apps/web/dist`; `web/blog-routes.ts` serves `apps/blog/dist`.
+- **Files:** `web/routes.ts` serves `apps/web/dist`; `web/blog-routes.ts` serves `apps/blog/dist`. `web/shared.ts` holds the path sanitization, MIME map, and `fileResponse` reused by every static handler (including `landing/`).
 - **Routes:** `GET /app`, `GET /app/*`, `GET /blog`, `GET /blog/*`.
-- **Contract:** `/app/*` shares the server origin with `/api/*`, `/auth/*`, and `/ws` so browser auth can use httpOnly cookies and same-origin `fetch(..., { credentials: "include" })`. `/blog/*` is the public Astro marketing site (no auth) — its build base must match the mount path (see [`apps/blog/astro.config.mjs`](apps/blog/astro.config.mjs)).
+- **Contract:** `/app/*` shares the server origin with `/api/*`, `/auth/*`, and `/ws` so browser auth can use httpOnly cookies and same-origin `fetch(..., { credentials: "include" })`. `/blog/*` is the public Astro blog (no auth) — its build base must match the mount path (see [`apps/blog/astro.config.mjs`](apps/blog/astro.config.mjs)).
+
+### `landing`
+
+Static-file serving for the marketing homepage.
+
+- **Files:** `landing/routes.ts` serves `apps/landing/dist`. Reuses `web/shared.ts` for path sanitization and MIME mapping.
+- **Routes:** `GET /`, `GET /_astro/*`, `GET /favicon.{svg,ico}`, `GET /screenshot-{dock,card,ask}.png`. Mounted last so it never shadows API or app prefixes.
+- **Contract:** Public, no auth. If `apps/landing/dist/` is absent the server returns 503 with a build hint instead of crashing.
 
 ## Desktop architecture (`apps/desktop/src/`)
 
@@ -148,9 +156,13 @@ Tailwind v4 via single shared `tailwind.css`.
 
 Installable Vite + React PWA served by `apps/server` under `/app/*`. It renders the server-backed presence/feed surface with same-origin `/api/*` calls and browser cookies. It is read/control plane only: local ingest, heartbeats, device repo paths, MCP proxy installation, local delegated agents, and local Spotify reads remain desktop-only.
 
+## Landing (`apps/landing/`)
+
+Public Astro static homepage (no auth) served by `apps/server` at `/`. Contains the marketing pitch and the macOS download CTA; the static `dist/` output is served through the same handler family as the PWA and blog. See [`apps/landing/README.md`](apps/landing/README.md).
+
 ## Blog (`apps/blog/`)
 
-Public Astro static site (no auth) served by `apps/server` under `/blog/*`. Contains marketing copy and long-form posts. The Astro build is configured with `base: '/blog'` so generated asset paths match the mount; the server serves the static `dist/` output through the same handler family as the PWA. See [`apps/blog/README.md`](apps/blog/README.md).
+Public Astro static site (no auth) served by `apps/server` under `/blog/*`. Contains long-form posts. The Astro build is configured with `base: '/blog'` so generated asset paths match the mount; the server serves the static `dist/` output through the same handler family as the PWA. See [`apps/blog/README.md`](apps/blog/README.md).
 
 ## MCP surface
 
@@ -181,6 +193,7 @@ Single file (`index.ts`) exporting types + runtime const objects (`SessionState`
 - **Add a database table** → [`apps/server/AGENTS.md`](apps/server/AGENTS.md#adding-a-database-column-or-table)
 - **Add a BrowserWindow or IPC channel** → [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md)
 - **Add a web PWA route or service worker behavior** → [`apps/web/AGENTS.md`](apps/web/AGENTS.md)
+- **Add or edit the landing page** → [`apps/landing/README.md`](apps/landing/README.md)
 - **Add or edit a blog page** → [`apps/blog/README.md`](apps/blog/README.md)
 - **Add a shared type** → [`packages/shared/AGENTS.md`](packages/shared/AGENTS.md#adding-a-new-type)
 - **Add a WebSocket message type** → rules in [`apps/server/AGENTS.md`](apps/server/AGENTS.md) + consumer in [`apps/desktop/src/main/ws.ts`](apps/desktop/src/main/ws.ts).

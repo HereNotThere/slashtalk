@@ -58,12 +58,20 @@ export const READ_ONLY_ALLOWLIST: readonly string[] = [
   "Bash(bun run typecheck)",
   "Bash(bun run test)",
   // GitHub remote (authoritative for PR/CI state — server's pull_requests
-  // table is best-effort and lags behind).
-  "Bash(gh pr:*)",
-  "Bash(gh run:*)",
-  "Bash(gh issue:*)",
+  // table is best-effort and lags behind). `gh api` is intentionally NOT on
+  // the list: it's a raw escape hatch to any REST/GraphQL endpoint, including
+  // POST/PUT/PATCH/DELETE (merge PRs, delete branches, …) — that breaks the
+  // read-only contract.
+  "Bash(gh pr view:*)",
+  "Bash(gh pr list:*)",
+  "Bash(gh pr diff:*)",
+  "Bash(gh pr checks:*)",
+  "Bash(gh pr status:*)",
+  "Bash(gh run view:*)",
+  "Bash(gh run list:*)",
+  "Bash(gh issue view:*)",
+  "Bash(gh issue list:*)",
   "Bash(gh repo view:*)",
-  "Bash(gh api:*)",
 ];
 
 /** Defense in depth: even if a future allowlist edit accidentally permits

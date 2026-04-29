@@ -301,6 +301,8 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     setFollowUp("");
     setHistoryOpen(false);
     setLoading(false);
+    setDelegateRun(null);
+    setRepoPicker(null);
     if (seed.kind === "message") {
       const initial: ChatMessage[] = [{ role: "user", content: seed.message }];
       setMessages(initial);
@@ -335,8 +337,14 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
   }, []);
 
   async function runDelegated(req: DelegatedChatRequest): Promise<void> {
+    // Same staleness contract as ask(): if the user switches threads or
+    // starts a new chat mid-run, drop the result silently. The placeholder
+    // row is already persisted server-side, so the answer isn't lost — it
+    // just doesn't pollute the new conversation.
+    const myToken = askTokenRef.current;
     setDelegateRun({ messageId: req.messageId, statusLine: "Investigating…" });
     const res = await window.chatheads.runDelegatedChat(req);
+    if (askTokenRef.current !== myToken) return;
     if (res.kind === "needs-repo") {
       setDelegateRun(null);
       setRepoPicker({ candidates: res.candidates, pendingReq: req });
@@ -448,6 +456,8 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     setError(null);
     setLoading(false);
     setHistoryOpen(false);
+    setDelegateRun(null);
+    setRepoPicker(null);
   }
 
   function startNewChat(): void {
@@ -458,6 +468,8 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     setFollowUp("");
     setLoading(false);
     setHistoryOpen(false);
+    setDelegateRun(null);
+    setRepoPicker(null);
   }
 
   return (

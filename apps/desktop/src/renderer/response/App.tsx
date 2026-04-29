@@ -444,11 +444,13 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
     }
   }
 
-  // Treated as "busy" for input gating: an in-flight delegation has already
-  // cleared `loading` (ask's finally fired before runDelegated returned),
-  // but a follow-up here would bump askTokenRef and silently drop the
-  // delegation answer — leaving "Looking deeper…" stranded forever.
-  const inputBusy = loading || delegateRun !== null;
+  // Treated as "busy" for input gating. `loading` covers ask() in-flight,
+  // but a delegation that's already returned to the renderer (delegateRun)
+  // or stalled waiting for a repo pick (repoPicker) leaves loading=false
+  // while a follow-up would still bump askTokenRef and either strand the
+  // placeholder ("Looking deeper…") or fork two delegations atop one stale
+  // repo picker.
+  const inputBusy = loading || delegateRun !== null || repoPicker !== null;
 
   function handleFollowUpSend(): void {
     const trimmed = followUp.trim();

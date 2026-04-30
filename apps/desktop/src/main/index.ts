@@ -1,5 +1,4 @@
 import { app, BrowserWindow, ipcMain, globalShortcut } from "electron";
-import type { DashboardScope } from "@slashtalk/shared";
 import type {
   ChatHead,
   McpInstallMode,
@@ -23,15 +22,12 @@ import {
   broadcastRailCollapseInactive,
   broadcastRailPinned,
   broadcastRailSessionOnlyMode,
-  broadcastDashboardScope,
   broadcastShowActivityTimestamps,
   configureRailState,
-  getDashboardScope,
   getRailCollapseInactive,
   getRailPinned,
   getRailSessionOnlyMode,
   getShowActivityTimestamps,
-  setDashboardScope,
   setRailCollapseInactive,
   setRailPinned,
   setRailSessionOnlyMode,
@@ -202,13 +198,6 @@ ipcMain.handle("rail:getShowActivityTimestamps", (): boolean => getShowActivityT
 ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
   setShowActivityTimestamps(shown);
   broadcastShowActivityTimestamps();
-});
-
-ipcMain.handle("rail:getDashboardScope", (): DashboardScope => getDashboardScope());
-ipcMain.handle("rail:setDashboardScope", (_e, scope: DashboardScope): void => {
-  if (!setDashboardScope(scope)) return;
-  info.onDashboardScopeChanged();
-  broadcastDashboardScope();
 });
 
 ipcMain.handle("theme:getMode", (): ThemeMode => getThemeMode());

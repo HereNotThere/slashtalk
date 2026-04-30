@@ -18,7 +18,6 @@ import type {
   ChatAskResponse,
   ChatHistoryResponse,
   ChatMessage,
-  DashboardScope,
   FeedSessionSnapshot,
   FeedUser,
   IngestResponse,
@@ -709,26 +708,20 @@ export function pushSelfPrs(prs: IngestSelfPrEntry[]): Promise<IngestSelfPrsResp
   });
 }
 
-export function fetchUserStandup(login: string, scope: DashboardScope): Promise<StandupResponse> {
-  const qs = new URLSearchParams({ scope });
-  return jsonFetch<StandupResponse>(`/api/users/${encodeURIComponent(login)}/standup?${qs}`, {
+export function fetchUserStandup(login: string): Promise<StandupResponse> {
+  return jsonFetch<StandupResponse>(`/api/users/${encodeURIComponent(login)}/standup`, {
     method: "GET",
   });
 }
 
 /** Server-side PRs for peer user-cards (self uses local `gh`, see ghPrs.ts). */
-export function fetchUserPrs(login: string, scope: DashboardScope): Promise<UserPrsResponse> {
-  const qs = new URLSearchParams({ scope });
-  return jsonFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs?${qs}`, {
+export function fetchUserPrs(login: string): Promise<UserPrsResponse> {
+  return jsonFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs`, {
     method: "GET",
   });
 }
 
-export function fetchProjectOverview(
-  repoFullName: string,
-  scope: DashboardScope,
-): Promise<ProjectOverviewResponse> {
-  const qs = new URLSearchParams({ scope });
+export function fetchProjectOverview(repoFullName: string): Promise<ProjectOverviewResponse> {
   // repoFullName splits at the LAST slash — owner can't contain "/", but name
   // can theoretically (GitHub doesn't allow it but be defensive).
   const slash = repoFullName.indexOf("/");
@@ -736,7 +729,7 @@ export function fetchProjectOverview(
   const owner = repoFullName.slice(0, slash);
   const name = repoFullName.slice(slash + 1);
   return jsonFetch<ProjectOverviewResponse>(
-    `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/overview?${qs}`,
+    `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/overview`,
     { method: "GET" },
   );
 }

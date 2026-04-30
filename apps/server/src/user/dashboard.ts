@@ -1,16 +1,16 @@
 // /api/users/:login/prs and /api/users/:login/standup — surfaces backing the
-// desktop's info-card hierarchy (Now / Today / PRs). One endpoint pair handles
-// both self and peer reads; access is gated by `user_repos` overlap between
-// caller and target (the same gate as /api/users/:login/questions).
+// desktop's info-card hierarchy (Now / Past 24h / PRs). One endpoint pair
+// handles both self and peer reads; access is gated by `user_repos` overlap
+// between caller and target (the same gate as /api/users/:login/questions).
 //
 // Standup is a Claude-composed blurb biased toward shipped code over WIP — the
 // "Now" section already shows the live session, so the standup deliberately
 // emphasises merged/closed PRs and wrapped sessions, not stale work-in-progress.
 //
-// Cache key is (callerId, targetId, scope) so peers viewing the same target
-// share the slot for the typical case where everyone is on the same team
-// (identical visible-repo overlap), without leaking PR titles from repos a
-// caller can't see.
+// Window is always now − 24h. Cache key is (callerId, targetId) so peers
+// viewing the same target share the slot for the typical case where everyone
+// is on the same team (identical visible-repo overlap), without leaking PR
+// titles from repos a caller can't see.
 
 import { Elysia, t } from "elysia";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
@@ -26,9 +26,6 @@ import { windowStart } from "../util/time-window";
 import { loadInsightsForSessions } from "../sessions/snapshot";
 import {
   shortRepoName,
-  DASHBOARD_SCOPES,
-  parseDashboardScope,
-  type DashboardScope,
   type StandupResponse,
   type UserPr,
   type UserPrsResponse,
@@ -110,25 +107,18 @@ interface DashboardDeps {
 
 const standupCache = new TtlCache<string, StandupResponse>(STANDUP_CACHE_TTL_MS);
 
-function cacheKey(callerId: number, targetId: number, scope: DashboardScope): string {
-  return `${callerId}:${targetId}:${scope}`;
-}
-
-/** Drop the user's *self-view* standup cache entries across all scopes.
- *  Called after the desktop pushes new self-PRs so the next hover composes
- *  a fresh blurb instead of waiting STANDUP_CACHE_TTL_MS. We don't bother
- *  invalidating peer-viewing-self entries — peers already accept some lag,
- *  and tracking them would mean iterating the cache. */
+/** Drop the user's *self-view* standup cache entry. Called after the desktop
+ *  pushes new self-PRs so the next hover composes a fresh blurb instead of
+ *  waiting STANDUP_CACHE_TTL_MS. We don't bother invalidating
+ *  peer-viewing-self entries — peers already accept some lag, and tracking
+ *  them would mean iterating the cache. */
 export function invalidateSelfStandupCache(userId: number): void {
-  for (const scope of DASHBOARD_SCOPES) {
-    standupCache.delete(cacheKey(userId, userId, scope));
-  }
+  standupCache.delete(`${userId}:${userId}`);
 }
 
 interface ResolvedTarget {
   id: number;
   githubLogin: string;
-  timezone: string | null;
   visibleRepoIds: number[];
 }
 
@@ -147,7 +137,6 @@ async function resolveTarget(
     .select({
       id: users.id,
       githubLogin: users.githubLogin,
-      timezone: users.timezone,
     })
     .from(users)
     .where(eq(users.githubLogin, login))
@@ -188,30 +177,26 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
   new Elysia({ name: "users/dashboard" })
     .use(jwtAuth)
 
-    // GET /api/users/:login/prs?scope=today|past24h — PRs the target user
-    // authored that were updated inside the window, scoped to repos visible
-    // to the caller (caller ∩ target).
+    // GET /api/users/:login/prs — PRs the target user authored that were
+    // updated inside the past-24h window, scoped to repos visible to the
+    // caller (caller ∩ target).
     .get(
       "/api/users/:login/prs",
-      async ({ user, params, query, set }): Promise<UserPrsResponse | { error: string }> => {
-        const scope = parseDashboardScope(query.scope) ?? "today";
+      async ({ user, params, set }): Promise<UserPrsResponse | { error: string }> => {
         const resolved = await resolveTarget(db, user, params.login);
         if ("error" in resolved) {
           set.status = resolved.error === "not_found" ? 404 : 403;
           return { error: resolved.error };
         }
 
-        const since = windowStart(scope, resolved.timezone ?? null);
-        const sinceIso = since.toISOString();
-
         // `noClaimedRepos` lets the renderer prompt the user to connect a repo
         // instead of showing a misleading empty list. Only reachable on the
         // self path — peers with empty overlap already 403 in resolveTarget.
-        const timezone = resolved.timezone ?? null;
         if (resolved.visibleRepoIds.length === 0) {
-          return { prs: [], scope, since: sinceIso, timezone, noClaimedRepos: true };
+          return { prs: [], noClaimedRepos: true };
         }
 
+        const since = windowStart();
         const rows = await db
           .select({
             number: pullRequests.number,
@@ -240,44 +225,34 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
           repoFullName: r.repoFullName,
           updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
         }));
-        return { prs, scope, since: sinceIso, timezone };
+        return { prs };
       },
       {
         params: t.Object({ login: t.String() }),
-        query: t.Object({ scope: t.Optional(t.String()) }),
       },
     )
 
-    // GET /api/users/:login/standup?scope=today|past24h — Claude-composed
-    // 2-4 sentence blurb of what the target shipped or wrapped up. Same
-    // visibility rules as /prs above. Cached per (caller, target, scope) for
-    // STANDUP_CACHE_TTL_MS so repeated info-card hovers don't burn budget.
+    // GET /api/users/:login/standup — Claude-composed 2-4 sentence blurb of
+    // what the target shipped or wrapped up in the past 24h. Same visibility
+    // rules as /prs above. Cached per (caller, target) for STANDUP_CACHE_TTL_MS
+    // so repeated info-card hovers don't burn budget.
     .get(
       "/api/users/:login/standup",
-      async ({ user, params, query, set }): Promise<StandupResponse | { error: string }> => {
-        const scope = parseDashboardScope(query.scope) ?? "today";
+      async ({ user, params, set }): Promise<StandupResponse | { error: string }> => {
         const resolved = await resolveTarget(db, user, params.login);
         if ("error" in resolved) {
           set.status = resolved.error === "not_found" ? 404 : 403;
           return { error: resolved.error };
         }
 
-        const since = windowStart(scope, resolved.timezone ?? null);
-        const sinceIso = since.toISOString();
-        const key = cacheKey(user.id, resolved.id, scope);
+        const key = `${user.id}:${resolved.id}`;
 
         // The no-repos check runs *before* cache lookup so unclaiming all repos
         // doesn't keep serving a pre-unclaim summary for up to TTL. Drop any
         // stale entry too so a re-claim doesn't resurrect it.
         if (resolved.visibleRepoIds.length === 0) {
           standupCache.delete(key);
-          return {
-            summary: null,
-            scope,
-            since: sinceIso,
-            timezone: resolved.timezone ?? null,
-            noClaimedRepos: true,
-          };
+          return { summary: null, noClaimedRepos: true };
         }
 
         const hit = standupCache.get(key);
@@ -289,8 +264,7 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
             redis: deps.redis,
             caller: { id: user.id },
             target: resolved,
-            since,
-            scope,
+            since: windowStart(),
           });
           standupCache.set(key, body);
           return body;
@@ -306,7 +280,6 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
       },
       {
         params: t.Object({ login: t.String() }),
-        query: t.Object({ scope: t.Optional(t.String()) }),
       },
     );
 
@@ -316,17 +289,11 @@ interface ComposeArgs {
   caller: { id: number };
   target: ResolvedTarget;
   since: Date;
-  scope: DashboardScope;
 }
 
 async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
-  const { db, redis, caller, target, since, scope } = args;
+  const { db, redis, caller, target, since } = args;
   const sinceIso = since.toISOString();
-  const timezone = target.timezone ?? null;
-
-  if (target.visibleRepoIds.length === 0) {
-    return { summary: null, scope, since: sinceIso, timezone, noClaimedRepos: true };
-  }
 
   // PRs and sessions are independent — fetch in parallel. The session-insights
   // batch must follow because it keys on session IDs.
@@ -381,7 +348,7 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
   // Bail without LLM call when there's nothing to summarize. Saves budget
   // and gives the renderer a clean "hide the section" signal.
   if (prRows.length === 0 && sessionRows.length === 0) {
-    return { summary: null, scope, since: sinceIso, timezone };
+    return { summary: null };
   }
 
   const insightsBySessionId = await loadInsightsForSessions(
@@ -390,7 +357,6 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
   );
 
   const prompt = buildStandupPrompt({
-    scope,
     prs: prRows.map((r) => ({
       number: r.number,
       title: r.title,
@@ -422,11 +388,10 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
   });
 
   const summary = result.output.summary?.trim() || null;
-  return { summary, scope, since: sinceIso, timezone };
+  return { summary };
 }
 
 interface StandupPromptArgs {
-  scope: DashboardScope;
   prs: Array<{
     number: number;
     title: string;
@@ -445,7 +410,7 @@ interface StandupPromptArgs {
 
 function buildStandupPrompt(args: StandupPromptArgs): string {
   const parts: string[] = [];
-  parts.push(`window: ${args.scope === "today" ? "today (target's local day)" : "past 24 hours"}`);
+  parts.push("window: past 24 hours");
 
   if (args.prs.length > 0) {
     const lines = args.prs.map((p) => {

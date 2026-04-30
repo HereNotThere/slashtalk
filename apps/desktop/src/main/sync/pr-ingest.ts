@@ -6,14 +6,13 @@
 // sees "Quiet window" despite having open PRs.
 //
 // Flow per tick:
-//   gh CLI search (caller's authored PRs, scope=today)
+//   gh CLI search (caller's authored PRs, past 24h)
 //     → POST /v1/me/prs (server upserts into pull_requests)
 //
 // Soft-fail at every step: gh missing/unauthed → no-op; server 4xx/5xx →
 // log + retry on next tick. Mirrors the posture of windows/info.ts's
 // hover-driven path so the two stay consistent.
 
-import type { DashboardScope } from "@slashtalk/shared";
 import * as backend from "../backend";
 import { fetchGhUserPrs, type GhPr } from "../ghPrs";
 
@@ -21,8 +20,6 @@ import { fetchGhUserPrs, type GhPr } from "../ghPrs";
 // hover after a tick lands on a fresh blurb. Shorter and we'd burn the
 // gh CLI for no user-visible win; longer and the empty-card window grows.
 const POLL_MS = 5 * 60 * 1000;
-
-const SCOPE: DashboardScope = "today";
 
 let running = false;
 let timer: NodeJS.Timeout | null = null;
@@ -59,7 +56,7 @@ async function refresh(): Promise<void> {
 
   let prs;
   try {
-    const result = await fetchGhUserPrs(login, SCOPE);
+    const result = await fetchGhUserPrs(login);
     if (result.ghStatus !== "ready") return;
     prs = result.prs;
   } catch (err) {

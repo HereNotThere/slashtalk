@@ -103,7 +103,7 @@ export function UserCard({
               <Divider />
             </>
           ) : null}
-          <TodaySection dashboard={dashboard} />
+          <Past24hSection dashboard={dashboard} />
           <Divider />
           <PrsSection dashboard={dashboard} />
         </>
@@ -138,18 +138,18 @@ function NowSection({ session }: { session: FeedSessionSnapshot }): JSX.Element 
   );
 }
 
-function TodaySection({ dashboard }: { dashboard: DashboardState }): JSX.Element {
+function Past24hSection({ dashboard }: { dashboard: DashboardState }): JSX.Element {
   return (
     <section className="px-4 py-3">
-      <SectionLabel icon={<ClockIcon className="h-3.5 w-3.5" />} label="Today" />
+      <SectionLabel icon={<ClockIcon className="h-3.5 w-3.5" />} label="Past 24h" />
       {dashboard.kind === "loading" ? (
         <p className="m-0 text-sm text-subtle">Fetching…</p>
       ) : dashboard.kind === "error" ? (
-        <p className="m-0 text-sm text-subtle">Could not load today.</p>
+        <p className="m-0 text-sm text-subtle">Could not load.</p>
       ) : dashboard.standup ? (
         <Markdown>{dashboard.standup}</Markdown>
       ) : (
-        <p className="m-0 text-sm text-subtle">Nothing shipped yet today.</p>
+        <p className="m-0 text-sm text-subtle">Nothing shipped in the past 24h.</p>
       )}
     </section>
   );

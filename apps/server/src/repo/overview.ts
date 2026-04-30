@@ -12,11 +12,11 @@
 // Otherwise 403. This is the same posture as `core-beliefs #13` (`user_repos`
 // is the only authorization for cross-user reads).
 //
-// Cache strategy: keyed by (callerId, repoId, scope, prsHash). Computing
-// `prsHash` from the in-window PR set means a single PR update bumps the key
-// and the cache misses naturally — Theo's "recursive cache" idea collapsed to
-// one layer because re-running the PR query is cheap; only the LLM call is
-// worth caching. TTL still acts as a backstop.
+// Window is always now − 24h. Cache strategy: keyed by (callerId, repoId,
+// prsHash). Computing `prsHash` from the in-window PR set means a single PR
+// update bumps the key and the cache misses naturally — Theo's "recursive
+// cache" idea collapsed to one layer because re-running the PR query is
+// cheap; only the LLM call is worth caching. TTL still acts as a backstop.
 
 import { Elysia, t } from "elysia";
 import { and, desc, eq, gte } from "drizzle-orm";
@@ -32,8 +32,6 @@ import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
 import {
   shortRepoName,
-  parseDashboardScope,
-  type DashboardScope,
   type ProjectActivePerson,
   type ProjectBucket,
   type ProjectOverviewResponse,
@@ -117,8 +115,7 @@ export function hashPrs(prs: ProjectPr[]): string {
 export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
   new Elysia({ name: "repo/overview" }).use(jwtAuth).get(
     "/api/repos/:owner/:name/overview",
-    async ({ user, params, query, set }): Promise<ProjectOverviewResponse | { error: string }> => {
-      const scope = parseDashboardScope(query.scope) ?? "today";
+    async ({ user, params, set }): Promise<ProjectOverviewResponse | { error: string }> => {
       const fullName = `${params.owner}/${params.name}`;
 
       const [repo] = await db
@@ -131,21 +128,16 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
         return { error: "not_found" };
       }
 
-      // Access gate + caller timezone in one round-trip. Repos themselves
-      // don't have a tz, so we use the viewer's "today" — the project card
-      // is for the person looking at it, not the team's collective clock.
       const [access] = await db
-        .select({ timezone: users.timezone })
+        .select({ userId: userRepos.userId })
         .from(userRepos)
-        .innerJoin(users, eq(users.id, userRepos.userId))
         .where(and(eq(userRepos.userId, user.id), eq(userRepos.repoId, repo.id)))
         .limit(1);
       if (!access) {
         set.status = 403;
         return { error: "no_access" };
       }
-      const since = windowStart(scope, access.timezone ?? null);
-      const sinceIso = since.toISOString();
+      const since = windowStart();
 
       // Independent queries — fan out so the popover paints sooner.
       const [prs, active] = await Promise.all([
@@ -156,12 +148,12 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
       // Empty repo → skip the LLM, return shaped empty response. Saves
       // budget and gives the renderer a clean "nothing here" signal.
       if (prs.length === 0) {
-        return { pulse: null, buckets: [], prs, active, scope, since: sinceIso };
+        return { pulse: null, buckets: [], prs, active };
       }
 
       // Cache key folds in the PR fingerprint so a single PR change naturally
       // misses on the next request — see file header.
-      const key = `${user.id}:${repo.id}:${scope}:${hashPrs(prs)}`;
+      const key = `${user.id}:${repo.id}:${hashPrs(prs)}`;
       const hit = overviewCache.get(key);
       if (hit) {
         // The cached body has the LLM-derived pulse+buckets but stale active
@@ -175,15 +167,12 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
           callerId: user.id,
           fullName: repo.fullName,
           prs,
-          scope,
         });
         const body: ProjectOverviewResponse = {
           pulse: result.pulse,
           buckets: result.buckets,
           prs,
           active,
-          scope,
-          since: sinceIso,
         };
         overviewCache.set(key, body);
         return body;
@@ -199,7 +188,6 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
     },
     {
       params: t.Object({ owner: t.String(), name: t.String() }),
-      query: t.Object({ scope: t.Optional(t.String()) }),
     },
   );
 
@@ -307,15 +295,14 @@ interface ComposeArgs {
   callerId: number;
   fullName: string;
   prs: ProjectPr[];
-  scope: DashboardScope;
 }
 
 async function composeOverview(args: ComposeArgs): Promise<{
   pulse: string;
   buckets: ProjectBucket[];
 }> {
-  const { redis, callerId, fullName, prs, scope } = args;
-  const prompt = buildOverviewPrompt({ fullName, prs, scope });
+  const { redis, callerId, fullName, prs } = args;
+  const prompt = buildOverviewPrompt({ fullName, prs });
 
   // Budget against the caller (the viewer pays for what they open) — same
   // posture as the user-standup endpoint.
@@ -349,17 +336,15 @@ async function composeOverview(args: ComposeArgs): Promise<{
 interface OverviewPromptArgs {
   fullName: string;
   prs: ProjectPr[];
-  scope: DashboardScope;
 }
 
 function buildOverviewPrompt(args: OverviewPromptArgs): string {
-  const window = args.scope === "today" ? "today (caller's local day)" : "past 24 hours";
   const lines = args.prs.map(
     (p) => `- #${p.number} [${p.state}] @${p.authorLogin}: ${truncate(p.title, 160)}`,
   );
   return [
     `repo: ${args.fullName} (basename: ${shortRepoName(args.fullName)})`,
-    `window: ${window}`,
+    "window: past 24 hours",
     `active PRs (${args.prs.length}):`,
     lines.join("\n"),
   ].join("\n\n");

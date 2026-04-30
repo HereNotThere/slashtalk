@@ -3,9 +3,9 @@ import { BoltIcon, ChatBubbleLeftIcon, ClockIcon, FolderIcon } from "@heroicons/
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, TokenUsage, UserPr } from "@slashtalk/shared";
 import type { InfoDashboardData, InfoSession } from "../../shared/types";
-import { ClaudeIcon, OpenAIIcon, PrIcon } from "../shared/icons";
+import { ClaudeIcon, OpenAIIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
-import { PR_STATE_COLOR, PR_STATE_LABEL } from "../shared/pr-state";
+import { PrItem } from "../shared/PrItem";
 import { ScopeToggle } from "../shared/ScopeToggle";
 import { ShimmerText } from "../shared/ShimmerText";
 import { relativeTime } from "../shared/relativeTime";
@@ -376,46 +376,22 @@ function GhUnavailableNudge({
 
 function PrRow({ pr }: { pr: UserPr }): JSX.Element {
   const [editing, setEditing] = useState(false);
-  const openPr = (): void => {
-    void window.chatheads.openExternal(pr.url);
-  };
   return (
-    <div className="px-4 py-2.5 group hover:bg-surface-alt/60 transition-colors">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={openPr}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            openPr();
-          }
-        }}
-        className="flex items-start gap-2.5 cursor-pointer"
-      >
-        <PrIcon className={`w-4 h-4 mt-0.5 shrink-0 ${PR_STATE_COLOR[pr.state]}`} />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-fg leading-snug line-clamp-2 group-hover:underline decoration-divider underline-offset-2">
-            {pr.title}
-          </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle">
-            <span className={`font-medium ${PR_STATE_COLOR[pr.state]}`}>#{pr.number}</span>
-            <span aria-hidden>·</span>
-            <span>{PR_STATE_LABEL[pr.state]}</span>
-            <span aria-hidden>·</span>
-            <span>{relativeTime(pr.updatedAt)}</span>
-          </div>
-        </div>
-        <AskTrigger onClick={() => setEditing(true)} className="self-end -mb-0.5 -mr-1" />
-      </div>
+    <>
+      <PrItem
+        pr={pr}
+        trailing={<AskTrigger onClick={() => setEditing(true)} className="-mr-1" />}
+      />
       {editing && (
-        <AskInput
-          contextLabel={`About PR #${pr.number} — "${pr.title}" (${pr.url}):`}
-          placeholder={`Ask about PR #${pr.number}…`}
-          onClose={() => setEditing(false)}
-        />
+        <div className="px-4 pb-2">
+          <AskInput
+            contextLabel={`About PR #${pr.number} — "${pr.title}" (${pr.url}):`}
+            placeholder={`Ask about PR #${pr.number}…`}
+            onClose={() => setEditing(false)}
+          />
+        </div>
       )}
-    </div>
+    </>
   );
 }
 

@@ -403,7 +403,7 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 			dock.style.transition = "left 240ms cubic-bezier(.4,0,.2,1), top 240ms cubic-bezier(.4,0,.2,1)";
 			dock.style.right = "";
 			dock.style.bottom = "";
-			dock.style.transform = "";
+			dock.style.transform = "none";
 			dock.style.left = t.left + "px";
 			dock.style.top = t.top + "px";
 			dock.classList.remove("flex-col", "flex-row");
@@ -424,6 +424,13 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 			dockStartTop = r.top - sr.top;
 			dock.setPointerCapture(e.pointerId);
 			dock.style.transition = "none";
+			// Switch to pure pixel positioning — strip the initial Tailwind
+			// `left-1/2` + `-translate-x-1/2` so subsequent left/top inline
+			// styles aren't offset by a half-width translate.
+			dock.classList.remove("left-1/2", "-translate-x-1/2");
+			dock.style.transform = "none";
+			dock.style.left = dockStartLeft + "px";
+			dock.style.top = dockStartTop + "px";
 			hideCard();
 			if (hint) hint.style.opacity = "0";
 		}

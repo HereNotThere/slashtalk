@@ -51,12 +51,16 @@ export function App(): JSX.Element | null {
     return window.chatheads.backend.onTrackedReposChange(setTracked);
   }, []);
 
-  // If the window somehow ends up open while we have nothing to show
-  // (signed in + onboarded), close it so the tray popup is the only
-  // settings surface the user sees.
+  // Returning user (already onboarded, signing back in after a sign-out, or
+  // app launch with persisted auth): don't make them re-walk onboarding.
+  // Surface the tray popup so they have a visible UI, then close this
+  // window. openSettings() *before* close() — closing first races the
+  // ipcRenderer call against window teardown.
   const nothingToShow = auth.signedIn && onboardingDone;
   useEffect(() => {
-    if (nothingToShow) window.close();
+    if (!nothingToShow) return;
+    void window.chatheads.openSettings();
+    window.close();
   }, [nothingToShow]);
   if (nothingToShow) return null;
 

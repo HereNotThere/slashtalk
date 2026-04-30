@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
 import type { ChatHead, GhStatus, InfoDashboardData, InfoSession } from "../../shared/types";
-import type { ProjectOverviewResponse, UserPr } from "@slashtalk/shared";
+import type { ProjectOverviewResponse, StandupResponse, UserPr } from "@slashtalk/shared";
 import * as backend from "../backend";
 import * as localRepos from "../localRepos";
 import * as rail from "../rail";
@@ -586,27 +586,50 @@ async function fetchDashboardForLogin(
   const promise = (async (): Promise<InfoDashboardData> => {
     // Self → local gh (zero poller lag + push-back to server). Peer → server
     // endpoint. Both share the same past-24h rolling window.
-    const standupP = backend.fetchUserStandup(login);
-    const prsP: Promise<{ prs: UserPr[]; ghStatus: GhStatus }> = backend.isSelf(login)
-      ? fetchGhUserPrs(login).then(async (r) => {
-          // Soft-fail: network blip must not break the user-card.
-          if (r.prs.length > 0) {
-            void backend
-              .pushSelfPrs(r.prs)
-              .then((p) => {
-                if (p.upserted > 0) {
-                  console.log(
-                    `[info] pushed ${p.upserted} self PR(s) to server (${p.unknownRepos} unknown repo)`,
-                  );
-                }
-              })
-              .catch((err) => {
-                console.warn(`[info] pushSelfPrs failed:`, (err as Error).message);
-              });
+    let prsP: Promise<{ prs: UserPr[]; ghStatus: GhStatus }>;
+    let standupP: Promise<StandupResponse>;
+    if (backend.isSelf(login)) {
+      // Serialize gh-fetch → pushSelfPrs → fetchUserStandup so the server-side
+      // standup composer reads the freshly-upserted `pull_requests` rows. If
+      // we parallelized standup with the push (the previous shape), the
+      // standup query lands at the server before the upsert and the LLM
+      // writes "Quiet window — no shipped PRs." while the PR list right
+      // below it is non-empty. pushSelfPrs invalidates the standup cache on
+      // success, so the subsequent fetchUserStandup recomposes from fresh
+      // data instead of returning a pre-push cached blurb.
+      prsP = (async () => {
+        const r = await fetchGhUserPrs(login);
+        if (r.prs.length > 0) {
+          try {
+            const p = await backend.pushSelfPrs(r.prs);
+            if (p.upserted > 0) {
+              console.log(
+                `[info] pushed ${p.upserted} self PR(s) to server (${p.unknownRepos} unknown repo)`,
+              );
+            }
+          } catch (err) {
+            // Soft-fail: network blip must not break the user-card. Standup
+            // will compose from whatever the server already had — same shape
+            // as the previous fire-and-forget posture.
+            console.warn(`[info] pushSelfPrs failed:`, (err as Error).message);
           }
-          return { prs: r.prs, ghStatus: r.ghStatus };
-        })
-      : backend.fetchUserPrs(login).then((r) => ({ prs: r.prs, ghStatus: "ready" as const }));
+        }
+        return { prs: r.prs, ghStatus: r.ghStatus };
+      })();
+      // Settle prsP before fetching the standup. Resolved/rejected both flow
+      // into the same call — a prsP rejection (shouldn't happen;
+      // fetchGhUserPrs always resolves) shouldn't strand the standup.
+      standupP = prsP.then(
+        () => backend.fetchUserStandup(login),
+        () => backend.fetchUserStandup(login),
+      );
+    } else {
+      prsP = backend.fetchUserPrs(login).then((r) => ({
+        prs: r.prs,
+        ghStatus: "ready" as const,
+      }));
+      standupP = backend.fetchUserStandup(login);
+    }
     const [prsRes, standupRes] = await Promise.allSettled([prsP, standupP]);
     if (prsRes.status === "rejected") {
       console.warn(`[info] dashboard prs fetch failed login=${login}:`, prsRes.reason);

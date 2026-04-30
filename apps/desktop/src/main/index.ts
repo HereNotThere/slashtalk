@@ -75,6 +75,7 @@ import { registerAgents } from "./ipc/agents";
 import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
 import { registerChatDelegateIpc } from "./ipc/chatDelegate";
+import { configureUpdater, startUpdateChecks, stopUpdateChecks } from "./updater";
 
 // uncaughtException leaves the process in undefined state — exit so Electron
 // surfaces a crash dialog and the user gets a clean restart. A stray
@@ -428,6 +429,18 @@ configureRailVisibility({
   isSelfLive: () => rail.isSelfLive(),
   isChatVisible,
 });
+configureUpdater({
+  windows: () => [
+    overlay.getOverlayWindow(),
+    getMainWindow(),
+    getTrayPopup(),
+    info.getInfoWindow(),
+    getChatWindow(),
+    getResponseWindow(),
+  ],
+  getPromptWindow: () =>
+    getResponseWindow() ?? getMainWindow() ?? getTrayPopup() ?? info.getInfoWindow(),
+});
 
 app
   .whenReady()
@@ -465,6 +478,7 @@ app
     rail.start();
     selfSession.start();
     applyInitialSync();
+    startUpdateChecks();
 
     registerDebugShortcuts();
   })
@@ -481,6 +495,7 @@ app.on("before-quit", () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  stopUpdateChecks();
   void mcpProxy.stop();
 });
 

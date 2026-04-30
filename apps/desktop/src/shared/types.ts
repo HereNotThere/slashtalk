@@ -375,6 +375,49 @@ export type ResponseOpenPayload =
 
 export type ThemeMode = "system" | "light" | "dark";
 
+interface UpdateStateBase {
+  currentVersion: string;
+}
+
+export type UpdateState =
+  | (UpdateStateBase & {
+      kind: "disabled";
+      reason: string;
+    })
+  | (UpdateStateBase & {
+      kind: "idle";
+    })
+  | (UpdateStateBase & {
+      kind: "checking";
+    })
+  | (UpdateStateBase & {
+      kind: "available";
+      updateVersion: string;
+    })
+  | (UpdateStateBase & {
+      kind: "downloading";
+      updateVersion: string;
+      percent: number;
+      transferred: number;
+      total: number;
+      bytesPerSecond: number;
+    })
+  | (UpdateStateBase & {
+      kind: "downloaded";
+      updateVersion: string;
+      releaseDate?: string;
+      releaseName?: string;
+    })
+  | (UpdateStateBase & {
+      kind: "not-available";
+      checkedAt: number;
+    })
+  | (UpdateStateBase & {
+      kind: "error";
+      message: string;
+      checkedAt?: number;
+    });
+
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
 export interface ChatHeadsBridge {
@@ -489,6 +532,13 @@ export interface ChatHeadsBridge {
     getMode: () => Promise<ThemeMode>;
     setMode: (mode: ThemeMode) => Promise<void>;
     onModeChange: (cb: (mode: ThemeMode) => void) => Unsubscribe;
+  };
+
+  updates: {
+    getState: () => Promise<UpdateState>;
+    check: () => Promise<UpdateState>;
+    install: () => Promise<void>;
+    onState: (cb: (state: UpdateState) => void) => Unsubscribe;
   };
 
   setUserLocation: (payload: UserLocation) => Promise<void>;

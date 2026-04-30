@@ -65,7 +65,7 @@ jobs:
           printf '%s' "${{ secrets.APPLE_API_KEY_BASE64 }}" | base64 --decode > "$key_path"
           echo "path=$key_path" >> "$GITHUB_OUTPUT"
 
-      - name: Build & package DMG (signed + notarized)
+      - name: Build & package desktop app (signed + notarized)
         working-directory: apps/desktop
         run: bun run dist:mac
         env:
@@ -75,12 +75,19 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
+      - name: Verify auto-update metadata
+        run: test -f apps/desktop/dist/latest-mac.yml
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "@slashtalk/electron@${{ steps.ver.outputs.version }}"
           name: "Slashtalk Desktop ${{ steps.ver.outputs.version }}"
           generate_release_notes: true
-          files: apps/desktop/dist/Slashtalk-mac-*.dmg
+          files: |
+            apps/desktop/dist/Slashtalk-mac-*.dmg
+            apps/desktop/dist/Slashtalk-mac-*.zip
+            apps/desktop/dist/Slashtalk-mac-*.blockmap
+            apps/desktop/dist/latest-mac.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,9 +3,14 @@
  * use `@heroicons/react`. See `docs/design.md` §7.
  */
 
-/** Slashtalk app mark — three white dots on a green-gradient squircle.
- *  Mirrors `apps/desktop/build/icon.png` so the in-app brand surface
- *  (sign-in, onboarding) matches the macOS app/dock/Finder icon. */
+/** Slashtalk app mark — three white dots on a green-gradient rounded
+ *  square. Full-bleed with generous dot spacing so it stays legible at
+ *  small UI sizes (sign-in/onboarding header, tray-popup header). The
+ *  macOS app icon is a squircle variant that lives at
+ *  `apps/desktop/build/icon.png`; this in-app mark intentionally diverges
+ *  to render crisply at 32–56px where the squircle's inset padding made
+ *  the dots crowd and the gradient mute. Color stops include a
+ *  `display-p3` fallback so the green stays vivid on wide-gamut displays. */
 export function SlashtalkLogo({ size = 44 }: { size?: number }): JSX.Element {
   return (
     <svg
@@ -17,21 +22,28 @@ export function SlashtalkLogo({ size = 44 }: { size?: number }): JSX.Element {
       aria-hidden
       className="shrink-0"
     >
-      <rect x="4" y="4" width="40" height="40" rx="10" fill="url(#slashtalkLogoGradient)" />
-      <circle cx="16.5" cy="14.5" r="4.5" fill="white" />
-      <circle cx="16.5" cy="24" r="4.5" fill="white" />
-      <circle cx="16.5" cy="33.5" r="4.5" fill="white" />
+      <rect width="48" height="48" rx="12" fill="url(#slashtalkLogoGradient)" />
+      <circle cx="14" cy="11" r="5" fill="white" />
+      <circle cx="14" cy="24" r="5" fill="white" />
+      <circle cx="14" cy="37" r="5" fill="white" />
       <defs>
         <linearGradient
           id="slashtalkLogoGradient"
           x1="24"
-          y1="4"
+          y1="0"
           x2="24"
-          y2="44"
+          y2="48"
           gradientUnits="userSpaceOnUse"
         >
-          <stop stopColor="#2ECF81" />
-          <stop offset="1" stopColor="#0BB764" />
+          <stop
+            stopColor="#2ECF81"
+            style={{ stopColor: "color(display-p3 0.1796 0.8111 0.5077)" }}
+          />
+          <stop
+            offset="1"
+            stopColor="#0BB764"
+            style={{ stopColor: "color(display-p3 0.0429 0.7179 0.3936)" }}
+          />
         </linearGradient>
       </defs>
     </svg>

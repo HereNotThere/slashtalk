@@ -19,23 +19,24 @@ const bubbles: Bubble[] = [
 ---
 
 <div
-	class="inline-flex items-center gap-2.5 rounded-full border border-white/60 bg-neutral-200/70 px-3 py-2 shadow-[0_10px_40px_-12px_rgba(0,0,0,0.25)] backdrop-blur-md"
+	class="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-white/60 bg-neutral-200/70 px-2 py-1.5 shadow-[0_10px_40px_-12px_rgba(0,0,0,0.25)] backdrop-blur-md [scrollbar-width:none] sm:gap-2.5 sm:overflow-visible sm:px-3 sm:py-2 [&::-webkit-scrollbar]:hidden"
 >
 	{
 		bubbles.map((b) => (
 			<button
 				type="button"
 				aria-label={`${b.name} — last active ${b.label || "recently"}`}
-				class={`relative inline-flex size-[52px] items-center justify-center rounded-full bg-neutral-300 ring-1 ring-black/5 transition hover:scale-110 ${b.self ? "outline outline-[3px] -outline-offset-[3px] outline-white/80" : ""}`}
+				class={`relative inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-neutral-300 ring-1 ring-black/5 transition hover:scale-110 sm:size-[52px] ${b.self ? "outline outline-[3px] -outline-offset-[3px] outline-white/80" : ""}`}
 			>
 				<img
 					src={b.avatar}
 					alt=""
-					loading="lazy"
+					decoding="async"
+					fetchpriority="high"
 					class="size-full rounded-full object-cover"
 				/>
 				{b.label && (
-					<span class="absolute -right-1 -bottom-1 rounded-full bg-neutral-900/90 px-1.5 py-0.5 text-[10px] leading-none font-medium text-white shadow-sm ring-2 ring-neutral-200/70">
+					<span class="absolute -right-1 -bottom-1 rounded-full bg-neutral-900/90 px-1 py-0.5 text-[8px] leading-none font-medium text-white shadow-sm ring-2 ring-neutral-200/70 sm:px-1.5 sm:text-[10px]">
 						{b.label}
 					</span>
 				)}
@@ -45,7 +46,7 @@ const bubbles: Bubble[] = [
 	<button
 		type="button"
 		aria-label="Search the dock"
-		class="inline-flex size-[52px] items-center justify-center rounded-full bg-neutral-300/80 text-neutral-700 transition hover:bg-neutral-300"
+		class="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-neutral-300/80 text-neutral-700 transition hover:bg-neutral-300 sm:size-[52px]"
 	>
 		<svg
 			viewBox="0 0 24 24"
@@ -54,9 +55,10 @@ const bubbles: Bubble[] = [
 			stroke-width="2"
 			stroke-linecap="round"
 			stroke-linejoin="round"
-			width="20"
-			height="20"
+			width="16"
+			height="16"
 			aria-hidden="true"
+			class="sm:[&]:size-5"
 		>
 			<circle cx="11" cy="11" r="7"></circle>
 			<path d="m20 20-3.5-3.5"></path>

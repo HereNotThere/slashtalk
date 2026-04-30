@@ -95,23 +95,27 @@ async function promptToInstall(version: string): Promise<void> {
   promptedVersion = version;
   showDownloadedNotification(version);
 
-  const parent = deps.getPromptWindow();
-  const options: Electron.MessageBoxOptions = {
-    type: "info",
-    title: "Slashtalk update ready",
-    message: "Restart Slashtalk to update?",
-    detail: `Version ${version} has downloaded and is ready to install.`,
-    buttons: ["Restart", "Later"],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-  };
-  const result =
-    parent && !parent.isDestroyed()
-      ? await dialog.showMessageBox(parent, options)
-      : await dialog.showMessageBox(options);
+  try {
+    const parent = deps.getPromptWindow();
+    const options: Electron.MessageBoxOptions = {
+      type: "info",
+      title: "Slashtalk update ready",
+      message: "Restart Slashtalk to update?",
+      detail: `Version ${version} has downloaded and is ready to install.`,
+      buttons: ["Restart", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    };
+    const result =
+      parent && !parent.isDestroyed()
+        ? await dialog.showMessageBox(parent, options)
+        : await dialog.showMessageBox(options);
 
-  if (result.response === 0) installUpdate();
+    if (result.response === 0) installUpdate();
+  } catch (err) {
+    console.warn("[updates] install prompt failed:", err);
+  }
 }
 
 function registerUpdaterEvents(): void {

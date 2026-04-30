@@ -42,11 +42,11 @@ export function UpdateStatus({ compact = false }: UpdateStatusProps): JSX.Elemen
     busy !== null;
   const body = (
     <>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-md">
         <div className="min-w-0">
           <div className="text-base font-medium">Updates</div>
           <div
-            className={`text-sm leading-snug mt-0.5 ${
+            className={`text-sm leading-snug mt-xs ${
               state?.kind === "error" ? "text-danger" : "text-subtle"
             }`}
           >
@@ -82,17 +82,33 @@ export function UpdateStatus({ compact = false }: UpdateStatusProps): JSX.Elemen
   );
 
   if (compact) {
-    return <div className="px-1 flex flex-col gap-2">{body}</div>;
+    return <div className="px-xs flex flex-col gap-sm">{body}</div>;
   }
 
-  return <section className="bg-surface rounded-2xl p-4 mt-4 flex flex-col gap-3">{body}</section>;
+  return (
+    <section className="bg-surface rounded-2xl p-lg mt-lg flex flex-col gap-md">{body}</section>
+  );
 }
 
 function useUpdateState(): UpdateState | null {
   const [state, setState] = useState<UpdateState | null>(null);
   useEffect(() => {
-    void window.chatheads.updates.getState().then(setState);
-    return window.chatheads.updates.onState(setState);
+    let alive = true;
+    void window.chatheads.updates
+      .getState()
+      .then((next) => {
+        if (alive) setState(next);
+      })
+      .catch(() => {
+        if (alive) setState(null);
+      });
+    const unsubscribe = window.chatheads.updates.onState((next) => {
+      if (alive) setState(next);
+    });
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
   }, []);
   return state;
 }

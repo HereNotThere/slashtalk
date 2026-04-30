@@ -645,9 +645,6 @@ function NoReposEmptyState(): JSX.Element {
       <p className="text-sm text-subtle leading-snug">
         Add a repo from the tray menu to start asking questions about what your team is shipping.
       </p>
-      <Button variant="primary" size="md" onClick={() => void window.chatheads.openMain()}>
-        Open settings
-      </Button>
     </div>
   );
 }

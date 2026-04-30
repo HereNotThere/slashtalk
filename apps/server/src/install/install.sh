@@ -3,7 +3,7 @@
 # Usage: curl <server>/install.sh | sh -s <setup_token>
 set -eu
 
-SERVER="${SLASHTALK_SERVER:-https://slashtalk.onrender.com}"
+SERVER="${SLASHTALK_SERVER:-https://slashtalk.com}"
 TOKEN="${1:-}"
 if [ -z "$TOKEN" ]; then
   echo "Usage: $0 <setup_token>"

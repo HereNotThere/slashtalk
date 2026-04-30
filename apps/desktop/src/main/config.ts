@@ -6,7 +6,7 @@
 // fallback chains. The local MCP proxy default is port-zero; persisted runtime
 // port reuse lives in localMcpProxyPort.ts, not env config.
 
-const DEFAULT_API_BASE_URL = "https://slashtalk.onrender.com";
+const DEFAULT_API_BASE_URL = "https://slashtalk.com";
 
 const BAKED_API_BASE_URL = import.meta.env.MAIN_VITE_SLASHTALK_API_URL as string | undefined;
 const BAKED_MCP_URL = import.meta.env.MAIN_VITE_SLASHTALK_MCP_URL as string | undefined;

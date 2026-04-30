@@ -63,8 +63,26 @@ export function ProjectDashboard({
             Ask about {shortRepoName(repoFullName)}…
           </button>
         )}
+        <FeedbackLink />
       </div>
     </div>
+  );
+}
+
+function FeedbackLink(): JSX.Element {
+  // mailto in Electron must go through openExternal — plain `<a href>` is
+  // either ignored or routed inside the BrowserWindow.
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        void window.chatheads.openExternal("mailto:info@hntlabs.com");
+      }}
+      className="mt-2 block w-full text-center text-[11px] text-subtle hover:text-fg transition-colors cursor-pointer"
+    >
+      Click here to send feedback
+    </button>
   );
 }
 

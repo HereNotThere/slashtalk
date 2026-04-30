@@ -71,18 +71,8 @@ function NoRepoSection(): JSX.Element {
     <div className="px-4 py-3">
       <p className="text-sm text-fg/90 leading-snug">No repos connected yet.</p>
       <p className="mt-1 text-xs text-subtle leading-snug">
-        Connect a repo to see your standup and PRs here.
+        Connect a repo from the tray menu to see your standup and PRs here.
       </p>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          void window.chatheads.openMain();
-        }}
-        className="mt-2.5 inline-flex items-center gap-1 px-2.5 h-7 rounded-full bg-primary text-primary-fg text-xs font-medium hover:bg-primary-hover transition-colors cursor-pointer"
-      >
-        Open settings
-      </button>
     </div>
   );
 }

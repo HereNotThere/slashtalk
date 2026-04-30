@@ -636,9 +636,12 @@ async function fetchDashboardForLogin(
     const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
     const ghStatus = prsRes.status === "fulfilled" ? prsRes.value.ghStatus : "ready";
     const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
-    // peer 403s short-circuit before reaching here; self gh-path has no claim concept.
+    // SLASHTALK_DEBUG_EMPTY=1 forces the no-repo CTA against a real account
+    // for renderer testing. Otherwise: peer 403s short-circuit upstream;
+    // self gh-path has no claim concept; only the standup endpoint surfaces it.
     const noClaimedRepos =
-      standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true;
+      process.env.SLASHTALK_DEBUG_EMPTY === "1" ||
+      (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
     const targetTimezone =
       backend.isSelf(login) || standupRes.status !== "fulfilled"
         ? null

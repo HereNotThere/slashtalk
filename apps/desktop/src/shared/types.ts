@@ -644,6 +644,11 @@ export interface ChatHeadsBridge {
   };
 
   debug: {
+    /** True when launched with `SLASHTALK_DEBUG_EMPTY=1`. Renderer surfaces
+     *  use this to force their no-tracked-repos empty state without making
+     *  the user actually unlink their repos. Read once at preload load —
+     *  changing the env var requires a relaunch. */
+    emptyState: boolean;
     railSnapshot: () => Promise<RailDebugSnapshot>;
     refreshRail: () => Promise<RailDebugSnapshot>;
     shuffleRail: () => Promise<void>;

@@ -250,6 +250,7 @@ const bridge: ChatHeadsBridge = {
   },
 
   debug: {
+    emptyState: process.env.SLASHTALK_DEBUG_EMPTY === "1",
     railSnapshot: () => ipcRenderer.invoke("debug:railSnapshot") as Promise<RailDebugSnapshot>,
     refreshRail: () => ipcRenderer.invoke("debug:refreshRail") as Promise<RailDebugSnapshot>,
     shuffleRail: () => ipcRenderer.invoke("debug:shuffleRail") as Promise<void>,

@@ -7,6 +7,11 @@ describe("isSafeExternalUrl", () => {
     expect(isSafeExternalUrl("https://github.com")).toBe(true);
   });
 
+  it("accepts mailto URLs", () => {
+    expect(isSafeExternalUrl("mailto:info@hntlabs.com")).toBe(true);
+    expect(isSafeExternalUrl("mailto:info@hntlabs.com?subject=Feedback")).toBe(true);
+  });
+
   it.each([
     ["http downgrade", "http://example.com"],
     ["file:// local read", "file:///etc/passwd"],

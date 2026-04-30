@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
-import type { ChatHead, InfoDashboardData, InfoSession } from "../../shared/types";
-import type { DashboardScope, ProjectOverviewResponse } from "@slashtalk/shared";
+import type { ChatHead, GhStatus, InfoDashboardData, InfoSession } from "../../shared/types";
+import type { DashboardScope, ProjectOverviewResponse, UserPr } from "@slashtalk/shared";
 import * as backend from "../backend";
 import * as localRepos from "../localRepos";
 import * as rail from "../rail";
@@ -592,10 +592,37 @@ async function fetchDashboardForLogin(
   // active in-flight. This prevents a superseded promise (bumped by a
   // forced refetch) from clobbering newer data.
   const promise = (async (): Promise<InfoDashboardData> => {
-    const [prsRes, standupRes] = await Promise.allSettled([
-      fetchGhUserPrs(login, DASHBOARD_PRS_SCOPE),
-      backend.fetchUserStandup(login, DASHBOARD_STANDUP_SCOPE),
-    ]);
+    // Self uses local `gh` (zero poller lag, lets us push fresh PRs back to
+    // the server). Peer uses the server endpoint so its PR list and the
+    // standup blurb are anchored to the same target-tz "today" — local gh
+    // would scope to the *caller's* midnight and produce a card whose two
+    // sections disagree across tz boundaries.
+    const standupP = backend.fetchUserStandup(login, DASHBOARD_STANDUP_SCOPE);
+    const prsP: Promise<{ prs: UserPr[]; ghStatus: GhStatus }> = backend.isSelf(login)
+      ? fetchGhUserPrs(login, DASHBOARD_PRS_SCOPE).then(async (r) => {
+          // Push gh-discovered self PRs back to the server so the standup
+          // composer (which reads `pull_requests`) sees them on the same day.
+          // Soft-fail: a network blip here must never break the user-card.
+          if (r.prs.length > 0) {
+            void backend
+              .pushSelfPrs(r.prs)
+              .then((p) => {
+                if (p.upserted > 0) {
+                  console.log(
+                    `[info] pushed ${p.upserted} self PR(s) to server (${p.unknownRepos} unknown repo)`,
+                  );
+                }
+              })
+              .catch((err) => {
+                console.warn(`[info] pushSelfPrs failed:`, (err as Error).message);
+              });
+          }
+          return { prs: r.prs, ghStatus: r.ghStatus };
+        })
+      : backend
+          .fetchUserPrs(login, DASHBOARD_PRS_SCOPE)
+          .then((r) => ({ prs: r.prs, ghStatus: "ready" as const }));
+    const [prsRes, standupRes] = await Promise.allSettled([prsP, standupP]);
     if (prsRes.status === "rejected") {
       console.warn(`[info] dashboard prs fetch failed login=${login}:`, prsRes.reason);
     }
@@ -605,29 +632,11 @@ async function fetchDashboardForLogin(
     const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
     const ghStatus = prsRes.status === "fulfilled" ? prsRes.value.ghStatus : "ready";
     const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
-    // `noClaimedRepos` now comes from the standup endpoint alone — gh-driven
-    // PR fetching has no notion of user_repos rows since it queries GitHub
-    // directly with the caller's token.
+    // `noClaimedRepos` comes from the standup endpoint — peer queries on
+    // /api/users/:login/prs return 403 (not the flag) when there's no
+    // user_repos overlap, and the self gh-driven path has no notion of it.
     const noClaimedRepos =
       standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true;
-    // When the dashboard target is self, push the gh-discovered PRs back to
-    // the server so the standup composer (server-side, queries
-    // `pull_requests`) can mention them on the same day they're opened.
-    // Soft-fail: a network blip here must never break the user-card.
-    if (prs.length > 0 && backend.isSelf(login)) {
-      backend
-        .pushSelfPrs(prs)
-        .then((r) => {
-          if (r.upserted > 0) {
-            console.log(
-              `[info] pushed ${r.upserted} self PR(s) to server (${r.unknownRepos} unknown repo)`,
-            );
-          }
-        })
-        .catch((err) => {
-          console.warn(`[info] pushSelfPrs failed:`, (err as Error).message);
-        });
-    }
     return { prs, standup, noClaimedRepos, ghStatus };
   })();
   dashboardInFlight.set(login, promise);

@@ -12,6 +12,7 @@
     "dev:web": "cd apps/web && bun run dev",
     "dev:blog": "cd apps/blog && bun run dev",
     "dev:landing": "cd apps/landing && bun run dev",
+    "build": "bun --filter @slashtalk/web build && bun --filter @slashtalk/landing build && bun --filter @slashtalk/blog build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",

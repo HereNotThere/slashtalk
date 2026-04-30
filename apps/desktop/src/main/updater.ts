@@ -61,7 +61,12 @@ async function checkForUpdates(): Promise<UpdateState> {
     setState(initialState());
     return state;
   }
-  if (state.kind === "checking" || state.kind === "downloading" || state.kind === "downloaded") {
+  if (
+    state.kind === "checking" ||
+    state.kind === "available" ||
+    state.kind === "downloading" ||
+    state.kind === "downloaded"
+  ) {
     return state;
   }
 

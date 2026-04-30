@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../shared/Button";
 import { SlashtalkLogo } from "../shared/icons";
 import { RailPreferences } from "../shared/RailPreferences";
+import { UpdateStatus } from "../shared/UpdateStatus";
 import { SignOutSection } from "./SignOutSection";
 import { SlashtalkSection } from "./SlashtalkSection";
 import type { BackendAuthState } from "../../shared/types";
@@ -58,6 +59,8 @@ export function App(): JSX.Element {
       <section className="bg-surface rounded-2xl p-4 mt-4 flex flex-col gap-1">
         <RailPreferences />
       </section>
+
+      <UpdateStatus />
 
       <SignOutSection />
     </>

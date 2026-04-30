@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ChatAskResponse, ChatMessage, SpotifyPresence } from "@slashtalk/shared";
+import type {
+  ChatAskResponse,
+  ChatMessage,
+  DashboardScope,
+  SpotifyPresence,
+} from "@slashtalk/shared";
 import type {
   AgentHistoryPage,
   ManagedAgentSessionRow,
@@ -25,6 +30,7 @@ import type {
   ResponseOpenPayload,
   TrackedRepo,
   Unsubscribe,
+  UpdateState,
   UpdateAgentInput,
 } from "../shared/types";
 
@@ -119,6 +125,11 @@ const bridge: ChatHeadsBridge = {
     setShowActivityTimestamps: (shown: boolean) =>
       ipcRenderer.invoke("rail:setShowActivityTimestamps", shown) as Promise<void>,
     onShowActivityTimestampsChange: (cb) => subscribe<boolean>("rail:showActivityTimestamps", cb),
+    getDashboardScope: () =>
+      ipcRenderer.invoke("rail:getDashboardScope") as Promise<DashboardScope>,
+    setDashboardScope: (scope: DashboardScope) =>
+      ipcRenderer.invoke("rail:setDashboardScope", scope) as Promise<void>,
+    onDashboardScopeChange: (cb) => subscribe<DashboardScope>("rail:dashboardScope", cb),
   },
 
   spotifyShare: {
@@ -135,6 +146,13 @@ const bridge: ChatHeadsBridge = {
     setMode: (mode: import("../shared/types").ThemeMode) =>
       ipcRenderer.invoke("theme:setMode", mode) as Promise<void>,
     onModeChange: (cb) => subscribe<import("../shared/types").ThemeMode>("theme:mode", cb),
+  },
+
+  updates: {
+    getState: () => ipcRenderer.invoke("updates:getState") as Promise<UpdateState>,
+    check: () => ipcRenderer.invoke("updates:check") as Promise<UpdateState>,
+    install: () => ipcRenderer.invoke("updates:install") as Promise<void>,
+    onState: (cb) => subscribe<UpdateState>("updates:state", cb),
   },
 
   setUserLocation: (payload) => ipcRenderer.invoke("user:setLocation", payload) as Promise<void>,
@@ -240,6 +258,7 @@ const bridge: ChatHeadsBridge = {
   },
 
   debug: {
+    emptyState: process.env.SLASHTALK_DEBUG_EMPTY === "1",
     railSnapshot: () => ipcRenderer.invoke("debug:railSnapshot") as Promise<RailDebugSnapshot>,
     refreshRail: () => ipcRenderer.invoke("debug:refreshRail") as Promise<RailDebugSnapshot>,
     shuffleRail: () => ipcRenderer.invoke("debug:shuffleRail") as Promise<void>,

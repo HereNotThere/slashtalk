@@ -1,4 +1,4 @@
-const CACHE_NAME = "slashtalk-app-shell-v1";
+const CACHE_NAME = "slashtalk-app-shell-v2";
 const SHELL_URLS = ["/app/", "/app/manifest.webmanifest", "/app/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {

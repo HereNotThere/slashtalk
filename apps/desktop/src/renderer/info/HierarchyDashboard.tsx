@@ -1,13 +1,22 @@
 import { Fragment, useState, type MouseEvent } from "react";
-import { BoltIcon, ChatBubbleLeftIcon, ClockIcon, FolderIcon } from "@heroicons/react/24/outline";
+import {
+  BoltIcon,
+  ChatBubbleLeftIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  FolderIcon,
+} from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, TokenUsage, UserPr } from "@slashtalk/shared";
 import type { InfoDashboardData, InfoSession } from "../../shared/types";
-import { ClaudeIcon, OpenAIIcon, PrIcon } from "../shared/icons";
+import { ClaudeIcon, OpenAIIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
-import { PR_STATE_COLOR, PR_STATE_LABEL } from "../shared/pr-state";
+import { PrItem } from "../shared/PrItem";
+import { PrLinkProvider } from "../shared/PrLinkContext";
+import { ScopeToggle } from "../shared/ScopeToggle";
 import { ShimmerText } from "../shared/ShimmerText";
 import { relativeTime } from "../shared/relativeTime";
+import { useDashboardScope } from "../shared/useDashboardScope";
 import { AskInput } from "./AskInline";
 
 const NOW_WINDOW_MS = 2 * 60 * 60 * 1000; // last 2 hours
@@ -58,6 +67,8 @@ export function HierarchyDashboard({
         // docs/info-card.md).
         loading={dashboard === null || dashboardFetching}
         subjectLabel={subjectLabel}
+        targetTimezone={dashboard?.targetTimezone ?? null}
+        prs={dashboard?.prs ?? []}
       />
       <Divider />
       <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
@@ -70,32 +81,14 @@ function NoRepoSection(): JSX.Element {
     <div className="px-4 py-3">
       <p className="text-sm text-fg/90 leading-snug">No repos connected yet.</p>
       <p className="mt-1 text-xs text-subtle leading-snug">
-        Connect a repo to see your standup and PRs here.
+        Connect a repo from the tray menu to see your standup and PRs here.
       </p>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          void window.chatheads.openMain();
-        }}
-        className="mt-2.5 inline-flex items-center gap-1 px-2.5 h-7 rounded-full bg-primary text-primary-fg text-xs font-medium hover:bg-primary-hover transition-colors cursor-pointer"
-      >
-        Open settings
-      </button>
     </div>
   );
 }
 
 function Divider(): JSX.Element {
   return <div className="mx-4 h-px bg-divider" />;
-}
-
-function PlainHeader({ label }: { label: string }): JSX.Element {
-  return (
-    <div className="px-4 pt-3 pb-1.5">
-      <span className="text-xs font-semibold tracking-wider uppercase text-subtle">{label}</span>
-    </div>
-  );
 }
 
 function AskTrigger({
@@ -119,6 +112,53 @@ function AskTrigger({
       <ChatBubbleLeftIcon className="w-3.5 h-3.5" />
     </button>
   );
+}
+
+// Caller and target may be on different calendar dates when the section is
+// labelled "Today" — surface the target's local date so the gap is legible.
+// Returns null when no ambiguity (same date, or tz unknown).
+//
+// Formatters are cached per-tz: PastDaySection re-renders on every dashboard
+// update, and Intl.DateTimeFormat construction is the expensive part.
+const callerYmdFmt = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const tzYmdFmts = new Map<string, Intl.DateTimeFormat>();
+const tzShortFmts = new Map<string, Intl.DateTimeFormat>();
+
+function peerDayHint(targetTz: string | null): { short: string; title: string } | null {
+  if (!targetTz) return null;
+  try {
+    let ymdFmt = tzYmdFmts.get(targetTz);
+    if (!ymdFmt) {
+      ymdFmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: targetTz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      tzYmdFmts.set(targetTz, ymdFmt);
+    }
+    const now = new Date();
+    if (callerYmdFmt.format(now) === ymdFmt.format(now)) return null;
+    let shortFmt = tzShortFmts.get(targetTz);
+    if (!shortFmt) {
+      shortFmt = new Intl.DateTimeFormat(undefined, {
+        timeZone: targetTz,
+        weekday: "short",
+        month: "numeric",
+        day: "numeric",
+      });
+      tzShortFmts.set(targetTz, shortFmt);
+    }
+    const short = shortFmt.format(now);
+    const city = targetTz.split("/").pop()?.replace(/_/g, " ") ?? targetTz;
+    return { short: `${short} their time`, title: `${short} in ${city}` };
+  } catch {
+    return null;
+  }
 }
 
 // Pick the session that the "Now" section should describe.
@@ -163,7 +203,7 @@ function NowSection({
   const status = sessionStatus(session);
   const repo = repoLabel(session);
   const tokens = fmtTokens(session.tokens);
-  // Only show the analyzer's 1-2 sentence description. Never fall back to the
+  // Only show the analyzer's one-sentence description. Never fall back to the
   // raw user prompt — surfacing what someone literally typed into Claude Code
   // verbatim feels surveillance-y, especially on peer cards.
   const summary = session.description ?? null;
@@ -224,25 +264,40 @@ function PastDaySection({
   summary,
   loading,
   subjectLabel,
+  targetTimezone,
+  prs,
 }: {
   summary: string | null;
   loading: boolean;
   subjectLabel: string;
+  targetTimezone: string | null;
+  prs: UserPr[];
 }): JSX.Element {
   const [editing, setEditing] = useState(false);
+  const { scope, setScope } = useDashboardScope();
+  const tzHint = peerDayHint(targetTimezone);
   return (
     <div>
       <div className="px-4 pt-3 pb-1.5 flex items-center gap-1.5">
         <ClockIcon className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden />
-        <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Today</span>
+        <ScopeToggle scope={scope} onChange={setScope} />
+        {tzHint && (
+          <span className="text-[10px] tracking-wider uppercase text-muted/80" title={tzHint.title}>
+            · {tzHint.short}
+          </span>
+        )}
       </div>
       <div className="px-4 pb-3">
         <div className="flex items-end gap-2">
           <div className="flex-1 text-sm text-fg/90 leading-snug">
             {summary ? (
-              <Markdown inline className="text-sm leading-snug">
-                {summary}
-              </Markdown>
+              // Block mode (not inline) so bullet lists render as `<ul>` —
+              // inline mode wraps everything in a `<span>`, where lists
+              // would be invalid HTML and browsers'd unparent them.
+              // PrLinkProvider enriches PR links into icon + colored #N.
+              <PrLinkProvider prs={prs}>
+                <Markdown className="text-sm leading-snug">{summary}</Markdown>
+              </PrLinkProvider>
             ) : loading ? (
               <span className="text-subtle">
                 <ShimmerText text="Fetching…" />
@@ -272,23 +327,48 @@ function PrsSection({
   prs: UserPr[] | null;
   ghStatus: InfoDashboardData["ghStatus"] | null;
 }): JSX.Element {
+  // Default collapsed so the card opens compact — PRs are the longest
+  // section and most peeks at a card don't need them. The count in the
+  // header tells you whether expanding is worth a click.
+  const [open, setOpen] = useState(false);
+  const count = prs?.length ?? null;
   return (
     <div>
-      <PlainHeader label="PRs pushed" />
-      {prs === null ? (
-        <div className="px-4 py-2.5 text-xs text-subtle">Loading…</div>
-      ) : ghStatus && ghStatus !== "ready" ? (
-        <GhUnavailableNudge status={ghStatus} />
-      ) : prs.length === 0 ? (
-        <div className="px-4 py-2.5 text-xs text-subtle">No PRs in this window.</div>
-      ) : (
-        prs.map((pr, i) => (
-          <Fragment key={`${pr.repoFullName}#${pr.number}`}>
-            {i > 0 && <div className="mx-4 h-px bg-divider/60" />}
-            <PrRow pr={pr} />
-          </Fragment>
-        ))
-      )}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-expanded={open}
+        className="w-full px-4 pt-3 pb-1.5 flex items-center gap-1.5 text-left hover:bg-surface-alt/40 transition-colors cursor-pointer"
+      >
+        <ChevronRightIcon
+          className={`w-3 h-3 shrink-0 text-subtle transition-transform ${open ? "rotate-90" : ""}`}
+          aria-hidden
+        />
+        <span className="text-xs font-semibold tracking-wider uppercase text-subtle">
+          PRs pushed
+        </span>
+        {count != null && count > 0 && (
+          <span className="text-[10px] tracking-wider uppercase text-muted/80">· {count}</span>
+        )}
+      </button>
+      {open &&
+        (prs === null ? (
+          <div className="px-4 py-2.5 text-xs text-subtle">Loading…</div>
+        ) : ghStatus && ghStatus !== "ready" ? (
+          <GhUnavailableNudge status={ghStatus} />
+        ) : prs.length === 0 ? (
+          <div className="px-4 py-2.5 text-xs text-subtle">No PRs in this window.</div>
+        ) : (
+          prs.map((pr, i) => (
+            <Fragment key={`${pr.repoFullName}#${pr.number}`}>
+              {i > 0 && <div className="mx-4 h-px bg-divider/60" />}
+              <PrRow pr={pr} />
+            </Fragment>
+          ))
+        ))}
     </div>
   );
 }
@@ -327,46 +407,22 @@ function GhUnavailableNudge({
 
 function PrRow({ pr }: { pr: UserPr }): JSX.Element {
   const [editing, setEditing] = useState(false);
-  const openPr = (): void => {
-    void window.chatheads.openExternal(pr.url);
-  };
   return (
-    <div className="px-4 py-2.5 group hover:bg-surface-alt/60 transition-colors">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={openPr}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            openPr();
-          }
-        }}
-        className="flex items-start gap-2.5 cursor-pointer"
-      >
-        <PrIcon className={`w-4 h-4 mt-0.5 shrink-0 ${PR_STATE_COLOR[pr.state]}`} />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-fg leading-snug line-clamp-2 group-hover:underline decoration-divider underline-offset-2">
-            {pr.title}
-          </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle">
-            <span className={`font-medium ${PR_STATE_COLOR[pr.state]}`}>#{pr.number}</span>
-            <span aria-hidden>·</span>
-            <span>{PR_STATE_LABEL[pr.state]}</span>
-            <span aria-hidden>·</span>
-            <span>{relativeTime(pr.updatedAt)}</span>
-          </div>
-        </div>
-        <AskTrigger onClick={() => setEditing(true)} className="self-end -mb-0.5 -mr-1" />
-      </div>
+    <>
+      <PrItem
+        pr={pr}
+        trailing={<AskTrigger onClick={() => setEditing(true)} className="-mr-1" />}
+      />
       {editing && (
-        <AskInput
-          contextLabel={`About PR #${pr.number} — "${pr.title}" (${pr.url}):`}
-          placeholder={`Ask about PR #${pr.number}…`}
-          onClose={() => setEditing(false)}
-        />
+        <div className="px-4 pb-2">
+          <AskInput
+            contextLabel={`About PR #${pr.number} — "${pr.title}" (${pr.url}):`}
+            placeholder={`Ask about PR #${pr.number}…`}
+            onClose={() => setEditing(false)}
+          />
+        </div>
       )}
-    </div>
+    </>
   );
 }
 

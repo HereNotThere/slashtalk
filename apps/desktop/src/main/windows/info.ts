@@ -1,12 +1,13 @@
 import { BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
-import type { ChatHead, InfoDashboardData, InfoSession } from "../../shared/types";
-import type { DashboardScope, ProjectOverviewResponse } from "@slashtalk/shared";
+import type { ChatHead, GhStatus, InfoDashboardData, InfoSession } from "../../shared/types";
+import type { ProjectOverviewResponse, UserPr } from "@slashtalk/shared";
 import * as backend from "../backend";
 import * as localRepos from "../localRepos";
 import * as rail from "../rail";
 import * as peerPresence from "../peerPresence";
 import * as peerLocations from "../peerLocations";
 import { fetchGhUserPrs } from "../ghPrs";
+import { getDashboardScope } from "./rail-state";
 import { setMacCornerRadius } from "../macCorners";
 import { BUBBLE_PAD, BUBBLE_SIZE, PADDING_Y } from "./dock-geometry";
 import { currentDock, getIsDragging } from "./dock-drag";
@@ -56,14 +57,6 @@ const INFO_SHOW_READY_TIMEOUT_MS = 80;
 // during an active session. Coalesce refreshes so the info window re-renders
 // at most once per REFRESH_DEBOUNCE_MS regardless of WS traffic.
 const REFRESH_DEBOUNCE_MS = 300;
-
-// Time-window scopes for the dashboard sections. Hardcoded flags — flip to
-// "past24h" to switch a section to a rolling 24h window instead of the
-// target's local "today" boundary. Each section's scope is independent so
-// the two can evolve at different cadences.
-const DASHBOARD_PRS_SCOPE: DashboardScope = "today";
-const DASHBOARD_STANDUP_SCOPE: DashboardScope = "today";
-const PROJECT_OVERVIEW_SCOPE: DashboardScope = "today";
 
 let deps: InfoDeps;
 let infoWindow: BrowserWindow | null = null;
@@ -142,6 +135,21 @@ localRepos.onClaimsSettled(clearProjectOverviewCache);
  *  `pr_activity` lands so the next hover repaints with fresh data. */
 export function invalidateProjectOverview(repoFullName: string): void {
   projectOverviewCache.delete(repoFullName);
+}
+
+/** Toggling the dashboard scope retargets the server window, so every cached
+ *  entry is stale AND any in-flight fetch is producing old-scope data. Drop
+ *  in-flight maps too — the `=== promise` identity guard at write-time then
+ *  rejects those late-landing writes instead of letting them poison the
+ *  freshly-cleared cache. */
+export function onDashboardScopeChanged(): void {
+  clearDashboardCache();
+  clearProjectOverviewCache();
+  dashboardInFlight.clear();
+  projectOverviewInFlight.clear();
+  if (selectedHeadId && infoWindow && !infoWindow.isDestroyed() && infoWindow.isVisible()) {
+    refreshNow();
+  }
 }
 
 type InfoShowReadyResolver = (height: number | null) => void;
@@ -548,7 +556,7 @@ async function fetchProjectOverviewForRepo(
   // rejection here would surface as an unhandled rejection.
   const promise = (async (): Promise<ProjectOverviewResponse | null> => {
     try {
-      return await backend.fetchProjectOverview(repoFullName, PROJECT_OVERVIEW_SCOPE);
+      return await backend.fetchProjectOverview(repoFullName, getDashboardScope());
     } catch (err) {
       console.warn(`[info] project overview fetch failed repo=${repoFullName}:`, err);
       return null;
@@ -592,10 +600,33 @@ async function fetchDashboardForLogin(
   // active in-flight. This prevents a superseded promise (bumped by a
   // forced refetch) from clobbering newer data.
   const promise = (async (): Promise<InfoDashboardData> => {
-    const [prsRes, standupRes] = await Promise.allSettled([
-      fetchGhUserPrs(login, DASHBOARD_PRS_SCOPE),
-      backend.fetchUserStandup(login, DASHBOARD_STANDUP_SCOPE),
-    ]);
+    // Self → local gh (zero poller lag + push-back to server). Peer → server
+    // endpoint so its PRs and the standup blurb share one target-tz window.
+    const scope = getDashboardScope();
+    const standupP = backend.fetchUserStandup(login, scope);
+    const prsP: Promise<{ prs: UserPr[]; ghStatus: GhStatus }> = backend.isSelf(login)
+      ? fetchGhUserPrs(login, scope).then(async (r) => {
+          // Soft-fail: network blip must not break the user-card.
+          if (r.prs.length > 0) {
+            void backend
+              .pushSelfPrs(r.prs)
+              .then((p) => {
+                if (p.upserted > 0) {
+                  console.log(
+                    `[info] pushed ${p.upserted} self PR(s) to server (${p.unknownRepos} unknown repo)`,
+                  );
+                }
+              })
+              .catch((err) => {
+                console.warn(`[info] pushSelfPrs failed:`, (err as Error).message);
+              });
+          }
+          return { prs: r.prs, ghStatus: r.ghStatus };
+        })
+      : backend
+          .fetchUserPrs(login, scope)
+          .then((r) => ({ prs: r.prs, ghStatus: "ready" as const }));
+    const [prsRes, standupRes] = await Promise.allSettled([prsP, standupP]);
     if (prsRes.status === "rejected") {
       console.warn(`[info] dashboard prs fetch failed login=${login}:`, prsRes.reason);
     }
@@ -605,30 +636,20 @@ async function fetchDashboardForLogin(
     const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
     const ghStatus = prsRes.status === "fulfilled" ? prsRes.value.ghStatus : "ready";
     const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
-    // `noClaimedRepos` now comes from the standup endpoint alone — gh-driven
-    // PR fetching has no notion of user_repos rows since it queries GitHub
-    // directly with the caller's token.
+    // SLASHTALK_DEBUG_EMPTY=1 forces the no-repo CTA against a real account
+    // for renderer testing. Otherwise: peer 403s short-circuit upstream;
+    // self gh-path has no claim concept; only the standup endpoint surfaces it.
     const noClaimedRepos =
-      standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true;
-    // When the dashboard target is self, push the gh-discovered PRs back to
-    // the server so the standup composer (server-side, queries
-    // `pull_requests`) can mention them on the same day they're opened.
-    // Soft-fail: a network blip here must never break the user-card.
-    if (prs.length > 0 && backend.isSelf(login)) {
-      backend
-        .pushSelfPrs(prs)
-        .then((r) => {
-          if (r.upserted > 0) {
-            console.log(
-              `[info] pushed ${r.upserted} self PR(s) to server (${r.unknownRepos} unknown repo)`,
-            );
-          }
-        })
-        .catch((err) => {
-          console.warn(`[info] pushSelfPrs failed:`, (err as Error).message);
-        });
-    }
-    return { prs, standup, noClaimedRepos, ghStatus };
+      process.env.SLASHTALK_DEBUG_EMPTY === "1" ||
+      (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
+    // `past24h` is a tz-neutral rolling window, so the "their time" hint is
+    // meaningless — clear the tz here rather than have the renderer carry
+    // scope-awareness it doesn't otherwise need.
+    const targetTimezone =
+      scope === "past24h" || backend.isSelf(login) || standupRes.status !== "fulfilled"
+        ? null
+        : (standupRes.value.timezone ?? null);
+    return { prs, standup, noClaimedRepos, ghStatus, targetTimezone };
   })();
   dashboardInFlight.set(login, promise);
   void promise
@@ -670,23 +691,33 @@ function refreshNow(): void {
   if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
     return;
   }
-  const head = deps.getHeads().find((h) => h.id === selectedHeadId);
+  // Synthetic project heads aren't in `deps.getHeads()` — reconstruct via
+  // rail.projectHead so a scope toggle on a visible project card refetches
+  // its overview instead of bailing at the membership guard below.
+  const projectRepo = rail.parseProjectHeadId(selectedHeadId);
+  const head = projectRepo
+    ? rail.projectHead(projectRepo)
+    : deps.getHeads().find((h) => h.id === selectedHeadId);
   if (!head) return;
-  // Only drop the selected head's cache; other heads stay warm until clicked.
   sessionCache.delete(head.id);
   const login = rail.parseUserHeadId(head.id);
-  // Push each fetch independently. The session_updated signal is what
-  // triggered us, so the new session data should reach the renderer ASAP —
-  // not block on the standup endpoint, which can take several seconds on
-  // a server-cache miss. `force: true` makes the dashboard refetch bypass
-  // any in-flight that started before this signal landed.
+  // Push each fetch independently — session data should reach the renderer
+  // ASAP without blocking on the slower standup/overview LLM calls.
+  // `force: true` bypasses any in-flight that started before this signal.
   const pushFollowUp = (): void => pushInfoShowSnapshot(infoWindow, head, undefined);
-  void fetchSessionsForHead(head.id)
-    .catch((e) => console.warn("[ws] refreshNow sessions failed:", e))
-    .finally(pushFollowUp);
+  if (head.kind !== "project") {
+    void fetchSessionsForHead(head.id)
+      .catch((e) => console.warn("[ws] refreshNow sessions failed:", e))
+      .finally(pushFollowUp);
+  }
   if (login) {
     void fetchDashboardForLogin(login, { force: true })
       .catch((e) => console.warn("[ws] refreshNow dashboard failed:", e))
+      .finally(pushFollowUp);
+  }
+  if (head.kind === "project" && head.repoFullName) {
+    void fetchProjectOverviewForRepo(head.repoFullName, { force: true })
+      .catch((e) => console.warn("[ws] refreshNow project overview failed:", e))
       .finally(pushFollowUp);
   }
 }

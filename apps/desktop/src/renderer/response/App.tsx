@@ -28,6 +28,7 @@ import type {
 import { AgentChat } from "../info/AgentPanel";
 import { Button } from "../shared/Button";
 import { CheckIcon, CopyIcon } from "../shared/icons";
+import { useNoTrackedRepos } from "../shared/useNoTrackedRepos";
 
 const CITATION_TOKEN = /\[session:[0-9a-fA-F-]+\]/g;
 const CARDS_VISIBLE = 5;
@@ -538,7 +539,7 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
       <div ref={scrollRef} className="flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-[720px] px-6 py-8 space-y-7">
           {messages.length === 0 && !loading && !error && (
-            <SamplePrompts onPick={handleSamplePrompt} />
+            <EmptyOrSampleStart onPick={handleSamplePrompt} />
           )}
           {messages.map((m, i) =>
             m.role === "user" ? (
@@ -619,6 +620,29 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// SamplePrompts assume the caller has at least one tracked repo — otherwise
+// "what did the team ship this week?" answers from an empty graph and reads
+// as broken. Branch on tracked-repo state and route fresh users to the tray.
+function EmptyOrSampleStart({ onPick }: { onPick: (prompt: string) => void }): JSX.Element | null {
+  const noRepos = useNoTrackedRepos();
+  if (noRepos === null) return null;
+  if (noRepos) return <NoReposEmptyState />;
+  return <SamplePrompts onPick={onPick} />;
+}
+
+function NoReposEmptyState(): JSX.Element {
+  return (
+    <div className="pt-6 space-y-3">
+      <p className="text-base text-fg leading-snug">
+        This is where your team&apos;s activity will appear.
+      </p>
+      <p className="text-sm text-subtle leading-snug">
+        Add a repo from the tray menu to start asking questions about what your team is shipping.
+      </p>
     </div>
   );
 }

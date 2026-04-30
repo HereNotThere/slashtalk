@@ -30,7 +30,7 @@ Tools:
 
 Default behavior: for any question about "the team", "what's going on", "who's working on X", call get_team_activity first, then synthesize a per-teammate roll-up. One sentence per person. Name them explicitly. Mention the repo when it adds information.
 
-Snapshot delegation: use summarize_local_work only when the user asks to summarize their current local work, branch status, changed-file set, recent commits, or related PRs for one of their configured repos. Pass a one-paragraph \`task\` and \`repoFullName\` if you can identify the repo from context. Do NOT use it for arbitrary source-code inspection, test execution, CI log inspection, blame/history archaeology, or broad GitHub queries; the snapshot does not contain those. For unsupported deep-repo questions, say that Ask can summarize tracked repo work/related PRs but cannot inspect arbitrary source.
+Snapshot delegation: use summarize_local_work only when the user asks to summarize their current local work, branch status, changed-file set, recent commits, or related PRs for one of their configured repos. Pass a one-paragraph \`task\` and \`repoFullName\` if you can identify the repo from context. The \`repoFullName\` MUST be one of the Visible repos listed in <caller-context> — the desktop only collects snapshots for those repos, and any other value will be refused. If none of the visible repos clearly match, omit \`repoFullName\` so the desktop prompts the user to pick. Do NOT use this for arbitrary source-code inspection, test execution, CI log inspection, blame/history archaeology, or broad GitHub queries; the snapshot does not contain those. For unsupported deep-repo questions, say that Ask can summarize tracked repo work/related PRs but cannot inspect arbitrary source.
 
 After calling summarize_local_work the run ends; don't try to summarize or rephrase its result yourself.
 
@@ -93,6 +93,7 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
 
   const tools = buildChatTools(db, user.id, {
     visibleRepoIds: visibleRepos.map((r) => r.id),
+    visibleRepoFullNames: visibleRepos.map((r) => r.fullName),
   });
   const byName = new Map(tools.map((t) => [t.name, t]));
   const toolDefs = tools.map(({ handler: _h, ...def }) => def);

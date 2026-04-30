@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, globalShortcut } from "electron";
+import type { DashboardScope } from "@slashtalk/shared";
 import type {
   ChatHead,
   McpInstallMode,
@@ -22,12 +23,15 @@ import {
   broadcastRailCollapseInactive,
   broadcastRailPinned,
   broadcastRailSessionOnlyMode,
+  broadcastDashboardScope,
   broadcastShowActivityTimestamps,
   configureRailState,
+  getDashboardScope,
   getRailCollapseInactive,
   getRailPinned,
   getRailSessionOnlyMode,
   getShowActivityTimestamps,
+  setDashboardScope,
   setRailCollapseInactive,
   setRailPinned,
   setRailSessionOnlyMode,
@@ -71,6 +75,7 @@ import { registerAgents } from "./ipc/agents";
 import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
 import { registerChatDelegateIpc } from "./ipc/chatDelegate";
+import { configureUpdater, startUpdateChecks, stopUpdateChecks } from "./updater";
 
 // uncaughtException leaves the process in undefined state — exit so Electron
 // surfaces a crash dialog and the user gets a clean restart. A stray
@@ -197,6 +202,13 @@ ipcMain.handle("rail:getShowActivityTimestamps", (): boolean => getShowActivityT
 ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
   setShowActivityTimestamps(shown);
   broadcastShowActivityTimestamps();
+});
+
+ipcMain.handle("rail:getDashboardScope", (): DashboardScope => getDashboardScope());
+ipcMain.handle("rail:setDashboardScope", (_e, scope: DashboardScope): void => {
+  if (!setDashboardScope(scope)) return;
+  info.onDashboardScopeChanged();
+  broadcastDashboardScope();
 });
 
 ipcMain.handle("theme:getMode", (): ThemeMode => getThemeMode());
@@ -417,6 +429,18 @@ configureRailVisibility({
   isSelfLive: () => rail.isSelfLive(),
   isChatVisible,
 });
+configureUpdater({
+  windows: () => [
+    overlay.getOverlayWindow(),
+    getMainWindow(),
+    getTrayPopup(),
+    info.getInfoWindow(),
+    getChatWindow(),
+    getResponseWindow(),
+  ],
+  getPromptWindow: () =>
+    getResponseWindow() ?? getMainWindow() ?? getTrayPopup() ?? info.getInfoWindow(),
+});
 
 app
   .whenReady()
@@ -454,6 +478,7 @@ app
     rail.start();
     selfSession.start();
     applyInitialSync();
+    startUpdateChecks();
 
     registerDebugShortcuts();
   })
@@ -470,6 +495,7 @@ app.on("before-quit", () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  stopUpdateChecks();
   void mcpProxy.stop();
 });
 

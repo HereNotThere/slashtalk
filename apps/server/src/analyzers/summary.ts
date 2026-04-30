@@ -11,7 +11,7 @@ import {
   topJsonbEntries,
 } from "./session-context";
 
-const VERSION = "4";
+const VERSION = "5";
 const LINE_SEQ_REFRESH_DELTA = 50;
 const REFRESH_MIN_MS = 10 * 60 * 1000;
 const MIN_EVENTS_FOR_FIRST_SUMMARY = 3;
@@ -32,7 +32,7 @@ const SCHEMA = {
     description: {
       type: "string",
       description:
-        "1-2 sentences describing what the developer set out to accomplish in this session and how they're approaching it.",
+        "One complete sentence (≤25 words, ≤140 characters, fitting on two display lines) naming the developer's overall goal — the kind of feature/fix/refactor at the heart of the session. No implementation specifics, file names, function names, or how-it-works detail. A teammate glancing at the user card should know what's being worked on, not how.",
     },
   },
   required: ["title", "description"],
@@ -40,7 +40,19 @@ const SCHEMA = {
 
 export const SUMMARY_SYSTEM = `You label a coding session by its overall *goal* — what the developer set out to accomplish — so a teammate glancing at the card understands the point of the work, not the most recent keystroke.
 
-Given session metadata (user prompts, files edited, tools used, recent events), emit a concise title and a 1-2 sentence description focused on the *substantive* feature, fix, or refactor at the heart of the session. Be specific to the technical work, not generic.
+Given session metadata (user prompts, files edited, tools used, recent events), emit a concise title and a *single complete sentence* description naming the substantive feature, fix, or refactor at the heart of the session. Stay at the goal level — no file names, function names, or how-it-works detail. A teammate glancing at the user card should know what's being worked on, not how.
+
+The description must be ONE sentence, ≤25 words and ≤140 characters, fitting on two display lines. Do not tack on a second sentence about approach, status, progress, or what comes next.
+
+Description examples (good):
+- "Restructuring dashboard summaries so peer cards stay in sync across timezones."
+- "Hardening the session uploader against silently dropped file-watch events."
+- "Polishing the project info-card to match the new design system."
+
+Description anti-patterns (bad):
+- mentioning specific files, functions, IPC handlers, or hook names
+- describing the implementation step-by-step
+- starting with "The developer" or "The user"
 
 Good examples:
 - title: "Refactoring Redis pub/sub for soft-fail"
@@ -145,7 +157,7 @@ export const summaryAnalyzer: Analyzer<SummaryOutput> = {
       system: SUMMARY_SYSTEM,
       prompt,
       toolName: "emit_summary",
-      toolDescription: "Emit the title and 1-2 sentence description for this coding session.",
+      toolDescription: "Emit the title and one-sentence description for this coding session.",
       schema: SCHEMA,
       maxTokens: 300,
       budget: { redis: ctx.redis, userId: ctx.session.userId },

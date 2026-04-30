@@ -58,12 +58,30 @@ jobs:
         id: ver
         run: echo "version=$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
 
-      # TODO: switch back to `bun run dist:mac` (signed + notarized) once the
-      # Developer ID Application cert + App Store Connect API key are wired up
-      # as repo secrets. See README "Releasing the desktop app".
-      - name: Build & package DMG (unsigned)
+      - name: Decode App Store Connect API key
+        id: apple_api_key
+        run: |
+          key_path="$RUNNER_TEMP/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8"
+          printf '%s' "${{ secrets.APPLE_API_KEY_BASE64 }}" | base64 --decode > "$key_path"
+          echo "path=$key_path" >> "$GITHUB_OUTPUT"
+
+      - name: Build & package desktop app (signed + notarized)
         working-directory: apps/desktop
-        run: bun run dist:mac:unsigned
+        run: bun run dist:mac
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERT_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY: ${{ steps.apple_api_key.outputs.path }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+      - name: Verify desktop release artifacts
+        run: |
+          test -f apps/desktop/dist/latest-mac.yml
+          test -f apps/desktop/dist/Slashtalk-mac-universal.dmg
+          test -f apps/desktop/dist/Slashtalk-mac-universal.zip
+          test -f apps/desktop/dist/Slashtalk-mac-universal.dmg.blockmap
+          test -f apps/desktop/dist/Slashtalk-mac-universal.zip.blockmap
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -71,6 +89,11 @@ jobs:
           tag_name: "@slashtalk/electron@${{ steps.ver.outputs.version }}"
           name: "Slashtalk Desktop ${{ steps.ver.outputs.version }}"
           generate_release_notes: true
-          files: apps/desktop/dist/Slashtalk-mac-*.dmg
+          fail_on_unmatched_files: true
+          files: |
+            apps/desktop/dist/Slashtalk-mac-*.dmg
+            apps/desktop/dist/Slashtalk-mac-*.zip
+            apps/desktop/dist/Slashtalk-mac-*.blockmap
+            apps/desktop/dist/latest-mac.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

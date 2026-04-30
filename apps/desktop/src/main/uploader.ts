@@ -25,6 +25,12 @@ const HEADER_BYTES = 64 * 1024; // how far in we scan for source metadata
 const SYNC_STATE_KEY = "uploaderSyncState";
 const DEBOUNCE_MS = 150;
 const PERSIST_DEBOUNCE_MS = 500;
+// Per-POST upper bound for the JSONL body. Render's WAF rejects multi-MB
+// requests with an HTML block page (and so do most generic edge proxies),
+// so we cap and loop. 256KiB is comfortably under common WAF thresholds
+// (1 MB) while keeping the loop count low — a multi-hour stall recovers in
+// a handful of round trips.
+const MAX_CHUNK_BYTES = 256 * 1024;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODEX_ROLLOUT_RE =
@@ -423,12 +429,24 @@ async function readTail(
   fd: fsp.FileHandle,
   from: number,
   size: number,
+  maxBytes: number = MAX_CHUNK_BYTES,
 ): Promise<{ chunk: Buffer; consumed: number } | null> {
   if (from >= size) return null;
-  const len = size - from;
-  const buf = Buffer.alloc(len);
+  const remaining = size - from;
+  // Cap the read window. If no newline lands in the capped window AND the
+  // file has more bytes available, fall back to the full remainder — that
+  // covers the (rare) case of a single line larger than the cap, where
+  // truncating mid-line would corrupt the JSONL.
+  let len = Math.min(remaining, maxBytes);
+  let buf = Buffer.alloc(len);
   await fd.read(buf, 0, len, from);
-  const lastNl = buf.lastIndexOf(0x0a);
+  let lastNl = buf.lastIndexOf(0x0a);
+  if (lastNl === -1 && remaining > len) {
+    len = remaining;
+    buf = Buffer.alloc(len);
+    await fd.read(buf, 0, len, from);
+    lastNl = buf.lastIndexOf(0x0a);
+  }
   if (lastNl === -1) return null;
   return { chunk: buf.subarray(0, lastNl + 1), consumed: lastNl + 1 };
 }
@@ -603,33 +621,61 @@ async function ingestTail(
   sessionId: string,
   entry: SessionSync,
 ): Promise<void> {
-  if (!entry.project || entry.byteOffset >= stat.size) return;
-  const tail = await readTail(fd, entry.byteOffset, stat.size);
-  if (!tail) return;
-  const body =
-    entry.source === "cursor"
-      ? synthesizeCursorChunk(tail.chunk, stat, entry.lineSeq, entry.cwd, entry.version)
-      : tail.chunk.toString("utf8");
+  if (!entry.project) return;
+  // Loop until caught up to `stat.size`. `stat` is captured at the top of
+  // syncFileInner so it doesn't drift while we're uploading; new bytes that
+  // arrive mid-loop are picked up by the next watcher event / rescan tick.
+  // Each iteration posts at most MAX_CHUNK_BYTES so the WAF doesn't reject
+  // multi-MB recoveries from a stalled offset.
+  while (entry.byteOffset < stat.size) {
+    const tail = await readTail(fd, entry.byteOffset, stat.size);
+    if (!tail) {
+      console.warn(
+        `[uploader] tail empty ${sessionId} (${entry.source}) offset=${entry.byteOffset} size=${stat.size}`,
+      );
+      return;
+    }
+    const body =
+      entry.source === "cursor"
+        ? synthesizeCursorChunk(tail.chunk, stat, entry.lineSeq, entry.cwd, entry.version)
+        : tail.chunk.toString("utf8");
 
-  const res = await backend.ingestChunk({
-    source: entry.source,
-    session: sessionId,
-    project: entry.project,
-    fromLineSeq: entry.lineSeq,
-    prefixHash: entry.prefixHash,
-    body,
-  });
+    console.log(
+      `[uploader] ingest ${sessionId} (${entry.source}) offset=${entry.byteOffset} ` +
+        `→ size=${stat.size} (+${tail.consumed}B, lineSeq=${entry.lineSeq})`,
+    );
+    let res;
+    try {
+      res = await backend.ingestChunk({
+        source: entry.source,
+        session: sessionId,
+        project: entry.project,
+        fromLineSeq: entry.lineSeq,
+        prefixHash: entry.prefixHash,
+        body,
+      });
+    } catch (err) {
+      // Re-throw so syncFile's outer catch logs `[uploader] sync failed`
+      // with the file path; this branch surfaces the HTTP angle one level
+      // up. Both lines together pinpoint stalled uploads.
+      console.error(
+        `[uploader] ingestChunk failed ${sessionId} (${entry.source}) offset=${entry.byteOffset}:`,
+        (err as Error).message,
+      );
+      throw err;
+    }
 
-  entry.byteOffset += tail.consumed;
-  entry.lineSeq = res.serverLineSeq;
-  persistSoon();
+    entry.byteOffset += tail.consumed;
+    entry.lineSeq = res.serverLineSeq;
+    persistSoon();
 
-  console.log(
-    `[uploader] ingested ${sessionId} (${entry.source}) +${res.acceptedEvents} events ` +
-      `(${res.duplicateEvents} dup, ${tail.consumed}B) → lineSeq=${res.serverLineSeq}`,
-  );
+    console.log(
+      `[uploader] ingested ${sessionId} (${entry.source}) +${res.acceptedEvents} events ` +
+        `(${res.duplicateEvents} dup, ${tail.consumed}B) → lineSeq=${res.serverLineSeq}`,
+    );
 
-  if (res.acceptedEvents > 0) ingested.emit({ sessionId });
+    if (res.acceptedEvents > 0) ingested.emit({ sessionId });
+  }
 }
 
 async function walkSessionFiles(

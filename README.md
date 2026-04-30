@@ -212,10 +212,8 @@ The [`release` workflow](.github/workflows/release.yml) runs on every push to `m
 
 1. **`release` job** (ubuntu) — runs `changesets/action`. If pending changesets exist, it opens (or updates) a `chore: version packages` PR that bumps `apps/desktop/package.json` and updates the changelog.
 2. When that PR is merged, the same job runs `changeset tag` and pushes the new tag (`@slashtalk/electron@<version>`).
-3. **`build-mac` job** (macos-latest) — gated on the publish output. Currently runs `bun run dist:mac:unsigned` which produces an **unsigned** `.dmg` (no Developer ID cert + no Apple notarization). Once cert + API key secrets are in place, switch the step back to `bun run dist:mac` and re-add the env block (`CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`) — see the TODO in `.github/workflows/release.yml`. The signed flow uses hardened runtime + entitlements at [`apps/desktop/build/entitlements.mac.plist`](apps/desktop/build/entitlements.mac.plist).
+3. **`build-mac` job** (macos-latest) — gated on the publish output. Runs `bun run dist:mac` to produce a **signed + notarized** `.dmg` using the repo secrets (`MAC_CERT_BASE64`, `MAC_CERT_PASSWORD`, `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`). The signed flow uses hardened runtime + entitlements at [`apps/desktop/build/entitlements.mac.plist`](apps/desktop/build/entitlements.mac.plist).
 4. Two DMGs are built and uploaded to a fresh GitHub Release: `Slashtalk-mac-arm64.dmg` (Apple Silicon) and `Slashtalk-mac-x64.dmg` (Intel). Stable filenames come from the `artifactName` template in `apps/desktop/package.json`.
-
-Until the build is signed, downloaders will see a Gatekeeper warning ("Slashtalk can't be opened because Apple cannot check it for malicious software"). They can right-click the app → **Open** → **Open** to bypass, or run `xattr -cr /Applications/Slashtalk.app` once after copying it from the DMG.
 
 ### Stable download URLs
 

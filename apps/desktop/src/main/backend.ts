@@ -32,6 +32,7 @@ import type {
   SpotifyPresence,
   StandupResponse,
   SyncStateEntry,
+  UserPrsResponse,
 } from "@slashtalk/shared";
 import type {
   BackendAuthState,
@@ -448,14 +449,17 @@ function responsePreview(body: string): string {
  *  read `.message` keep working; new callers can read `status` and `body`
  *  to branch on structured server errors without regexing the message. */
 export class HttpError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly body: string,
-    method: string,
-    path: string,
-  ) {
+  readonly status: number;
+  readonly body!: string;
+  constructor(status: number, body: string, method: string, path: string) {
     super(`${method} ${path} failed (${status}): ${responsePreview(body)}`);
     this.name = "HttpError";
+    this.status = status;
+    // Body can be a multi-KB WAF block page or HTML error doc; mark it
+    // non-enumerable so `console.error(err)` / `util.inspect` doesn't dump
+    // the whole thing into the terminal each retry. Still accessible via
+    // `err.body` for callers that want to parse it (see parseClaimError).
+    Object.defineProperty(this, "body", { value: body, enumerable: false });
   }
 }
 
@@ -714,6 +718,14 @@ export function fetchUserStandup(login: string, scope: DashboardScope): Promise<
   });
 }
 
+/** Server-side PRs for peer user-cards (self uses local `gh`, see ghPrs.ts). */
+export function fetchUserPrs(login: string, scope: DashboardScope): Promise<UserPrsResponse> {
+  const qs = new URLSearchParams({ scope });
+  return jsonFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs?${qs}`, {
+    method: "GET",
+  });
+}
+
 export function fetchProjectOverview(
   repoFullName: string,
   scope: DashboardScope,
@@ -782,7 +794,7 @@ export async function ingestChunk(args: {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`POST /v1/ingest failed (${res.status}): ${text}`);
+    throw new HttpError(res.status, text, "POST", "/v1/ingest");
   }
   return (await res.json()) as IngestResponse;
 }

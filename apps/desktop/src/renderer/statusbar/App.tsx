@@ -3,6 +3,7 @@ import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 import { Checkbox } from "../shared/Checkbox";
 import { RailPreferences } from "../shared/RailPreferences";
+import { UpdateStatus } from "../shared/UpdateStatus";
 
 export function App(): JSX.Element {
   useAutoResize();
@@ -19,6 +20,8 @@ export function App(): JSX.Element {
         <SignedOutPrompt />
         <Divider />
         <RailPreferences />
+        <Divider />
+        <UpdateStatus compact />
         <Divider />
         <Footer />
       </Shell>
@@ -51,6 +54,8 @@ export function App(): JSX.Element {
       <AddButton busy={busy === "add"} onClick={onAdd} />
       <Divider />
       <RailPreferences />
+      <Divider />
+      <UpdateStatus compact />
       <Divider />
       <Footer />
     </Shell>

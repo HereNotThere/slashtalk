@@ -188,14 +188,18 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     let downPos: { x: number; y: number } | null = null;
-    let downAction: "search" | null = null;
+    let downAction: "search" | "add-repo" | null = null;
     let dragging = false;
 
     const onDown = (e: MouseEvent): void => {
       if (e.button !== 0) return;
       downPos = { x: e.screenX, y: e.screenY };
       const target = e.target instanceof Element ? e.target.closest("[data-bubble]") : null;
-      downAction = target?.hasAttribute("data-search") ? "search" : null;
+      downAction = target?.hasAttribute("data-search")
+        ? "search"
+        : target?.hasAttribute("data-add-repo")
+          ? "add-repo"
+          : null;
       dragging = false;
     };
 
@@ -213,6 +217,7 @@ export function App(): JSX.Element {
       if (e.button !== 0) return;
       if (dragging) void window.chatheads.dragEnd();
       else if (downAction === "search") void window.chatheads.showAsk();
+      else if (downAction === "add-repo") void window.chatheads.openMain();
       downPos = null;
       downAction = null;
       dragging = false;
@@ -523,11 +528,14 @@ export function App(): JSX.Element {
 }
 
 function AddRepoBubble(): JSX.Element {
+  // Click is dispatched by the global mouseup handler (after the drag-vs-click
+  // discriminator), not by React onClick — otherwise dragging the rail from
+  // this bubble would fire openMain on release.
   return (
     <div
       data-bubble
+      data-add-repo
       title="Add a repo to see your team"
-      onClick={() => void window.chatheads.openMain()}
       className="
         relative w-11.25 h-11.25 rounded-full cursor-pointer
         flex items-center justify-center

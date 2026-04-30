@@ -1,5 +1,11 @@
 # @slashtalk/electron
 
+## 0.1.1
+
+### Patch Changes
+
+- 030fdd9: Update the packaged desktop default API host to slashtalk.com.
+
 ## 0.1.0
 
 ### Minor Changes

@@ -221,7 +221,6 @@ const bridge: ChatHeadsBridge = {
   getSpotifyForLogin: (login) =>
     ipcRenderer.invoke("spotify:forLogin", login) as Promise<SpotifyPresence | null>,
 
-  openMain: () => ipcRenderer.invoke("app:openMain") as Promise<void>,
   openSettings: () => ipcRenderer.invoke("app:openSettings") as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit") as Promise<void>,
 

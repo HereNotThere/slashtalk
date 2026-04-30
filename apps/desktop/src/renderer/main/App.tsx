@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Button } from "../shared/Button";
 import { SlashtalkLogo } from "../shared/icons";
 import { OnboardingAddRepo } from "./OnboardingAddRepo";
 import { OnboardingShare } from "./OnboardingShare";
@@ -64,49 +63,40 @@ export function App(): JSX.Element | null {
       }
     };
     return (
-      <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-8">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <SlashtalkLogo size={64} />
-          <div>
-            <h1 className="m-0 text-2xl font-bold leading-tight tracking-tight">Slashtalk</h1>
-            <div className="text-subtle text-base mt-1.5">A dock for your team&rsquo;s work.</div>
-          </div>
+      <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-10 px-6 text-center">
+        <SlashtalkLogo size={56} />
+        <div className="flex flex-col items-center gap-3">
+          <h1 className="m-0 text-[36px] font-semibold leading-[1.05] tracking-tight text-fg">
+            Slash<span className="font-serif font-normal italic">talk</span>
+          </h1>
+          <p className="m-0 text-md text-muted leading-relaxed">
+            A dock for your team&rsquo;s work.
+          </p>
         </div>
-        <Button
-          variant="primary"
-          size="lg"
-          fullWidth
+        <button
+          type="button"
           onClick={signIn}
           disabled={signingIn}
-          className="max-w-[320px]"
+          className="inline-flex items-center justify-center rounded-full bg-fg px-7 py-3 text-base font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
-          {signingIn ? "Waiting for browser…" : "→  Sign in to Slashtalk"}
-        </Button>
+          {signingIn ? "Waiting for browser…" : "Sign in with GitHub"}
+        </button>
       </div>
     );
   }
 
+  // Both Skip-from-AddRepo and Done-from-Share land here so the
+  // tray-popup reveal happens consistently — the user always learns
+  // where settings live as they exit onboarding.
+  const finishOnboarding = (): void => {
+    writeOnboardingDone();
+    setOnboardingDone(true);
+    void window.chatheads.openSettings();
+    window.close();
+  };
+
   if (tracked.length === 0) {
-    return (
-      <OnboardingAddRepo
-        onSkip={() => {
-          writeOnboardingDone();
-          setOnboardingDone(true);
-        }}
-      />
-    );
+    return <OnboardingAddRepo onSkip={finishOnboarding} />;
   }
-  return (
-    <OnboardingShare
-      onDone={() => {
-        writeOnboardingDone();
-        setOnboardingDone(true);
-        // Pop the tray popup as we exit onboarding so the user physically
-        // sees the settings UI slide down from the menubar icon — telling
-        // them where to find it later without a separate tooltip.
-        void window.chatheads.openSettings();
-        window.close();
-      }}
-    />
-  );
+  return <OnboardingShare onDone={finishOnboarding} />;
 }

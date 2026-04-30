@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Button } from "../shared/Button";
 import { SlashtalkLogo } from "../shared/icons";
+import { StepLabel } from "./StepLabel";
 
 export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -22,39 +22,39 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
   };
 
   return (
-    <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-8">
-      <div className="flex flex-col items-center gap-4 text-center max-w-md">
-        <SlashtalkLogo size={56} />
+    <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-10 px-6 text-center">
+      <SlashtalkLogo size={48} />
+      <div className="flex flex-col items-center gap-5 max-w-md">
         <StepLabel current={1} total={2} />
-        <h1 className="m-0 text-2xl font-bold leading-tight tracking-tight">Pick a local repo</h1>
-        <p className="m-0 text-base text-muted leading-relaxed">
+        <h1 className="m-0 text-[36px] font-semibold leading-[1.05] tracking-tight text-fg">
+          Pick a <span className="font-serif font-normal text-muted italic">local</span> repo.
+        </h1>
+        <p className="m-0 text-md text-muted leading-relaxed">
           Choose a folder that&rsquo;s a git clone of a repo you share with your team. Slashtalk
-          uses it to show you what teammates working in the same repo are up to right now.
+          uses it to show what teammates working in the same repo are up to right now.
         </p>
       </div>
 
-      <div className="flex flex-col items-center gap-3 w-full max-w-[320px]">
-        <Button variant="primary" size="lg" fullWidth onClick={addRepo} disabled={busy}>
+      <div className="flex flex-col items-center gap-4 w-full max-w-[320px]">
+        <button
+          type="button"
+          onClick={addRepo}
+          disabled={busy}
+          className="w-full inline-flex items-center justify-center rounded-full bg-fg px-7 py-3 text-base font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        >
           {busy ? "Opening folder picker…" : "Choose a folder"}
-        </Button>
+        </button>
         <button
           type="button"
           onClick={onSkip}
-          className="text-sm text-subtle hover:text-fg cursor-pointer bg-transparent border-none [font:inherit]"
+          disabled={busy}
+          className="text-sm text-subtle hover:text-fg cursor-pointer bg-transparent border-none [font:inherit] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Skip for now
         </button>
       </div>
 
       {error ? <div className="text-sm text-danger leading-snug">{error}</div> : null}
-    </div>
-  );
-}
-
-function StepLabel({ current, total }: { current: number; total: number }): JSX.Element {
-  return (
-    <div className="text-xs uppercase tracking-wider text-subtle">
-      Step {current} of {total}
     </div>
   );
 }

@@ -681,7 +681,7 @@ GITHUB_CLIENT_ID=<oauth app client id>
 GITHUB_CLIENT_SECRET=<oauth app client secret>
 JWT_SECRET=<random 256-bit secret>
 ENCRYPTION_KEY=<for encrypting GitHub tokens at rest>
-BASE_URL=https://slashtalk.onrender.com
+BASE_URL=https://slashtalk.com
 PORT=10000
 ```
 

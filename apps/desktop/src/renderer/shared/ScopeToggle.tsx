@@ -3,7 +3,7 @@ import type { DashboardScope } from "../../shared/types";
 
 const OPTS: { scope: DashboardScope; label: string }[] = [
   { scope: "today", label: "Today" },
-  { scope: "past24h", label: "Past 24h" },
+  { scope: "past24h", label: "24h" },
 ];
 
 /** Two text labels in the same uppercase mini-cap font as the section

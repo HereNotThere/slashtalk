@@ -10,7 +10,9 @@ export function useDashboardScope(): {
   scope: DashboardScope;
   setScope: (next: DashboardScope) => void;
 } {
-  const [scope, setScopeState] = useState<DashboardScope>("today");
+  // Initial value matches the main-side default in rail-state.ts so the
+  // first paint doesn't flash the wrong segment before the IPC resolves.
+  const [scope, setScopeState] = useState<DashboardScope>("past24h");
 
   useEffect(() => {
     let alive = true;

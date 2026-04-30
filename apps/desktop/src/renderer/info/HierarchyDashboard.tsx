@@ -203,7 +203,7 @@ function NowSection({
   const status = sessionStatus(session);
   const repo = repoLabel(session);
   const tokens = fmtTokens(session.tokens);
-  // Only show the analyzer's 1-2 sentence description. Never fall back to the
+  // Only show the analyzer's one-sentence description. Never fall back to the
   // raw user prompt — surfacing what someone literally typed into Claude Code
   // verbatim feels surveillance-y, especially on peer cards.
   const summary = session.description ?? null;

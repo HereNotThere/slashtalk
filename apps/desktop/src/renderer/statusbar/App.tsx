@@ -15,13 +15,12 @@ export function App(): JSX.Element {
   const [addError, setAddError] = useState<string | null>(null);
 
   if (!auth.signedIn) {
+    // Settings are only meaningful once you're signed in — the dock,
+    // teammate stack, MCP install, etc. all key off auth. Keep this popup
+    // minimal so the only obvious action is to sign in.
     return (
       <Shell>
         <SignedOutPrompt />
-        <Divider />
-        <RailPreferences />
-        <Divider />
-        <UpdateStatus compact />
         <Divider />
         <Footer signedIn={false} />
       </Shell>

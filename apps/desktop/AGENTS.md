@@ -15,7 +15,7 @@ Electron app for slashtalk. Built with `electron-vite` (main + preload + multi-w
 - `out/` — build output (gitignored)
 - `dist/` — packaged installers from `electron-builder` (gitignored)
 - `resources/` — runtime assets (e.g. `trayTemplate.png`/`@2x` for the macOS menu-bar icon). Loaded relative to `__dirname` from main process. Template PNGs use grayscale + alpha so macOS auto-tints to match the menu bar. Inside a packaged build, these are included in `app.asar` at the same relative path (`../../resources/…` from `out/main/`).
-- `build/` — brand + packaging sources. `icon.svg` / `icon.png` are the Slashtalk logo source; `icon.iconset/` + `icon.icns` are generated from the SVG (`rsvg-convert` per-size → `iconutil -c icns`) and picked up automatically by electron-builder for the app/dock/Finder/DMG icons. `trayTemplate.svg` is the mono source for `resources/trayTemplate*.png` (rendered at 22px / 44px). Not shipped at runtime — only `resources/**` goes into `app.asar`.
+- `build/` — brand + packaging sources. `icon.png` (1024×1024) is the canonical app-icon source; `icon.iconset/` + `icon.icns` are downsampled from it (`sips -z $size $size icon.png --out icon.iconset/<name>` per Apple iconset naming → `iconutil -c icns`) and picked up automatically by electron-builder for the app/dock/Finder/DMG icons. `trayTemplate.svg` is the mono source for `resources/trayTemplate*.png` (rendered at 22px / 44px). Not shipped at runtime — only `resources/**` goes into `app.asar`.
 
 ## Styling
 
@@ -93,7 +93,7 @@ Notes:
 
 ## Packaging (electron-builder)
 
-Config is inline in `package.json` under the `build` key. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). App icon lives at `build/icon.icns` (auto-picked by electron-builder) — regenerate from `build/icon.svg` via the `rsvg-convert` + `iconutil` steps noted in Layout if the logo changes.
+Config is inline in `package.json` under the `build` key. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). App icon lives at `build/icon.icns` (auto-picked by electron-builder) — regenerate from `build/icon.png` via the `sips` + `iconutil` steps noted in Layout if the logo changes.
 
 Auto-update uses `electron-updater` with public GitHub Releases for `HereNotThere/slashtalk`. macOS builds are universal and must ship both `dmg` and `zip` targets plus `latest-mac.yml`; the zip is required by Squirrel.Mac update metadata even though users normally download the DMG. The release workflow uploads the DMG, zip, blockmaps, and `latest-mac.yml` to the `@slashtalk/electron@<version>` GitHub release.
 

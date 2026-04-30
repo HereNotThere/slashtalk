@@ -55,6 +55,42 @@ From repo root you can also do `bun --filter @slashtalk/electron <script>`.
 
 Install deps from repo root: `bun install` (this is a workspace package, do not run install inside `apps/desktop/`).
 
+## Local development
+
+By default the packaged desktop talks to the hosted services (`https://slashtalk.onrender.com` for the API and `/mcp` on the same server for remote MCP). Local Claude Code and Codex installs point at the desktop-local proxy (`http://127.0.0.1:37613/mcp`) so the device API key stays in Electron `safeStorage` instead of AI-client config files.
+
+To point the desktop at a locally-running backend instead, create `apps/desktop/.env` with:
+
+```dotenv
+MAIN_VITE_SLASHTALK_API_URL=http://localhost:10000
+```
+
+`MAIN_VITE_SLASHTALK_MCP_URL` remains available as a remote-MCP escape hatch for the desktop proxy and self-session client, but the default remote target is `MAIN_VITE_SLASHTALK_API_URL + /mcp`. `SLASHTALK_LOCAL_MCP_PORT` can override the local proxy port for testing.
+
+Then start the backend and desktop from the repo root:
+
+```sh
+bun run dev:server
+bun run dev:desktop
+```
+
+Or run each process separately:
+
+```sh
+# Terminal 1: slashtalk API server (port 10000)
+cd apps/server && bun run dev
+
+# Terminal 2: desktop
+cd apps/desktop && bun run dev
+```
+
+Notes:
+
+- The `MAIN_VITE_` prefix is required — electron-vite only exposes prefixed env vars to the main process. Plain `SLASHTALK_*` in `.env` is ignored. (Plain `SLASHTALK_*` exported in your shell still works as a runtime override.)
+- Keep API and explicit MCP override URLs pointed at the same environment. The desktop device apiKey is minted by the API server and accepted by the server-owned `/mcp` route for local-proxy and legacy compatibility. Direct Claude Code and Codex clients can also authenticate to the same `/mcp` route through MCP OAuth.
+- The former standalone `apps/mcp` service has been removed. MCP local development runs through the server-owned `/mcp` route.
+- For a hosted-API + local-everything-else dev session, comment the local URLs out and the desktop falls back to the hosted defaults.
+
 ## Packaging (electron-builder)
 
 Config is inline in `package.json` under the `build` key. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). App icon lives at `build/icon.icns` (auto-picked by electron-builder) — regenerate from `build/icon.svg` via the `rsvg-convert` + `iconutil` steps noted in Layout if the logo changes.

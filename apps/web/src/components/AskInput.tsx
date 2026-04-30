@@ -34,7 +34,8 @@ export function AskInput({ onSubmit, busy, busyHint, contextHint }: AskInputProp
 
   return (
     <form
-      className="flex items-center gap-2 border-t border-divider bg-surface px-3 py-3"
+      className="ui-chrome flex items-center gap-2 border-t border-divider bg-surface px-3 pt-3"
+      style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -47,7 +48,13 @@ export function AskInput({ onSubmit, busy, busyHint, contextHint }: AskInputProp
         disabled={busy}
         onChange={(e) => setValue(e.target.value)}
         placeholder={placeholder}
-        className="min-w-0 flex-1 rounded-full border border-divider bg-surface-alt px-4 py-2.5 text-sm text-fg placeholder:text-subtle focus:border-primary focus:outline-none disabled:opacity-60"
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        // 16px font is required to stop iOS Safari from auto-zooming the
+        // viewport on focus. Smaller and the page jumps every time the
+        // keyboard opens.
+        className="min-w-0 flex-1 rounded-full border border-divider bg-surface-alt px-4 py-2.5 text-[16px] text-fg placeholder:text-subtle focus:border-primary focus:outline-none disabled:opacity-60"
       />
       <button
         type="submit"

@@ -607,9 +607,11 @@ async function fetchDashboardForLogin(
     const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
     // `noClaimedRepos` now comes from the standup endpoint alone — gh-driven
     // PR fetching has no notion of user_repos rows since it queries GitHub
-    // directly with the caller's token.
+    // directly with the caller's token. SLASHTALK_DEBUG_EMPTY=1 forces it on
+    // so the renderer's no-repo CTA shows up against a real account.
     const noClaimedRepos =
-      standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true;
+      process.env.SLASHTALK_DEBUG_EMPTY === "1" ||
+      (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
     // When the dashboard target is self, push the gh-discovered PRs back to
     // the server so the standup composer (server-side, queries
     // `pull_requests`) can mention them on the same day they're opened.

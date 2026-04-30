@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
-import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { MagnifyingGlassIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useNoTrackedRepos } from "../shared/useNoTrackedRepos";
 
 const DRAG_THRESHOLD = 4;
 const REORDER_ANIM_MS = 280;
@@ -346,6 +347,12 @@ export function App(): JSX.Element {
   const shouldStack = (h: ChatHead): boolean => collapseInactive && isPeerInactive(h);
   const activePeers = allPeers.filter((h) => !shouldStack(h));
   const inactivePeers = allPeers.filter(shouldStack);
+  // When the user has zero tracked repos, the rail collapses to self + search
+  // with no signal that more was supposed to appear. Slip an "+ add repo"
+  // bubble between them — clicks open the tray for the actual flow.
+  const noTrackedRepos = useNoTrackedRepos();
+  const showAddRepoHint =
+    noTrackedRepos === true && activePeers.length === 0 && inactivePeers.length === 0;
   const stackPinnedByInfo =
     infoOpenHeadId != null && inactivePeers.some((p) => p.id === infoOpenHeadId);
   const stackVisuallyExpanded = stackExpanded || stackPinnedByInfo;
@@ -367,8 +374,8 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (!headsLoaded) return;
     const RAIL_OUTER_PAD_PX = 16; // py-4 / px-4 main-axis padding on the rail
-    // search + self + active peers
-    const wrapperCount = 2 + activeCount;
+    // search + self + active peers (+ optional add-repo bubble)
+    const wrapperCount = 2 + activeCount + (showAddRepoHint ? 1 : 0);
     let length = wrapperCount * STACK_WRAPPER_PX;
     if (inactiveCount > 0) {
       length += stackVisuallyExpanded
@@ -377,7 +384,7 @@ export function App(): JSX.Element {
     }
     length += RAIL_OUTER_PAD_PX * 2;
     void window.chatheads.setOverlayLength(length);
-  }, [headsLoaded, activeCount, inactiveCount, stackVisuallyExpanded]);
+  }, [headsLoaded, activeCount, inactiveCount, stackVisuallyExpanded, showAddRepoHint]);
 
   // Outer fills the window exactly along the rail's main axis (height for
   // vertical, width for horizontal). Self + chat are shrink-0; the peer list
@@ -494,6 +501,11 @@ export function App(): JSX.Element {
           )}
         </div>
       )}
+      {showAddRepoHint && (
+        <div className={bubblePadClass}>
+          <AddRepoBubble />
+        </div>
+      )}
       <div
         className={bubblePadClass}
         onMouseEnter={handleSearchBubbleEnter}
@@ -501,6 +513,26 @@ export function App(): JSX.Element {
       >
         <SearchBubble open={chatOpen} />
       </div>
+    </div>
+  );
+}
+
+function AddRepoBubble(): JSX.Element {
+  return (
+    <div
+      data-bubble
+      title="Add a repo to see your team"
+      onClick={() => void window.chatheads.openMain()}
+      className="
+        relative w-11.25 h-11.25 rounded-full cursor-pointer
+        flex items-center justify-center
+        bg-primary/85 text-primary-fg
+        outline-1 -outline-offset-1 outline-white/25
+        transition-transform duration-150 ease-out
+        hover:scale-[1.05] hover:bg-primary
+      "
+    >
+      <PlusIcon className="w-5 h-5 pointer-events-none" />
     </div>
   );
 }

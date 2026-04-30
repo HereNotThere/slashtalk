@@ -24,6 +24,11 @@ export function App(): JSX.Element {
   // Bumped on every `info:show` to drive the post-commit ack effect. Lets us
   // ack same-head re-shows where head?.id is unchanged.
   const [showNonce, setShowNonce] = useState(0);
+  // Tracks the head id from the previous info:show so we can tell a same-head
+  // refetch (keep prior content; the fetching flag drives a fade) from a
+  // head-switch (replace wholesale). Refs not state — we only need the value
+  // synchronously inside the IPC handler.
+  const prevHeadIdRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Measure the inner content, not the card: the card is capped at max-h-screen
@@ -32,14 +37,28 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const offShow = window.chatheads.onInfoShow((p) => {
+      const sameHead = prevHeadIdRef.current === p.head.id;
+      prevHeadIdRef.current = p.head.id;
       setHead(p.head);
-      setSessions(p.sessions);
+      // Same-head re-show: SWR semantics — only overwrite when the snapshot
+      // carries data, so a cache-cleared push (dashboard=null, fetching=true)
+      // doesn't wipe the visible content. The fetching flags below still
+      // update so the dashboards can fade their stale content during the
+      // in-flight refetch. Head-switch: replace wholesale; showing user A's
+      // content on user B's card would be misleading.
+      if (sameHead) {
+        if (p.sessions !== null) setSessions(p.sessions);
+        if (p.dashboard !== null) setDashboard(p.dashboard);
+        if (p.projectOverview !== null) setProjectOverview(p.projectOverview);
+      } else {
+        setSessions(p.sessions);
+        setDashboard(p.dashboard);
+        setProjectOverview(p.projectOverview);
+      }
       setSpotify(p.spotify);
       setLocation(p.location);
       setIsSelf(p.isSelf);
-      setDashboard(p.dashboard);
       setDashboardFetching(p.dashboardFetching);
-      setProjectOverview(p.projectOverview);
       setProjectOverviewFetching(p.projectOverviewFetching);
       setVisible(true);
       setShowNonce((n) => n + 1);

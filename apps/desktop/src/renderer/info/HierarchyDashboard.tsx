@@ -15,6 +15,7 @@ import { PrItem } from "../shared/PrItem";
 import { PrLinkProvider } from "../shared/PrLinkContext";
 import { SectionLabel } from "../shared/SectionLabel";
 import { ShimmerText } from "../shared/ShimmerText";
+import { StaleWrapper } from "../shared/StaleWrapper";
 import { relativeTime } from "../shared/relativeTime";
 import { AskInput } from "./AskInline";
 
@@ -49,6 +50,8 @@ export function HierarchyDashboard({
       </>
     );
   }
+  // NowSection is sessions-driven, not dashboard-driven, so it sits outside
+  // the StaleWrapper — its data has its own refresh path.
   return (
     <>
       <Divider />
@@ -58,18 +61,20 @@ export function HierarchyDashboard({
           <Divider />
         </>
       )}
-      <PastDaySection
-        summary={dashboard?.standup ?? null}
-        // `loading` only drives the shimmer when there's no summary to show.
-        // PastDaySection prefers a stale summary over the shimmer so a
-        // background refetch doesn't hide the prior blurb (SWR — see
-        // docs/info-card.md).
-        loading={dashboard === null || dashboardFetching}
-        subjectLabel={subjectLabel}
-        prs={dashboard?.prs ?? []}
-      />
-      <Divider />
-      <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
+      <StaleWrapper stale={dashboardFetching && dashboard !== null}>
+        <PastDaySection
+          summary={dashboard?.standup ?? null}
+          // `loading` only drives the shimmer when there's no summary to show.
+          // PastDaySection prefers a stale summary over the shimmer so a
+          // background refetch doesn't hide the prior blurb (SWR — see
+          // docs/info-card.md).
+          loading={dashboard === null || dashboardFetching}
+          subjectLabel={subjectLabel}
+          prs={dashboard?.prs ?? []}
+        />
+        <Divider />
+        <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
+      </StaleWrapper>
     </>
   );
 }

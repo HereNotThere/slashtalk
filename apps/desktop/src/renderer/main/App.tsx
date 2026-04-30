@@ -31,7 +31,11 @@ function writeOnboardingDone(): void {
 export function App(): JSX.Element | null {
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
   const [signingIn, setSigningIn] = useState(false);
-  const [tracked, setTracked] = useState<TrackedRepo[]>([]);
+  // null = first IPC fetch hasn't resolved yet. Without this sentinel a
+  // signed-in user with repos sees AddRepo flash because tracked starts at
+  // [], and tapping "Skip for now" during the flash permanently marks
+  // onboarding done before the Share step ever renders.
+  const [tracked, setTracked] = useState<TrackedRepo[] | null>(null);
   const [onboardingDone, setOnboardingDone] = useState<boolean>(readOnboardingDone);
 
   useEffect(() => {
@@ -40,7 +44,10 @@ export function App(): JSX.Element | null {
   }, []);
 
   useEffect(() => {
-    void window.chatheads.backend.listTrackedRepos().then(setTracked);
+    void window.chatheads.backend
+      .listTrackedRepos()
+      .then(setTracked)
+      .catch(() => setTracked([]));
     return window.chatheads.backend.onTrackedReposChange(setTracked);
   }, []);
 
@@ -84,6 +91,11 @@ export function App(): JSX.Element | null {
       </div>
     );
   }
+
+  // Wait for the first listTrackedRepos resolution before deciding which
+  // step to show — otherwise an existing user with repos briefly sees
+  // AddRepo (Step 1) while tracked is still its loading sentinel.
+  if (tracked === null) return null;
 
   // Both Skip-from-AddRepo and Done-from-Share land here so the
   // tray-popup reveal happens consistently — the user always learns

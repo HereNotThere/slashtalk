@@ -3,7 +3,9 @@
  * use `@heroicons/react`. See `docs/design.md` §7.
  */
 
-/** Slashtalk app mark — three dots on green gradient. */
+/** Slashtalk app mark — three white dots on a green-gradient squircle.
+ *  Mirrors `apps/desktop/build/icon.png` so the in-app brand surface
+ *  (sign-in, onboarding) matches the macOS app/dock/Finder icon. */
 export function SlashtalkLogo({ size = 44 }: { size?: number }): JSX.Element {
   return (
     <svg
@@ -15,17 +17,17 @@ export function SlashtalkLogo({ size = 44 }: { size?: number }): JSX.Element {
       aria-hidden
       className="shrink-0"
     >
-      <rect width="48" height="48" rx="12" fill="url(#slashtalkLogoGradient)" />
-      <circle cx="13" cy="11" r="5" fill="white" />
-      <circle cx="13" cy="24" r="5" fill="white" />
-      <circle cx="13" cy="37" r="5" fill="white" />
+      <rect x="4" y="4" width="40" height="40" rx="10" fill="url(#slashtalkLogoGradient)" />
+      <circle cx="16.5" cy="14.5" r="4.5" fill="white" />
+      <circle cx="16.5" cy="24" r="4.5" fill="white" />
+      <circle cx="16.5" cy="33.5" r="4.5" fill="white" />
       <defs>
         <linearGradient
           id="slashtalkLogoGradient"
           x1="24"
-          y1="0"
+          y1="4"
           x2="24"
-          y2="48"
+          y2="44"
           gradientUnits="userSpaceOnUse"
         >
           <stop stopColor="#2ECF81" />

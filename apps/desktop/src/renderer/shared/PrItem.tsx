@@ -42,15 +42,16 @@ export function PrItem({
             openPr();
           }
         }}
+        // State word lives in the native tooltip rather than the meta line —
+        // the icon + #N color already encode state visually.
+        title={PR_STATE_LABEL[pr.state]}
         className="flex items-center gap-2 cursor-pointer"
       >
-        <PrIcon className={`w-3.5 h-3.5 shrink-0 ${PR_STATE_COLOR[pr.state]}`} />
+        <PrIcon state={pr.state} className={`w-3.5 h-3.5 shrink-0 ${PR_STATE_COLOR[pr.state]}`} />
         <div className="flex-1 min-w-0">
           <MarqueeTitle text={pr.title} />
           <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle">
             <span className={`font-medium ${PR_STATE_COLOR[pr.state]}`}>#{pr.number}</span>
-            <span aria-hidden>·</span>
-            <span>{PR_STATE_LABEL[pr.state]}</span>
             {authorLogin && (
               <>
                 <span aria-hidden>·</span>

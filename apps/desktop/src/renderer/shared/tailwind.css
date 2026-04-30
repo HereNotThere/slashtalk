@@ -80,6 +80,7 @@
   --color-danger: #ef4444;
   --color-warning: #f59e0b;
   --color-info: #3b82f6;
+  --color-merged: #a371f7;
 
   /* ─── Window-specific surfaces ─────────────────────────────────── */
   /* Code blocks in markdown */
@@ -121,6 +122,7 @@
     --color-danger: #dc2626;
     --color-warning: #d97706;
     --color-info: #2563eb;
+    --color-merged: #8957e5;
 
     --color-code: rgba(0, 0, 0, 0.06);
     --color-bubble: rgba(255, 255, 255, 0.85);
@@ -155,6 +157,7 @@
       --color-danger: #dc2626;
       --color-warning: #d97706;
       --color-info: #2563eb;
+      --color-merged: #8957e5;
 
       --color-code: rgba(0, 0, 0, 0.06);
       --color-bubble: rgba(255, 255, 255, 0.85);

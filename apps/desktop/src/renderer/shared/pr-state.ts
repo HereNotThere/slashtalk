@@ -7,7 +7,7 @@ type PrState = "open" | "closed" | "merged";
 
 export const PR_STATE_COLOR: Record<PrState, string> = {
   open: "text-success",
-  merged: "text-info",
+  merged: "text-merged",
   closed: "text-danger",
 };
 

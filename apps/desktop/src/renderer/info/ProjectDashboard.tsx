@@ -7,12 +7,11 @@ import {
   type ProjectOverviewResponse,
   type ProjectPr,
 } from "@slashtalk/shared";
-import { PrIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
-import { PR_STATE_COLOR, PR_STATE_LABEL } from "../shared/pr-state";
+import { PersonAvatar } from "../shared/PersonAvatar";
+import { PrItem } from "../shared/PrItem";
 import { ScopeToggle } from "../shared/ScopeToggle";
 import { ShimmerText } from "../shared/ShimmerText";
-import { relativeTime } from "../shared/relativeTime";
 import { useDashboardScope } from "../shared/useDashboardScope";
 import { AskInput } from "./AskInline";
 
@@ -183,41 +182,14 @@ function BucketRow({
 }
 
 function PrRow({ pr }: { pr: ProjectPr }): JSX.Element {
-  const openPr = (): void => {
-    void window.chatheads.openExternal(pr.url);
-  };
   return (
-    <div className="px-6 py-2 group hover:bg-surface-alt/60 transition-colors">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={openPr}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            openPr();
-          }
-        }}
-        className="flex items-start gap-2 cursor-pointer"
-      >
-        <PrIcon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${PR_STATE_COLOR[pr.state]}`} />
-        <div className="flex-1 min-w-0">
-          <div className="text-[13px] text-fg leading-snug line-clamp-1 group-hover:underline decoration-divider underline-offset-2">
-            {pr.title}
-          </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-subtle">
-            <span className={`font-medium ${PR_STATE_COLOR[pr.state]}`}>#{pr.number}</span>
-            <span aria-hidden>·</span>
-            <span>{PR_STATE_LABEL[pr.state]}</span>
-            <span aria-hidden>·</span>
-            <span>@{pr.authorLogin}</span>
-            <span aria-hidden>·</span>
-            <span>{relativeTime(pr.updatedAt)}</span>
-          </div>
-        </div>
+    <PrItem
+      pr={pr}
+      authorLogin={pr.authorLogin}
+      trailing={
         <PersonAvatar person={{ login: pr.authorLogin, avatarUrl: pr.authorAvatarUrl }} size={20} />
-      </div>
-    </div>
+      }
+    />
   );
 }
 
@@ -261,38 +233,5 @@ function PersonChip({ person }: { person: ProjectActivePerson }): JSX.Element {
     >
       <PersonAvatar person={person} size={28} />
     </button>
-  );
-}
-
-function PersonAvatar({
-  person,
-  size,
-}: {
-  person: { login: string; avatarUrl: string | null };
-  size: number;
-}): JSX.Element {
-  if (person.avatarUrl) {
-    return (
-      <img
-        src={person.avatarUrl}
-        alt=""
-        width={size}
-        height={size}
-        className="rounded-full object-cover shrink-0"
-        style={{ width: size, height: size }}
-      />
-    );
-  }
-  // Fallback: initial-on-tinted-circle. No remote avatar (external author or
-  // user record without a stored avatar_url).
-  const initial = person.login.slice(0, 1).toUpperCase();
-  return (
-    <span
-      className="inline-flex items-center justify-center rounded-full bg-surface-alt text-fg/80 font-semibold shrink-0"
-      style={{ width: size, height: size, fontSize: Math.max(10, size * 0.45) }}
-      aria-hidden
-    >
-      {initial}
-    </span>
   );
 }

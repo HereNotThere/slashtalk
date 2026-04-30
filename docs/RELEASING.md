@@ -26,7 +26,7 @@ The [`release` workflow](../.github/workflows/release.yml) runs on every push to
 
 The website (or anywhere else) should link to one of these:
 
-```
+```text
 https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg
 https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.zip
 ```

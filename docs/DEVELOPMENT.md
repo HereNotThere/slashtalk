@@ -31,7 +31,7 @@ cp .env.example apps/server/.env
 
 Edit `apps/server/.env` with your values. For local dev, the defaults work if you used the Docker commands above:
 
-```
+```dotenv
 DATABASE_URL=postgres://slashtalk:slashtalk@localhost:5432/slashtalk
 REDIS_URL=redis://localhost:6379
 GITHUB_CLIENT_ID=<your GitHub OAuth app client ID>

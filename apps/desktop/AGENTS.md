@@ -61,7 +61,7 @@ By default the packaged desktop talks to the hosted services (`https://slashtalk
 
 To point the desktop at a locally-running backend instead, create `apps/desktop/.env` with:
 
-```
+```dotenv
 MAIN_VITE_SLASHTALK_API_URL=http://localhost:10000
 ```
 

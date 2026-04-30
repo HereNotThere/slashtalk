@@ -99,32 +99,36 @@ function ProjectHeader({
   repoFullName: string;
   activeCount: number;
 }): JSX.Element {
-  const { scope, setScope } = useDashboardScope();
   return (
     <div className="flex items-baseline gap-2 px-4 pt-4 pb-3">
       <div className="text-lg font-bold leading-tight truncate font-mono">{repoFullName}</div>
-      <div className="ml-auto flex items-center gap-2 shrink-0">
-        <ScopeToggle scope={scope} onChange={setScope} />
-        {activeCount > 0 && <span className="text-[11px] text-subtle">· {activeCount} active</span>}
-      </div>
+      {activeCount > 0 && (
+        <div className="ml-auto text-[11px] text-subtle shrink-0">{activeCount} active</div>
+      )}
     </div>
   );
 }
 
 function PulseSection({ pulse, loading }: { pulse: string | null; loading: boolean }): JSX.Element {
+  const { scope, setScope } = useDashboardScope();
   return (
-    <div className="px-4 py-3 text-sm text-fg/90 leading-snug">
-      {pulse ? (
-        <Markdown inline className="text-sm leading-snug">
-          {pulse}
-        </Markdown>
-      ) : loading ? (
-        <span className="text-subtle">
-          <ShimmerText text="Reading the room…" />
-        </span>
-      ) : (
-        <span className="text-subtle">Quiet window — no PRs in flight.</span>
-      )}
+    <div>
+      <div className="px-4 pt-3 pb-1.5">
+        <ScopeToggle scope={scope} onChange={setScope} />
+      </div>
+      <div className="px-4 pb-3 text-sm text-fg/90 leading-snug">
+        {pulse ? (
+          <Markdown inline className="text-sm leading-snug">
+            {pulse}
+          </Markdown>
+        ) : loading ? (
+          <span className="text-subtle">
+            <ShimmerText text="Reading the room…" />
+          </span>
+        ) : (
+          <span className="text-subtle">Quiet window — no PRs in flight.</span>
+        )}
+      </div>
     </div>
   );
 }

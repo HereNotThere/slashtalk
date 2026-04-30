@@ -23,7 +23,7 @@ export function App(): JSX.Element {
         <Divider />
         <UpdateStatus compact />
         <Divider />
-        <Footer />
+        <Footer signedIn={false} />
       </Shell>
     );
   }
@@ -57,7 +57,7 @@ export function App(): JSX.Element {
       <Divider />
       <UpdateStatus compact />
       <Divider />
-      <Footer />
+      <Footer signedIn />
     </Shell>
   );
 }
@@ -206,9 +206,24 @@ function SignedOutPrompt(): JSX.Element {
   );
 }
 
-function Footer(): JSX.Element {
+function Footer({ signedIn }: { signedIn: boolean }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const onSignOut = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await window.chatheads.backend.signOut();
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="flex gap-2">
+      {signedIn ? (
+        <FooterButton onClick={() => void onSignOut()} disabled={busy}>
+          {busy ? "Signing out…" : "Sign out"}
+        </FooterButton>
+      ) : null}
       <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
     </div>
   );

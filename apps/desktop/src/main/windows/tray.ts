@@ -78,6 +78,22 @@ export function toggleTrayPopup(bounds: Electron.Rectangle): void {
   }
 }
 
+/** Show the tray popup anchored to the menubar tray icon. Used when an
+ *  in-app surface (settings cog, "add a repo" CTA) wants to surface the
+ *  same popup the user gets from clicking the tray icon — there's only one
+ *  settings UI now, so all roads lead here. No-op if the tray isn't ready. */
+export function openTrayPopup(): void {
+  if (!tray) return;
+  const win = ensureTrayPopup();
+  if (win.isVisible()) {
+    win.focus();
+    return;
+  }
+  positionTrayPopup(tray.getBounds());
+  win.show();
+  win.focus();
+}
+
 export function hideTrayPopup(): void {
   if (trayPopup && !trayPopup.isDestroyed() && trayPopup.isVisible()) trayPopup.hide();
 }

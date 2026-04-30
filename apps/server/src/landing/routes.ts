@@ -11,7 +11,8 @@ export const landingRoutes = () =>
     .get("/favicon.ico", ({ request, set }) => serveLanding(request, set))
     .get("/screenshot-dock.png", ({ request, set }) => serveLanding(request, set))
     .get("/screenshot-card.png", ({ request, set }) => serveLanding(request, set))
-    .get("/screenshot-ask.png", ({ request, set }) => serveLanding(request, set));
+    .get("/screenshot-ask.png", ({ request, set }) => serveLanding(request, set))
+    .get("/og-image.png", ({ request, set }) => serveLanding(request, set));
 
 async function serveLanding(request: Request, set: { status?: number | string }) {
   const relPath = relativeLandingPath(new URL(request.url).pathname);

@@ -197,10 +197,10 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 			data-edge="top"
 		>
 			{
-				team.map((m) => (
+				team.map((m, i) => (
 					<button
 						type="button"
-						class={`avatar relative inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-neutral-300 ring-1 ring-black/5 transition-transform hover:scale-110 sm:size-[46px] ${m.live ? "dock-live" : ""}`}
+						class={`avatar relative ${i >= 5 ? "hidden sm:inline-flex" : "inline-flex"} size-9 shrink-0 items-center justify-center rounded-full bg-neutral-300 ring-1 ring-black/5 transition-transform hover:scale-110 sm:size-[46px] ${m.live ? "dock-live" : ""}`}
 						data-user={m.login}
 						aria-label={`${m.login} card`}
 					>

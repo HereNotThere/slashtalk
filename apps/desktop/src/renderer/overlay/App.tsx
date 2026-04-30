@@ -349,10 +349,15 @@ export function App(): JSX.Element {
   const inactivePeers = allPeers.filter(shouldStack);
   // When the user has zero tracked repos, the rail collapses to self + search
   // with no signal that more was supposed to appear. Slip an "+ add repo"
-  // bubble between them — clicks open the tray for the actual flow.
+  // bubble between them — clicks open the tray for the actual flow. Peer
+  // guards keep it from firing when the rail still has teammates; under
+  // SLASHTALK_DEBUG_EMPTY we skip them so the bubble is previewable against
+  // a real account that already has peers loaded.
   const noTrackedRepos = useNoTrackedRepos();
+  const debugEmptyState = window.chatheads.debug.emptyState;
   const showAddRepoHint =
-    noTrackedRepos === true && activePeers.length === 0 && inactivePeers.length === 0;
+    noTrackedRepos === true &&
+    (debugEmptyState || (activePeers.length === 0 && inactivePeers.length === 0));
   const stackPinnedByInfo =
     infoOpenHeadId != null && inactivePeers.some((p) => p.id === infoOpenHeadId);
   const stackVisuallyExpanded = stackExpanded || stackPinnedByInfo;

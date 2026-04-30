@@ -32,14 +32,13 @@ import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
 import {
   shortRepoName,
+  parseDashboardScope,
   type DashboardScope,
   type ProjectActivePerson,
   type ProjectBucket,
   type ProjectOverviewResponse,
   type ProjectPr,
 } from "@slashtalk/shared";
-
-const SCOPE_VALUES: DashboardScope[] = ["today", "past24h"];
 
 // Caps keep the prompt bounded for repos with many in-flight PRs / contributors.
 const MAX_PRS_IN_OVERVIEW = 30;
@@ -98,11 +97,6 @@ interface OverviewDeps {
 
 const overviewCache = new TtlCache<string, ProjectOverviewResponse>(OVERVIEW_CACHE_TTL_MS);
 
-function parseScope(raw: string | undefined): DashboardScope {
-  if (raw && (SCOPE_VALUES as string[]).includes(raw)) return raw as DashboardScope;
-  return "today";
-}
-
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1)}…`;
@@ -124,7 +118,7 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
   new Elysia({ name: "repo/overview" }).use(jwtAuth).get(
     "/api/repos/:owner/:name/overview",
     async ({ user, params, query, set }): Promise<ProjectOverviewResponse | { error: string }> => {
-      const scope = parseScope(query.scope);
+      const scope = parseDashboardScope(query.scope) ?? "today";
       const fullName = `${params.owner}/${params.name}`;
 
       const [repo] = await db

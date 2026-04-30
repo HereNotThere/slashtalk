@@ -713,11 +713,7 @@ export function fetchUserStandup(login: string, scope: DashboardScope): Promise<
   });
 }
 
-/** Server-side PRs for the user-card. Used for peer cards so the PRs section
- *  and the standup blurb are anchored to the same target-tz "today" window —
- *  otherwise the local-gh path uses the *caller's* midnight and the two
- *  sections of the same card disagree across tz boundaries. The self path
- *  intentionally keeps using local `gh` (see ghPrs.ts) for freshness. */
+/** Server-side PRs for peer user-cards (self uses local `gh`, see ghPrs.ts). */
 export function fetchUserPrs(login: string, scope: DashboardScope): Promise<UserPrsResponse> {
   const qs = new URLSearchParams({ scope });
   return jsonFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs?${qs}`, {

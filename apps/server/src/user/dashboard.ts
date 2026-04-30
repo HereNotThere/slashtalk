@@ -26,13 +26,13 @@ import { windowStart } from "../util/time-window";
 import { loadInsightsForSessions } from "../sessions/snapshot";
 import {
   shortRepoName,
+  DASHBOARD_SCOPES,
+  parseDashboardScope,
   type DashboardScope,
   type StandupResponse,
   type UserPr,
   type UserPrsResponse,
 } from "@slashtalk/shared";
-
-const SCOPE_VALUES: DashboardScope[] = ["today", "past24h"];
 
 // Cap on how many sessions/PRs feed into the standup prompt. Keeps the
 // Anthropic call bounded for power users with dozens of sessions in a day.
@@ -92,14 +92,9 @@ function cacheKey(callerId: number, targetId: number, scope: DashboardScope): st
  *  invalidating peer-viewing-self entries — peers already accept some lag,
  *  and tracking them would mean iterating the cache. */
 export function invalidateSelfStandupCache(userId: number): void {
-  for (const scope of SCOPE_VALUES) {
+  for (const scope of DASHBOARD_SCOPES) {
     standupCache.delete(cacheKey(userId, userId, scope));
   }
-}
-
-function parseScope(raw: string | undefined): DashboardScope {
-  if (raw && (SCOPE_VALUES as string[]).includes(raw)) return raw as DashboardScope;
-  return "today";
 }
 
 interface ResolvedTarget {
@@ -171,7 +166,7 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
     .get(
       "/api/users/:login/prs",
       async ({ user, params, query, set }): Promise<UserPrsResponse | { error: string }> => {
-        const scope = parseScope(query.scope);
+        const scope = parseDashboardScope(query.scope) ?? "today";
         const resolved = await resolveTarget(db, user, params.login);
         if ("error" in resolved) {
           set.status = resolved.error === "not_found" ? 404 : 403;
@@ -232,7 +227,7 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
     .get(
       "/api/users/:login/standup",
       async ({ user, params, query, set }): Promise<StandupResponse | { error: string }> => {
-        const scope = parseScope(query.scope);
+        const scope = parseDashboardScope(query.scope) ?? "today";
         const resolved = await resolveTarget(db, user, params.login);
         if ("error" in resolved) {
           set.status = resolved.error === "not_found" ? 404 : 403;

@@ -205,9 +205,7 @@ ipcMain.handle("rail:setShowActivityTimestamps", (_e, shown: boolean): void => {
 
 ipcMain.handle("rail:getDashboardScope", (): DashboardScope => getDashboardScope());
 ipcMain.handle("rail:setDashboardScope", (_e, scope: DashboardScope): void => {
-  setDashboardScope(scope);
-  // Caches and currently-shown card are scope-bound — clear and refetch so
-  // the user sees the new window immediately, not after the next hover.
+  if (!setDashboardScope(scope)) return;
   info.onDashboardScopeChanged();
   broadcastDashboardScope();
 });

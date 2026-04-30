@@ -9,7 +9,7 @@
 // index.ts — those side effects span hover-polling and rail-visibility too.
 
 import type { BrowserWindow } from "electron";
-import type { DashboardScope } from "@slashtalk/shared";
+import { parseDashboardScope, type DashboardScope } from "@slashtalk/shared";
 import * as store from "../store";
 import { broadcast } from "./broadcast";
 
@@ -19,8 +19,6 @@ const COLLAPSE_INACTIVE_KEY = "railCollapseInactive";
 const SHOW_ACTIVITY_TIMESTAMPS_KEY = "showActivityTimestamps";
 const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
 const DASHBOARD_SCOPE_KEY = "dashboardScope";
-
-const VALID_DASHBOARD_SCOPES: readonly DashboardScope[] = ["today", "past24h"];
 
 interface RailStateDeps {
   getOverlay: () => BrowserWindow | null;
@@ -72,16 +70,11 @@ export function getShowActivityTimestamps(): boolean {
 }
 
 /** Time window driving every dashboard surface (user-card PRs/standup +
- *  project-card overview). Default `today` — anchored to the *target's* tz
- *  on user surfaces, the *caller's* tz on the project surface. Switching to
- *  `past24h` collapses both into a single tz-neutral window, useful when
- *  caller and target are on different calendar dates. Validated against the
- *  enum so a stale serialised value can't poison the dashboards. */
+ *  project-card overview). Default `today` — anchored to the target's tz on
+ *  user surfaces, the caller's tz on the project surface. `past24h` is a
+ *  tz-neutral rolling window. */
 export function getDashboardScope(): DashboardScope {
-  const v = store.get<string>(DASHBOARD_SCOPE_KEY);
-  return (VALID_DASHBOARD_SCOPES as readonly string[]).includes(v ?? "")
-    ? (v as DashboardScope)
-    : "today";
+  return parseDashboardScope(store.get<string>(DASHBOARD_SCOPE_KEY)) ?? "today";
 }
 
 // ---------- Setters ----------
@@ -106,9 +99,13 @@ export function setSpotifyShareEnabled(value: boolean): void {
   store.set(SPOTIFY_SHARE_KEY, value);
 }
 
-export function setDashboardScope(value: DashboardScope): void {
-  if (!(VALID_DASHBOARD_SCOPES as readonly string[]).includes(value)) return;
+/** Persist a new scope. Returns true if the value actually changed; lets the
+ *  caller skip cache-clearing and broadcast on a redundant click. */
+export function setDashboardScope(value: DashboardScope): boolean {
+  if (parseDashboardScope(value) === null) return false;
+  if (getDashboardScope() === value) return false;
   store.set(DASHBOARD_SCOPE_KEY, value);
+  return true;
 }
 
 // ---------- Broadcasts ----------

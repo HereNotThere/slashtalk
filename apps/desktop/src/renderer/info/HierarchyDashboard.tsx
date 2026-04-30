@@ -122,31 +122,46 @@ function AskTrigger({
   );
 }
 
-// "Today" on a peer card is anchored to the *target's* tz on the server. When
-// caller and target are on different calendar dates right now, the section
-// header can read "Today" while showing nothing the viewer's own day produced
-// — surface the target's local date so the gap is legible. Returns null when
-// either tz is unknown or both sides are on the same date (no ambiguity).
+// Caller and target may be on different calendar dates when the section is
+// labelled "Today" — surface the target's local date so the gap is legible.
+// Returns null when no ambiguity (same date, or tz unknown).
+//
+// Formatters are cached per-tz: PastDaySection re-renders on every dashboard
+// update, and Intl.DateTimeFormat construction is the expensive part.
+const callerYmdFmt = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const tzYmdFmts = new Map<string, Intl.DateTimeFormat>();
+const tzShortFmts = new Map<string, Intl.DateTimeFormat>();
+
 function peerDayHint(targetTz: string | null): { short: string; title: string } | null {
   if (!targetTz) return null;
   try {
-    const now = new Date();
-    // YYYY-MM-DD comparison via en-CA — locale-independent, easy to compare.
-    const ymd = (tz?: string): string =>
-      new Intl.DateTimeFormat("en-CA", {
-        timeZone: tz,
+    let ymdFmt = tzYmdFmts.get(targetTz);
+    if (!ymdFmt) {
+      ymdFmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: targetTz,
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
-      }).format(now);
-    if (ymd() === ymd(targetTz)) return null;
-    const short = new Intl.DateTimeFormat(undefined, {
-      timeZone: targetTz,
-      weekday: "short",
-      month: "numeric",
-      day: "numeric",
-    }).format(now);
-    // City label — best-effort, falls back to the raw tz id (e.g. "America/Los_Angeles").
+      });
+      tzYmdFmts.set(targetTz, ymdFmt);
+    }
+    const now = new Date();
+    if (callerYmdFmt.format(now) === ymdFmt.format(now)) return null;
+    let shortFmt = tzShortFmts.get(targetTz);
+    if (!shortFmt) {
+      shortFmt = new Intl.DateTimeFormat(undefined, {
+        timeZone: targetTz,
+        weekday: "short",
+        month: "numeric",
+        day: "numeric",
+      });
+      tzShortFmts.set(targetTz, shortFmt);
+    }
+    const short = shortFmt.format(now);
     const city = targetTz.split("/").pop()?.replace(/_/g, " ") ?? targetTz;
     return { short: `${short} their time`, title: `${short} in ${city}` };
   } catch {

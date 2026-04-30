@@ -58,13 +58,6 @@ const INFO_SHOW_READY_TIMEOUT_MS = 80;
 // at most once per REFRESH_DEBOUNCE_MS regardless of WS traffic.
 const REFRESH_DEBOUNCE_MS = 300;
 
-// Time-window scope for every dashboard surface (user-card PRs/standup +
-// project overview). Sourced from the user-controlled preference so all
-// surfaces flip together — splitting them by section confuses the viewer
-// when one says "today" and another says "past 24h." `today` anchors to
-// target tz on user surfaces and caller tz on the project overview;
-// `past24h` is a single tz-neutral rolling window everywhere.
-
 let deps: InfoDeps;
 let infoWindow: BrowserWindow | null = null;
 
@@ -144,13 +137,16 @@ export function invalidateProjectOverview(repoFullName: string): void {
   projectOverviewCache.delete(repoFullName);
 }
 
-/** Toggling the dashboard scope changes the time window the server filters on,
- *  so every cached entry on both surfaces is stale. Wholesale-clear and
- *  refetch the currently-shown card so the user sees the new window
- *  immediately instead of after the next hover. */
+/** Toggling the dashboard scope retargets the server window, so every cached
+ *  entry is stale AND any in-flight fetch is producing old-scope data. Drop
+ *  in-flight maps too — the `=== promise` identity guard at write-time then
+ *  rejects those late-landing writes instead of letting them poison the
+ *  freshly-cleared cache. */
 export function onDashboardScopeChanged(): void {
   clearDashboardCache();
   clearProjectOverviewCache();
+  dashboardInFlight.clear();
+  projectOverviewInFlight.clear();
   if (selectedHeadId && infoWindow && !infoWindow.isDestroyed() && infoWindow.isVisible()) {
     refreshNow();
   }
@@ -604,17 +600,13 @@ async function fetchDashboardForLogin(
   // active in-flight. This prevents a superseded promise (bumped by a
   // forced refetch) from clobbering newer data.
   const promise = (async (): Promise<InfoDashboardData> => {
-    // Self uses local `gh` (zero poller lag, lets us push fresh PRs back to
-    // the server). Peer uses the server endpoint so its PR list and the
-    // standup blurb are anchored to the same target-tz "today" — local gh
-    // would scope to the *caller's* midnight and produce a card whose two
-    // sections disagree across tz boundaries.
-    const standupP = backend.fetchUserStandup(login, getDashboardScope());
+    // Self → local gh (zero poller lag + push-back to server). Peer → server
+    // endpoint so its PRs and the standup blurb share one target-tz window.
+    const scope = getDashboardScope();
+    const standupP = backend.fetchUserStandup(login, scope);
     const prsP: Promise<{ prs: UserPr[]; ghStatus: GhStatus }> = backend.isSelf(login)
-      ? fetchGhUserPrs(login, getDashboardScope()).then(async (r) => {
-          // Push gh-discovered self PRs back to the server so the standup
-          // composer (which reads `pull_requests`) sees them on the same day.
-          // Soft-fail: a network blip here must never break the user-card.
+      ? fetchGhUserPrs(login, scope).then(async (r) => {
+          // Soft-fail: network blip must not break the user-card.
           if (r.prs.length > 0) {
             void backend
               .pushSelfPrs(r.prs)
@@ -632,7 +624,7 @@ async function fetchDashboardForLogin(
           return { prs: r.prs, ghStatus: r.ghStatus };
         })
       : backend
-          .fetchUserPrs(login, getDashboardScope())
+          .fetchUserPrs(login, scope)
           .then((r) => ({ prs: r.prs, ghStatus: "ready" as const }));
     const [prsRes, standupRes] = await Promise.allSettled([prsP, standupP]);
     if (prsRes.status === "rejected") {
@@ -644,19 +636,13 @@ async function fetchDashboardForLogin(
     const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
     const ghStatus = prsRes.status === "fulfilled" ? prsRes.value.ghStatus : "ready";
     const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
-    // `noClaimedRepos` comes from the standup endpoint — peer queries on
-    // /api/users/:login/prs return 403 (not the flag) when there's no
-    // user_repos overlap, and the self gh-driven path has no notion of it.
+    // peer 403s short-circuit before reaching here; self gh-path has no claim concept.
     const noClaimedRepos =
       standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true;
-    // Self path doesn't need the disambiguation hint — caller and target are
-    // the same person on the same machine. Null short-circuits the renderer
-    // check cleanly.
-    const targetTimezone = backend.isSelf(login)
-      ? null
-      : standupRes.status === "fulfilled"
-        ? (standupRes.value.timezone ?? null)
-        : null;
+    const targetTimezone =
+      backend.isSelf(login) || standupRes.status !== "fulfilled"
+        ? null
+        : (standupRes.value.timezone ?? null);
     return { prs, standup, noClaimedRepos, ghStatus, targetTimezone };
   })();
   dashboardInFlight.set(login, promise);

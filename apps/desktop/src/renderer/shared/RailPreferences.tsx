@@ -379,8 +379,6 @@ function DashboardScopeRow({
   value: DashboardScope;
   onChange: (scope: DashboardScope) => void;
 }): JSX.Element {
-  // Marked "experimental" until we've watched a few teams use the past24h
-  // mode in mixed-tz situations and decide whether to flip the default.
   const opts: { scope: DashboardScope; label: string }[] = [
     { scope: "today", label: "Today" },
     { scope: "past24h", label: "Past 24h" },

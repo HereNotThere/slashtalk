@@ -78,6 +78,17 @@ export interface SessionPr {
  *  IANA timezone to compute the local 00:00 boundary; "past24h" is now - 24h. */
 export type DashboardScope = "today" | "past24h";
 
+export const DASHBOARD_SCOPES: readonly DashboardScope[] = ["today", "past24h"];
+
+/** Coerce an arbitrary string to a `DashboardScope`, returning `null` when it
+ *  isn't one. Used at every trust boundary (request query, persisted prefs)
+ *  so a stale or hand-crafted value can't slip past the type system. */
+export function parseDashboardScope(raw: unknown): DashboardScope | null {
+  return typeof raw === "string" && (DASHBOARD_SCOPES as readonly string[]).includes(raw)
+    ? (raw as DashboardScope)
+    : null;
+}
+
 /** A PR authored by a specific user inside the dashboard window. Shape
  *  mirrors what the info-card "PRs pushed" section needs. The endpoint that
  *  returns these gates by `user_repos` overlap between caller and target so

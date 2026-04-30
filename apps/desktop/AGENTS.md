@@ -93,6 +93,18 @@ xcrun stapler validate dist/Slashtalk-*.dmg
 
 To build unsigned locally (skip the cert + notarize), unset `CSC_LINK` and pass `--config.mac.identity=null --config.mac.notarize=false` to electron-builder, or temporarily flip `notarize` off in `package.json`.
 
+## Auto-update
+
+Powered by [`electron-updater`](https://www.electron.build/auto-update) reading from GitHub Releases (the public `HereNotThere/slashtalk` repo). Wiring lives in [`src/main/autoUpdate.ts`](src/main/autoUpdate.ts) and is called from `app.whenReady` in `src/main/index.ts`.
+
+- **Disabled in dev.** `app.isPackaged` gates everything; the manual-check IPC shows an "updates disabled" dialog.
+- **Cadence.** Initial check 5s after launch, then every hour.
+- **UX.** Auto-download is on. On `update-downloaded` we show a native dialog: "Restart now" calls `quitAndInstall()`, "Later" applies on next quit.
+- **Manual check.** "Check for updates" button in the tray popover ([`statusbar` renderer](src/renderer/statusbar/App.tsx)) calls `update:check` IPC; result surfaces in a dialog.
+- **Artifacts.** electron-builder `mac.target` includes both `dmg` (first install) and `zip` (auto-update). The release workflow uploads the zips, their `.blockmap` files, and `latest-mac.yml` (the manifest electron-updater fetches).
+- **Publish config.** `build.publish` in `package.json` points at GitHub. Builds run with `--publish never` so electron-builder generates `latest-mac.yml` but doesn't upload — the GitHub Release upload is owned by `softprops/action-gh-release` in `release.yml` (single source of truth, no double-upload race).
+- **Tag format.** Releases use the changesets-style tag `@slashtalk/electron@<version>`. electron-updater's GitHub provider reads `releases/latest` and the version from `latest-mac.yml`, so the unusual tag format is fine — just make sure new releases are marked "latest" on GitHub (the default for non-prerelease releases).
+
 ## Before committing
 
 ```bash

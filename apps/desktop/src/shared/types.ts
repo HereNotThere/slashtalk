@@ -375,6 +375,15 @@ export type ResponseOpenPayload =
 
 export type ThemeMode = "system" | "light" | "dark";
 
+export type AutoUpdateStatus =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "available"; version: string }
+  | { kind: "downloading"; percent: number; version: string }
+  | { kind: "downloaded"; version: string }
+  | { kind: "not-available"; version: string }
+  | { kind: "error"; message: string };
+
 // The full preload → renderer API surface. Implemented in src/preload/index.ts,
 // consumed by renderer code via `window.chatheads`.
 export interface ChatHeadsBridge {
@@ -666,6 +675,16 @@ export interface ChatHeadsBridge {
   /** Dev-only: main fires this to ask the overlay to replay the enter
    *  animation on all currently mounted bubbles. */
   onDebugReplayEnter: (cb: () => void) => Unsubscribe;
+
+  // Auto-update (electron-updater + GitHub Releases). Disabled in dev — the
+  // manual check there shows a "not available in dev" dialog. Status events
+  // arrive on every window so any surface can show progress.
+  update: {
+    check: () => Promise<void>;
+    status: () => Promise<AutoUpdateStatus>;
+    installNow: () => Promise<void>;
+    onStatus: (cb: (status: AutoUpdateStatus) => void) => Unsubscribe;
+  };
 }
 
 declare global {

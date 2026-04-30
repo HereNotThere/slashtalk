@@ -75,6 +75,7 @@ import { registerAgents } from "./ipc/agents";
 import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
 import { registerChatDelegateIpc } from "./ipc/chatDelegate";
+import * as autoUpdate from "./autoUpdate";
 
 // uncaughtException leaves the process in undefined state — exit so Electron
 // surfaces a crash dialog and the user gets a clean restart. A stray
@@ -465,6 +466,8 @@ app
     rail.start();
     selfSession.start();
     applyInitialSync();
+
+    autoUpdate.init();
 
     registerDebugShortcuts();
   })

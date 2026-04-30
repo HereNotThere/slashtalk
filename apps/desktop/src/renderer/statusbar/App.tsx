@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BackendAuthState, TrackedRepo } from "../../shared/types";
+import type { AutoUpdateStatus, BackendAuthState, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 import { Checkbox } from "../shared/Checkbox";
 import { RailPreferences } from "../shared/RailPreferences";
@@ -203,10 +203,58 @@ function SignedOutPrompt(): JSX.Element {
 
 function Footer(): JSX.Element {
   return (
-    <div className="flex gap-2">
-      <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
+    <div className="flex flex-col gap-2">
+      <UpdateRow />
+      <div className="flex gap-2">
+        <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
+      </div>
     </div>
   );
+}
+
+function UpdateRow(): JSX.Element {
+  const status = useUpdateStatus();
+  const label = updateLabel(status);
+  const cta = status.kind === "downloaded" ? "Restart to update" : "Check for updates";
+  const onClick = (): void => {
+    if (status.kind === "downloaded") void window.chatheads.update.installNow();
+    else if (status.kind !== "checking" && status.kind !== "downloading") {
+      void window.chatheads.update.check();
+    }
+  };
+  const disabled = status.kind === "checking" || status.kind === "downloading";
+  return (
+    <div className="flex items-center gap-2">
+      <FooterButton onClick={onClick} disabled={disabled}>
+        {cta}
+      </FooterButton>
+      {label ? (
+        <span className="text-xs text-fg/55 min-w-0 truncate" title={label}>
+          {label}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function updateLabel(s: AutoUpdateStatus): string {
+  switch (s.kind) {
+    case "checking":
+      return "Checking…";
+    case "available":
+      return `Downloading ${s.version}…`;
+    case "downloading":
+      return `Downloading ${s.version} (${s.percent}%)`;
+    case "downloaded":
+      return `${s.version} ready`;
+    case "not-available":
+      return "";
+    case "error":
+      return "Update check failed";
+    case "idle":
+    default:
+      return "";
+  }
 }
 
 function FooterButton({
@@ -263,4 +311,13 @@ function useSelection(): Set<number> {
     return window.chatheads.trackedRepos.onSelectionChange((list) => setSelected(new Set(list)));
   }, []);
   return selected;
+}
+
+function useUpdateStatus(): AutoUpdateStatus {
+  const [status, setStatus] = useState<AutoUpdateStatus>({ kind: "idle" });
+  useEffect(() => {
+    void window.chatheads.update.status().then(setStatus);
+    return window.chatheads.update.onStatus(setStatus);
+  }, []);
+  return status;
 }

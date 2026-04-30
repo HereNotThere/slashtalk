@@ -7,6 +7,7 @@ import type {
 } from "@slashtalk/shared";
 import type {
   AgentHistoryPage,
+  AutoUpdateStatus,
   ManagedAgentSessionRow,
   AgentSessionSummary,
   AgentStreamEvent,
@@ -264,6 +265,13 @@ const bridge: ChatHeadsBridge = {
     const handler = (): void => cb();
     ipcRenderer.on("debug:replayEnter", handler);
     return () => ipcRenderer.off("debug:replayEnter", handler);
+  },
+
+  update: {
+    check: () => ipcRenderer.invoke("update:check") as Promise<void>,
+    status: () => ipcRenderer.invoke("update:status") as Promise<AutoUpdateStatus>,
+    installNow: () => ipcRenderer.invoke("update:installNow") as Promise<void>,
+    onStatus: (cb) => subscribe<AutoUpdateStatus>("update:status", cb),
   },
 };
 

@@ -95,6 +95,11 @@ export interface UserPrsResponse {
   prs: UserPr[];
   scope: DashboardScope;
   since: string;
+  /** Target's IANA timezone, the one `since` was anchored to. Lets the
+   *  renderer disambiguate "today" when caller and target are in different
+   *  zones (e.g. surface "Tue 4/29 her time" next to the section header).
+   *  Null when the target hasn't reported a tz yet. */
+  timezone: string | null;
   /** True only on the self path when the caller has no claimed `user_repos`
    *  rows. Renderers should surface a "claim a repo" CTA rather than an empty
    *  list — without this signal, "0 PRs" is ambiguous (genuinely quiet day vs.
@@ -136,6 +141,8 @@ export interface StandupResponse {
   summary: string | null;
   scope: DashboardScope;
   since: string;
+  /** See `UserPrsResponse.timezone`. */
+  timezone: string | null;
   /** See `UserPrsResponse.noClaimedRepos`. */
   noClaimedRepos?: boolean;
 }

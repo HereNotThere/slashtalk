@@ -2,6 +2,7 @@
 // Any IPC contract lives here, so changes are caught by the compiler on both sides.
 
 import type {
+  DashboardScope,
   ManagedAgentSessionRow,
   FeedSessionSnapshot,
   ProjectOverviewResponse,
@@ -11,7 +12,7 @@ import type {
 
 // Re-export for convenience: renderers import from this module, not from
 // @slashtalk/shared directly.
-export type { ManagedAgentSessionRow, SpotifyPresence };
+export type { DashboardScope, ManagedAgentSessionRow, SpotifyPresence };
 
 // Sessions surfaced to the info window: own sessions (SessionSnapshot) and
 // peer sessions from /api/feed (FeedSessionSnapshot with extra social fields).
@@ -112,6 +113,13 @@ export interface InfoDashboardData {
    *  shows a "connect a repo" CTA instead of empty PR/standup placeholders. */
   noClaimedRepos: boolean;
   ghStatus: GhStatus;
+  /** Target user's IANA timezone (the one `since` was anchored to on the
+   *  server). Renderer uses it to disambiguate "Today" when caller's and
+   *  target's local dates differ — without this hint, a peer in a tz behind
+   *  the caller looks like they had a quiet day even after PRs they shipped
+   *  late their evening. Null on the self path (caller IS the target) and
+   *  when the target hasn't reported a tz. */
+  targetTimezone: string | null;
 }
 
 // Signed-in identity for the MCP/agents shim. Token stays main-side.
@@ -456,6 +464,13 @@ export interface ChatHeadsBridge {
     getShowActivityTimestamps: () => Promise<boolean>;
     setShowActivityTimestamps: (shown: boolean) => Promise<void>;
     onShowActivityTimestampsChange: (cb: (shown: boolean) => void) => Unsubscribe;
+    /** Time-window driving every dashboard surface (user-card PRs/standup,
+     *  project overview). `today` honours target/caller tz; `past24h` is a
+     *  tz-neutral rolling window. Toggling clears the dashboard caches and
+     *  refetches the visible card so the new scope shows immediately. */
+    getDashboardScope: () => Promise<DashboardScope>;
+    setDashboardScope: (scope: DashboardScope) => Promise<void>;
+    onDashboardScopeChange: (cb: (scope: DashboardScope) => void) => Unsubscribe;
   };
 
   // Opt-in toggle for broadcasting the user's Spotify "Now Playing" to peers.

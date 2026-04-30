@@ -184,8 +184,9 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
         // `noClaimedRepos` lets the renderer prompt the user to connect a repo
         // instead of showing a misleading empty list. Only reachable on the
         // self path — peers with empty overlap already 403 in resolveTarget.
+        const timezone = resolved.timezone ?? null;
         if (resolved.visibleRepoIds.length === 0) {
-          return { prs: [], scope, since: sinceIso, noClaimedRepos: true };
+          return { prs: [], scope, since: sinceIso, timezone, noClaimedRepos: true };
         }
 
         const rows = await db
@@ -216,7 +217,7 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
           repoFullName: r.repoFullName,
           updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
         }));
-        return { prs, scope, since: sinceIso };
+        return { prs, scope, since: sinceIso, timezone };
       },
       {
         params: t.Object({ login: t.String() }),
@@ -247,7 +248,13 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
         // stale entry too so a re-claim doesn't resurrect it.
         if (resolved.visibleRepoIds.length === 0) {
           standupCache.delete(key);
-          return { summary: null, scope, since: sinceIso, noClaimedRepos: true };
+          return {
+            summary: null,
+            scope,
+            since: sinceIso,
+            timezone: resolved.timezone ?? null,
+            noClaimedRepos: true,
+          };
         }
 
         const hit = standupCache.get(key);
@@ -292,9 +299,10 @@ interface ComposeArgs {
 async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
   const { db, redis, caller, target, since, scope } = args;
   const sinceIso = since.toISOString();
+  const timezone = target.timezone ?? null;
 
   if (target.visibleRepoIds.length === 0) {
-    return { summary: null, scope, since: sinceIso, noClaimedRepos: true };
+    return { summary: null, scope, since: sinceIso, timezone, noClaimedRepos: true };
   }
 
   // PRs and sessions are independent — fetch in parallel. The session-insights
@@ -350,7 +358,7 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
   // Bail without LLM call when there's nothing to summarize. Saves budget
   // and gives the renderer a clean "hide the section" signal.
   if (prRows.length === 0 && sessionRows.length === 0) {
-    return { summary: null, scope, since: sinceIso };
+    return { summary: null, scope, since: sinceIso, timezone };
   }
 
   const insightsBySessionId = await loadInsightsForSessions(
@@ -391,7 +399,7 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
   });
 
   const summary = result.output.summary?.trim() || null;
-  return { summary, scope, since: sinceIso };
+  return { summary, scope, since: sinceIso, timezone };
 }
 
 interface StandupPromptArgs {

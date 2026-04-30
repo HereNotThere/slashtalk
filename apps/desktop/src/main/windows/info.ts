@@ -1,12 +1,13 @@
 import { BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
 import type { ChatHead, GhStatus, InfoDashboardData, InfoSession } from "../../shared/types";
-import type { DashboardScope, ProjectOverviewResponse, UserPr } from "@slashtalk/shared";
+import type { ProjectOverviewResponse, UserPr } from "@slashtalk/shared";
 import * as backend from "../backend";
 import * as localRepos from "../localRepos";
 import * as rail from "../rail";
 import * as peerPresence from "../peerPresence";
 import * as peerLocations from "../peerLocations";
 import { fetchGhUserPrs } from "../ghPrs";
+import { getDashboardScope } from "./rail-state";
 import { setMacCornerRadius } from "../macCorners";
 import { BUBBLE_PAD, BUBBLE_SIZE, PADDING_Y } from "./dock-geometry";
 import { currentDock, getIsDragging } from "./dock-drag";
@@ -57,13 +58,12 @@ const INFO_SHOW_READY_TIMEOUT_MS = 80;
 // at most once per REFRESH_DEBOUNCE_MS regardless of WS traffic.
 const REFRESH_DEBOUNCE_MS = 300;
 
-// Time-window scopes for the dashboard sections. Hardcoded flags — flip to
-// "past24h" to switch a section to a rolling 24h window instead of the
-// target's local "today" boundary. Each section's scope is independent so
-// the two can evolve at different cadences.
-const DASHBOARD_PRS_SCOPE: DashboardScope = "today";
-const DASHBOARD_STANDUP_SCOPE: DashboardScope = "today";
-const PROJECT_OVERVIEW_SCOPE: DashboardScope = "today";
+// Time-window scope for every dashboard surface (user-card PRs/standup +
+// project overview). Sourced from the user-controlled preference so all
+// surfaces flip together — splitting them by section confuses the viewer
+// when one says "today" and another says "past 24h." `today` anchors to
+// target tz on user surfaces and caller tz on the project overview;
+// `past24h` is a single tz-neutral rolling window everywhere.
 
 let deps: InfoDeps;
 let infoWindow: BrowserWindow | null = null;
@@ -142,6 +142,18 @@ localRepos.onClaimsSettled(clearProjectOverviewCache);
  *  `pr_activity` lands so the next hover repaints with fresh data. */
 export function invalidateProjectOverview(repoFullName: string): void {
   projectOverviewCache.delete(repoFullName);
+}
+
+/** Toggling the dashboard scope changes the time window the server filters on,
+ *  so every cached entry on both surfaces is stale. Wholesale-clear and
+ *  refetch the currently-shown card so the user sees the new window
+ *  immediately instead of after the next hover. */
+export function onDashboardScopeChanged(): void {
+  clearDashboardCache();
+  clearProjectOverviewCache();
+  if (selectedHeadId && infoWindow && !infoWindow.isDestroyed() && infoWindow.isVisible()) {
+    refreshNow();
+  }
 }
 
 type InfoShowReadyResolver = (height: number | null) => void;
@@ -548,7 +560,7 @@ async function fetchProjectOverviewForRepo(
   // rejection here would surface as an unhandled rejection.
   const promise = (async (): Promise<ProjectOverviewResponse | null> => {
     try {
-      return await backend.fetchProjectOverview(repoFullName, PROJECT_OVERVIEW_SCOPE);
+      return await backend.fetchProjectOverview(repoFullName, getDashboardScope());
     } catch (err) {
       console.warn(`[info] project overview fetch failed repo=${repoFullName}:`, err);
       return null;
@@ -597,9 +609,9 @@ async function fetchDashboardForLogin(
     // standup blurb are anchored to the same target-tz "today" — local gh
     // would scope to the *caller's* midnight and produce a card whose two
     // sections disagree across tz boundaries.
-    const standupP = backend.fetchUserStandup(login, DASHBOARD_STANDUP_SCOPE);
+    const standupP = backend.fetchUserStandup(login, getDashboardScope());
     const prsP: Promise<{ prs: UserPr[]; ghStatus: GhStatus }> = backend.isSelf(login)
-      ? fetchGhUserPrs(login, DASHBOARD_PRS_SCOPE).then(async (r) => {
+      ? fetchGhUserPrs(login, getDashboardScope()).then(async (r) => {
           // Push gh-discovered self PRs back to the server so the standup
           // composer (which reads `pull_requests`) sees them on the same day.
           // Soft-fail: a network blip here must never break the user-card.
@@ -620,7 +632,7 @@ async function fetchDashboardForLogin(
           return { prs: r.prs, ghStatus: r.ghStatus };
         })
       : backend
-          .fetchUserPrs(login, DASHBOARD_PRS_SCOPE)
+          .fetchUserPrs(login, getDashboardScope())
           .then((r) => ({ prs: r.prs, ghStatus: "ready" as const }));
     const [prsRes, standupRes] = await Promise.allSettled([prsP, standupP]);
     if (prsRes.status === "rejected") {
@@ -637,7 +649,15 @@ async function fetchDashboardForLogin(
     // user_repos overlap, and the self gh-driven path has no notion of it.
     const noClaimedRepos =
       standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true;
-    return { prs, standup, noClaimedRepos, ghStatus };
+    // Self path doesn't need the disambiguation hint — caller and target are
+    // the same person on the same machine. Null short-circuits the renderer
+    // check cleanly.
+    const targetTimezone = backend.isSelf(login)
+      ? null
+      : standupRes.status === "fulfilled"
+        ? (standupRes.value.timezone ?? null)
+        : null;
+    return { prs, standup, noClaimedRepos, ghStatus, targetTimezone };
   })();
   dashboardInFlight.set(login, promise);
   void promise

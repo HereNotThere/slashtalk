@@ -9,6 +9,7 @@
 // index.ts — those side effects span hover-polling and rail-visibility too.
 
 import type { BrowserWindow } from "electron";
+import type { DashboardScope } from "@slashtalk/shared";
 import * as store from "../store";
 import { broadcast } from "./broadcast";
 
@@ -17,6 +18,9 @@ const SESSION_ONLY_KEY = "railSessionOnlyMode";
 const COLLAPSE_INACTIVE_KEY = "railCollapseInactive";
 const SHOW_ACTIVITY_TIMESTAMPS_KEY = "showActivityTimestamps";
 const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
+const DASHBOARD_SCOPE_KEY = "dashboardScope";
+
+const VALID_DASHBOARD_SCOPES: readonly DashboardScope[] = ["today", "past24h"];
 
 interface RailStateDeps {
   getOverlay: () => BrowserWindow | null;
@@ -67,6 +71,19 @@ export function getShowActivityTimestamps(): boolean {
   return store.get<boolean>(SHOW_ACTIVITY_TIMESTAMPS_KEY) ?? true;
 }
 
+/** Time window driving every dashboard surface (user-card PRs/standup +
+ *  project-card overview). Default `today` — anchored to the *target's* tz
+ *  on user surfaces, the *caller's* tz on the project surface. Switching to
+ *  `past24h` collapses both into a single tz-neutral window, useful when
+ *  caller and target are on different calendar dates. Validated against the
+ *  enum so a stale serialised value can't poison the dashboards. */
+export function getDashboardScope(): DashboardScope {
+  const v = store.get<string>(DASHBOARD_SCOPE_KEY);
+  return (VALID_DASHBOARD_SCOPES as readonly string[]).includes(v ?? "")
+    ? (v as DashboardScope)
+    : "today";
+}
+
 // ---------- Setters ----------
 
 export function setRailPinned(value: boolean): void {
@@ -87,6 +104,11 @@ export function setShowActivityTimestamps(value: boolean): void {
 
 export function setSpotifyShareEnabled(value: boolean): void {
   store.set(SPOTIFY_SHARE_KEY, value);
+}
+
+export function setDashboardScope(value: DashboardScope): void {
+  if (!(VALID_DASHBOARD_SCOPES as readonly string[]).includes(value)) return;
+  store.set(DASHBOARD_SCOPE_KEY, value);
 }
 
 // ---------- Broadcasts ----------
@@ -112,4 +134,8 @@ export function broadcastRailCollapseInactive(): void {
 
 export function broadcastShowActivityTimestamps(): void {
   broadcastToRailTargets("rail:showActivityTimestamps", getShowActivityTimestamps());
+}
+
+export function broadcastDashboardScope(): void {
+  broadcastToRailTargets("rail:dashboardScope", getDashboardScope());
 }

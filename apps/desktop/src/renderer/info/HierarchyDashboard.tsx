@@ -58,6 +58,7 @@ export function HierarchyDashboard({
         // docs/info-card.md).
         loading={dashboard === null || dashboardFetching}
         subjectLabel={subjectLabel}
+        targetTimezone={dashboard?.targetTimezone ?? null}
       />
       <Divider />
       <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
@@ -119,6 +120,38 @@ function AskTrigger({
       <ChatBubbleLeftIcon className="w-3.5 h-3.5" />
     </button>
   );
+}
+
+// "Today" on a peer card is anchored to the *target's* tz on the server. When
+// caller and target are on different calendar dates right now, the section
+// header can read "Today" while showing nothing the viewer's own day produced
+// — surface the target's local date so the gap is legible. Returns null when
+// either tz is unknown or both sides are on the same date (no ambiguity).
+function peerDayHint(targetTz: string | null): { short: string; title: string } | null {
+  if (!targetTz) return null;
+  try {
+    const now = new Date();
+    // YYYY-MM-DD comparison via en-CA — locale-independent, easy to compare.
+    const ymd = (tz?: string): string =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(now);
+    if (ymd() === ymd(targetTz)) return null;
+    const short = new Intl.DateTimeFormat(undefined, {
+      timeZone: targetTz,
+      weekday: "short",
+      month: "numeric",
+      day: "numeric",
+    }).format(now);
+    // City label — best-effort, falls back to the raw tz id (e.g. "America/Los_Angeles").
+    const city = targetTz.split("/").pop()?.replace(/_/g, " ") ?? targetTz;
+    return { short: `${short} their time`, title: `${short} in ${city}` };
+  } catch {
+    return null;
+  }
 }
 
 // Pick the session that the "Now" section should describe.
@@ -224,17 +257,25 @@ function PastDaySection({
   summary,
   loading,
   subjectLabel,
+  targetTimezone,
 }: {
   summary: string | null;
   loading: boolean;
   subjectLabel: string;
+  targetTimezone: string | null;
 }): JSX.Element {
   const [editing, setEditing] = useState(false);
+  const tzHint = peerDayHint(targetTimezone);
   return (
     <div>
       <div className="px-4 pt-3 pb-1.5 flex items-center gap-1.5">
         <ClockIcon className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden />
         <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Today</span>
+        {tzHint && (
+          <span className="text-[10px] tracking-wider uppercase text-muted/80" title={tzHint.title}>
+            · {tzHint.short}
+          </span>
+        )}
       </div>
       <div className="px-4 pb-3">
         <div className="flex items-end gap-2">

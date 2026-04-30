@@ -6,10 +6,10 @@ const OPTS: { scope: DashboardScope; label: string }[] = [
   { scope: "past24h", label: "24h" },
 ];
 
-/** Compact segmented toggle for the user/project card headers. Matches the
- *  size of the existing "Xm/Xh" age pills on the rail so it doesn't dominate
- *  the header strip. State is global (see useDashboardScope) so flipping in
- *  one card flips every open surface. */
+/** Two text labels in the same uppercase mini-cap font as the section
+ *  headers; the inactive one is dimmed. State is global (see
+ *  useDashboardScope) so flipping in one card flips every other open
+ *  surface. */
 export function ScopeToggle({
   scope,
   onChange,
@@ -18,14 +18,11 @@ export function ScopeToggle({
   onChange: (next: DashboardScope) => void;
 }): JSX.Element {
   const click = (e: MouseEvent<HTMLButtonElement>, next: DashboardScope): void => {
-    // Cards live inside a window that also reacts to clicks (drag, focus).
-    // Stop the event from bubbling so toggling doesn't trigger surrounding
-    // UX (e.g. AskInput open).
     e.stopPropagation();
     if (next !== scope) onChange(next);
   };
   return (
-    <div className="inline-flex rounded bg-surface-alt p-0.5 gap-0.5">
+    <div className="flex items-center gap-1.5">
       {OPTS.map((o) => {
         const active = scope === o.scope;
         return (
@@ -34,8 +31,10 @@ export function ScopeToggle({
             type="button"
             onClick={(e) => click(e, o.scope)}
             aria-pressed={active}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider uppercase cursor-pointer border-none [font:inherit] ${
-              active ? "bg-bg text-fg" : "bg-transparent text-fg/60 hover:text-fg"
+            className={`text-xs font-semibold tracking-wider uppercase bg-transparent border-none p-0 [font:inherit] transition-colors ${
+              active
+                ? "text-subtle cursor-default"
+                : "text-muted/50 hover:text-muted cursor-pointer"
             }`}
           >
             {o.label}

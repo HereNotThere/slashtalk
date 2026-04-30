@@ -101,15 +101,11 @@ function ProjectHeader({
 }): JSX.Element {
   const { scope, setScope } = useDashboardScope();
   return (
-    <div className="px-4 pt-4 pb-3">
-      <div className="flex items-baseline gap-2">
-        <div className="text-lg font-bold leading-tight truncate font-mono">{repoFullName}</div>
-        {activeCount > 0 && (
-          <div className="ml-auto text-[11px] text-subtle shrink-0">{activeCount} active</div>
-        )}
-      </div>
-      <div className="mt-1.5">
+    <div className="flex items-baseline gap-2 px-4 pt-4 pb-3">
+      <div className="text-lg font-bold leading-tight truncate font-mono">{repoFullName}</div>
+      <div className="ml-auto flex items-center gap-2 shrink-0">
         <ScopeToggle scope={scope} onChange={setScope} />
+        {activeCount > 0 && <span className="text-[11px] text-subtle">· {activeCount} active</span>}
       </div>
     </div>
   );

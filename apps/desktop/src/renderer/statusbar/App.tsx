@@ -207,6 +207,11 @@ function SignedOutPrompt(): JSX.Element {
 
 function Footer({ signedIn }: { signedIn: boolean }): JSX.Element {
   const [busy, setBusy] = useState<null | "signOut" | "signOutEverywhere">(null);
+  // Inline confirm instead of window.confirm() — a native modal triggers
+  // browser-window-blur on the tray popup, which auto-hides it (see
+  // apps/desktop/src/main/windows/tray.ts blur listener). The user would
+  // never see the dialog.
+  const [confirmingEverywhere, setConfirmingEverywhere] = useState(false);
 
   const onSignOut = async (): Promise<void> => {
     if (busy) return;
@@ -220,14 +225,8 @@ function Footer({ signedIn }: { signedIn: boolean }): JSX.Element {
 
   const onSignOutEverywhere = async (): Promise<void> => {
     if (busy) return;
-    // Confirm — this is the lost/stolen-device escape hatch and revokes
-    // sessions on every device the user is signed in on.
-    const ok = window.confirm(
-      "Sign out on all devices? You'll need to sign in again everywhere you use Slashtalk. " +
-        "Use this if a device is lost or stolen.",
-    );
-    if (!ok) return;
     setBusy("signOutEverywhere");
+    setConfirmingEverywhere(false);
     try {
       await window.chatheads.backend.signOutEverywhere();
     } finally {
@@ -246,18 +245,35 @@ function Footer({ signedIn }: { signedIn: boolean }): JSX.Element {
         <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
       </div>
       {signedIn ? (
-        <button
-          type="button"
-          onClick={() => void onSignOutEverywhere()}
-          disabled={busy !== null}
-          className="
-            self-center px-1.5 py-0.5 text-xs text-subtle hover:text-danger
-            bg-transparent border-none cursor-pointer [font:inherit]
-            disabled:opacity-[0.35] disabled:cursor-default
-          "
-        >
-          {busy === "signOutEverywhere" ? "Signing out…" : "Sign out on all devices"}
-        </button>
+        confirmingEverywhere ? (
+          <div className="flex flex-col gap-1.5 px-1.5 py-1.5 rounded-md bg-surface-alt">
+            <div className="text-xs text-fg/70 leading-snug">
+              Sign out on all devices? You&rsquo;ll need to sign in again everywhere. Use this if a
+              device is lost or stolen.
+            </div>
+            <div className="flex gap-2">
+              <FooterButton onClick={() => setConfirmingEverywhere(false)} disabled={busy !== null}>
+                Cancel
+              </FooterButton>
+              <FooterButton onClick={() => void onSignOutEverywhere()} disabled={busy !== null}>
+                {busy === "signOutEverywhere" ? "Signing out…" : "Sign out everywhere"}
+              </FooterButton>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmingEverywhere(true)}
+            disabled={busy !== null}
+            className="
+              self-center px-1.5 py-0.5 text-xs text-subtle hover:text-danger
+              bg-transparent border-none cursor-pointer [font:inherit]
+              disabled:opacity-[0.35] disabled:cursor-default
+            "
+          >
+            Sign out on all devices
+          </button>
+        )
       ) : null}
     </div>
   );

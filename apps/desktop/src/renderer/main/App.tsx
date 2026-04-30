@@ -28,6 +28,14 @@ function writeOnboardingDone(): void {
   }
 }
 
+function clearOnboardingDone(): void {
+  try {
+    window.localStorage.removeItem(ONBOARDING_DONE_KEY);
+  } catch {
+    /* ignore — storage may be disabled */
+  }
+}
+
 export function App(): JSX.Element | null {
   const [auth, setAuth] = useState<BackendAuthState>({ signedIn: false });
   const [signingIn, setSigningIn] = useState(false);
@@ -50,6 +58,18 @@ export function App(): JSX.Element | null {
       .catch(() => setTracked([]));
     return window.chatheads.backend.onTrackedReposChange(setTracked);
   }, []);
+
+  // Sign-out also wipes tracked repos in the main process, so a re-sign-in
+  // needs to walk through onboarding again — and crucially needs to call
+  // openSettings() on finish so the tray popup is surfaced. Without this,
+  // the persisted onboardingDone flag would short-circuit straight to
+  // window.close() on re-sign-in, leaving the user with no visible UI.
+  useEffect(() => {
+    if (!auth.signedIn && onboardingDone) {
+      clearOnboardingDone();
+      setOnboardingDone(false);
+    }
+  }, [auth.signedIn, onboardingDone]);
 
   // If the window somehow ends up open while we have nothing to show
   // (signed in + onboarded), close it so the tray popup is the only

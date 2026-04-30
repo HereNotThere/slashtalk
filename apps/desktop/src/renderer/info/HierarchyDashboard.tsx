@@ -6,8 +6,10 @@ import type { InfoDashboardData, InfoSession } from "../../shared/types";
 import { ClaudeIcon, OpenAIIcon, PrIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
 import { PR_STATE_COLOR, PR_STATE_LABEL } from "../shared/pr-state";
+import { ScopeToggle } from "../shared/ScopeToggle";
 import { ShimmerText } from "../shared/ShimmerText";
 import { relativeTime } from "../shared/relativeTime";
+import { useDashboardScope } from "../shared/useDashboardScope";
 import { AskInput } from "./AskInline";
 
 const NOW_WINDOW_MS = 2 * 60 * 60 * 1000; // last 2 hours
@@ -270,12 +272,13 @@ function PastDaySection({
   targetTimezone: string | null;
 }): JSX.Element {
   const [editing, setEditing] = useState(false);
+  const { scope, setScope } = useDashboardScope();
   const tzHint = peerDayHint(targetTimezone);
   return (
     <div>
       <div className="px-4 pt-3 pb-1.5 flex items-center gap-1.5">
         <ClockIcon className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden />
-        <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Today</span>
+        <ScopeToggle scope={scope} onChange={setScope} />
         {tzHint && (
           <span className="text-[10px] tracking-wider uppercase text-muted/80" title={tzHint.title}>
             · {tzHint.short}

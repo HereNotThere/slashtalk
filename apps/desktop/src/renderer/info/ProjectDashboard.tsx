@@ -10,8 +10,10 @@ import {
 import { PrIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
 import { PR_STATE_COLOR, PR_STATE_LABEL } from "../shared/pr-state";
+import { ScopeToggle } from "../shared/ScopeToggle";
 import { ShimmerText } from "../shared/ShimmerText";
 import { relativeTime } from "../shared/relativeTime";
+import { useDashboardScope } from "../shared/useDashboardScope";
 import { AskInput } from "./AskInline";
 
 export function ProjectDashboard({
@@ -97,12 +99,18 @@ function ProjectHeader({
   repoFullName: string;
   activeCount: number;
 }): JSX.Element {
+  const { scope, setScope } = useDashboardScope();
   return (
-    <div className="flex items-baseline gap-2 px-4 pt-4 pb-3">
-      <div className="text-lg font-bold leading-tight truncate font-mono">{repoFullName}</div>
-      {activeCount > 0 && (
-        <div className="ml-auto text-[11px] text-subtle shrink-0">{activeCount} active</div>
-      )}
+    <div className="px-4 pt-4 pb-3">
+      <div className="flex items-baseline gap-2">
+        <div className="text-lg font-bold leading-tight truncate font-mono">{repoFullName}</div>
+        {activeCount > 0 && (
+          <div className="ml-auto text-[11px] text-subtle shrink-0">{activeCount} active</div>
+        )}
+      </div>
+      <div className="mt-1.5">
+        <ScopeToggle scope={scope} onChange={setScope} />
+      </div>
     </div>
   );
 }

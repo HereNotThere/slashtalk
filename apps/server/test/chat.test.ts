@@ -14,7 +14,7 @@ import {
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { mockGitHubAuth, resetDatabase, getCookie, signInAs } from "./helpers";
-import { getTeamActivityImpl, getSessionImpl } from "../src/chat/tools";
+import { getTeamActivityImpl, getSessionImpl, buildChatTools } from "../src/chat/tools";
 import { loadSessionCards } from "../src/chat/cards";
 import { loadChatHistory } from "../src/chat/history";
 import { SUMMARY_ANALYZER } from "../src/analyzers/names";
@@ -928,5 +928,45 @@ describe("GET /api/users/:login/questions", () => {
     expect(body.threads.map((t) => t.threadId).sort()).toEqual(
       [BOB_THREAD_VISIBLE, BOB_THREAD_HIDDEN, BOB_THREAD_UNCITED].sort(),
     );
+  });
+});
+
+describe("chat tool: delegate_to_local_agent — repoFullName binding", () => {
+  function delegateTool(visibleRepoFullNames: string[] | undefined) {
+    const tools = buildChatTools(db, 0, { visibleRepoFullNames });
+    const tool = tools.find((t) => t.name === "delegate_to_local_agent");
+    expect(tool).toBeDefined();
+    return tool!;
+  }
+
+  it("constrains repoFullName to the caller's tracked repos via JSON-Schema enum", () => {
+    const tool = delegateTool(["acme/foo", "acme/bar"]);
+    const repoParam = tool.input_schema.properties.repoFullName as Record<string, unknown>;
+    expect(repoParam.enum).toEqual(["acme/foo", "acme/bar"]);
+    expect(String(repoParam.description)).toContain("acme/foo");
+    expect(String(repoParam.description)).toContain("acme/bar");
+    expect(String(repoParam.description)).toMatch(/MUST be exactly one of/);
+  });
+
+  it("omits the enum and warns about no-tracked-repos when the caller hasn't added any", () => {
+    const tool = delegateTool([]);
+    const repoParam = tool.input_schema.properties.repoFullName as Record<string, unknown>;
+    expect(repoParam.enum).toBeUndefined();
+    expect(String(repoParam.description)).toContain("not tracked any repos");
+  });
+
+  it("falls back gracefully when the runner didn't pass visibleRepoFullNames", () => {
+    const tool = delegateTool(undefined);
+    const repoParam = tool.input_schema.properties.repoFullName as Record<string, unknown>;
+    expect(repoParam.enum).toBeUndefined();
+    expect(typeof repoParam.description).toBe("string");
+  });
+
+  it("truncates the inline list when the caller has more than the cap", () => {
+    const many = Array.from({ length: 75 }, (_, i) => `acme/repo-${String(i).padStart(2, "0")}`);
+    const tool = delegateTool(many);
+    const repoParam = tool.input_schema.properties.repoFullName as Record<string, unknown>;
+    expect((repoParam.enum as string[]).length).toBe(75);
+    expect(String(repoParam.description)).toMatch(/and \d+ more/);
   });
 });

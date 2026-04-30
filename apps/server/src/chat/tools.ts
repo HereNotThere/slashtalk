@@ -84,6 +84,12 @@ export interface ChatToolContext {
   /** Caller's visible repo IDs, if the runner already fetched them. Skips
    *  a per-request DB round-trip when provided. */
   visibleRepoIds?: number[];
+  /** Caller's visible repo full names (`owner/name`). Used to bind the
+   *  `delegate_to_local_agent` tool's `repoFullName` parameter to the exact
+   *  set the desktop has tracked, so the model can't ask for one we don't
+   *  have. Order matches `visibleRepoIds`; sorting/truncation is the
+   *  caller's responsibility. */
+  visibleRepoFullNames?: string[];
 }
 
 function truncate(s: string | null, max: number): string | null {
@@ -562,8 +568,10 @@ export function buildChatTools(
           },
           repoFullName: {
             type: "string",
-            description:
-              "owner/name of the repo to scope the agent to. Must be one of the caller's visible repos. Omit if the question doesn't name a specific repo — the desktop will prompt the user to pick.",
+            ...(ctx?.visibleRepoFullNames && ctx.visibleRepoFullNames.length > 0
+              ? { enum: ctx.visibleRepoFullNames }
+              : {}),
+            description: buildRepoFullNameDescription(ctx?.visibleRepoFullNames),
           },
         },
         required: ["task"],
@@ -583,6 +591,27 @@ export function buildChatTools(
       },
     },
   ];
+}
+
+// Cap the inline list to keep the tool description (which goes through the
+// prompt cache) from ballooning when the caller has hundreds of tracked
+// repos. The `enum` constraint above is the authoritative gate; this string
+// is just a hint so the model picks the right one.
+const MAX_REPOS_IN_DELEGATE_HINT = 50;
+
+function buildRepoFullNameDescription(visibleRepoFullNames: string[] | undefined): string {
+  const base =
+    "owner/name of the repo to scope the agent to. Omit if the user's question doesn't clearly map to a specific repo — the desktop will then prompt the user to pick from their tracked set.";
+  if (!visibleRepoFullNames || visibleRepoFullNames.length === 0) {
+    return `${base} The caller has not tracked any repos yet, so delegation will fail until they add one — prefer answering from team-presence tools or telling the user to add a repo from the desktop tray.`;
+  }
+  const sorted = [...visibleRepoFullNames].sort();
+  const shown = sorted.slice(0, MAX_REPOS_IN_DELEGATE_HINT).join(", ");
+  const overflow =
+    sorted.length > MAX_REPOS_IN_DELEGATE_HINT
+      ? `, …and ${sorted.length - MAX_REPOS_IN_DELEGATE_HINT} more`
+      : "";
+  return `${base} MUST be exactly one of the caller's tracked repos: ${shown}${overflow}. Never invent a repo or use one not on this list — the desktop has no access to anything else and will refuse the task.`;
 }
 
 function resolveSince(args: GetTeamActivityArgs): Date {

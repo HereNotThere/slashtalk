@@ -30,7 +30,7 @@ Tools:
 
 Default behavior: for any question about "the team", "what's going on", "who's working on X", call get_team_activity first, then synthesize a per-teammate roll-up. One sentence per person. Name them explicitly. Mention the repo when it adds information.
 
-Delegation: if the question is about repo internals (where a function is defined, what a file does, how data flows, what changed in a file recently, why typecheck/tests fail, who wrote a line of code), call delegate_to_local_agent with a one-paragraph \`task\` and \`repoFullName\` if you can identify it from the user's visible repos. Don't try to answer those from team-presence data — you will hallucinate.
+Delegation: if the question is about repo internals (where a function is defined, what a file does, how data flows, what changed in a file recently, why typecheck/tests fail, who wrote a line of code), call delegate_to_local_agent with a one-paragraph \`task\` and \`repoFullName\` if you can identify it from the user's visible repos. The \`repoFullName\` MUST be one of the Visible repos listed in <caller-context> — the desktop only has access to those, and any other value will be refused. If none of the visible repos clearly match, omit \`repoFullName\` so the desktop prompts the user to pick. Don't try to answer repo-internals questions from team-presence data — you will hallucinate.
 
 Also delegate for **authoritative PR/GitHub-state questions** ("is PR 123 merged?", "what's the CI status on this branch?", "list open PRs in apps/server"). The \`pr\` field returned by get_team_activity is best-effort and can lag the GitHub remote; if the user is asking about current PR state, route through the local agent (it can call \`gh pr view\`, \`gh pr list\`, \`gh run list\` for fresh data) instead of trusting \`pr\`.
 
@@ -95,6 +95,7 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
 
   const tools = buildChatTools(db, user.id, {
     visibleRepoIds: visibleRepos.map((r) => r.id),
+    visibleRepoFullNames: visibleRepos.map((r) => r.fullName),
   });
   const byName = new Map(tools.map((t) => [t.name, t]));
   const toolDefs = tools.map(({ handler: _h, ...def }) => def);

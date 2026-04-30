@@ -10,8 +10,8 @@ import { appState } from "./windows/lib";
 
 const { autoUpdater } = electronUpdater;
 
-const STARTUP_CHECK_DELAY_MS = 30_000;
-const PERIODIC_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+const STARTUP_CHECK_DELAY_MS = 10_000;
+const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1_000;
 
 interface UpdateDeps {
   windows: () => Array<BrowserWindow | null | undefined>;

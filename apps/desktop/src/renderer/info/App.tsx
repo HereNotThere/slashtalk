@@ -137,7 +137,7 @@ export function App(): JSX.Element {
       ref={rootRef}
       onMouseEnter={() => void window.chatheads.infoHoverEnter()}
       onMouseLeave={() => void window.chatheads.infoHoverLeave()}
-      className="bg-surface-2 h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out"
+      className="bg-surface-2 h-screen overflow-y-auto transition-[opacity,transform] duration-75 ease-out select-text"
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? "translateX(0)" : "translateX(-4px)",

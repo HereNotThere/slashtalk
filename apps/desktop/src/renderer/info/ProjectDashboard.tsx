@@ -10,6 +10,7 @@ import {
 import { Markdown } from "../shared/Markdown";
 import { PersonAvatar } from "../shared/PersonAvatar";
 import { PrItem } from "../shared/PrItem";
+import { PrLinkProvider } from "../shared/PrLinkContext";
 import { ScopeToggle } from "../shared/ScopeToggle";
 import { ShimmerText } from "../shared/ShimmerText";
 import { useDashboardScope } from "../shared/useDashboardScope";
@@ -35,7 +36,7 @@ export function ProjectDashboard({
     <div>
       <ProjectHeader repoFullName={repoFullName} activeCount={active.length} />
       <Divider />
-      <PulseSection pulse={overview?.pulse ?? null} loading={fetching} />
+      <PulseSection pulse={overview?.pulse ?? null} loading={fetching} prs={overview?.prs ?? []} />
       {buckets.length > 0 && <Divider />}
       {buckets.map((b, i) => (
         <Fragment key={`${b.name}-${i}`}>
@@ -108,7 +109,15 @@ function ProjectHeader({
   );
 }
 
-function PulseSection({ pulse, loading }: { pulse: string | null; loading: boolean }): JSX.Element {
+function PulseSection({
+  pulse,
+  loading,
+  prs,
+}: {
+  pulse: string | null;
+  loading: boolean;
+  prs: ProjectPr[];
+}): JSX.Element {
   const { scope, setScope } = useDashboardScope();
   return (
     <div>
@@ -117,9 +126,11 @@ function PulseSection({ pulse, loading }: { pulse: string | null; loading: boole
       </div>
       <div className="px-4 pb-3 text-sm text-fg/90 leading-snug">
         {pulse ? (
-          <Markdown inline className="text-sm leading-snug">
-            {pulse}
-          </Markdown>
+          <PrLinkProvider prs={prs}>
+            <Markdown inline className="text-sm leading-snug">
+              {pulse}
+            </Markdown>
+          </PrLinkProvider>
         ) : loading ? (
           <span className="text-subtle">
             <ShimmerText text="Reading the room…" />

@@ -1,11 +1,18 @@
 import { Fragment, useState, type MouseEvent } from "react";
-import { BoltIcon, ChatBubbleLeftIcon, ClockIcon, FolderIcon } from "@heroicons/react/24/outline";
+import {
+  BoltIcon,
+  ChatBubbleLeftIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  FolderIcon,
+} from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, TokenUsage, UserPr } from "@slashtalk/shared";
 import type { InfoDashboardData, InfoSession } from "../../shared/types";
 import { ClaudeIcon, OpenAIIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
 import { PrItem } from "../shared/PrItem";
+import { PrLinkProvider } from "../shared/PrLinkContext";
 import { ScopeToggle } from "../shared/ScopeToggle";
 import { ShimmerText } from "../shared/ShimmerText";
 import { relativeTime } from "../shared/relativeTime";
@@ -61,6 +68,7 @@ export function HierarchyDashboard({
         loading={dashboard === null || dashboardFetching}
         subjectLabel={subjectLabel}
         targetTimezone={dashboard?.targetTimezone ?? null}
+        prs={dashboard?.prs ?? []}
       />
       <Divider />
       <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
@@ -81,14 +89,6 @@ function NoRepoSection(): JSX.Element {
 
 function Divider(): JSX.Element {
   return <div className="mx-4 h-px bg-divider" />;
-}
-
-function PlainHeader({ label }: { label: string }): JSX.Element {
-  return (
-    <div className="px-4 pt-3 pb-1.5">
-      <span className="text-xs font-semibold tracking-wider uppercase text-subtle">{label}</span>
-    </div>
-  );
 }
 
 function AskTrigger({
@@ -265,11 +265,13 @@ function PastDaySection({
   loading,
   subjectLabel,
   targetTimezone,
+  prs,
 }: {
   summary: string | null;
   loading: boolean;
   subjectLabel: string;
   targetTimezone: string | null;
+  prs: UserPr[];
 }): JSX.Element {
   const [editing, setEditing] = useState(false);
   const { scope, setScope } = useDashboardScope();
@@ -289,9 +291,13 @@ function PastDaySection({
         <div className="flex items-end gap-2">
           <div className="flex-1 text-sm text-fg/90 leading-snug">
             {summary ? (
-              <Markdown inline className="text-sm leading-snug">
-                {summary}
-              </Markdown>
+              // Block mode (not inline) so bullet lists render as `<ul>` —
+              // inline mode wraps everything in a `<span>`, where lists
+              // would be invalid HTML and browsers'd unparent them.
+              // PrLinkProvider enriches PR links into icon + colored #N.
+              <PrLinkProvider prs={prs}>
+                <Markdown className="text-sm leading-snug">{summary}</Markdown>
+              </PrLinkProvider>
             ) : loading ? (
               <span className="text-subtle">
                 <ShimmerText text="Fetching…" />
@@ -321,23 +327,48 @@ function PrsSection({
   prs: UserPr[] | null;
   ghStatus: InfoDashboardData["ghStatus"] | null;
 }): JSX.Element {
+  // Default collapsed so the card opens compact — PRs are the longest
+  // section and most peeks at a card don't need them. The count in the
+  // header tells you whether expanding is worth a click.
+  const [open, setOpen] = useState(false);
+  const count = prs?.length ?? null;
   return (
     <div>
-      <PlainHeader label="PRs pushed" />
-      {prs === null ? (
-        <div className="px-4 py-2.5 text-xs text-subtle">Loading…</div>
-      ) : ghStatus && ghStatus !== "ready" ? (
-        <GhUnavailableNudge status={ghStatus} />
-      ) : prs.length === 0 ? (
-        <div className="px-4 py-2.5 text-xs text-subtle">No PRs in this window.</div>
-      ) : (
-        prs.map((pr, i) => (
-          <Fragment key={`${pr.repoFullName}#${pr.number}`}>
-            {i > 0 && <div className="mx-4 h-px bg-divider/60" />}
-            <PrRow pr={pr} />
-          </Fragment>
-        ))
-      )}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-expanded={open}
+        className="w-full px-4 pt-3 pb-1.5 flex items-center gap-1.5 text-left hover:bg-surface-alt/40 transition-colors cursor-pointer"
+      >
+        <ChevronRightIcon
+          className={`w-3 h-3 shrink-0 text-subtle transition-transform ${open ? "rotate-90" : ""}`}
+          aria-hidden
+        />
+        <span className="text-xs font-semibold tracking-wider uppercase text-subtle">
+          PRs pushed
+        </span>
+        {count != null && count > 0 && (
+          <span className="text-[10px] tracking-wider uppercase text-muted/80">· {count}</span>
+        )}
+      </button>
+      {open &&
+        (prs === null ? (
+          <div className="px-4 py-2.5 text-xs text-subtle">Loading…</div>
+        ) : ghStatus && ghStatus !== "ready" ? (
+          <GhUnavailableNudge status={ghStatus} />
+        ) : prs.length === 0 ? (
+          <div className="px-4 py-2.5 text-xs text-subtle">No PRs in this window.</div>
+        ) : (
+          prs.map((pr, i) => (
+            <Fragment key={`${pr.repoFullName}#${pr.number}`}>
+              {i > 0 && <div className="mx-4 h-px bg-divider/60" />}
+              <PrRow pr={pr} />
+            </Fragment>
+          ))
+        ))}
     </div>
   );
 }

@@ -318,7 +318,9 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 			searchBtn.addEventListener("click", (e) => {
 				e.preventDefault();
 				const target = document.getElementById("ask");
-				if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+				if (!target) return;
+				const top = target.getBoundingClientRect().top + window.scrollY - 24;
+				window.scrollTo({ top, behavior: "smooth" });
 			});
 		}
 
@@ -412,7 +414,9 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 		}
 
 		function onPointerDown(e) {
-			if (e.target.closest(".avatar")) return; // let avatar receive hover
+			// Skip drag start for interactive children — let the avatar / search
+			// button receive their normal click + hover events.
+			if (e.target.closest(".avatar") || e.target.closest("[data-search]")) return;
 			dragging = true;
 			dragMoved = false;
 			pointerId = e.pointerId;

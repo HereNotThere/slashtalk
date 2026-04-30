@@ -642,8 +642,11 @@ async function fetchDashboardForLogin(
     const noClaimedRepos =
       process.env.SLASHTALK_DEBUG_EMPTY === "1" ||
       (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
+    // `past24h` is a tz-neutral rolling window, so the "their time" hint is
+    // meaningless — clear the tz here rather than have the renderer carry
+    // scope-awareness it doesn't otherwise need.
     const targetTimezone =
-      backend.isSelf(login) || standupRes.status !== "fulfilled"
+      scope === "past24h" || backend.isSelf(login) || standupRes.status !== "fulfilled"
         ? null
         : (standupRes.value.timezone ?? null);
     return { prs, standup, noClaimedRepos, ghStatus, targetTimezone };
@@ -688,23 +691,33 @@ function refreshNow(): void {
   if (!infoWindow || infoWindow.isDestroyed() || !infoWindow.isVisible()) {
     return;
   }
-  const head = deps.getHeads().find((h) => h.id === selectedHeadId);
+  // Synthetic project heads aren't in `deps.getHeads()` — reconstruct via
+  // rail.projectHead so a scope toggle on a visible project card refetches
+  // its overview instead of bailing at the membership guard below.
+  const projectRepo = rail.parseProjectHeadId(selectedHeadId);
+  const head = projectRepo
+    ? rail.projectHead(projectRepo)
+    : deps.getHeads().find((h) => h.id === selectedHeadId);
   if (!head) return;
-  // Only drop the selected head's cache; other heads stay warm until clicked.
   sessionCache.delete(head.id);
   const login = rail.parseUserHeadId(head.id);
-  // Push each fetch independently. The session_updated signal is what
-  // triggered us, so the new session data should reach the renderer ASAP —
-  // not block on the standup endpoint, which can take several seconds on
-  // a server-cache miss. `force: true` makes the dashboard refetch bypass
-  // any in-flight that started before this signal landed.
+  // Push each fetch independently — session data should reach the renderer
+  // ASAP without blocking on the slower standup/overview LLM calls.
+  // `force: true` bypasses any in-flight that started before this signal.
   const pushFollowUp = (): void => pushInfoShowSnapshot(infoWindow, head, undefined);
-  void fetchSessionsForHead(head.id)
-    .catch((e) => console.warn("[ws] refreshNow sessions failed:", e))
-    .finally(pushFollowUp);
+  if (head.kind !== "project") {
+    void fetchSessionsForHead(head.id)
+      .catch((e) => console.warn("[ws] refreshNow sessions failed:", e))
+      .finally(pushFollowUp);
+  }
   if (login) {
     void fetchDashboardForLogin(login, { force: true })
       .catch((e) => console.warn("[ws] refreshNow dashboard failed:", e))
+      .finally(pushFollowUp);
+  }
+  if (head.kind === "project" && head.repoFullName) {
+    void fetchProjectOverviewForRepo(head.repoFullName, { force: true })
+      .catch((e) => console.warn("[ws] refreshNow project overview failed:", e))
       .finally(pushFollowUp);
   }
 }

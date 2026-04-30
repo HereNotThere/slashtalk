@@ -217,7 +217,7 @@ export function App(): JSX.Element {
       if (e.button !== 0) return;
       if (dragging) void window.chatheads.dragEnd();
       else if (downAction === "search") void window.chatheads.showAsk();
-      else if (downAction === "add-repo") void window.chatheads.openMain();
+      else if (downAction === "add-repo") void window.chatheads.openSettings();
       downPos = null;
       downAction = null;
       dragging = false;

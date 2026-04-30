@@ -15,15 +15,14 @@ export function App(): JSX.Element {
   const [addError, setAddError] = useState<string | null>(null);
 
   if (!auth.signedIn) {
+    // Settings are only meaningful once you're signed in — the dock,
+    // teammate stack, MCP install, etc. all key off auth. Keep this popup
+    // minimal so the only obvious action is to sign in.
     return (
       <Shell>
         <SignedOutPrompt />
         <Divider />
-        <RailPreferences />
-        <Divider />
-        <UpdateStatus compact />
-        <Divider />
-        <Footer />
+        <Footer signedIn={false} />
       </Shell>
     );
   }
@@ -57,7 +56,7 @@ export function App(): JSX.Element {
       <Divider />
       <UpdateStatus compact />
       <Divider />
-      <Footer />
+      <Footer signedIn />
     </Shell>
   );
 }
@@ -206,10 +205,60 @@ function SignedOutPrompt(): JSX.Element {
   );
 }
 
-function Footer(): JSX.Element {
+function Footer({ signedIn }: { signedIn: boolean }): JSX.Element {
+  const [busy, setBusy] = useState<null | "signOut" | "signOutEverywhere">(null);
+
+  const onSignOut = async (): Promise<void> => {
+    if (busy) return;
+    setBusy("signOut");
+    try {
+      await window.chatheads.backend.signOut();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onSignOutEverywhere = async (): Promise<void> => {
+    if (busy) return;
+    // Confirm — this is the lost/stolen-device escape hatch and revokes
+    // sessions on every device the user is signed in on.
+    const ok = window.confirm(
+      "Sign out on all devices? You'll need to sign in again everywhere you use Slashtalk. " +
+        "Use this if a device is lost or stolen.",
+    );
+    if (!ok) return;
+    setBusy("signOutEverywhere");
+    try {
+      await window.chatheads.backend.signOutEverywhere();
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
-    <div className="flex gap-2">
-      <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-2">
+        {signedIn ? (
+          <FooterButton onClick={() => void onSignOut()} disabled={busy !== null}>
+            {busy === "signOut" ? "Signing out…" : "Sign out"}
+          </FooterButton>
+        ) : null}
+        <FooterButton onClick={() => window.chatheads.quit()}>Quit</FooterButton>
+      </div>
+      {signedIn ? (
+        <button
+          type="button"
+          onClick={() => void onSignOutEverywhere()}
+          disabled={busy !== null}
+          className="
+            self-center px-1.5 py-0.5 text-xs text-subtle hover:text-danger
+            bg-transparent border-none cursor-pointer [font:inherit]
+            disabled:opacity-[0.35] disabled:cursor-default
+          "
+        >
+          {busy === "signOutEverywhere" ? "Signing out…" : "Sign out on all devices"}
+        </button>
+      ) : null}
     </div>
   );
 }

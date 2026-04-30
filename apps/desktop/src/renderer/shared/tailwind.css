@@ -43,6 +43,9 @@
   --font-sans:
     "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* Accent face — italic only. Mirrors the marketing site headlines. */
+  --font-serif:
+    "Instrument Serif", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
 
   /* Type scale — seven stops. See design.md §3. */
   --text-xs: 11px;

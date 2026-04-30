@@ -365,10 +365,15 @@ ipcMain.handle("backend:cancelSignIn", () => backend.cancelSignIn());
 ipcMain.handle("backend:signOut", async () => {
   await backend.signOut();
   localRepos.clearOnSignOut();
+  // The main window auto-closed itself after onboarding; surface it again
+  // now that there's a sign-in screen to show, otherwise the tray popup
+  // hides on blur and the user is left without an obvious way back in.
+  showMainWindow();
 });
 ipcMain.handle("backend:signOutEverywhere", async () => {
   await backend.signOutEverywhere();
   localRepos.clearOnSignOut();
+  showMainWindow();
 });
 
 registerWsHandlers();

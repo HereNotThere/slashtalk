@@ -648,8 +648,11 @@ export interface ChatHeadsBridge {
   /** Latest cached Spotify presence for `login` from the main-process poller. */
   getSpotifyForLogin: (login: string) => Promise<SpotifyPresence | null>;
 
-  // Tray popup actions
-  openMain: () => Promise<void>;
+  /** Show the menubar tray popup (the one and only settings UI) anchored to
+   *  the tray icon. Called from in-app entry points like the rail's
+   *  add-repo CTA and the post-onboarding reveal, so they all surface the
+   *  same popup as a tray-icon click. */
+  openSettings: () => Promise<void>;
   quit: () => Promise<void>;
 
   // System utilities

@@ -1,4 +1,4 @@
-import { app, globalShortcut, ipcMain, type BrowserWindow } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain } from "electron";
 import * as backend from "../backend";
 import * as rail from "../rail";
 import type { InfoSession } from "../../shared/types";
@@ -151,6 +151,13 @@ export function registerDebugShortcuts(): void {
     // Same, but spawns a fake teammate first so a single shortcut on an
     // empty rail still produces a visible rail-ring animation.
     ["CommandOrControl+Shift+'", () => void runDebugFireCollisionOnFake()],
+    // Toggle devtools for the focused window — no menu/devtools is wired up
+    // in this app, so without this the only way to inspect renderer state
+    // is to remote-debug via the Vite port.
+    [
+      "CommandOrControl+Alt+I",
+      () => BrowserWindow.getFocusedWindow()?.webContents.toggleDevTools(),
+    ],
   ];
   for (const [accel, fn] of bindings) {
     const ok = globalShortcut.register(accel, fn);

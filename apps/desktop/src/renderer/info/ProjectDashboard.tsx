@@ -11,9 +11,8 @@ import { Markdown } from "../shared/Markdown";
 import { PersonAvatar } from "../shared/PersonAvatar";
 import { PrItem } from "../shared/PrItem";
 import { PrLinkProvider } from "../shared/PrLinkContext";
-import { ScopeToggle } from "../shared/ScopeToggle";
+import { SectionLabel } from "../shared/SectionLabel";
 import { ShimmerText } from "../shared/ShimmerText";
-import { useDashboardScope } from "../shared/useDashboardScope";
 import { AskInput } from "./AskInline";
 
 export function ProjectDashboard({
@@ -118,11 +117,10 @@ function PulseSection({
   loading: boolean;
   prs: ProjectPr[];
 }): JSX.Element {
-  const { scope, setScope } = useDashboardScope();
   return (
     <div>
       <div className="px-4 pt-3 pb-1.5">
-        <ScopeToggle scope={scope} onChange={setScope} />
+        <SectionLabel>PAST 24H</SectionLabel>
       </div>
       <div className="px-4 pb-3 text-sm text-fg/90 leading-snug">
         {pulse ? (

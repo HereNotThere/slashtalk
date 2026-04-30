@@ -12,7 +12,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { DashboardScope, UserPr } from "@slashtalk/shared";
+import type { UserPr } from "@slashtalk/shared";
 import type { GhStatus } from "../shared/types";
 
 const execFileAsync = promisify(execFile);
@@ -82,14 +82,11 @@ export function probeGhStatus(): Promise<GhStatus> {
   return attempt;
 }
 
-export async function fetchGhUserPrs(
-  login: string,
-  scope: DashboardScope,
-): Promise<GhUserPrsResult> {
+export async function fetchGhUserPrs(login: string): Promise<GhUserPrsResult> {
   const ghStatus = await probeGhStatus();
   if (ghStatus !== "ready") return { prs: [], ghStatus };
 
-  const since = windowStartIso(scope);
+  const since = past24hIso();
   const q = `author:${login} type:pr updated:>=${since}`;
   const args = [
     "api",
@@ -141,18 +138,9 @@ export async function fetchGhUserPrs(
   return { prs, ghStatus: "ready" };
 }
 
-function windowStartIso(scope: DashboardScope): string {
-  // Local-time "today" — caller's machine is the natural reference for a
-  // hover that's happening on their screen. GitHub's search syntax accepts
-  // ISO-8601 (with offset).
-  if (scope === "past24h") {
-    return toIsoMinute(new Date(Date.now() - 24 * 60 * 60 * 1000));
-  }
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return toIsoMinute(d);
-}
-
-function toIsoMinute(d: Date): string {
-  return d.toISOString().slice(0, 16) + "Z";
+function past24hIso(): string {
+  // Tz-neutral rolling window, full ISO precision so the cutoff matches the
+  // server-side standup/overview window exactly (no ~60s minute-truncation
+  // drift between desktop-local PRs and server-backed surfaces).
+  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 }

@@ -7,7 +7,6 @@ import * as rail from "../rail";
 import * as peerPresence from "../peerPresence";
 import * as peerLocations from "../peerLocations";
 import { fetchGhUserPrs } from "../ghPrs";
-import { getDashboardScope } from "./rail-state";
 import { setMacCornerRadius } from "../macCorners";
 import { BUBBLE_PAD, BUBBLE_SIZE, PADDING_Y } from "./dock-geometry";
 import { currentDock, getIsDragging } from "./dock-drag";
@@ -135,21 +134,6 @@ localRepos.onClaimsSettled(clearProjectOverviewCache);
  *  `pr_activity` lands so the next hover repaints with fresh data. */
 export function invalidateProjectOverview(repoFullName: string): void {
   projectOverviewCache.delete(repoFullName);
-}
-
-/** Toggling the dashboard scope retargets the server window, so every cached
- *  entry is stale AND any in-flight fetch is producing old-scope data. Drop
- *  in-flight maps too — the `=== promise` identity guard at write-time then
- *  rejects those late-landing writes instead of letting them poison the
- *  freshly-cleared cache. */
-export function onDashboardScopeChanged(): void {
-  clearDashboardCache();
-  clearProjectOverviewCache();
-  dashboardInFlight.clear();
-  projectOverviewInFlight.clear();
-  if (selectedHeadId && infoWindow && !infoWindow.isDestroyed() && infoWindow.isVisible()) {
-    refreshNow();
-  }
 }
 
 type InfoShowReadyResolver = (height: number | null) => void;
@@ -556,7 +540,7 @@ async function fetchProjectOverviewForRepo(
   // rejection here would surface as an unhandled rejection.
   const promise = (async (): Promise<ProjectOverviewResponse | null> => {
     try {
-      return await backend.fetchProjectOverview(repoFullName, getDashboardScope());
+      return await backend.fetchProjectOverview(repoFullName);
     } catch (err) {
       console.warn(`[info] project overview fetch failed repo=${repoFullName}:`, err);
       return null;
@@ -601,11 +585,10 @@ async function fetchDashboardForLogin(
   // forced refetch) from clobbering newer data.
   const promise = (async (): Promise<InfoDashboardData> => {
     // Self → local gh (zero poller lag + push-back to server). Peer → server
-    // endpoint so its PRs and the standup blurb share one target-tz window.
-    const scope = getDashboardScope();
-    const standupP = backend.fetchUserStandup(login, scope);
+    // endpoint. Both share the same past-24h rolling window.
+    const standupP = backend.fetchUserStandup(login);
     const prsP: Promise<{ prs: UserPr[]; ghStatus: GhStatus }> = backend.isSelf(login)
-      ? fetchGhUserPrs(login, scope).then(async (r) => {
+      ? fetchGhUserPrs(login).then(async (r) => {
           // Soft-fail: network blip must not break the user-card.
           if (r.prs.length > 0) {
             void backend
@@ -623,9 +606,7 @@ async function fetchDashboardForLogin(
           }
           return { prs: r.prs, ghStatus: r.ghStatus };
         })
-      : backend
-          .fetchUserPrs(login, scope)
-          .then((r) => ({ prs: r.prs, ghStatus: "ready" as const }));
+      : backend.fetchUserPrs(login).then((r) => ({ prs: r.prs, ghStatus: "ready" as const }));
     const [prsRes, standupRes] = await Promise.allSettled([prsP, standupP]);
     if (prsRes.status === "rejected") {
       console.warn(`[info] dashboard prs fetch failed login=${login}:`, prsRes.reason);
@@ -642,14 +623,7 @@ async function fetchDashboardForLogin(
     const noClaimedRepos =
       process.env.SLASHTALK_DEBUG_EMPTY === "1" ||
       (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
-    // `past24h` is a tz-neutral rolling window, so the "their time" hint is
-    // meaningless — clear the tz here rather than have the renderer carry
-    // scope-awareness it doesn't otherwise need.
-    const targetTimezone =
-      scope === "past24h" || backend.isSelf(login) || standupRes.status !== "fulfilled"
-        ? null
-        : (standupRes.value.timezone ?? null);
-    return { prs, standup, noClaimedRepos, ghStatus, targetTimezone };
+    return { prs, standup, noClaimedRepos, ghStatus };
   })();
   dashboardInFlight.set(login, promise);
   void promise
@@ -692,8 +666,8 @@ function refreshNow(): void {
     return;
   }
   // Synthetic project heads aren't in `deps.getHeads()` — reconstruct via
-  // rail.projectHead so a scope toggle on a visible project card refetches
-  // its overview instead of bailing at the membership guard below.
+  // rail.projectHead so a refresh on a visible project card refetches its
+  // overview instead of bailing at the membership guard below.
   const projectRepo = rail.parseProjectHeadId(selectedHeadId);
   const head = projectRepo
     ? rail.projectHead(projectRepo)

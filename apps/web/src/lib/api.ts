@@ -44,16 +44,16 @@ export const fetchFeed = () => apiFetch<FeedSessionSnapshot[]>("/api/feed");
 export const fetchSession = (id: string) =>
   apiFetch<SessionSnapshot>(`/api/session/${encodeURIComponent(id)}`);
 
-export const fetchUserPrs = (login: string, scope: "today" | "past24h" = "today") =>
-  apiFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs?scope=${scope}`);
+export const fetchUserPrs = (login: string) =>
+  apiFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs`);
 
-export const fetchUserStandup = (login: string, scope: "today" | "past24h" = "today") =>
-  apiFetch<StandupResponse>(`/api/users/${encodeURIComponent(login)}/standup?scope=${scope}`);
+export const fetchUserStandup = (login: string) =>
+  apiFetch<StandupResponse>(`/api/users/${encodeURIComponent(login)}/standup`);
 
-export const fetchRepoOverview = (fullName: string, scope: "today" | "past24h" = "today") => {
+export const fetchRepoOverview = (fullName: string) => {
   const [owner, name] = fullName.split("/");
   return apiFetch<ProjectOverviewResponse>(
-    `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/overview?scope=${scope}`,
+    `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/overview`,
   );
 };
 

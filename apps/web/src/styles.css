@@ -159,12 +159,26 @@
 
   body {
     overscroll-behavior: none;
+    /* iOS Safari adds a flash on tap unless we disable the highlight. */
+    -webkit-tap-highlight-color: transparent;
+    /* Block accidental zoom on rapid double-tap; pinch-zoom remains available. */
+    touch-action: manipulation;
   }
 
   button {
     font: inherit;
     color: inherit;
     cursor: pointer;
+    /* Removes the 300ms tap delay on iOS without disabling pinch-zoom. */
+    touch-action: manipulation;
+  }
+
+  /* Disable text-selection on UI chrome (header, carousel, input wrapper) so
+   * tap-and-hold doesn't show the iOS callout bar. Card content opts back in
+   * via `select-text`. */
+  .ui-chrome {
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   /* Hide scrollbars on the carousel — visual cleanliness only, not a11y change. */

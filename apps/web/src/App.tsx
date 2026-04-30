@@ -59,6 +59,17 @@ export default function App(): JSX.Element {
     void load();
   }, [load]);
 
+  // First load opens straight into the project/team view (the magnifying-glass
+  // tab). Subsequent loads (WS-driven refreshes) leave the user's chosen view
+  // alone. Falls back to leaving the default card view when no repo is visible.
+  const initRef = useRef(false);
+  useEffect(() => {
+    if (initRef.current || state.kind !== "ready") return;
+    initRef.current = true;
+    const repo = pickProjectRepo(state.sessions, state.users, state.me.githubLogin);
+    if (repo) setView({ kind: "project", repoFullName: repo });
+  }, [state]);
+
   useWebSocket(state.kind === "ready", load);
 
   // Cycle gerunds while a chat call is in flight.
@@ -189,7 +200,10 @@ export default function App(): JSX.Element {
 
   return (
     <div className="mx-auto flex h-[100dvh] w-full max-w-2xl flex-col bg-bg">
-      <header className="flex items-center justify-between border-b border-divider bg-surface px-3 py-2.5">
+      <header
+        className="ui-chrome flex items-center justify-between border-b border-divider bg-surface px-3 py-2.5"
+        style={{ paddingTop: "max(10px, env(safe-area-inset-top))" }}
+      >
         <div className="flex items-center gap-2">
           <img src="/app/icons/icon.svg" alt="" className="h-7 w-7 rounded-md" />
           <h1 className="m-0 text-md font-semibold text-fg">Slashtalk</h1>
@@ -200,7 +214,7 @@ export default function App(): JSX.Element {
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {view.kind === "thread" ? (
           <AskThread
             messages={thread.messages}

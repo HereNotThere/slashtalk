@@ -16,8 +16,8 @@ export function HeadsCarousel({
   onSearch,
 }: HeadsCarouselProps): JSX.Element {
   return (
-    <div className="border-t border-divider bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
-      <div className="no-scrollbar flex items-center gap-3 overflow-x-auto px-3 py-3">
+    <div className="ui-chrome border-t border-divider bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+      <div className="no-scrollbar flex items-center gap-3 overflow-x-auto overscroll-x-contain px-3 py-3">
         <button
           type="button"
           onClick={onSearch}

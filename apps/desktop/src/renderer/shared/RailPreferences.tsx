@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Checkbox } from "./Checkbox";
-import type { McpInstallStatus, McpTarget, ThemeMode } from "../../shared/types";
+import type { DashboardScope, McpInstallStatus, McpTarget, ThemeMode } from "../../shared/types";
 
 const MCP_TARGETS: McpTarget[] = ["claude-code", "codex"];
 
@@ -12,6 +12,7 @@ export function RailPreferences(): JSX.Element {
   const [spotifySupported, setSpotifySupported] = useState<boolean>(false);
   const [spotifyShare, setSpotifyShare] = useState<boolean>(false);
   const [theme, setTheme] = useState<ThemeMode>("system");
+  const [dashboardScope, setDashboardScope] = useState<DashboardScope>("today");
 
   useEffect(() => {
     let alive = true;
@@ -90,6 +91,18 @@ export function RailPreferences(): JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    void window.chatheads.rail.getDashboardScope().then((v) => {
+      if (alive) setDashboardScope(v);
+    });
+    const off = window.chatheads.rail.onDashboardScopeChange((v) => setDashboardScope(v));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
   const onPinnedChange = (v: boolean): void => {
     setPinned(v);
     void window.chatheads.rail.setPinned(v);
@@ -114,6 +127,10 @@ export function RailPreferences(): JSX.Element {
     setTheme(mode);
     void window.chatheads.theme.setMode(mode);
   };
+  const onDashboardScopeChange = (scope: DashboardScope): void => {
+    setDashboardScope(scope);
+    void window.chatheads.rail.setDashboardScope(scope);
+  };
 
   return (
     <>
@@ -128,6 +145,7 @@ export function RailPreferences(): JSX.Element {
       {spotifySupported ? (
         <SpotifyShareRow enabled={spotifyShare} onChange={onSpotifyShareChange} />
       ) : null}
+      <DashboardScopeRow value={dashboardScope} onChange={onDashboardScopeChange} />
       <ThemeRow value={theme} onChange={onThemeChange} />
     </>
   );
@@ -351,6 +369,45 @@ function SpotifyShareRow({
       <Checkbox checked={enabled} />
       <span className="flex-1 text-base">Share Spotify Now Playing</span>
     </button>
+  );
+}
+
+function DashboardScopeRow({
+  value,
+  onChange,
+}: {
+  value: DashboardScope;
+  onChange: (scope: DashboardScope) => void;
+}): JSX.Element {
+  const opts: { scope: DashboardScope; label: string }[] = [
+    { scope: "today", label: "Today" },
+    { scope: "past24h", label: "Past 24h" },
+  ];
+  return (
+    <div className="flex items-center gap-2 px-1.5 py-1">
+      <span className="flex-1 text-base text-fg">
+        Window <span className="text-xs text-subtle">(experimental)</span>
+      </span>
+      <div className="flex rounded-md bg-surface-alt p-0.5 gap-0.5">
+        {opts.map((o) => {
+          const active = value === o.scope;
+          return (
+            <button
+              key={o.scope}
+              type="button"
+              onClick={() => onChange(o.scope)}
+              aria-pressed={active}
+              className={`
+                px-2 py-0.5 rounded text-xs [font:inherit] cursor-pointer border-none
+                ${active ? "bg-bg text-fg" : "bg-transparent text-fg/60 hover:text-fg"}
+              `}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

@@ -143,7 +143,7 @@ export function App(): JSX.Element {
         transform: visible ? "translateX(0)" : "translateX(-4px)",
       }}
     >
-      <div ref={contentRef}>
+      <div ref={contentRef} className={head?.kind === "agent" ? undefined : "pb-2"}>
         {head?.kind === "agent" ? (
           <AgentPanel head={head} />
         ) : head?.kind === "project" ? (

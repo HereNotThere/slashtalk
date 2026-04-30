@@ -9,6 +9,7 @@
 // index.ts — those side effects span hover-polling and rail-visibility too.
 
 import type { BrowserWindow } from "electron";
+import { parseDashboardScope, type DashboardScope } from "@slashtalk/shared";
 import * as store from "../store";
 import { broadcast } from "./broadcast";
 
@@ -17,6 +18,7 @@ const SESSION_ONLY_KEY = "railSessionOnlyMode";
 const COLLAPSE_INACTIVE_KEY = "railCollapseInactive";
 const SHOW_ACTIVITY_TIMESTAMPS_KEY = "showActivityTimestamps";
 const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
+const DASHBOARD_SCOPE_KEY = "dashboardScope";
 
 interface RailStateDeps {
   getOverlay: () => BrowserWindow | null;
@@ -67,6 +69,14 @@ export function getShowActivityTimestamps(): boolean {
   return store.get<boolean>(SHOW_ACTIVITY_TIMESTAMPS_KEY) ?? true;
 }
 
+/** Time window driving every dashboard surface (user-card PRs/standup +
+ *  project-card overview). Default `today` — anchored to the target's tz on
+ *  user surfaces, the caller's tz on the project surface. `past24h` is a
+ *  tz-neutral rolling window. */
+export function getDashboardScope(): DashboardScope {
+  return parseDashboardScope(store.get<string>(DASHBOARD_SCOPE_KEY)) ?? "today";
+}
+
 // ---------- Setters ----------
 
 export function setRailPinned(value: boolean): void {
@@ -87,6 +97,15 @@ export function setShowActivityTimestamps(value: boolean): void {
 
 export function setSpotifyShareEnabled(value: boolean): void {
   store.set(SPOTIFY_SHARE_KEY, value);
+}
+
+/** Persist a new scope. Returns true if the value actually changed; lets the
+ *  caller skip cache-clearing and broadcast on a redundant click. */
+export function setDashboardScope(value: DashboardScope): boolean {
+  if (parseDashboardScope(value) === null) return false;
+  if (getDashboardScope() === value) return false;
+  store.set(DASHBOARD_SCOPE_KEY, value);
+  return true;
 }
 
 // ---------- Broadcasts ----------
@@ -112,4 +131,8 @@ export function broadcastRailCollapseInactive(): void {
 
 export function broadcastShowActivityTimestamps(): void {
   broadcastToRailTargets("rail:showActivityTimestamps", getShowActivityTimestamps());
+}
+
+export function broadcastDashboardScope(): void {
+  broadcastToRailTargets("rail:dashboardScope", getDashboardScope());
 }

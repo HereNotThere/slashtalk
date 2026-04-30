@@ -58,6 +58,7 @@ export function HierarchyDashboard({
         // docs/info-card.md).
         loading={dashboard === null || dashboardFetching}
         subjectLabel={subjectLabel}
+        targetTimezone={dashboard?.targetTimezone ?? null}
       />
       <Divider />
       <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
@@ -109,6 +110,53 @@ function AskTrigger({
       <ChatBubbleLeftIcon className="w-3.5 h-3.5" />
     </button>
   );
+}
+
+// Caller and target may be on different calendar dates when the section is
+// labelled "Today" — surface the target's local date so the gap is legible.
+// Returns null when no ambiguity (same date, or tz unknown).
+//
+// Formatters are cached per-tz: PastDaySection re-renders on every dashboard
+// update, and Intl.DateTimeFormat construction is the expensive part.
+const callerYmdFmt = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const tzYmdFmts = new Map<string, Intl.DateTimeFormat>();
+const tzShortFmts = new Map<string, Intl.DateTimeFormat>();
+
+function peerDayHint(targetTz: string | null): { short: string; title: string } | null {
+  if (!targetTz) return null;
+  try {
+    let ymdFmt = tzYmdFmts.get(targetTz);
+    if (!ymdFmt) {
+      ymdFmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: targetTz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      tzYmdFmts.set(targetTz, ymdFmt);
+    }
+    const now = new Date();
+    if (callerYmdFmt.format(now) === ymdFmt.format(now)) return null;
+    let shortFmt = tzShortFmts.get(targetTz);
+    if (!shortFmt) {
+      shortFmt = new Intl.DateTimeFormat(undefined, {
+        timeZone: targetTz,
+        weekday: "short",
+        month: "numeric",
+        day: "numeric",
+      });
+      tzShortFmts.set(targetTz, shortFmt);
+    }
+    const short = shortFmt.format(now);
+    const city = targetTz.split("/").pop()?.replace(/_/g, " ") ?? targetTz;
+    return { short: `${short} their time`, title: `${short} in ${city}` };
+  } catch {
+    return null;
+  }
 }
 
 // Pick the session that the "Now" section should describe.
@@ -214,17 +262,25 @@ function PastDaySection({
   summary,
   loading,
   subjectLabel,
+  targetTimezone,
 }: {
   summary: string | null;
   loading: boolean;
   subjectLabel: string;
+  targetTimezone: string | null;
 }): JSX.Element {
   const [editing, setEditing] = useState(false);
+  const tzHint = peerDayHint(targetTimezone);
   return (
     <div>
       <div className="px-4 pt-3 pb-1.5 flex items-center gap-1.5">
         <ClockIcon className="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden />
         <span className="text-xs font-semibold tracking-wider uppercase text-subtle">Today</span>
+        {tzHint && (
+          <span className="text-[10px] tracking-wider uppercase text-muted/80" title={tzHint.title}>
+            · {tzHint.short}
+          </span>
+        )}
       </div>
       <div className="px-4 pb-3">
         <div className="flex items-end gap-2">

@@ -30,6 +30,7 @@ import type {
   SpotifyPresence,
   StandupResponse,
   SyncStateEntry,
+  UserPrsResponse,
 } from "@slashtalk/shared";
 import type {
   BackendAuthState,
@@ -708,6 +709,14 @@ export function pushSelfPrs(prs: IngestSelfPrEntry[]): Promise<IngestSelfPrsResp
 export function fetchUserStandup(login: string, scope: DashboardScope): Promise<StandupResponse> {
   const qs = new URLSearchParams({ scope });
   return jsonFetch<StandupResponse>(`/api/users/${encodeURIComponent(login)}/standup?${qs}`, {
+    method: "GET",
+  });
+}
+
+/** Server-side PRs for peer user-cards (self uses local `gh`, see ghPrs.ts). */
+export function fetchUserPrs(login: string, scope: DashboardScope): Promise<UserPrsResponse> {
+  const qs = new URLSearchParams({ scope });
+  return jsonFetch<UserPrsResponse>(`/api/users/${encodeURIComponent(login)}/prs?${qs}`, {
     method: "GET",
   });
 }

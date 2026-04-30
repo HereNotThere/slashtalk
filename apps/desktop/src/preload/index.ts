@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ChatAskResponse, ChatMessage, SpotifyPresence } from "@slashtalk/shared";
+import type {
+  ChatAskResponse,
+  ChatMessage,
+  DashboardScope,
+  SpotifyPresence,
+} from "@slashtalk/shared";
 import type {
   AgentHistoryPage,
   ManagedAgentSessionRow,
@@ -119,6 +124,11 @@ const bridge: ChatHeadsBridge = {
     setShowActivityTimestamps: (shown: boolean) =>
       ipcRenderer.invoke("rail:setShowActivityTimestamps", shown) as Promise<void>,
     onShowActivityTimestampsChange: (cb) => subscribe<boolean>("rail:showActivityTimestamps", cb),
+    getDashboardScope: () =>
+      ipcRenderer.invoke("rail:getDashboardScope") as Promise<DashboardScope>,
+    setDashboardScope: (scope: DashboardScope) =>
+      ipcRenderer.invoke("rail:setDashboardScope", scope) as Promise<void>,
+    onDashboardScopeChange: (cb) => subscribe<DashboardScope>("rail:dashboardScope", cb),
   },
 
   spotifyShare: {

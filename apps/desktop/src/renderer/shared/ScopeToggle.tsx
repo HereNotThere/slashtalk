@@ -2,8 +2,8 @@ import { Fragment, type MouseEvent } from "react";
 import type { DashboardScope } from "../../shared/types";
 
 const OPTS: { scope: DashboardScope; label: string }[] = [
-  { scope: "today", label: "Today" },
   { scope: "past24h", label: "24h" },
+  { scope: "today", label: "Today" },
 ];
 
 /** Two text labels in the same uppercase mini-cap font as the section

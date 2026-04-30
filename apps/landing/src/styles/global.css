@@ -10,3 +10,23 @@
 html {
   font-feature-settings: "cv11", "ss01", "ss03";
 }
+
+/* Device-class gates for the download CTA: shown on devices that report a
+ * fine pointer (mouse/trackpad — i.e. real desktops/laptops, regardless of
+ * window size) and replaced with an inactive label on touch-only devices
+ * (phones, iPads). Falls back to the inactive label when the media feature
+ * isn't supported. */
+.dl-mac {
+  display: none;
+}
+.dl-not-mac {
+  display: inline-flex;
+}
+@media (any-pointer: fine) {
+  .dl-mac {
+    display: inline-flex;
+  }
+  .dl-not-mac {
+    display: none;
+  }
+}

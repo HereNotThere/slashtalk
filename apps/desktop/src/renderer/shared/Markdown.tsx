@@ -7,7 +7,14 @@ const REMARK_PLUGINS = [remarkGfm];
 
 const MARKDOWN_CLASSES =
   "prose prose-invert text-fg/90 break-words text-base leading-relaxed " +
-  "[&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 " +
+  // `text-pretty` asks the browser to avoid orphans — short trailing tokens
+  // like "[#224]" get pulled up onto the previous line instead of stranded
+  // alone at the bottom of a bullet.
+  "text-pretty [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 " +
+  // Tailwind preflight resets `list-style: none` on ul/ol, so bullet glyphs
+  // never render unless we re-enable them here. Padding-left makes room for
+  // the disc/decimal marker without it clipping at the container edge.
+  "[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 " +
   "[&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-code [&_code]:text-[0.9em] " +
   "[&_pre]:bg-code [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-auto " +
   "[&_pre_code]:bg-transparent [&_pre_code]:p-0 " +

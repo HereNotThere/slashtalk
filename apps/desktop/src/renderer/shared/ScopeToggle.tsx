@@ -31,7 +31,7 @@ export function ScopeToggle({
             type="button"
             onClick={(e) => click(e, o.scope)}
             aria-pressed={active}
-            className={`text-xs font-semibold tracking-wider uppercase bg-transparent border-none p-0 [font:inherit] transition-colors ${
+            className={`text-xs font-semibold tracking-wider uppercase bg-transparent border-none transition-colors ${
               active
                 ? "text-subtle cursor-default"
                 : "text-muted/50 hover:text-muted cursor-pointer"

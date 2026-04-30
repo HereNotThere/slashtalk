@@ -18,6 +18,8 @@ Both tiers are canonical. Placement signals scope, not authority.
 | Doc                                    | Purpose                                                                                                                                 |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | [`CONVENTIONS.md`](CONVENTIONS.md)     | The authoring bible — every doc type, where it lives, naming, when to write what. Read this before adding any doc.                      |
+| [`DEVELOPMENT.md`](DEVELOPMENT.md)     | Backend dev getting-started — prerequisites, env, DB migrations, tests, local server.                                                   |
+| [`RELEASING.md`](RELEASING.md)         | Desktop release pipeline — changesets flow, signing/notarization secrets, Homebrew tap auto-bump, manual unsigned build.                |
 | [`RELIABILITY.md`](RELIABILITY.md)     | How load-bearing flows (ingest, heartbeat, pub/sub, analyzers) degrade and recover. Resume protocol, state machine, soft-fail contract. |
 | [`SECURITY.md`](SECURITY.md)           | Threat model, OAuth scope, repo-claim verification, token storage and hashing, JWT cookie, PII surface, secrets in WS payloads.         |
 | [`QUALITY_SCORE.md`](QUALITY_SCORE.md) | Per-domain health grades. Tests / docs / invariants / open gaps for every server domain, desktop subsystem, and shared package.         |
@@ -40,6 +42,8 @@ Both tiers are canonical. Placement signals scope, not authority.
 
 | You want to …                                         | Read                                                                                                         |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Run the backend locally                               | [`DEVELOPMENT.md`](DEVELOPMENT.md)                                                                           |
+| Cut a desktop release                                 | [`RELEASING.md`](RELEASING.md)                                                                               |
 | Understand the project's domains end to end           | [`../ARCHITECTURE.md`](../ARCHITECTURE.md)                                                                   |
 | Add a route, analyzer, table, window, or shared type  | [`../AGENTS.md`](../AGENTS.md) → per-workspace `AGENTS.md`                                                   |
 | Know which rules can't be broken                      | [`design-docs/core-beliefs.md`](design-docs/core-beliefs.md)                                                 |

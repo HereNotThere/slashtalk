@@ -97,3 +97,10 @@ jobs:
             apps/desktop/dist/latest-mac.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          DMG_PATH: apps/desktop/dist/Slashtalk-mac-universal.dmg
+        run: ./apps/desktop/scripts/update-homebrew-cask.sh

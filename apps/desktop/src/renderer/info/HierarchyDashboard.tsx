@@ -8,7 +8,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, TokenUsage, UserPr } from "@slashtalk/shared";
-import type { InfoDashboardData, InfoSession } from "../../shared/types";
+import type { ChatHead, InfoDashboardData, InfoSession } from "../../shared/types";
 import { ClaudeIcon, OpenAIIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
 import { PrItem } from "../shared/PrItem";
@@ -22,11 +22,13 @@ import { AskInput } from "./AskInline";
 const NOW_WINDOW_MS = 2 * 60 * 60 * 1000; // last 2 hours
 
 export function HierarchyDashboard({
+  head,
   sessions,
   dashboard,
   dashboardFetching,
   subjectLabel,
 }: {
+  head: ChatHead | null;
   sessions: InfoSession[] | null;
   dashboard: InfoDashboardData | null;
   /** True between fetch-start and fetch-settle on main. Drives the
@@ -39,6 +41,10 @@ export function HierarchyDashboard({
   subjectLabel: string;
 }): JSX.Element {
   const nowSession = pickNowSession(sessions);
+  const collision =
+    head?.collisionAt != null && head.collisionFile && head.label
+      ? { file: head.collisionFile, login: head.label }
+      : null;
   // Self-mode: server tells us when the user has no claimed user_repos. In
   // that state, every section below would be blank and confusing — surface a
   // single CTA pointing at the main window where repos are picked.
@@ -55,6 +61,12 @@ export function HierarchyDashboard({
   return (
     <>
       <Divider />
+      {collision && (
+        <>
+          <CollisionBanner file={collision.file} login={collision.login} />
+          <Divider />
+        </>
+      )}
       {nowSession && (
         <>
           <NowSection session={nowSession} subjectLabel={subjectLabel} />
@@ -76,6 +88,39 @@ export function HierarchyDashboard({
         <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
       </StaleWrapper>
     </>
+  );
+}
+
+// Pairs with the rose-400 ring on the chat head — both pulse on the shared
+// `live-ring` keyframe (via `.collision-dot`) so they read as one event.
+function CollisionBanner({ file, login }: { file: string; login: string }): JSX.Element {
+  const dismiss = (e: MouseEvent): void => {
+    e.stopPropagation();
+    void window.chatheads.collision.dismiss(login);
+  };
+  return (
+    <div className="px-4 py-2.5">
+      <div className="flex items-start gap-1.5 px-2 py-1 rounded bg-danger/10">
+        {/* mt-[5px] aligns the 8px dot's center with the first text line. */}
+        <span
+          aria-hidden
+          className="collision-dot shrink-0 inline-block w-2 h-2 rounded-full mt-[5px]"
+        />
+        <div className="text-[12px] leading-snug min-w-0 flex-1">
+          <span className="text-danger font-medium">Also editing </span>
+          <span className="font-mono text-fg/90 break-all">{file}</span>
+        </div>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Dismiss collision warning"
+          title="Dismiss"
+          className="shrink-0 -mr-1 px-1.5 py-0 text-[14px] leading-none text-subtle hover:text-fg rounded cursor-pointer"
+        >
+          ×
+        </button>
+      </div>
+    </div>
   );
 }
 

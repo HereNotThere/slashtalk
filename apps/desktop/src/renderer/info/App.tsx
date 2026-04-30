@@ -181,6 +181,7 @@ export function App(): JSX.Element {
               spotify={spotify}
             />
             <HierarchyDashboard
+              head={head}
               sessions={sessions}
               dashboard={dashboard}
               dashboardFetching={dashboardFetching}

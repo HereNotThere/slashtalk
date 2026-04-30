@@ -76,23 +76,17 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 
 <style>
 	.dock-live {
-		box-shadow:
-			0 0 0 2px rgba(59, 130, 246, 0.9),
-			0 0 12px 2px rgba(59, 130, 246, 0.55);
-		animation: dock-live-pulse 1.8s ease-in-out infinite;
+		box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.9);
+		animation: dock-live-pulse 2s ease-in-out infinite;
 	}
 
 	@keyframes dock-live-pulse {
 		0%,
 		100% {
-			box-shadow:
-				0 0 0 2px rgba(59, 130, 246, 0.9),
-				0 0 10px 1px rgba(59, 130, 246, 0.45);
+			box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.9);
 		}
 		50% {
-			box-shadow:
-				0 0 0 2px rgba(96, 165, 250, 1),
-				0 0 18px 4px rgba(59, 130, 246, 0.7);
+			box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.9);
 		}
 	}
 

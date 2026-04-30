@@ -1,9 +1,9 @@
-import type { MouseEvent } from "react";
+import { Fragment, type MouseEvent } from "react";
 import type { DashboardScope } from "../../shared/types";
 
 const OPTS: { scope: DashboardScope; label: string }[] = [
   { scope: "today", label: "Today" },
-  { scope: "past24h", label: "24h" },
+  { scope: "past24h", label: "Past 24h" },
 ];
 
 /** Two text labels in the same uppercase mini-cap font as the section
@@ -23,22 +23,28 @@ export function ScopeToggle({
   };
   return (
     <div className="flex items-center gap-1.5">
-      {OPTS.map((o) => {
+      {OPTS.map((o, i) => {
         const active = scope === o.scope;
         return (
-          <button
-            key={o.scope}
-            type="button"
-            onClick={(e) => click(e, o.scope)}
-            aria-pressed={active}
-            className={`text-xs font-semibold tracking-wider uppercase bg-transparent border-none transition-colors ${
-              active
-                ? "text-subtle cursor-default"
-                : "text-muted/50 hover:text-muted cursor-pointer"
-            }`}
-          >
-            {o.label}
-          </button>
+          <Fragment key={o.scope}>
+            {i > 0 && (
+              <span className="text-xs text-muted/40" aria-hidden>
+                ·
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => click(e, o.scope)}
+              aria-pressed={active}
+              className={`text-xs font-semibold tracking-wider uppercase bg-transparent border-none transition-colors ${
+                active
+                  ? "text-subtle cursor-default"
+                  : "text-muted/50 hover:text-muted cursor-pointer"
+              }`}
+            >
+              {o.label}
+            </button>
+          </Fragment>
         );
       })}
     </div>

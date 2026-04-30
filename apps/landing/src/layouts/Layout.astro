@@ -14,7 +14,13 @@ const {
 // og:image and twitter:image must be absolute URLs — relative paths break
 // previews on Facebook, X/Twitter, LinkedIn, Slack, Discord, etc.
 // Astro.site comes from `site` in astro.config.mjs (overridable via SITE_URL).
-const ogImage = new URL('/screenshot-dock.png', Astro.site).toString();
+const ogImage = new URL('/og-image.png', Astro.site).toString();
+// Branded 600x315 unfurl card (Slashtalk logo + wordmark). Width/height
+// are emitted as og:image:width / og:image:height so unfurlers don't
+// have to fetch the asset just to size the card. If you replace the file,
+// keep the dimensions in sync below.
+const ogImageWidth = 600;
+const ogImageHeight = 315;
 const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
 ---
 
@@ -32,10 +38,14 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
 		<meta property="og:type" content="website" />
 		<meta property="og:url" content={canonicalUrl} />
 		<meta property="og:image" content={ogImage} />
+		<meta property="og:image:width" content={String(ogImageWidth)} />
+		<meta property="og:image:height" content={String(ogImageHeight)} />
+		<meta property="og:image:alt" content="Slashtalk" />
 		<meta name="twitter:card" content="summary_large_image" />
 		<meta name="twitter:title" content={title} />
 		<meta name="twitter:description" content={description} />
 		<meta name="twitter:image" content={ogImage} />
+		<meta name="twitter:image:alt" content="Slashtalk" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 		<link

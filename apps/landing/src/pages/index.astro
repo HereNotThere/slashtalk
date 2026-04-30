@@ -33,17 +33,18 @@ import AskMock from '../components/AskMock.astro';
 					class="hidden text-sm font-medium text-neutral-600 transition hover:text-neutral-900 sm:inline"
 					>GitHub</a
 				>
-				<button
-					type="button"
+				<a
+					href="#download"
 					data-download
 					class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
 				>
 					Download
-				</button>
+				</a>
 			</nav>
 		</header>
 
 		<section
+			id="download"
 			class="mx-auto max-w-6xl px-4 pt-4 pb-16 sm:px-6 sm:pt-6 sm:pb-24"
 		>
 			<DesktopPreview>
@@ -68,8 +69,8 @@ import AskMock from '../components/AskMock.astro';
 				<div
 					class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
 				>
-					<button
-						type="button"
+					<a
+						href="https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-arm64.dmg"
 						data-download
 						class="inline-flex items-center gap-2.5 rounded-full bg-neutral-900 px-7 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-neutral-700"
 					>
@@ -85,7 +86,7 @@ import AskMock from '../components/AskMock.astro';
 							></path>
 						</svg>
 						Download for macOS
-					</button>
+					</a>
 					<a
 						href="/blog"
 						class="text-base font-medium text-neutral-800 transition hover:text-neutral-950"
@@ -94,7 +95,11 @@ import AskMock from '../components/AskMock.astro';
 					</a>
 				</div>
 				<p class="mt-5 text-sm text-neutral-600">
-					Free · macOS 13+ · Apple Silicon &amp; Intel
+					Free · macOS 13+ · Apple Silicon · <a
+						href="https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-x64.dmg"
+						data-download
+						class="text-neutral-800 underline decoration-neutral-300 underline-offset-4 transition hover:text-neutral-950 hover:decoration-neutral-700"
+					>Intel build</a>
 				</p>
 			</DesktopPreview>
 		</section>
@@ -275,8 +280,8 @@ import AskMock from '../components/AskMock.astro';
 				<div
 					class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
 				>
-					<button
-						type="button"
+					<a
+						href="https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-arm64.dmg"
 						data-download
 						class="inline-flex items-center gap-2.5 rounded-full bg-white px-7 py-3.5 text-base font-medium text-neutral-900 transition hover:bg-neutral-100"
 					>
@@ -292,7 +297,7 @@ import AskMock from '../components/AskMock.astro';
 							></path>
 						</svg>
 						Download for macOS
-					</button>
+					</a>
 					<a
 						href="/blog"
 						class="text-base font-medium text-neutral-300 transition hover:text-white"
@@ -301,7 +306,11 @@ import AskMock from '../components/AskMock.astro';
 					</a>
 				</div>
 				<p class="mt-5 text-sm text-neutral-500">
-					Free · macOS 13+
+					Free · macOS 13+ · Apple Silicon · <a
+						href="https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-x64.dmg"
+						data-download
+						class="text-neutral-300 underline decoration-neutral-700 underline-offset-4 transition hover:text-white hover:decoration-neutral-400"
+					>Intel build</a>
 				</p>
 			</div>
 		</section>
@@ -335,9 +344,9 @@ import AskMock from '../components/AskMock.astro';
 
 <script>
 	document
-		.querySelectorAll<HTMLButtonElement>('[data-download]')
-		.forEach((button) => {
-			button.addEventListener('click', () => {
+		.querySelectorAll<HTMLElement>('[data-download]')
+		.forEach((el) => {
+			el.addEventListener('click', () => {
 				console.log('[slashtalk] Download for macOS clicked');
 			});
 		});

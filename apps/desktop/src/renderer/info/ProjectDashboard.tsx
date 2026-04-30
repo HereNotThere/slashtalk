@@ -13,6 +13,7 @@ import { PrItem } from "../shared/PrItem";
 import { PrLinkProvider } from "../shared/PrLinkContext";
 import { SectionLabel } from "../shared/SectionLabel";
 import { ShimmerText } from "../shared/ShimmerText";
+import { StaleWrapper } from "../shared/StaleWrapper";
 import { AskInput } from "./AskInline";
 
 export function ProjectDashboard({
@@ -33,18 +34,25 @@ export function ProjectDashboard({
 
   return (
     <div>
+      {/* Header stays outside the StaleWrapper so the repo title doesn't pulse. */}
       <ProjectHeader repoFullName={repoFullName} activeCount={active.length} />
-      <Divider />
-      <PulseSection pulse={overview?.pulse ?? null} loading={fetching} prs={overview?.prs ?? []} />
-      {buckets.length > 0 && <Divider />}
-      {buckets.map((b, i) => (
-        <Fragment key={`${b.name}-${i}`}>
-          {i > 0 && <div className="mx-4 h-px bg-divider/60" />}
-          <BucketRow bucket={b} prsByNumber={prsByNumber} />
-        </Fragment>
-      ))}
-      {active.length > 0 && <Divider />}
-      {active.length > 0 && <ActiveStrip people={active} />}
+      <StaleWrapper stale={fetching && overview !== null}>
+        <Divider />
+        <PulseSection
+          pulse={overview?.pulse ?? null}
+          loading={fetching}
+          prs={overview?.prs ?? []}
+        />
+        {buckets.length > 0 && <Divider />}
+        {buckets.map((b, i) => (
+          <Fragment key={`${b.name}-${i}`}>
+            {i > 0 && <div className="mx-4 h-px bg-divider/60" />}
+            <BucketRow bucket={b} prsByNumber={prsByNumber} />
+          </Fragment>
+        ))}
+        {active.length > 0 && <Divider />}
+        {active.length > 0 && <ActiveStrip people={active} />}
+      </StaleWrapper>
       <div className="px-4 pb-3 pt-2">
         {editing ? (
           <AskInput

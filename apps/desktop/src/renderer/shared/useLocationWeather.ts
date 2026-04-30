@@ -16,8 +16,22 @@ type Fetcher = typeof fetch;
 const WEATHER_TTL_MS = 10 * 60 * 1000;
 
 let cachedLocation: ResolvedLocation | null = null;
-let cachedWeather: { icon: string; fetchedAt: number; lat: number; lon: number } | null = null;
+// Per-location weather cache. Keyed by `lat,lon` so switching between peer
+// cards (Stockholm ↔ Berlin) doesn't evict each other — a singleton entry
+// would force a fresh HTTP roundtrip every time the user flipped back.
+const weatherCache = new Map<string, { icon: string; fetchedAt: number }>();
 let inflight: Promise<void> | null = null;
+
+function weatherKey(lat: number, lon: number): string {
+  return `${lat},${lon}`;
+}
+
+function freshIconFor(loc: ResolvedLocation | null): string | null {
+  if (!loc) return null;
+  const entry = weatherCache.get(weatherKey(loc.lat, loc.lon));
+  if (!entry) return null;
+  return Date.now() - entry.fetchedAt < WEATHER_TTL_MS ? entry.icon : null;
+}
 
 export function parseCityFromTimezone(tz: string | null | undefined): string | null {
   if (!tz || tz.startsWith("Etc/") || tz === "UTC" || !tz.includes("/")) return null;
@@ -151,17 +165,12 @@ function reportLocationToMain(city: string | null): void {
 }
 
 async function fetchWeatherIconCached(lat: number, lon: number): Promise<string | null> {
+  const key = weatherKey(lat, lon);
+  const entry = weatherCache.get(key);
   const now = Date.now();
-  if (
-    cachedWeather &&
-    cachedWeather.lat === lat &&
-    cachedWeather.lon === lon &&
-    now - cachedWeather.fetchedAt < WEATHER_TTL_MS
-  ) {
-    return cachedWeather.icon;
-  }
+  if (entry && now - entry.fetchedAt < WEATHER_TTL_MS) return entry.icon;
   const icon = await fetchWeatherIconFresh(lat, lon);
-  if (icon) cachedWeather = { icon, fetchedAt: now, lat, lon };
+  if (icon) weatherCache.set(key, { icon, fetchedAt: now });
   return icon;
 }
 
@@ -179,18 +188,23 @@ export function useLocationWeather(
   const overrideCity = override?.city ?? null;
 
   const [state, setState] = useState<LocationWeather>(() => {
-    if (isPeerMode) return { city: overrideCity, icon: null };
-    return {
-      city: cachedLocation?.city ?? null,
-      icon: cachedWeather?.icon ?? null,
-    };
+    if (isPeerMode) {
+      const loc = overrideCity ? (peerLocationCache.get(overrideCity) ?? null) : null;
+      return { city: loc?.city ?? overrideCity, icon: freshIconFor(loc) };
+    }
+    return { city: cachedLocation?.city ?? null, icon: freshIconFor(cachedLocation) };
   });
 
   useEffect(() => {
     let cancelled = false;
 
     if (isPeerMode) {
-      setState({ city: overrideCity, icon: null });
+      // Seed from cache rather than wiping the icon: re-mounts (e.g. flipping
+      // between user/project cards) would otherwise force a re-fetch even
+      // when the entry is still fresh. Initial useState ran the same lookup;
+      // this resyncs after `overrideCity` changes.
+      const cachedLoc = overrideCity ? (peerLocationCache.get(overrideCity) ?? null) : null;
+      setState({ city: cachedLoc?.city ?? overrideCity, icon: freshIconFor(cachedLoc) });
       if (!overrideCity) return;
       void resolvePeerCity(overrideCity).then(async (loc) => {
         if (cancelled || !loc) return;
@@ -221,7 +235,7 @@ export function useLocationWeather(
         if (cancelled) return;
         setState({
           city: cachedLocation?.city ?? null,
-          icon: cachedWeather?.icon ?? null,
+          icon: freshIconFor(cachedLocation),
         });
       });
     } else {

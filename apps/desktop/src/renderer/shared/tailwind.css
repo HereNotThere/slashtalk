@@ -28,6 +28,43 @@
   }
 }
 
+/* Sweep highlight applied as an absolutely-positioned overlay on top of stale
+ * info-card content during an in-flight refetch. Pairs with `saturate-0` +
+ * `opacity-70` on the underlying content for a unified "this is being
+ * refreshed" cue. Tint is a CSS var so light/dark themes flip it.
+ *
+ * Implementation: a fixed-width inner band translated across the overlay via
+ * `transform`. Keeps the work on the compositor instead of repainting a
+ * background-position shift each frame. */
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  /* Band crosses fast (~30% of the cycle), then rests off-screen until the
+   * next cycle. Keeps the overall 1.8s cadence while making each pass feel
+   * snappy instead of a slow drift. */
+  30% {
+    transform: translateX(300%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.shimmer-overlay {
+  overflow: hidden;
+}
+
+.shimmer-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 50%;
+  background: linear-gradient(100deg, transparent, var(--shimmer-tint), transparent);
+  animation: shimmer-sweep 1.8s linear infinite;
+  will-change: transform;
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * Design tokens. See `docs/design.md` for the system rules. Default values =
  * dark theme. Light theme overrides live below. Three blocks must stay in
@@ -91,6 +128,11 @@
   /* Overlay bubble (rail chatheads) */
   --color-bubble: rgba(255, 255, 255, 0.18);
   --color-bubble-outline: rgba(255, 255, 255, 0.45);
+  /* Sweep tint for the stale-content shimmer overlay (info card refetches).
+   * Tracks --color-surface-2 with partial alpha so the band reads as a wash
+   * of background color over the content — content "fades into" the surface
+   * as the sweep passes — rather than a brighter/darker highlight. */
+  --shimmer-tint: rgba(44, 44, 44, 0.6);
 
   /* ─── Elevation ────────────────────────────────────────────────── */
   /* Only allowed shadow — for cards / popovers / dock. Not for buttons. */
@@ -130,6 +172,7 @@
     --color-code: rgba(0, 0, 0, 0.06);
     --color-bubble: rgba(255, 255, 255, 0.85);
     --color-bubble-outline: rgba(0, 0, 0, 0.2);
+    --shimmer-tint: rgba(255, 255, 255, 0.6);
 
     --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
   }
@@ -165,6 +208,7 @@
       --color-code: rgba(0, 0, 0, 0.06);
       --color-bubble: rgba(255, 255, 255, 0.85);
       --color-bubble-outline: rgba(0, 0, 0, 0.2);
+      --shimmer-tint: rgba(255, 255, 255, 0.6);
 
       --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
     }

@@ -1,16 +1,17 @@
 import { ipcMain } from "electron";
 import * as backend from "../backend";
 import * as localRepos from "../localRepos";
-import { runDelegatedChat, hasClaudeCli } from "../chatDelegate";
+import { collectChatWorkSnapshot } from "../chatWorkSnapshot";
 import { broadcast, liveWindows } from "../windows/broadcast";
-import type { AgentStreamEvent } from "../anthropic";
-import type { DelegatedChatRequest, DelegatedChatResponse } from "../../shared/types";
+import type {
+  ChatDelegateEvent,
+  DelegatedChatRequest,
+  DelegatedChatResponse,
+  TrackedRepo,
+} from "../../shared/types";
 
 const CHANNEL_REQUEST = "chat:run-delegated";
 const CHANNEL_EVENT = "chat:delegated-event";
-
-const CLAUDE_CLI_INSTALL_HINT =
-  "Claude Code CLI isn't installed. Install it from https://claude.com/code, then restart Slashtalk to enable deep-repo questions.";
 
 export function registerChatDelegateIpc(
   getResponseWindow: () => Electron.BrowserWindow | null,
@@ -21,65 +22,59 @@ export function registerChatDelegateIpc(
       const task = (raw?.task ?? "").trim();
       if (!task) return { kind: "error", message: "empty task" };
 
-      if (!(await hasClaudeCli())) {
-        return { kind: "error", message: CLAUDE_CLI_INSTALL_HINT };
-      }
-
-      const cwd = resolveCwd(raw);
-      if (!cwd) {
+      const repo = resolveRepo(raw);
+      if (!repo) {
         const candidates = localRepos.list();
         if (candidates.length === 0) {
           return {
             kind: "error",
             message:
-              "No local repos tracked. Add one from the tray menu so the agent has somewhere to look.",
+              "No local repos tracked. Add one from the tray menu so Slashtalk can summarize it.",
           };
         }
         return { kind: "needs-repo", candidates };
       }
 
-      const onEvent = (event: AgentStreamEvent): void => {
+      const onEvent = (event: ChatDelegateEvent): void => {
         broadcast(CHANNEL_EVENT, event, ...liveWindows(getResponseWindow()));
       };
 
-      const result = await runDelegatedChat({ task, cwd, onEvent });
+      onEvent({ kind: "phase", label: "Collecting repo snapshot…" });
+      const snapshot = await collectChatWorkSnapshot(repo);
 
-      if (result.text) {
-        try {
-          await backend.finalizeDelegatedChat({
-            threadId: raw.threadId,
-            messageId: raw.messageId,
-            answer: result.text,
-          });
-        } catch (err) {
-          // Soft-fail per CLAUDE.md: persisting history must not break the
-          // user-facing answer (already in `result.text`, returned below).
-          console.error("[chat-delegate] finalize failed:", err);
-        }
-      }
+      onEvent({ kind: "phase", label: "Asking Slashtalk…" });
+      const result = await backend.answerDelegatedWork({
+        threadId: raw.threadId,
+        body: {
+          messageId: raw.messageId,
+          task,
+          repoFullName: repo.fullName,
+          snapshot,
+        },
+      });
 
       return {
         kind: "ok",
         text: result.text,
-        hadError: result.hadError,
-        ghAvailable: result.ghAvailable,
+        hadError: result.hadError || (snapshot.collectionErrors?.length ?? 0) > 0,
+        ghAvailable: snapshot.ghStatus === "ready",
       };
     },
   );
 }
 
-function resolveCwd(req: DelegatedChatRequest): string | null {
+function resolveRepo(req: DelegatedChatRequest): TrackedRepo | null {
   if (typeof req.resolvedRepoId === "number") {
     const match = localRepos.list().find((r) => r.repoId === req.resolvedRepoId);
-    return match?.localPath ?? null;
+    return match ?? null;
   }
   if (req.repoFullName) {
     const match = localRepos.findByFullName(req.repoFullName);
-    if (match) return match.localPath;
+    if (match) return match;
   }
   // Single-repo shortcut: if the user only has one tracked repo, use it
   // without prompting. Two or more → ambiguous, ask the renderer to pick.
   const all = localRepos.list();
-  if (all.length === 1) return all[0].localPath;
+  if (all.length === 1) return all[0];
   return null;
 }

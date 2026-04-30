@@ -82,8 +82,9 @@ Profile + device + repo-claim management.
 Team-presence Q&A. Stateless server; client owns the thread.
 
 - **Files:** `chat/routes.ts` (plus helpers referenced from `app.ts`).
-- **Routes:** `POST /api/chat/ask`.
+- **Routes:** `POST /api/chat/ask`, `GET /api/chat/history`, `POST /api/chat/threads/:threadId/delegated-work`.
 - **Reads:** session snapshots + insights via the same access-control rules as `/api/feed`.
+- **Delegated work:** desktop collects a fixed metadata-only repo snapshot for a tracked repo; backend composes the answer with Anthropic and persists it.
 
 ### `ws`
 
@@ -154,7 +155,7 @@ Tailwind v4 via single shared `tailwind.css`.
 
 ## Web app (`apps/web/`)
 
-Installable Vite + React PWA served by `apps/server` under `/app/*`. It renders the server-backed presence/feed surface with same-origin `/api/*` calls and browser cookies. It is read/control plane only: local ingest, heartbeats, device repo paths, MCP proxy installation, local delegated agents, and local Spotify reads remain desktop-only.
+Installable Vite + React PWA served by `apps/server` under `/app/*`. It renders the server-backed presence/feed surface with same-origin `/api/*` calls and browser cookies. It is read/control plane only: local ingest, heartbeats, device repo paths, MCP proxy installation, desktop repo snapshots for delegated Ask answers, and local Spotify reads remain desktop-only.
 
 ## Landing (`apps/landing/`)
 

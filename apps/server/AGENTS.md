@@ -37,7 +37,7 @@ src/
 ├── repo/
 │   └── overview.ts  # /api/repos/:owner/:name/overview — info-card project surface
 ├── chat/
-│   └── routes.ts    # /api/chat/ask (stateless Q&A)
+│   └── routes.ts    # /api/chat/ask, /api/chat/history, delegated-work snapshot answers
 ├── presence/
 │   └── routes.ts    # POST /v1/presence/spotify, GET /api/presence/peers; publishes to user:<id> + repo:<id>
 ├── web/

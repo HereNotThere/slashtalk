@@ -443,10 +443,10 @@ export interface ChatToolDefinition {
   }>;
 }
 
-/** Sentinel emitted by the `delegate_to_local_agent` tool's handler and
+/** Sentinel emitted by the `summarize_local_work` tool's handler and
  *  detected by `runChatAgent`'s loop to short-circuit out of the
- *  Anthropic-side iteration. The tool itself is a signal channel, not an
- *  executor — the actual run happens on the desktop. */
+ *  Anthropic-side iteration. The tool itself is a signal channel: the
+ *  desktop collects a fixed snapshot, then the backend composes the answer. */
 export const DELEGATE_SENTINEL = "__delegate__";
 
 export interface DelegatePayload {
@@ -549,21 +549,21 @@ export function buildChatTools(
       },
     },
     {
-      name: "delegate_to_local_agent",
+      name: "summarize_local_work",
       description:
-        "Hand off the question to a read-only Claude Code agent running on the user's desktop, scoped to one of their tracked repos. Use this when the question requires reading repo source files, inspecting git history (commits, blame, diffs), running build/test commands, or querying authoritative GitHub state via `gh` (PRs, CI runs, issues). Examples: 'where is X defined', 'what changed in Y last week', 'why does typecheck fail in Z', 'how does the auth flow work in this repo', 'is PR 123 merged', 'what's the CI status on branch foo'. The local agent has gh CLI auth, so PR/CI questions go through the GitHub remote and are fresher than the `pr` field from get_team_activity (which is best-effort and can lag). Pass a `task` (one paragraph instructing the local agent what to investigate and answer; rephrase the user's question if it helps) and `repoFullName` if you can identify the target repo from context. Do NOT use this for questions about teammates' presence/activity — those are answered by get_team_activity / get_session.",
+        "Request a fixed metadata-only snapshot from the user's desktop for one tracked repo, then have the backend summarize current work and related PRs. Use only when the user asks about their local work summary, branch status, changed files, recent commits, or PRs related to the current branch. The snapshot contains no file contents, no test output, no CI logs, and no arbitrary GitHub queries, so do NOT use this for source-code explanation, debugging, blame/history archaeology, running commands, or broad GitHub/CI inspection. For teammate presence/activity, use get_team_activity / get_session instead.",
       input_schema: {
         type: "object",
         properties: {
           task: {
             type: "string",
             description:
-              "One-paragraph task description for the local agent. State the question and any context the user gave; the local agent will read the repo, run git or test commands as needed, and return a single concise answer.",
+              "One-paragraph work-summary task to answer from branch/status/diffstat/recent-commit/related-PR metadata. Do not ask for file contents, command execution, or broader inspection.",
           },
           repoFullName: {
             type: "string",
             description:
-              "owner/name of the repo to scope the agent to. Must be one of the caller's visible repos. Omit if the question doesn't name a specific repo — the desktop will prompt the user to pick.",
+              "owner/name of the repo whose fixed snapshot should be summarized. Must be one of the caller's visible repos. Omit if the question doesn't name a specific repo — the desktop will prompt the user to pick.",
           },
         },
         required: ["task"],

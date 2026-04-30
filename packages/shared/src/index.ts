@@ -420,21 +420,20 @@ export interface ChatAssistantMessage {
   citations?: ChatCitation[];
   cards?: SessionCard[];
   /** Set when the server chat planner judged the question needs repo access
-   *  and delegated it to a desktop-side headless Claude agent. The desktop
-   *  receives this on the response, runs the local agent against the named
-   *  repo (or asks the user to pick one), and POSTs the final answer back to
-   *  /api/chat/threads/:threadId/finalize keyed by `messageId`. */
+   *  and needs a bounded local repo snapshot. The desktop receives this on
+   *  the response, collects the fixed snapshot for a tracked repo (or asks
+   *  the user to pick one), then asks the backend to compose the answer. */
   delegation?: ChatDelegation;
 }
 
 export interface ChatDelegation {
-  /** The model-rephrased task to hand to the local agent. */
+  /** The model-rephrased work-summary task to answer from a fixed snapshot. */
   task: string;
   /** owner/name of the repo the question is about, when the model could
    *  identify one from context. Unset means "ask the user to pick". */
   repoFullName?: string;
-  /** chat_messages.id of the placeholder row the desktop should finalize
-   *  once the local agent run completes. */
+  /** chat_messages.id of the placeholder row the backend should finalize
+   *  once it composes the answer from the snapshot. */
   messageId: string;
 }
 
@@ -453,6 +452,54 @@ export interface ChatAskResponse {
   /** The thread this turn was persisted under (always set on success — even
    *  for first turns, where it was generated server-side). */
   threadId: string;
+}
+
+export type ChatWorkSnapshotGhStatus = "ready" | "missing" | "unauthed";
+
+export interface ChatWorkSnapshotPr {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  headRef: string | null;
+  baseRef: string | null;
+  authorLogin: string | null;
+  updatedAt: string | null;
+}
+
+/**
+ * Deterministic desktop-collected context for delegated Ask answers. This is
+ * intentionally metadata-only: no file contents, no arbitrary command output,
+ * and no model-selected local tools. The backend treats all string fields as
+ * untrusted data.
+ */
+export interface ChatWorkSnapshot {
+  repo: {
+    repoId: number;
+    fullName: string;
+  };
+  collectedAt: string;
+  branch: string | null;
+  headSha: string | null;
+  statusShort: string[];
+  changedFiles: string[];
+  diffStat: string | null;
+  recentCommits: string[];
+  relatedPrs: ChatWorkSnapshotPr[];
+  ghStatus: ChatWorkSnapshotGhStatus;
+  collectionErrors?: string[];
+}
+
+export interface ChatDelegatedWorkRequest {
+  messageId: string;
+  task: string;
+  repoFullName: string;
+  snapshot: ChatWorkSnapshot;
+}
+
+export interface ChatDelegatedWorkResponse {
+  text: string;
+  hadError: boolean;
 }
 
 /** One persisted user→assistant exchange, surfaced in history views. */

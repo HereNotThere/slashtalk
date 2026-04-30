@@ -376,18 +376,16 @@ function MessageResponse({ seed }: { seed: MessageSeed }): JSX.Element {
       return;
     }
     if (!res.text) {
-      setError("Local agent returned an empty answer.");
+      setError("Slashtalk returned an empty answer.");
       return;
     }
     const footerParts: string[] = [];
-    if (req.repoFullName) footerParts.push(`ran locally on \`${req.repoFullName}\``);
+    if (req.repoFullName) footerParts.push(`used a local snapshot of \`${req.repoFullName}\``);
     if (!res.ghAvailable) {
-      footerParts.push(
-        "PR/CI data is from local git only — `gh auth login` would give live answers",
-      );
+      footerParts.push("related PR lookup was unavailable because GitHub CLI is not ready");
     }
     if (res.hadError)
-      footerParts.push("the agent hit an error mid-run; this answer may be partial");
+      footerParts.push("some snapshot fields were unavailable; this answer may be partial");
     const footer = footerParts.length > 0 ? `\n\n_${footerParts.join(" — ")}_` : "";
     setMessages((prev) =>
       prev.map((m) =>

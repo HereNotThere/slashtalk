@@ -2,7 +2,7 @@
 <p align="center"><em>Coordination, without the meetings.</em></p>
 <p align="center">
   <code>brew install --cask herenotthere/tap/slashtalk</code><br/>
-  or <a href="https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg">download the latest .dmg</a>
+  or download the <a href="https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg">latest Github release</a>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@ Slashtalk lives at the edge of your screen and quietly aggregates Claude Code se
 
 ## Quickstart
 
-1. **Install** — `brew install --cask herenotthere/tap/slashtalk` (macOS 11+), or grab the [latest DMG](https://github.com/HereNotThere/slashtalk/releases/latest).
+1. **Install** — grab the [latest Github release](https://github.com/HereNotThere/slashtalk/releases/latest) or `brew install --cask herenotthere/tap/slashtalk` (macOS 11+).
 2. **Launch** — Slashtalk lives in your menu bar. Click the icon to show the dock.
 3. **Sign in with GitHub** — your active orgs appear; pick the repos you want on your dock.
 4. **You're done** — sessions, PRs, and conflicts start appearing as your team works.

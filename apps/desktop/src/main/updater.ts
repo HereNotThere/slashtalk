@@ -61,7 +61,9 @@ async function checkForUpdates(): Promise<UpdateState> {
     setState(initialState());
     return state;
   }
-  if (state.kind === "checking" || state.kind === "downloading") return state;
+  if (state.kind === "checking" || state.kind === "downloading" || state.kind === "downloaded") {
+    return state;
+  }
 
   try {
     await autoUpdater.checkForUpdates();

@@ -10,8 +10,10 @@ import {
 import { PrIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
 import { PR_STATE_COLOR, PR_STATE_LABEL } from "../shared/pr-state";
+import { ScopeToggle } from "../shared/ScopeToggle";
 import { ShimmerText } from "../shared/ShimmerText";
 import { relativeTime } from "../shared/relativeTime";
+import { useDashboardScope } from "../shared/useDashboardScope";
 import { AskInput } from "./AskInline";
 
 export function ProjectDashboard({
@@ -108,19 +110,25 @@ function ProjectHeader({
 }
 
 function PulseSection({ pulse, loading }: { pulse: string | null; loading: boolean }): JSX.Element {
+  const { scope, setScope } = useDashboardScope();
   return (
-    <div className="px-4 py-3 text-sm text-fg/90 leading-snug">
-      {pulse ? (
-        <Markdown inline className="text-sm leading-snug">
-          {pulse}
-        </Markdown>
-      ) : loading ? (
-        <span className="text-subtle">
-          <ShimmerText text="Reading the room…" />
-        </span>
-      ) : (
-        <span className="text-subtle">Quiet window — no PRs in flight.</span>
-      )}
+    <div>
+      <div className="px-4 pt-3 pb-1.5">
+        <ScopeToggle scope={scope} onChange={setScope} />
+      </div>
+      <div className="px-4 pb-3 text-sm text-fg/90 leading-snug">
+        {pulse ? (
+          <Markdown inline className="text-sm leading-snug">
+            {pulse}
+          </Markdown>
+        ) : loading ? (
+          <span className="text-subtle">
+            <ShimmerText text="Reading the room…" />
+          </span>
+        ) : (
+          <span className="text-subtle">Quiet window — no PRs in flight.</span>
+        )}
+      </div>
     </div>
   );
 }

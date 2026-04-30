@@ -70,11 +70,12 @@ export function getShowActivityTimestamps(): boolean {
 }
 
 /** Time window driving every dashboard surface (user-card PRs/standup +
- *  project-card overview). Default `today` — anchored to the target's tz on
- *  user surfaces, the caller's tz on the project surface. `past24h` is a
- *  tz-neutral rolling window. */
+ *  project-card overview). Default `past24h` because tz-neutral rolling
+ *  windows are easier to reason about across mixed-tz teams; `today` is
+ *  available when you specifically want target-tz framing on user cards
+ *  and caller-tz on the project card. */
 export function getDashboardScope(): DashboardScope {
-  return parseDashboardScope(store.get<string>(DASHBOARD_SCOPE_KEY)) ?? "today";
+  return parseDashboardScope(store.get<string>(DASHBOARD_SCOPE_KEY)) ?? "past24h";
 }
 
 // ---------- Setters ----------

@@ -7,10 +7,10 @@
 // "Now" section already shows the live session, so the standup deliberately
 // emphasises merged/closed PRs and wrapped sessions, not stale work-in-progress.
 //
-// Window is always now − 24h. Cache key is (callerId, targetId) so peers
-// viewing the same target share the slot for the typical case where everyone
-// is on the same team (identical visible-repo overlap), without leaking PR
-// titles from repos a caller can't see.
+// Window is always now − 24h. Cache key is `${callerId}:${targetId}` —
+// per-caller-per-target so a peer's view never inherits PR titles from
+// repos they can't see (the visible-repo set differs across callers, and
+// the composed blurb bakes that filter in).
 
 import { Elysia, t } from "elysia";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";

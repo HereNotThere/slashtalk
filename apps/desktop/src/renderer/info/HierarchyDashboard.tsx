@@ -252,7 +252,7 @@ function PastDaySection({
         </div>
         {editing && (
           <AskInput
-            contextLabel={`About ${subjectLabel} day so far:`}
+            contextLabel={`About ${subjectLabel} past 24 hours:`}
             placeholder="Ask about the past 24h…"
             onClose={() => setEditing(false)}
           />

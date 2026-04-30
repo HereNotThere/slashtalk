@@ -139,6 +139,8 @@ export async function fetchGhUserPrs(login: string): Promise<GhUserPrsResult> {
 }
 
 function past24hIso(): string {
-  // Tz-neutral rolling window. GitHub's search syntax accepts ISO-8601.
-  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 16) + "Z";
+  // Tz-neutral rolling window, full ISO precision so the cutoff matches the
+  // server-side standup/overview window exactly (no ~60s minute-truncation
+  // drift between desktop-local PRs and server-backed surfaces).
+  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 }

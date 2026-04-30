@@ -1,5 +1,11 @@
 # @slashtalk/electron
 
+## 0.1.0
+
+### Minor Changes
+
+- 8329e20: Add GitHub-backed desktop auto-update checks with user-prompted install flow.
+
 ## 0.0.5
 
 ### Patch Changes

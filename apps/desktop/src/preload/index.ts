@@ -30,6 +30,7 @@ import type {
   ResponseOpenPayload,
   TrackedRepo,
   Unsubscribe,
+  UpdateState,
   UpdateAgentInput,
 } from "../shared/types";
 
@@ -145,6 +146,13 @@ const bridge: ChatHeadsBridge = {
     setMode: (mode: import("../shared/types").ThemeMode) =>
       ipcRenderer.invoke("theme:setMode", mode) as Promise<void>,
     onModeChange: (cb) => subscribe<import("../shared/types").ThemeMode>("theme:mode", cb),
+  },
+
+  updates: {
+    getState: () => ipcRenderer.invoke("updates:getState") as Promise<UpdateState>,
+    check: () => ipcRenderer.invoke("updates:check") as Promise<UpdateState>,
+    install: () => ipcRenderer.invoke("updates:install") as Promise<void>,
+    onState: (cb) => subscribe<UpdateState>("updates:state", cb),
   },
 
   setUserLocation: (payload) => ipcRenderer.invoke("user:setLocation", payload) as Promise<void>,

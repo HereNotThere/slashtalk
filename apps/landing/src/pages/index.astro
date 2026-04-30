@@ -3,6 +3,9 @@ import Layout from '../layouts/Layout.astro';
 import DesktopPreview from '../components/DesktopPreview.astro';
 import CardMock from '../components/CardMock.astro';
 import AskMock from '../components/AskMock.astro';
+
+const MAC_DOWNLOAD_URL =
+	'https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg';
 ---
 
 <Layout>
@@ -33,13 +36,13 @@ import AskMock from '../components/AskMock.astro';
 					class="hidden text-sm font-medium text-neutral-600 transition hover:text-neutral-900 sm:inline"
 					>GitHub</a
 				>
-				<button
-					type="button"
+				<a
+					href={MAC_DOWNLOAD_URL}
 					data-download
 					class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
 				>
 					Download
-				</button>
+				</a>
 			</nav>
 		</header>
 
@@ -68,8 +71,8 @@ import AskMock from '../components/AskMock.astro';
 				<div
 					class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
 				>
-					<button
-						type="button"
+					<a
+						href={MAC_DOWNLOAD_URL}
 						data-download
 						class="inline-flex items-center gap-2.5 rounded-full bg-neutral-900 px-7 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-neutral-700"
 					>
@@ -85,7 +88,7 @@ import AskMock from '../components/AskMock.astro';
 							></path>
 						</svg>
 						Download for macOS
-					</button>
+					</a>
 					<a
 						href="/blog"
 						class="text-base font-medium text-neutral-800 transition hover:text-neutral-950"
@@ -275,8 +278,8 @@ import AskMock from '../components/AskMock.astro';
 				<div
 					class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
 				>
-					<button
-						type="button"
+					<a
+						href={MAC_DOWNLOAD_URL}
 						data-download
 						class="inline-flex items-center gap-2.5 rounded-full bg-white px-7 py-3.5 text-base font-medium text-neutral-900 transition hover:bg-neutral-100"
 					>
@@ -292,7 +295,7 @@ import AskMock from '../components/AskMock.astro';
 							></path>
 						</svg>
 						Download for macOS
-					</button>
+					</a>
 					<a
 						href="/blog"
 						class="text-base font-medium text-neutral-300 transition hover:text-white"
@@ -335,9 +338,9 @@ import AskMock from '../components/AskMock.astro';
 
 <script>
 	document
-		.querySelectorAll<HTMLButtonElement>('[data-download]')
-		.forEach((button) => {
-			button.addEventListener('click', () => {
+		.querySelectorAll<HTMLAnchorElement>('[data-download]')
+		.forEach((link) => {
+			link.addEventListener('click', () => {
 				console.log('[slashtalk] Download for macOS clicked');
 			});
 		});

@@ -43,7 +43,7 @@ bun run dev          # electron-vite dev (HMR for renderers, restarts main)
 bun run build        # electron-vite build → ./out
 bun run start        # electron-vite preview (run the built app)
 bun run dist         # build + package via electron-builder → ./dist (host platform)
-bun run dist:mac     # build + package .dmg for macOS → ./dist
+bun run dist:mac     # build + package macOS DMG/zip/update metadata → ./dist
 
 bun run lint         # eslint .
 bun run typecheck    # tsc --noEmit for node + web projects
@@ -58,6 +58,8 @@ Install deps from repo root: `bun install` (this is a workspace package, do not 
 ## Packaging (electron-builder)
 
 Config is inline in `package.json` under the `build` key. `files` is explicit — only `out/**`, `resources/**`, `package.json` are bundled, so no workspace `node_modules` copy is attempted (everything else is vite-bundled into `out/`). App icon lives at `build/icon.icns` (auto-picked by electron-builder) — regenerate from `build/icon.svg` via the `rsvg-convert` + `iconutil` steps noted in Layout if the logo changes.
+
+Auto-update uses `electron-updater` with public GitHub Releases for `HereNotThere/slashtalk`. macOS builds are universal and must ship both `dmg` and `zip` targets plus `latest-mac.yml`; the zip is required by Squirrel.Mac update metadata even though users normally download the DMG. The release workflow uploads the DMG, zip, blockmaps, and `latest-mac.yml` to the `@slashtalk/electron@<version>` GitHub release.
 
 ### macOS signing + notarization
 

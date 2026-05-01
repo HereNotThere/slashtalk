@@ -4,6 +4,30 @@
 // and snaps to any of the four edges. Hovering an avatar pops up a card
 // for that teammate with mock data — a quick taste of the actual product.
 
+import type { ImageMetadata } from "astro";
+
+// Bundled avatars (vs avatars.githubusercontent.com) — keeps rendering
+// deterministic and avoids 8 third-party requests on the marketing page.
+import avatar557990 from "../assets/avatar-557990.jpg";
+import avatar950745 from "../assets/avatar-950745.jpg";
+import avatar352982 from "../assets/avatar-352982.jpg";
+import avatar5714678 from "../assets/avatar-5714678.jpg";
+import avatar1041695 from "../assets/avatar-1041695.jpg";
+import avatar22621836 from "../assets/avatar-22621836.jpg";
+import avatar28305049 from "../assets/avatar-28305049.jpg";
+import avatar104387024 from "../assets/avatar-104387024.jpg";
+
+const avatarById: Record<number, ImageMetadata> = {
+	557990: avatar557990,
+	950745: avatar950745,
+	352982: avatar352982,
+	5714678: avatar5714678,
+	1041695: avatar1041695,
+	22621836: avatar22621836,
+	28305049: avatar28305049,
+	104387024: avatar104387024,
+};
+
 interface PrSeed {
 	title: string;
 	number: number;
@@ -175,7 +199,6 @@ const team: Member[] = [
 	},
 ];
 
-const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}?s=120&v=4`;
 ---
 
 <div
@@ -205,7 +228,9 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 						aria-label={`${m.login} card`}
 					>
 						<img
-							src={avatarFor(m.id)}
+							src={avatarById[m.id].src}
+							width={avatarById[m.id].width}
+							height={avatarById[m.id].height}
 							alt=""
 							draggable="false"
 							decoding="async"
@@ -254,21 +279,23 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 					</div>
 				</div>
 			</div>
-			<div class="mx-4 h-px bg-neutral-200/80"></div>
-			<div class="px-4 pt-3 pb-3">
-				<div class="mb-1 flex items-center gap-1.5">
-					<svg class="size-3.5 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden>
-						<path d="M3.75 13.5 13.5 3l-1.5 7.5h6.75l-9.75 10.5 1.5-7.5H3.75z" />
-					</svg>
-					<span class="text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">Now</span>
-				</div>
-				<p data-card-now class="text-sm leading-snug text-neutral-800"></p>
-				<div class="mt-2 flex items-center gap-1.5 text-[11px] text-neutral-500">
-					<span data-card-repo class="font-medium text-neutral-700"></span>
-					<span class="text-neutral-300">·</span>
-					<span data-card-branch class="font-mono text-neutral-600"></span>
-					<span class="text-neutral-300">·</span>
-					<span data-card-age></span>
+			<div data-card-now-section>
+				<div class="mx-4 h-px bg-neutral-200/80"></div>
+				<div class="px-4 pt-3 pb-3">
+					<div class="mb-1 flex items-center gap-1.5">
+						<svg class="size-3.5 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden>
+							<path d="M3.75 13.5 13.5 3l-1.5 7.5h6.75l-9.75 10.5 1.5-7.5H3.75z" />
+						</svg>
+						<span class="text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">Now</span>
+					</div>
+					<p data-card-now class="text-sm leading-snug text-neutral-800"></p>
+					<div class="mt-2 flex items-center gap-1.5 text-[11px] text-neutral-500">
+						<span data-card-repo class="font-medium text-neutral-700"></span>
+						<span class="text-neutral-300">·</span>
+						<span data-card-branch class="font-mono text-neutral-600"></span>
+						<span class="text-neutral-300">·</span>
+						<span data-card-age></span>
+					</div>
 				</div>
 			</div>
 		<div class="mx-4 h-px bg-neutral-200/80"></div>
@@ -479,7 +506,11 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 		// --- Hover card ------------------------------------------------------
 
 		function renderCard(m) {
-			card.querySelector("[data-card-avatar]").src = `https://avatars.githubusercontent.com/u/${m.id}?s=120&v=4`;
+			// Reuse the bundled avatar from the dock (which Astro hashed at
+			// build time) instead of refetching from github — keeps the
+			// page deterministic and avoids a duplicate network request.
+			const dockImg = stage.querySelector(`.avatar[data-user="${m.login}"] img`);
+			if (dockImg) card.querySelector("[data-card-avatar]").src = dockImg.src;
 			card.querySelector("[data-card-name]").textContent = m.login;
 			card.querySelector("[data-card-weather]").textContent = m.weather;
 			card.querySelector("[data-card-city]").textContent = m.city;
@@ -489,6 +520,9 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 			card.querySelector("[data-card-repo]").textContent = m.repo;
 			card.querySelector("[data-card-branch]").textContent = m.branch;
 			card.querySelector("[data-card-age]").textContent = m.age;
+			// "Now" reflects an active coding session — only show it for
+			// teammates with a live session (the blue-ring chatheads).
+			card.querySelector("[data-card-now-section]").hidden = !m.live;
 			card.querySelector("[data-card-today]").textContent = m.today || "—";
 			const prsRoot = card.querySelector("[data-card-prs]");
 			prsRoot.innerHTML = m.prs

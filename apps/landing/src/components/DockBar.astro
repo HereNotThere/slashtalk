@@ -1,30 +1,46 @@
 ---
+import type { ImageMetadata } from "astro";
+
+// Bundled team avatars (vs avatars.githubusercontent.com) — keeps the
+// page deterministic and avoids an external request per face. Filenames
+// keyed by GitHub numeric ID, which never changes even if a user renames.
+import avatar557990 from "../assets/avatar-557990.jpg";
+import avatar950745 from "../assets/avatar-950745.jpg";
+import avatar352982 from "../assets/avatar-352982.jpg";
+import avatar5714678 from "../assets/avatar-5714678.jpg";
+import avatar1041695 from "../assets/avatar-1041695.jpg";
+import avatar22621836 from "../assets/avatar-22621836.jpg";
+import avatar28305049 from "../assets/avatar-28305049.jpg";
+import avatar104387024 from "../assets/avatar-104387024.jpg";
+
 interface Bubble {
 	login: string;
 	id: number;
+	avatar: ImageMetadata;
 	label: string;
 	live?: boolean;
 }
 
 // Slashtalk team — top contributors to HereNotThere/slashtalk.
-// Avatar URLs are derived from each user's GitHub numeric ID, which never
-// changes even if a user renames their account.
 // `live` mirrors the desktop's active-session indicator (a pulsing rim).
 const bubbles: Bubble[] = [
-	{ login: "ttillberg", id: 557990, label: "16m", live: true },
-	{ login: "texuf", id: 950745, label: "14m", live: true },
-	{ login: "erikolsson", id: 352982, label: "49m" },
-	{ login: "giuseppecrj", id: 5714678, label: "1h", live: true },
-	{ login: "heyitsfei", id: 1041695, label: "1h" },
-	{ login: "benrbn", id: 22621836, label: "6h" },
-	{ login: "ryanpaulc1", id: 28305049, label: "13h" },
-	{ login: "sergekh2", id: 104387024, label: "23h" },
+	{ login: "ttillberg", id: 557990, avatar: avatar557990, label: "16m", live: true },
+	{ login: "texuf", id: 950745, avatar: avatar950745, label: "14m", live: true },
+	{ login: "erikolsson", id: 352982, avatar: avatar352982, label: "49m" },
+	{ login: "giuseppecrj", id: 5714678, avatar: avatar5714678, label: "1h", live: true },
+	{ login: "heyitsfei", id: 1041695, avatar: avatar1041695, label: "1h" },
+	{ login: "benrbn", id: 22621836, avatar: avatar22621836, label: "6h" },
+	{ login: "ryanpaulc1", id: 28305049, avatar: avatar28305049, label: "13h" },
+	{ login: "sergekh2", id: 104387024, avatar: avatar104387024, label: "23h" },
 ];
-
-const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}?s=120&v=4`;
 ---
 
+<!-- inert: this is a visual mock; the avatar links and search button
+     don't do anything in this context. Skipping the subtree keeps
+     keyboard nav and screen readers focused on real article content. -->
 <div
+	inert
+	aria-hidden="true"
 	class="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-white/60 bg-neutral-200/70 px-2 py-1.5 shadow-[0_10px_40px_-12px_rgba(0,0,0,0.25)] backdrop-blur-md [scrollbar-width:none] sm:gap-2.5 sm:overflow-visible sm:px-3 sm:py-2 [&::-webkit-scrollbar]:hidden"
 >
 	{
@@ -37,10 +53,12 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 				class={`relative inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-neutral-300 ring-1 ring-black/5 transition hover:scale-110 sm:size-[52px] ${b.live ? "dock-live" : ""}`}
 			>
 				<img
-					src={avatarFor(b.id)}
+					src={b.avatar.src}
+					width={b.avatar.width}
+					height={b.avatar.height}
 					alt=""
 					decoding="async"
-					fetchpriority="high"
+					loading="lazy"
 					class="size-full rounded-full object-cover"
 				/>
 				{b.label && (

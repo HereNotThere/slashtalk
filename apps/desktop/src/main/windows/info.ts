@@ -638,13 +638,18 @@ async function fetchDashboardForLogin(
     }
     const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
     const ghStatus = prsRes.status === "fulfilled" ? prsRes.value.ghStatus : "ready";
-    const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
     // SLASHTALK_DEBUG_EMPTY=1 forces the no-repo CTA against a real account
     // for renderer testing. Otherwise: peer 403s short-circuit upstream;
     // self gh-path has no claim concept; only the standup endpoint surfaces it.
     const noClaimedRepos =
       process.env.SLASHTALK_DEBUG_EMPTY === "1" ||
       (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
+    const fetchedStandup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
+    const previousStandup = dashboardCache.get(login)?.standup ?? null;
+    // A null standup can be a transient cold-read while PR/session data catches
+    // up. Preserve the last useful summary instead of letting a later null
+    // response make the card flicker back to "Nothing shipped".
+    const standup = noClaimedRepos ? null : (fetchedStandup ?? previousStandup);
     return { prs, standup, noClaimedRepos, ghStatus };
   })();
   dashboardInFlight.set(login, promise);

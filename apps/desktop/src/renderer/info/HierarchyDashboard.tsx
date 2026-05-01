@@ -20,6 +20,7 @@ import { relativeTime } from "../shared/relativeTime";
 import { AskInput } from "./AskInline";
 
 const NOW_WINDOW_MS = 2 * 60 * 60 * 1000; // last 2 hours
+const PAST_DAY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export function HierarchyDashboard({
   head,
@@ -83,7 +84,7 @@ export function HierarchyDashboard({
           loading={dashboard === null || dashboardFetching}
           subjectLabel={subjectLabel}
           prs={dashboard?.prs ?? []}
-          hasActivity={(sessions?.length ?? 0) > 0 || (dashboard?.prs.length ?? 0) > 0}
+          hasActivity={hasPastDaySession(sessions) || (dashboard?.prs.length ?? 0) > 0}
         />
         <Divider />
         <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
@@ -192,6 +193,15 @@ function pickNowSession(sessions: InfoSession[] | null): InfoSession | null {
     }
   }
   return bestLive ?? bestRecent;
+}
+
+function hasPastDaySession(sessions: InfoSession[] | null): boolean {
+  if (!sessions || sessions.length === 0) return false;
+  const cutoff = Date.now() - PAST_DAY_WINDOW_MS;
+  return sessions.some((s) => {
+    const ts = s.lastTs ? new Date(s.lastTs).getTime() : NaN;
+    return Number.isFinite(ts) && ts >= cutoff;
+  });
 }
 
 function NowSection({

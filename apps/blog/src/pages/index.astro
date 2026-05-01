@@ -1,11 +1,13 @@
 ---
 import Layout from '../layouts/Layout.astro';
-// Mocks live in apps/landing as the single source of truth — the blog
-// renders the same product visuals as the homepage, so importing them
-// here keeps the two surfaces from drifting on every UI tweak.
+// Mocks + the site wordmark live in apps/landing as the single source of
+// truth — the blog renders the same product visuals + identity as the
+// homepage, so importing them here keeps the two surfaces from drifting
+// on every UI tweak.
 import DockBar from '../../../landing/src/components/DockBar.astro';
 import CardMock from '../../../landing/src/components/CardMock.astro';
 import AskMock from '../../../landing/src/components/AskMock.astro';
+import Wordmark from '../../../landing/src/components/Wordmark.astro';
 ---
 
 <Layout title="Slashtalk — we built a presence dock for our remote team. Here's why.">
@@ -13,18 +15,7 @@ import AskMock from '../../../landing/src/components/AskMock.astro';
 		<header
 			class="mx-auto flex max-w-6xl items-center justify-between px-6 py-6"
 		>
-			<a href="/" class="flex items-center gap-2.5">
-				<img
-					src="/favicon.svg"
-					alt=""
-					width="28"
-					height="28"
-					class="rounded-md"
-				/>
-				<span class="text-base font-semibold tracking-tight"
-					>Slashtalk</span
-				>
-			</a>
+			<Wordmark />
 			<nav class="flex items-center gap-2 sm:gap-7">
 				<a
 					href="/blog"

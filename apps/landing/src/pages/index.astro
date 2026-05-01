@@ -4,6 +4,7 @@ import DesktopPreview from '../components/DesktopPreview.astro';
 import CardMock from '../components/CardMock.astro';
 import AskMock from '../components/AskMock.astro';
 import ClaudeCodeMock from '../components/ClaudeCodeMock.astro';
+import Wordmark from '../components/Wordmark.astro';
 
 const MAC_DOWNLOAD_URL =
 	'https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg';
@@ -14,21 +15,7 @@ const MAC_DOWNLOAD_URL =
 		<header
 			class="mx-auto flex max-w-6xl items-center justify-between px-6 py-6"
 		>
-			<a href="/" class="flex items-center gap-2.5">
-				<img
-					src="/favicon.svg"
-					alt=""
-					width="28"
-					height="28"
-					class="rounded-md"
-				/>
-				<span class="text-base font-semibold tracking-tight"
-					>Slash<span
-						style="font-family: var(--font-serif);"
-						class="font-normal italic">talk</span
-					></span
-				>
-			</a>
+			<Wordmark />
 			<nav class="flex items-center gap-2 sm:gap-7">
 				<a
 					href="/blog"

@@ -1,7 +1,6 @@
 // Watches Claude, Codex, and Cursor session JSONLs and ships new lines to
-// /v1/ingest. Claude/Codex only upload when the cwd is under a tracked repo;
-// Cursor uploads whenever we can resolve a cwd/project and sharing is decided
-// server-side via repo matching.
+// /v1/ingest. Claude, Codex, and Cursor only upload when the cwd is under a
+// tracked repo; server-side sharing still comes from repo matching + user_repos.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -451,8 +450,8 @@ async function readTail(
   return { chunk: buf.subarray(0, lastNl + 1), consumed: lastNl + 1 };
 }
 
-function shouldUploadSource(source: EventSource, cwd: string): boolean {
-  return source === "cursor" ? true : localRepos.isPathTracked(cwd);
+function shouldUploadSource(_source: EventSource, cwd: string): boolean {
+  return localRepos.isPathTracked(cwd);
 }
 
 function synthesizeCursorChunk(

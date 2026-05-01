@@ -1,5 +1,13 @@
 # @slashtalk/electron
 
+## 0.1.2
+
+### Patch Changes
+
+- Fix two desktop reliability issues:
+  - Augment `PATH` on macOS so the bundled app can locate a user-installed `gh` CLI (e.g. from Homebrew) when launched from Finder.
+  - Serialize the self PR push before the standup fetch so the standup view always reflects the latest pushed state.
+
 ## 0.1.1
 
 ### Patch Changes

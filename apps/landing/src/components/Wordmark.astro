@@ -1,0 +1,21 @@
+---
+// Shared "Slashtalk" logo — favicon + wordmark with the italic-serif "talk".
+// Used by the landing header AND the blog header so the two surfaces don't
+// drift on logo styling. Default href points home; override via the `href`
+// prop if a future surface needs it (e.g. linking blog index back to the
+// marketing root).
+
+interface Props {
+	href?: string;
+	class?: string;
+}
+
+const { href = "/", class: className = "" } = Astro.props;
+---
+
+<a href={href} class={`flex items-center gap-2.5 ${className}`.trim()}>
+	<img src="/favicon.svg" alt="" width="28" height="28" class="rounded-md" />
+	<span class="text-base font-semibold tracking-tight">
+		Slash<span style="font-family: var(--font-serif);" class="font-normal italic">talk</span>
+	</span>
+</a>

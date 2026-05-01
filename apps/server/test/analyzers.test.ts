@@ -11,6 +11,7 @@ import {
 import { SUMMARY_SYSTEM } from "../src/analyzers/summary";
 import { ROLLING_SUMMARY_SYSTEM } from "../src/analyzers/rolling-summary";
 import { processEvents } from "../src/ingest/aggregator";
+import { buildStandupPrompt } from "../src/user/dashboard";
 
 function analyzerCtx(session: Record<string, unknown>) {
   return {
@@ -188,6 +189,28 @@ describe("event compaction", () => {
     expect(user).toContain("prompt: Fix server OOM crashes");
     expect(assistant).toContain("reply: I will inspect ingest memory use.");
     expect(tool).toContain("exec_command: bun test test/analyzers.test.ts");
+  });
+});
+
+describe("standup prompt context", () => {
+  it("ignores malformed rolling-summary highlights", () => {
+    const prompt = buildStandupPrompt({
+      prs: [],
+      sessions: [
+        {
+          title: "Fix standup summary cache",
+          repoFullName: "herenotthere/slashtalk",
+          lastTs: "2026-05-01T18:30:00.000Z",
+          summary: {
+            summary: "Auditing the standup path.",
+            highlights: "not-an-array",
+          },
+        },
+      ],
+    } as never);
+
+    expect(prompt).toContain("Auditing the standup path.");
+    expect(prompt).not.toContain("not-an-array");
   });
 });
 

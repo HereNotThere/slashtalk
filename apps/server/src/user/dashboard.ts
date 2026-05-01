@@ -266,7 +266,11 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
             target: resolved,
             since: windowStart(),
           });
-          standupCache.set(key, body);
+          // A null standup is a transient-prone read: self PR ingest and
+          // session repo attribution can land milliseconds after the first
+          // cold request. Rechecking an empty window is cheap because
+          // composeStandup returns before the LLM call when no rows qualify.
+          if (body.summary !== null) standupCache.set(key, body);
           return body;
         } catch (err) {
           if (err instanceof LlmBudgetExceededError) {
@@ -408,7 +412,7 @@ interface StandupPromptArgs {
   }>;
 }
 
-function buildStandupPrompt(args: StandupPromptArgs): string {
+export function buildStandupPrompt(args: StandupPromptArgs): string {
   const parts: string[] = [];
   parts.push("window: past 24 hours");
 
@@ -426,9 +430,11 @@ function buildStandupPrompt(args: StandupPromptArgs): string {
     const lines = args.sessions.map((s) => {
       const repo = shortRepoName(s.repoFullName);
       const title = s.title ? truncate(s.title, 120) : "(untitled)";
-      const summary = s.summary?.summary ? truncate(s.summary.summary, 240) : "(no summary)";
-      const highlights = s.summary?.highlights?.length
-        ? ` highlights: ${s.summary.highlights
+      const summaryText = typeof s.summary?.summary === "string" ? s.summary.summary : null;
+      const summary = summaryText ? truncate(summaryText, 240) : "(no summary)";
+      const highlightsList = stringList(s.summary?.highlights);
+      const highlights = highlightsList.length
+        ? ` highlights: ${highlightsList
             .slice(0, 3)
             .map((h) => truncate(h, 80))
             .join("; ")}`
@@ -444,4 +450,10 @@ function buildStandupPrompt(args: StandupPromptArgs): string {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1)}…`;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }

@@ -292,6 +292,34 @@ describe("localMcpProxy", () => {
     expect(upstreamCalled).toBe(false);
   });
 
+  it("rejects oversized MCP request bodies before forwarding", async () => {
+    let upstreamCalled = false;
+    const upstream = await listen((_req, res) => {
+      upstreamCalled = true;
+      res.writeHead(200);
+      res.end();
+    });
+    closers.push(upstream.close);
+    const proxy = createLocalMcpProxy({
+      port: 0,
+      getToken: () => "safe-storage-token",
+      getProxySecret: () => "local-proxy-secret",
+      remoteMcpUrl: () => upstream.url,
+    });
+    await proxy.start();
+    closers.push(() => proxy.stop());
+
+    const res = await fetch(proxy.url(), {
+      method: "POST",
+      headers: { "x-slashtalk-proxy-token": "local-proxy-secret" },
+      body: "x".repeat(1024 * 1024 + 1),
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.text()).toContain("too large");
+    expect(upstreamCalled).toBe(false);
+  });
+
   it("aborts the upstream request when the client disconnects", async () => {
     const originalFetch = globalThis.fetch;
     let upstreamAborted = false;

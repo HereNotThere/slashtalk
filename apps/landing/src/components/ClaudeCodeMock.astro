@@ -1,0 +1,67 @@
+---
+// Mock of a Claude Code terminal session calling the Slashtalk MCP server.
+// Stylized — not a literal screenshot — to convey the feature in a glance.
+---
+
+<div
+	class="overflow-hidden rounded-2xl border border-neutral-200 bg-white font-mono text-[13px] leading-relaxed text-neutral-800 shadow-[0_30px_60px_-30px_rgba(0,0,0,0.25)]"
+>
+	<div
+		class="relative flex items-center justify-center border-b border-neutral-200 bg-neutral-50 px-4 py-2.5"
+	>
+		<div class="absolute left-4 flex items-center gap-1.5">
+			<span class="size-3 rounded-full bg-[#ff5f57]"></span>
+			<span class="size-3 rounded-full bg-[#febc2e]"></span>
+			<span class="size-3 rounded-full bg-[#28c840]"></span>
+		</div>
+		<span class="text-xs font-medium text-neutral-500">claude — ~/acme</span>
+	</div>
+
+	<div class="space-y-3 px-5 py-5">
+		<div class="flex items-start gap-2">
+			<span class="select-none text-emerald-600">&gt;</span>
+			<span class="text-neutral-900">what shipped today?</span>
+		</div>
+
+		<div class="space-y-2 pl-4 text-neutral-700">
+			<p>
+				Checking the team via
+				<span class="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-800">slashtalk</span>
+				MCP…
+			</p>
+
+			<div class="space-y-1 text-[12px] text-neutral-500">
+				<div class="flex items-center gap-2">
+					<span class="text-emerald-600">⏺</span>
+					<span><span class="text-neutral-800">get_team_activity</span>(window: "24h")</span>
+				</div>
+				<div class="pl-5 text-neutral-400">→ 3 sessions, 2 PRs merged</div>
+			</div>
+
+			<div class="space-y-0.5 pt-1 text-neutral-800">
+				<p>
+					<span class="text-neutral-400">·</span>
+					<span class="font-semibold">Theo</span>
+					<span class="text-neutral-600">— auth refactor, merged</span>
+					<span class="text-neutral-400">(#412)</span>
+				</p>
+				<p>
+					<span class="text-neutral-400">·</span>
+					<span class="font-semibold">Austin</span>
+					<span class="text-neutral-600">— Codex quota extraction</span>
+					<span class="text-neutral-400">(#418)</span>
+				</p>
+				<p>
+					<span class="text-neutral-400">·</span>
+					<span class="font-semibold">Ryan</span>
+					<span class="text-neutral-600">— collision warnings, just landed</span>
+				</p>
+			</div>
+		</div>
+
+		<div class="flex items-center gap-2 pt-2 text-neutral-400">
+			<span class="text-emerald-600">&gt;</span>
+			<span class="inline-block h-4 w-2 animate-pulse bg-neutral-700"></span>
+		</div>
+	</div>
+</div>

@@ -254,21 +254,23 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 					</div>
 				</div>
 			</div>
-			<div class="mx-4 h-px bg-neutral-200/80"></div>
-			<div class="px-4 pt-3 pb-3">
-				<div class="mb-1 flex items-center gap-1.5">
-					<svg class="size-3.5 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden>
-						<path d="M3.75 13.5 13.5 3l-1.5 7.5h6.75l-9.75 10.5 1.5-7.5H3.75z" />
-					</svg>
-					<span class="text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">Now</span>
-				</div>
-				<p data-card-now class="text-sm leading-snug text-neutral-800"></p>
-				<div class="mt-2 flex items-center gap-1.5 text-[11px] text-neutral-500">
-					<span data-card-repo class="font-medium text-neutral-700"></span>
-					<span class="text-neutral-300">·</span>
-					<span data-card-branch class="font-mono text-neutral-600"></span>
-					<span class="text-neutral-300">·</span>
-					<span data-card-age></span>
+			<div data-card-now-section>
+				<div class="mx-4 h-px bg-neutral-200/80"></div>
+				<div class="px-4 pt-3 pb-3">
+					<div class="mb-1 flex items-center gap-1.5">
+						<svg class="size-3.5 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden>
+							<path d="M3.75 13.5 13.5 3l-1.5 7.5h6.75l-9.75 10.5 1.5-7.5H3.75z" />
+						</svg>
+						<span class="text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">Now</span>
+					</div>
+					<p data-card-now class="text-sm leading-snug text-neutral-800"></p>
+					<div class="mt-2 flex items-center gap-1.5 text-[11px] text-neutral-500">
+						<span data-card-repo class="font-medium text-neutral-700"></span>
+						<span class="text-neutral-300">·</span>
+						<span data-card-branch class="font-mono text-neutral-600"></span>
+						<span class="text-neutral-300">·</span>
+						<span data-card-age></span>
+					</div>
 				</div>
 			</div>
 		<div class="mx-4 h-px bg-neutral-200/80"></div>
@@ -489,6 +491,9 @@ const avatarFor = (id: number) => `https://avatars.githubusercontent.com/u/${id}
 			card.querySelector("[data-card-repo]").textContent = m.repo;
 			card.querySelector("[data-card-branch]").textContent = m.branch;
 			card.querySelector("[data-card-age]").textContent = m.age;
+			// "Now" reflects an active coding session — only show it for
+			// teammates with a live session (the blue-ring chatheads).
+			card.querySelector("[data-card-now-section]").hidden = !m.live;
 			card.querySelector("[data-card-today]").textContent = m.today || "—";
 			const prsRoot = card.querySelector("[data-card-prs]");
 			prsRoot.innerHTML = m.prs

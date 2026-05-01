@@ -3,6 +3,7 @@ import Layout from '../layouts/Layout.astro';
 import DesktopPreview from '../components/DesktopPreview.astro';
 import CardMock from '../components/CardMock.astro';
 import AskMock from '../components/AskMock.astro';
+import ClaudeCodeMock from '../components/ClaudeCodeMock.astro';
 
 const MAC_DOWNLOAD_URL =
 	'https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg';
@@ -283,6 +284,39 @@ const MAC_DOWNLOAD_URL =
 							you push
 						</div>
 					</div>
+				</div>
+			</div>
+
+			<div class="grid grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-20">
+				<div class="min-w-0">
+					<ClaudeCodeMock />
+				</div>
+				<div class="min-w-0">
+					<p
+						class="mb-4 text-xs font-medium tracking-[0.18em] text-neutral-500 uppercase"
+					>
+						MCP
+					</p>
+					<h2
+						class="text-4xl font-semibold tracking-tight text-balance text-neutral-900 sm:text-5xl"
+					>
+						Bring your
+						<span
+							style="font-family: var(--font-serif);"
+							class="font-normal italic"
+						>
+							agents
+						</span>
+						along.
+					</h2>
+					<p
+						class="mt-6 text-lg leading-relaxed text-neutral-600"
+					>
+						Slashtalk speaks MCP, so Claude Code, Codex, and Cursor
+						get the same team context you do. Ask your agent what
+						shipped today — it pulls from real sessions, not
+						guesses.
+					</p>
 				</div>
 			</div>
 		</section>

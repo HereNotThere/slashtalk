@@ -11,6 +11,7 @@ import {
 import { SUMMARY_SYSTEM } from "../src/analyzers/summary";
 import { ROLLING_SUMMARY_SYSTEM } from "../src/analyzers/rolling-summary";
 import { processEvents } from "../src/ingest/aggregator";
+import { __standupTest, buildStandupPrompt } from "../src/user/dashboard";
 
 function analyzerCtx(session: Record<string, unknown>) {
   return {
@@ -188,6 +189,99 @@ describe("event compaction", () => {
     expect(user).toContain("prompt: Fix server OOM crashes");
     expect(assistant).toContain("reply: I will inspect ingest memory use.");
     expect(tool).toContain("exec_command: bun test test/analyzers.test.ts");
+  });
+});
+
+describe("standup prompt context", () => {
+  it("ignores malformed rolling-summary highlights", () => {
+    const prompt = buildStandupPrompt({
+      prs: [],
+      sessions: [
+        {
+          title: "Fix standup summary cache",
+          repoFullName: "herenotthere/slashtalk",
+          lastTs: "2026-05-01T18:30:00.000Z",
+          summary: {
+            summary: "Auditing the standup path.",
+            highlights: "not-an-array",
+          },
+        },
+      ],
+    } as never);
+
+    expect(prompt).toContain("Auditing the standup path.");
+    expect(prompt).not.toContain("not-an-array");
+  });
+
+  it("falls back to deterministic PR bullets when the LLM returns no usable summary", () => {
+    const summary = __standupTest.fallbackStandup({
+      prs: [
+        {
+          number: 260,
+          title: "Fix standup summary cache misses",
+          url: "https://github.com/HereNotThere/slashtalk/pull/260",
+          state: "merged",
+          repoFullName: "HereNotThere/slashtalk",
+          updatedAt: "2026-05-01T18:30:00.000Z",
+        },
+      ],
+      sessions: [],
+    });
+
+    expect(summary).toContain("Recent shipped work is ready to review.");
+    expect(summary).toContain(
+      "- Fix standup summary cache misses [#260](https://github.com/HereNotThere/slashtalk/pull/260)",
+    );
+  });
+
+  it("fingerprints standup inputs by visible PR and session insight content", () => {
+    const base = {
+      sinceIso: "2026-05-01T18:30:00.000Z",
+      prs: [
+        {
+          number: 260,
+          title: "Fix standup summary cache misses",
+          url: "https://github.com/HereNotThere/slashtalk/pull/260",
+          state: "merged",
+          repoFullName: "HereNotThere/slashtalk",
+          updatedAt: new Date("2026-05-01T18:30:00.000Z"),
+        },
+      ],
+      sessions: [
+        {
+          sessionId: "session-1",
+          title: "Debug standup flow",
+          repoFullName: "HereNotThere/slashtalk",
+          lastTs: new Date("2026-05-01T18:31:00.000Z"),
+        },
+      ],
+      insightsBySessionId: new Map([
+        [
+          "session-1",
+          {
+            rollingSummary: {
+              summary: "Investigating inconsistent standup responses.",
+              highlights: ["Found duplicate cold requests"],
+            },
+          },
+        ],
+      ]),
+    };
+
+    const same = __standupTest.standupInputFingerprint(base as never);
+    const unchanged = __standupTest.standupInputFingerprint({
+      ...base,
+      prs: [...base.prs],
+      sessions: [...base.sessions],
+      insightsBySessionId: new Map(base.insightsBySessionId),
+    } as never);
+    const changed = __standupTest.standupInputFingerprint({
+      ...base,
+      prs: [{ ...base.prs[0], title: "Fix standup summary cache races" }],
+    } as never);
+
+    expect(unchanged).toBe(same);
+    expect(changed).not.toBe(same);
   });
 });
 

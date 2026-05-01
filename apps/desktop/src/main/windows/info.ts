@@ -567,15 +567,15 @@ async function fetchDashboardForLogin(
   login: string,
   opts: { force?: boolean } = {},
 ): Promise<InfoDashboardData> {
-  // `force` bypasses BOTH the cache and the in-flight dedupe so callers that
-  // intentionally invalidated state (showInfo, refreshNow) don't get served
-  // a result from a fetch started before the invalidation.
+  // `force` bypasses the cache, but still joins an active same-login fetch.
+  // Launch/WS/hover paths can all request a forced refresh at once; single-
+  // flight keeps those bursts from spawning multiple standup LLM calls.
   if (!opts.force) {
     const cached = dashboardCache.get(login);
     if (cached) return cached;
-    const inFlight = dashboardInFlight.get(login);
-    if (inFlight) return inFlight;
   }
+  const inFlight = dashboardInFlight.get(login);
+  if (inFlight) return inFlight;
 
   // Build the result without writing cache or in-flight tracking inside the
   // IIFE — the caller-visible promise resolves with the data; mutation of
@@ -638,13 +638,18 @@ async function fetchDashboardForLogin(
     }
     const prs = prsRes.status === "fulfilled" ? prsRes.value.prs : [];
     const ghStatus = prsRes.status === "fulfilled" ? prsRes.value.ghStatus : "ready";
-    const standup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
     // SLASHTALK_DEBUG_EMPTY=1 forces the no-repo CTA against a real account
     // for renderer testing. Otherwise: peer 403s short-circuit upstream;
     // self gh-path has no claim concept; only the standup endpoint surfaces it.
     const noClaimedRepos =
       process.env.SLASHTALK_DEBUG_EMPTY === "1" ||
       (standupRes.status === "fulfilled" && standupRes.value.noClaimedRepos === true);
+    const fetchedStandup = standupRes.status === "fulfilled" ? standupRes.value.summary : null;
+    const previousStandup = dashboardCache.get(login)?.standup ?? null;
+    // A null standup can be a transient cold-read while PR/session data catches
+    // up. Preserve the last useful summary instead of letting a later null
+    // response make the card flicker back to "Nothing shipped".
+    const standup = noClaimedRepos ? null : (fetchedStandup ?? previousStandup);
     return { prs, standup, noClaimedRepos, ghStatus };
   })();
   dashboardInFlight.set(login, promise);

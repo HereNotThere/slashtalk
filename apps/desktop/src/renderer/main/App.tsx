@@ -69,9 +69,19 @@ export function App(): JSX.Element | null {
       setSigningIn(true);
       try {
         await window.chatheads.backend.signIn();
+      } catch (error) {
+        // backend.cancelSignIn rejects this promise with "Cancelled" — a
+        // user-initiated path, not an error to surface.
+        if (error instanceof Error && error.message === "Cancelled") return;
+        throw error;
       } finally {
         setSigningIn(false);
       }
+    };
+    const cancel = (): void => {
+      // signIn's own finally flips signingIn back to false once the
+      // rejection from cancelSignIn lands, so this stays the sole writer.
+      void window.chatheads.backend.cancelSignIn();
     };
     return (
       <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-10 px-6 text-center">
@@ -84,14 +94,33 @@ export function App(): JSX.Element | null {
             A dock for your team&rsquo;s work.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={signIn}
-          disabled={signingIn}
-          className="inline-flex items-center justify-center rounded-full bg-fg px-7 py-3 text-base font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          {signingIn ? "Waiting for browser…" : "Sign in with GitHub"}
-        </button>
+        {signingIn ? (
+          // OAuth round-trip happens in a real browser tab. Without a
+          // visible explanation here the desktop window just looks frozen
+          // — users hunt for a popup or close the window in confusion.
+          <div className="flex flex-col items-center gap-sm max-w-sm">
+            <p className="m-0 text-base font-medium text-fg">Finish signing in in your browser</p>
+            <p className="m-0 text-sm text-muted leading-relaxed">
+              We opened a GitHub tab for you. Approve Slashtalk there, then come back to this
+              window.
+            </p>
+            <button
+              type="button"
+              onClick={cancel}
+              className="mt-xs text-sm text-muted hover:text-fg underline underline-offset-4 transition-colors cursor-pointer bg-transparent border-none [font:inherit]"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={signIn}
+            className="inline-flex items-center justify-center rounded-full bg-fg px-7 py-3 text-base font-medium text-bg transition-opacity hover:opacity-90 cursor-pointer"
+          >
+            Sign in with GitHub
+          </button>
+        )}
       </div>
     );
   }

@@ -76,6 +76,23 @@ bun run lint     # apps/desktop today; apps/server forthcoming (Tier 2)
 
 If you touched `apps/server/src/db/schema.ts`, also run `bun run gen:db-schema` to refresh [`docs/generated/db-schema.md`](docs/generated/db-schema.md).
 
+## Changesets
+
+Any change that is **user-visible** or **material** to a published package — bug fixes, new features, behavior changes, packaging or auto-update changes, dependency bumps that affect runtime — needs a changeset so it lands in the next `chore: version packages` cut and ships in the next desktop build.
+
+```sh
+bunx changeset                       # interactive — pick package(s) + bump type
+# or write the file directly:
+# .changeset/<kebab-slug>.md
+# ---
+# "@slashtalk/electron": patch
+# ---
+#
+# One-paragraph user-facing description of what changed and why it matters.
+```
+
+Today only `@slashtalk/electron` is versioned ([`.changeset/config.json`](.changeset/config.json) ignores `server`/`web`/`blog`/`landing`/`shared`), so most changesets target it. Use `patch` for fixes, `minor` for new features, `major` for breaking changes. Skip the changeset only for things that don't affect behavior — pure docs, tests, internal refactors with no observable change, or edits to ignored workspaces.
+
 ## Adding something common
 
 - **Route plugin** → [`apps/server/AGENTS.md`](apps/server/AGENTS.md#adding-a-route-plugin)

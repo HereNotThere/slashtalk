@@ -32,6 +32,9 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+    ],
     "npmRebuild": false,
     "electronUpdaterCompatibility": ">=2.16",
     "publish": [

@@ -10,7 +10,7 @@ import AskMock from '../../../landing/src/components/AskMock.astro';
 import Wordmark from '../../../landing/src/components/Wordmark.astro';
 ---
 
-<Layout title="Slashtalk — we built a presence dock for our remote team. Here's why.">
+<Layout title="Slashtalk — we built a presence dock for our team. Here's why.">
 	<div class="min-h-screen bg-white text-neutral-900">
 		<header
 			class="mx-auto flex max-w-6xl items-center justify-between px-6 py-6"
@@ -42,55 +42,91 @@ import Wordmark from '../../../landing/src/components/Wordmark.astro';
 				<h1
 					class="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl"
 				>
-					We built a presence dock for our remote team. Here's why.
+					We built a presence dock for our team. Here's why.
 				</h1>
 
 				<p>
-					Our team had a coordination problem we kept trying to solve with
-					more talking.
+					Something has changed about software teams in the last eighteen
+					months, and we don't think anyone has named it yet.
 				</p>
 
 				<p>
-					We're small, fully remote, and we ship fast. Because we aren't 100%
-					relying on tickets, we pinged each other constantly — <em
-						class="italic text-neutral-900">"hey, are you on this?"</em
-					>. We did daily
-					standups, status threads, Slack channels. People wouldn't pay
-					attention and the noise became louder, not clearer.
+					Every engineer on a small team can now ship production quality
+					work, <em class="italic text-neutral-900">fast</em>. The output
+					per engineer has multiplied by magnitudes.
 				</p>
 
 				<p>
-					The tools we'd inherited were built for the old way of work.
-					Standups assume your whole day of work fits into two sentences. Ticket tracking assumes people should only work on what they're assigned. Slack channel updates assume people read them. None of
-					those assumptions hold at the speed small teams are moving today.
+					The part that gets less attention: coordination got harder by
+					exactly the same multiple.
 				</p>
 
-				<p>So we built the thing we wished we had.</p>
+				<p>
+					If one person ships ten times more code, in ten times more
+					places, branching off in ten times more directions — then the
+					cost of knowing what your teammates are doing scales with it.
+					The standup that used to fit a day into two sentences now can't
+					fit an hour. The ticket board that tracked who-owns-what now
+					lags reality by days. The Slack channel meant to keep everyone
+					in the loop becomes the thing you mute to get anything done.
+				</p>
+
+				<p>
+					This isn't a tooling preference. It's a structural mismatch.
+					The coordination layer was built for a pace of work that no
+					longer exists.
+				</p>
+
+				<p>
+					The same tools that let us ship this fast also force us, for
+					the first time, to <strong
+						class="font-semibold text-neutral-900"
+						>write down what we're trying to do.</strong
+					> Every prompt is a small, live, machine-readable description
+					of the work — composed by the person doing the work, at the
+					moment they're doing it.
+				</p>
+
+				<p>
+					That has never been true before. The whole history of project
+					management has been a workaround for not having it - standups,
+					tickets, status threads.
+				</p>
+
+				<p>
+					Now it does - the signal for work is sitting right there in
+					the prompts, generated as a byproduct of the work itself.
+				</p>
+
+				<p>The opportunity is to read it.</p>
 
 				<hr class="my-12 border-neutral-200" />
 
+				<p>So that's what we're building.</p>
+
 				<p>
-					Slashtalk is a floating dock that sits on top of your desktop.
+					<strong class="font-semibold text-neutral-900"
+						>Slashtalk is a presence dock for small teams shipping at
+						this new pace.</strong
+					> It sits on top of your desktop. Each teammate is a card.
+					Each card shows what they're shipping right now — recent PRs,
+					active sessions, the work in flight — synthesized from their
+					prompts and their PRs.
 				</p>
 
 				<figure class="my-10 flex justify-center">
 					<DockBar />
 				</figure>
 
-				<p>
-					Each teammate is a card which shows what they're shipping: recent
-					PRs, active sessions. The question "what
-					are you working on?" stops getting asked because the answer is
-					always on your dock.
-				</p>
-
 				<figure class="my-10 flex justify-center">
 					<CardMock />
 				</figure>
 
 				<p>
-					PMs or CEOs constantly pinging developers? They can just go ask. The answers come from
-					real code, not a guess.
+					When someone wants to know what features the team is working
+					on today, they ask the dock instead of pinging engineers.
+					When two people are about to collide on the same file, it's
+					flagged. The answers come from the work itself.
 				</p>
 
 				<figure class="my-10">
@@ -98,23 +134,17 @@ import Wordmark from '../../../landing/src/components/Wordmark.astro';
 				</figure>
 
 				<p>
-					When two of us start editing files that are about to collide,
-					both our cards flag it. We catch conflicts in the five minutes
-					they're being created.
+					We built it for ourselves, because we're a small remote team
+					that ran headfirst into the problem we just described. We're
+					now shipping more with fewer interruptions and bonus - its
+					fun to feel like your team is hanging out with you while you
+					work.
 				</p>
 
 				<p>
-					And we purposely left chat or messaging out of this product. We all have enough of those apps on our computers.
-				</p>
-
-				<p>
-					We've been on it ourselves for a while now, and so far, we're shipping more with fewer interruptions and it's been delightful to feel like you're working alongside your teammates even when you're not physically together.
-				</p>
-
-				<p>
-					If you're on a small team shipping fast with AI and the
-					coordination is starting to fray — try it and let us know what
-					you think.
+					If you're on a team where the shipping got faster but the
+					coordination got worse — try Slashtalk and tell us what you
+					think.
 				</p>
 
 				<div id="install" class="scroll-mt-8 pt-4">

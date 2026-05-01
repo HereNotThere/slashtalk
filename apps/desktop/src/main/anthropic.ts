@@ -12,6 +12,7 @@
 // create automatically has access to the Slashtalk MCP tool list.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { isIP } from "node:net";
 import * as store from "./store";
 import * as chatheadsAuth from "./chatheadsAuth";
 import * as githubAuth from "./githubDeviceAuth";
@@ -25,6 +26,7 @@ const VAULT_KEY = "anthropic.vaultId";
 const API_KEY_STORE_KEY = "anthropic.apiKeyEnc";
 
 const SLASHTALK_MCP_NAME = "slashtalk-mcp";
+const MCP_SERVER_NAME = /^[A-Za-z0-9_.-]{1,255}$/;
 
 const GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/";
 const SLASHTALK_CRED_ID_KEY = "anthropic.slashtalkCredentialId";
@@ -112,7 +114,12 @@ async function ensureEnvironment(): Promise<string> {
     name: "slashtalk-desktop",
     config: {
       type: "cloud",
-      networking: { type: "unrestricted" },
+      networking: {
+        type: "limited",
+        allow_mcp_servers: true,
+        allow_package_managers: false,
+        allowed_hosts: [],
+      },
     },
   });
   store.set(ENV_KEY, env.id);
@@ -212,7 +219,7 @@ export interface CreateAgentInput {
   systemPrompt: string;
   model?: string; // default claude-haiku-4-5
   /** Extra URL-based MCP servers the agent should have access to. Each gets
-   *  a matching mcp_toolset with always_allow permission policy. */
+   *  a matching mcp_toolset whose calls require confirmation. */
   mcpServers?: McpServerInput[];
 }
 
@@ -281,7 +288,7 @@ async function buildAgentConfig(input: CreateAgentInput): Promise<{
     | {
         type: "mcp_toolset";
         mcp_server_name: string;
-        default_config: { permission_policy: { type: "always_allow" } };
+        default_config: { permission_policy: { type: "always_ask" } };
       }
   >;
   skills: Array<{ type: "anthropic"; skill_id: "xlsx" }>;
@@ -292,17 +299,19 @@ async function buildAgentConfig(input: CreateAgentInput): Promise<{
   // Merge user-specified MCP servers with the built-in Slashtalk one (if we
   // have a vault credential for it). Names must be unique; dedupe by name
   // with user-specified taking precedence.
-  const servers = dedupeByName([
-    ...(vaultId
-      ? [
-          {
-            name: SLASHTALK_MCP_NAME,
-            url: mcpUrl(),
-          },
-        ]
-      : []),
-    ...(input.mcpServers ?? []),
-  ]);
+  const servers = dedupeByName(
+    [
+      ...(vaultId
+        ? [
+            {
+              name: SLASHTALK_MCP_NAME,
+              url: mcpUrl(),
+            },
+          ]
+        : []),
+      ...(input.mcpServers ?? []),
+    ].map(validateMcpServer),
+  );
 
   const mcpServers = servers.map((s) => ({
     type: "url" as const,
@@ -314,7 +323,7 @@ async function buildAgentConfig(input: CreateAgentInput): Promise<{
     type: "mcp_toolset" as const,
     mcp_server_name: s.name,
     default_config: {
-      permission_policy: { type: "always_allow" as const },
+      permission_policy: { type: "always_ask" as const },
     },
   }));
 
@@ -335,6 +344,66 @@ function dedupeByName(servers: McpServerInput[]): McpServerInput[] {
     out.push(s);
   }
   return out;
+}
+
+function validateMcpServer(server: McpServerInput): McpServerInput {
+  const name = server.name.trim();
+  if (!MCP_SERVER_NAME.test(name)) {
+    throw new Error(
+      "MCP server names must be 1-255 characters of letters, numbers, dots, underscores, or dashes.",
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(server.url);
+  } catch {
+    throw new Error(`Invalid MCP server URL for ${name}.`);
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new Error(`MCP server ${name} must use https.`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`MCP server ${name} URL must not include credentials.`);
+  }
+  if (isBlockedMcpHost(parsed.hostname)) {
+    throw new Error(`MCP server ${name} must not target a local or private host.`);
+  }
+
+  return { name, url: parsed.toString() };
+}
+
+function isBlockedMcpHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host === "metadata.google.internal"
+  ) {
+    return true;
+  }
+
+  const ipKind = isIP(host);
+  if (ipKind === 4) {
+    const [a, b] = host.split(".").map((part) => Number(part));
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+  if (ipKind === 6) {
+    return (
+      host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")
+    );
+  }
+
+  return false;
 }
 
 export async function archiveAgent(agentId: string): Promise<void> {

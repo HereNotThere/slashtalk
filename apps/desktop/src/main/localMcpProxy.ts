@@ -42,11 +42,28 @@ const RESPONSE_SKIP_HEADERS = new Set([
   "content-length",
 ]);
 
+const MAX_LOCAL_MCP_BODY_BYTES = 1024 * 1024;
+
+class RequestBodyTooLarge extends Error {
+  constructor() {
+    super("Local MCP proxy request body too large");
+  }
+}
+
 async function readBody(req: http.IncomingMessage): Promise<Buffer | undefined> {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
+  const contentLength = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_LOCAL_MCP_BODY_BYTES) {
+    throw new RequestBodyTooLarge();
+  }
+
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.byteLength;
+    if (total > MAX_LOCAL_MCP_BODY_BYTES) throw new RequestBodyTooLarge();
+    chunks.push(buf);
   }
   return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
 }
@@ -215,6 +232,12 @@ export function createLocalMcpProxy(deps: LocalMcpProxyDeps = {}): LocalMcpProxy
       finished = true;
       res.end();
     } catch (err) {
+      if (err instanceof RequestBodyTooLarge) {
+        abortController.abort();
+        if (!res.headersSent) response(res, 413, "MCP proxy request body too large");
+        else if (!res.destroyed) res.end();
+        return;
+      }
       if (!abortController.signal.aborted) {
         console.warn("[localMcpProxy] forward failed", {
           message: err instanceof Error ? err.message : String(err),

@@ -11,7 +11,7 @@ import { setMacCornerRadius } from "../macCorners";
 import { BUBBLE_PAD, BUBBLE_SIZE, PADDING_Y } from "./dock-geometry";
 import { currentDock, getIsDragging } from "./dock-drag";
 import { broadcast } from "./broadcast";
-import { loadRenderer, preloadPath } from "./lib";
+import { loadRenderer, preloadPath, rendererWebPreferences } from "./lib";
 
 interface InfoDeps {
   getOverlay: () => BrowserWindow | null;
@@ -201,10 +201,9 @@ function ensureInfoWindow(): BrowserWindow {
     // surface.
     backgroundColor: infoBackgroundColor(),
     hasShadow: true,
-    webPreferences: {
+    webPreferences: rendererWebPreferences({
       preload: preloadPath,
-      contextIsolation: true,
-    },
+    }),
   });
 
   infoWindow.setAlwaysOnTop(true, "floating");

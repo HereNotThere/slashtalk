@@ -14,7 +14,7 @@ import { getRailPinned } from "./rail-state";
 import { resolveRailVisibility } from "./rail-visibility";
 import { startHoverPolling, stopHoverPolling } from "./hover-polling";
 import { sendWhenLoaded } from "./broadcast";
-import { loadRenderer, preloadPath } from "./lib";
+import { loadRenderer, preloadPath, rendererWebPreferences } from "./lib";
 import * as info from "./info";
 import { hideChat } from "./chat";
 
@@ -198,10 +198,9 @@ export function ensureOverlay(): BrowserWindow {
     // `under-window` which only blurs the desktop wallpaper.
     vibrancy: "hud",
     visualEffectState: "active",
-    webPreferences: {
+    webPreferences: rendererWebPreferences({
       preload: preloadPath,
-      contextIsolation: true,
-    },
+    }),
   });
 
   applyRailPinned();

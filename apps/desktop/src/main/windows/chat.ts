@@ -6,7 +6,7 @@
 import { BrowserWindow, nativeTheme, screen } from "electron";
 import type { DockConfig } from "../../shared/types";
 import { DOCK_EDGE_MARGIN, OVERLAY_WIDTH } from "./dock-geometry";
-import { loadRenderer, preloadPath } from "./lib";
+import { loadRenderer, preloadPath, rendererWebPreferences } from "./lib";
 import { setMacCornerRadius } from "../macCorners";
 
 const CHAT_WIDTH = 560;
@@ -73,10 +73,9 @@ function ensureChatWindow(): BrowserWindow {
     hasShadow: true,
     vibrancy: "popover",
     visualEffectState: "active",
-    webPreferences: {
+    webPreferences: rendererWebPreferences({
       preload: preloadPath,
-      contextIsolation: true,
-    },
+    }),
   });
 
   chatWindow.setAlwaysOnTop(true, "floating");

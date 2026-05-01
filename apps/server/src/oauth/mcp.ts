@@ -6,6 +6,11 @@ import type { Database } from "../db";
 import { oauthAuthorizationCodes, oauthClients, oauthTokens, users } from "../db/schema";
 import { hashToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
+import {
+  isSessionCredentialFresh,
+  type SessionJwtVerifier,
+  verifySessionJwt,
+} from "../auth/session";
 
 const SCOPES = ["mcp:read", "mcp:write"] as const;
 const STATIC_CLIENT_IDS = new Set(["slashtalk-static-claude-code"]);
@@ -267,20 +272,22 @@ class KeyedRequestLimiter {
   }
 }
 
-type JwtVerifier = {
-  verify: (token: string) => Promise<false | { sub?: string | number }>;
-};
-
-async function sessionUser(db: Database, jwt: JwtVerifier, token: string | undefined) {
+async function sessionUser(
+  db: Database,
+  jwt: SessionJwtVerifier | undefined,
+  token: string | undefined,
+) {
   if (!token) return null;
-  const payload = await jwt.verify(token);
-  if (!payload || !payload.sub) return null;
+  const payload = await verifySessionJwt(jwt, token);
+  if (!payload) return null;
   const [user] = await db
     .select()
     .from(users)
     .where(eq(users.id, Number(payload.sub)))
     .limit(1);
-  return user ?? null;
+  if (!user) return null;
+  if (!isSessionCredentialFresh(user, payload)) return null;
+  return user;
 }
 
 type OAuthClientMetadata = Omit<OAuthClientRegistration, "client_id" | "client_id_issued_at">;

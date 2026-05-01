@@ -704,6 +704,36 @@ describe("MCP OAuth discovery", () => {
     expect(unknown.status).toBe(400);
   });
 
+  it("does not authorize MCP OAuth with a globally revoked session JWT", async () => {
+    const { challenge } = await pkcePair();
+    const staleAt = new Date(Date.now() + 1_000);
+    await db
+      .update(users)
+      .set({ credentialsRevokedAt: staleAt, updatedAt: staleAt })
+      .where(eq(users.id, aliceId));
+
+    try {
+      const res = await fetch(
+        `${baseUrl}/oauth/authorize?${new URLSearchParams({
+          response_type: "code",
+          client_id: "slashtalk-static-claude-code",
+          redirect_uri: "http://localhost:37622/callback",
+          code_challenge: challenge,
+          code_challenge_method: "S256",
+        })}`,
+        { redirect: "manual", headers: { Cookie: aliceCookie } },
+      );
+
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toStartWith("/auth/github?");
+    } finally {
+      await db
+        .update(users)
+        .set({ credentialsRevokedAt: null, updatedAt: new Date() })
+        .where(eq(users.id, aliceId));
+    }
+  });
+
   it("exchanges an authorization code with PKCE for MCP tokens", async () => {
     const { clientId, redirectUri } = await registerDynamicOAuthClient();
     const { verifier, challenge } = await pkcePair();

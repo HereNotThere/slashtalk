@@ -192,11 +192,34 @@ describe("session state classification", () => {
 // ── Setup Token Exchange ─────────────────────────────────────
 
 describe("setup token exchange", () => {
+  it("stores setup tokens hashed at rest", async () => {
+    const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: aliceCookie },
+    });
+    expect(setupRes.status).toBe(200);
+    const { token } = (await setupRes.json()) as { token: string };
+
+    const [rawMatch] = await db
+      .select()
+      .from(setupTokens)
+      .where(eq(setupTokens.token, token))
+      .limit(1);
+    expect(rawMatch).toBeUndefined();
+
+    const [hashMatch] = await db
+      .select()
+      .from(setupTokens)
+      .where(eq(setupTokens.token, await hashToken(token)))
+      .limit(1);
+    expect(hashMatch).toBeTruthy();
+  });
+
   it("rejects expired setup token", async () => {
     // Insert an expired token directly
     await db.insert(setupTokens).values({
       userId: aliceUserId,
-      token: "expired-token-test",
+      token: await hashToken("expired-token-test"),
       expiresAt: new Date(Date.now() - 60_000), // 1 min ago
       redeemed: false,
     });
@@ -217,7 +240,7 @@ describe("setup token exchange", () => {
   it("rejects already-redeemed setup token", async () => {
     await db.insert(setupTokens).values({
       userId: aliceUserId,
-      token: "redeemed-token-test",
+      token: await hashToken("redeemed-token-test"),
       expiresAt: new Date(Date.now() + 600_000),
       redeemed: true,
     });
@@ -231,6 +254,26 @@ describe("setup token exchange", () => {
       }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("lets only one concurrent setup-token exchange succeed", async () => {
+    const setupRes = await fetch(`${baseUrl}/api/me/setup-token`, {
+      method: "POST",
+      headers: { Cookie: aliceCookie },
+    });
+    expect(setupRes.status).toBe(200);
+    const { token } = (await setupRes.json()) as { token: string };
+
+    const exchange = (deviceName: string) =>
+      fetch(`${baseUrl}/v1/auth/exchange`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, deviceName }),
+      });
+
+    const results = await Promise.all([exchange("race-device-a"), exchange("race-device-b")]);
+    expect(results.map((res) => res.status).sort()).toEqual([200, 400]);
+    await Promise.all(results.map((res) => res.text()));
   });
 });
 

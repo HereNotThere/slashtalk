@@ -20,12 +20,12 @@
 	<div class="space-y-3 px-5 py-5">
 		<div class="flex items-start gap-2">
 			<span class="select-none text-emerald-600">&gt;</span>
-			<span class="text-neutral-900">what shipped today?</span>
+			<span class="text-neutral-900">who's coding right now?</span>
 		</div>
 
 		<div class="space-y-2 pl-4 text-neutral-700">
 			<p>
-				Checking the team via
+				Checking live sessions via
 				<span class="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-800">slashtalk</span>
 				MCP…
 			</p>
@@ -33,30 +33,43 @@
 			<div class="space-y-1 text-[12px] text-neutral-500">
 				<div class="flex items-center gap-2">
 					<span class="text-emerald-600">⏺</span>
-					<span><span class="text-neutral-800">get_team_activity</span>(window: "24h")</span>
+					<span><span class="text-neutral-800">get_live_sessions</span>()</span>
 				</div>
-				<div class="pl-5 text-neutral-400">→ 3 sessions, 2 PRs merged</div>
+				<div class="pl-5 text-neutral-400">→ 3 teammates active</div>
 			</div>
 
-			<div class="space-y-0.5 pt-1 text-neutral-800">
-				<p>
-					<span class="text-neutral-400">·</span>
-					<span class="font-semibold">Theo</span>
-					<span class="text-neutral-600">— auth refactor, merged</span>
-					<span class="text-neutral-400">(#412)</span>
-				</p>
-				<p>
-					<span class="text-neutral-400">·</span>
-					<span class="font-semibold">Austin</span>
-					<span class="text-neutral-600">— Codex quota extraction</span>
-					<span class="text-neutral-400">(#418)</span>
-				</p>
-				<p>
-					<span class="text-neutral-400">·</span>
-					<span class="font-semibold">Ryan</span>
-					<span class="text-neutral-600">— collision warnings, just landed</span>
-				</p>
+			<div class="space-y-2 pt-1">
+				<div>
+					<p class="flex items-center gap-2 text-neutral-800">
+						<span class="inline-block size-1.5 animate-pulse rounded-full bg-emerald-500"></span>
+						<span class="font-semibold">Theo</span>
+						<span class="text-neutral-600">project summary card UI</span>
+					</p>
+					<p class="pl-[14px] text-[11px] text-neutral-400">feat/proj-card · 14m</p>
+				</div>
+				<div>
+					<p class="flex items-center gap-2 text-neutral-800">
+						<span class="inline-block size-1.5 animate-pulse rounded-full bg-emerald-500"></span>
+						<span class="font-semibold">Austin</span>
+						<span class="text-neutral-600">addressing review comments</span>
+					</p>
+					<p class="pl-[14px] text-[11px] text-neutral-400">codex-quotas · 6m</p>
+				</div>
+				<div>
+					<p class="flex items-center gap-2 text-neutral-800">
+						<span class="inline-block size-1.5 animate-pulse rounded-full bg-emerald-500"></span>
+						<span class="font-semibold">Ryan</span>
+						<span class="text-neutral-600">hardening collision warnings</span>
+					</p>
+					<p class="pl-[14px] text-[11px] text-neutral-400">main · 2m</p>
+				</div>
 			</div>
+
+			<p class="pt-1 text-neutral-700">
+				Heads up: Theo is editing
+				<span class="rounded bg-neutral-100 px-1 text-[12px] text-neutral-800">apps/landing/index.astro</span>
+				— same file as you.
+			</p>
 		</div>
 
 		<div class="flex items-center gap-2 pt-2 text-neutral-400">

@@ -11,6 +11,7 @@ import {
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { AgentStreamEvent } from "./anthropic";
+import { resolveBundledClaudeBin } from "./claudeBin";
 import { normalizeSdkMessage } from "./sdkEvents";
 
 const execFileAsync = promisify(execFile);
@@ -149,6 +150,7 @@ export async function runDelegatedChat(
 
   const ghAvailable = await hasGhCliReady();
 
+  const bundledBin = resolveBundledClaudeBin();
   const options: Options = {
     cwd,
     model: "claude-sonnet-4-6",
@@ -160,6 +162,9 @@ export async function runDelegatedChat(
     // Inherit the user's MCP servers + hooks from ~/.claude/settings.json.
     // Project/local scopes are intentionally omitted: they'd vary by cwd.
     settingSources: ["user"],
+    // In packaged builds the SDK's own resolver lands inside `app.asar`,
+    // which spawn() can't traverse. See claudeBin.ts.
+    ...(bundledBin ? { pathToClaudeCodeExecutable: bundledBin } : {}),
   };
 
   let finalText = "";

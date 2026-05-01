@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
 import * as agentStore from "./agentStore";
+import { resolveBundledClaudeBin } from "./claudeBin";
 import * as localTranscripts from "./localTranscripts";
 import type { AgentStreamEvent } from "./anthropic";
 import { normalizeSdkMessage } from "./sdkEvents";
@@ -132,6 +133,7 @@ export async function sendMessage(
 
   onEvent({ kind: "phase", label: "Working…" });
 
+  const bundledBin = resolveBundledClaudeBin();
   const options: Options = {
     cwd,
     model: agent.model,
@@ -144,6 +146,9 @@ export async function sendMessage(
     // differently per cwd, and 'local' is per-checkout state we don't want
     // leaking into agent runs.
     settingSources: ["user"],
+    // In packaged builds the SDK's own resolver lands inside `app.asar`,
+    // which spawn() can't traverse. See claudeBin.ts.
+    ...(bundledBin ? { pathToClaudeCodeExecutable: bundledBin } : {}),
     ...(resume ? { resume } : {}),
   };
 

@@ -16,6 +16,9 @@ import type { RedisBridge } from "../ws/redis-bridge";
 import { userRepos, users } from "../db/schema";
 
 const TTL_SECONDS = 120;
+const SPOTIFY_TRACK_ID_PATTERN = "^[A-Za-z0-9]{1,64}$";
+const SPOTIFY_TRACK_URL_PATTERN = "^https://open\\.spotify\\.com/track/[A-Za-z0-9]{1,64}$";
+const SPOTIFY_TEXT_MAX = 240;
 
 function key(userId: number): string {
   return `presence:spotify:user:${userId}`;
@@ -72,10 +75,10 @@ export const spotifyPresenceRoutes = (db: Database, redis: RedisBridge) =>
         track: t.Union([
           t.Null(),
           t.Object({
-            trackId: t.String(),
-            name: t.String(),
-            artist: t.String(),
-            url: t.String(),
+            trackId: t.String({ pattern: SPOTIFY_TRACK_ID_PATTERN }),
+            name: t.String({ minLength: 1, maxLength: SPOTIFY_TEXT_MAX }),
+            artist: t.String({ minLength: 1, maxLength: SPOTIFY_TEXT_MAX }),
+            url: t.String({ pattern: SPOTIFY_TRACK_URL_PATTERN }),
             isPlaying: t.Boolean(),
           }),
         ]),

@@ -195,4 +195,38 @@ describe("spotify presence", () => {
     });
     expect(res.status).toBe(422);
   });
+
+  it("rejects non-Spotify track URLs", async () => {
+    const res = await fetch(`${baseUrl}/v1/presence/spotify`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        track: {
+          ...aliceTrack,
+          url: "https://example.com/not-spotify",
+        },
+      }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it("rejects oversized track text fields", async () => {
+    const res = await fetch(`${baseUrl}/v1/presence/spotify`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${aliceApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        track: {
+          ...aliceTrack,
+          name: "x".repeat(241),
+        },
+      }),
+    });
+    expect(res.status).toBe(422);
+  });
 });

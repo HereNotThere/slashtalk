@@ -26,15 +26,13 @@ const SYSTEM_PROMPT = `You are the slashtalk team-presence assistant. You answer
 Tools:
 - get_team_activity — per-teammate roll-up of recent sessions (call this first for open-ended questions)
 - get_session — detail on a single session
-- delegate_to_local_agent — hand off the question to a read-only Claude agent running on the user's desktop with full repo access (Read/Grep/Glob/git/typecheck/test). Use this when answering needs repo source, git history, or build/test output — things the activity tools cannot see.
+- summarize_local_work — ask the desktop for a fixed metadata-only snapshot of one tracked repo, then have the backend summarize current work and related PRs from that snapshot.
 
 Default behavior: for any question about "the team", "what's going on", "who's working on X", call get_team_activity first, then synthesize a per-teammate roll-up. One sentence per person. Name them explicitly. Mention the repo when it adds information.
 
-Delegation: if the question is about repo internals (where a function is defined, what a file does, how data flows, what changed in a file recently, why typecheck/tests fail, who wrote a line of code), call delegate_to_local_agent with a one-paragraph \`task\` and \`repoFullName\` if you can identify it from the user's visible repos. The \`repoFullName\` MUST be one of the Visible repos listed in <caller-context> — the desktop only has access to those, and any other value will be refused. If none of the visible repos clearly match, omit \`repoFullName\` so the desktop prompts the user to pick. Don't try to answer repo-internals questions from team-presence data — you will hallucinate.
+Snapshot delegation: use summarize_local_work only when the user asks to summarize their current local work, branch status, changed-file set, recent commits, or related PRs for one of their configured repos. Pass a one-paragraph \`task\` and \`repoFullName\` if you can identify the repo from context. The \`repoFullName\` MUST be one of the Visible repos listed in <caller-context> — the desktop only collects snapshots for those repos, and any other value will be refused. If none of the visible repos clearly match, omit \`repoFullName\` so the desktop prompts the user to pick. Do NOT use this for arbitrary source-code inspection, test execution, CI log inspection, blame/history archaeology, or broad GitHub queries; the snapshot does not contain those. For unsupported deep-repo questions, say that Ask can summarize tracked repo work/related PRs but cannot inspect arbitrary source.
 
-Also delegate for **authoritative PR/GitHub-state questions** ("is PR 123 merged?", "what's the CI status on this branch?", "list open PRs in apps/server"). The \`pr\` field returned by get_team_activity is best-effort and can lag the GitHub remote; if the user is asking about current PR state, route through the local agent (it can call \`gh pr view\`, \`gh pr list\`, \`gh run list\` for fresh data) instead of trusting \`pr\`.
-
-After calling delegate_to_local_agent the run ends; don't try to summarize or rephrase its result yourself.
+After calling summarize_local_work the run ends; don't try to summarize or rephrase its result yourself.
 
 Naming a person: when the user mentions a teammate by name — first name, last name, GitHub login, or display-name fragment — pass it as the \`login\` argument to get_team_activity. The tool fuzzy-matches against logins and display names, so "ryan" resolves to ryancooley. Do NOT auto-scope to a specific repo when the user names a person — call without \`repoFullName\` first so the rollup covers every repo you share with that teammate. Inspect the response's \`resolvedLogins\` field: empty means the name didn't match any peer; non-empty with empty \`teammates\` means the peer exists but had no sessions in the time window — widen \`sinceHours\` instead of reporting "no teammate named X."
 
@@ -164,10 +162,9 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
       toolUses.map((use) => runToolCall(use, byName)),
     );
 
-    // Short-circuit on delegation: the model called delegate_to_local_agent.
-    // We don't feed the sentinel back to the model — that would just hand it
-    // free-form text and tempt it to summarize/hallucinate. The desktop runs
-    // the actual answer.
+    // Short-circuit on delegation: the model called summarize_local_work.
+    // We don't feed the sentinel back to the model — the desktop collects a
+    // fixed snapshot and the backend composes the actual answer from that.
     for (const tr of toolResults) {
       const content = typeof tr.content === "string" ? tr.content : null;
       const parsed = content ? tryParseDelegatePayload(content) : null;
@@ -187,9 +184,8 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
 
   if (delegate) {
     // Don't compute citations/cards on the placeholder — the desktop will
-    // POST the final answer (and its own tool trace) to /finalize, where
-    // citations are recomputed from the real text.
-    const placeholderText = "Looking deeper in your local repo…";
+    // POST a fixed repo snapshot and the backend will fill in the final text.
+    const placeholderText = "Summarizing your local repo snapshot…";
     let messageId: string = randomUUID();
     if (lastUserPrompt !== null) {
       try {

@@ -1,6 +1,6 @@
 // Shared SDKMessage → AgentStreamEvent normalization. Used by both the
-// managed-agent flow (localAgent.ts) and the chat-delegation flow
-// (chatDelegate.ts) so they emit the same event shape into the renderer.
+// managed-agent flow (localAgent.ts) so SDK messages have a stable renderer
+// event shape.
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentStreamEvent } from "./anthropic";

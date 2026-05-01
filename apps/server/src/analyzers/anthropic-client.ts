@@ -19,3 +19,11 @@ export function getAnthropicClient(): Anthropic {
   });
   return _client;
 }
+
+export function setAnthropicClientForTest(client: Anthropic | null): () => void {
+  const prior = _client;
+  _client = client;
+  return () => {
+    _client = prior;
+  };
+}

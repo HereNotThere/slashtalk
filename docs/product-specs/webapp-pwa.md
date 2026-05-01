@@ -30,8 +30,8 @@ The web app is read/control plane only:
 - It can claim/unclaim repos through `/api/me/repos` and use the existing
   `/api/me/orgs` and `/api/me/orgs/:org/repos` pickers.
 - It cannot ingest local sessions, post heartbeats, register local repo paths,
-  manage the local MCP proxy, run local delegated agents, or read Spotify
-  locally. Those remain desktop-only.
+  manage the local MCP proxy, collect desktop repo snapshots for delegated Ask
+  answers, or read Spotify locally. Those remain desktop-only.
 
 ## Product scope
 
@@ -46,7 +46,7 @@ MVP screens:
   paginated event view.
 - **Ask**: web version of the response window using `/api/chat/ask` and
   `/api/chat/history`. If the server returns `delegation`, render it as
-  "requires desktop" until there is a web-safe remote delegation story.
+  "requires desktop" because the bounded repo snapshot collector is desktop-only.
 - **Repos**: claim/unclaim repos by org/repo; no local path management.
 - **Notifications**: install/PWA state, browser permission state, subscription
   state, category toggles, and a test notification.
@@ -265,8 +265,9 @@ Server tests should cover:
   not the workspace. `apps/web` is shorter and conventional next to
   `apps/server`, `apps/desktop`, and `apps/blog`.
 - **Make the browser app a full desktop replacement** — rejected because browser
-  APIs cannot watch local Claude/Codex files, own a local MCP proxy, or keep
-  device API keys with the same trust model.
+  APIs cannot watch local Claude/Codex files, inspect local git metadata for
+  delegated Ask snapshots, own a local MCP proxy, or keep device API keys with
+  the same trust model.
 - **Put shared UI into `@slashtalk/shared`** — rejected because that package is
   a protocol/type package. Mixing React/Tailwind into it would make every server
   import pay for frontend concerns.

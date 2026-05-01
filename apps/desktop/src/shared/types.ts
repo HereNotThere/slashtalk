@@ -600,10 +600,10 @@ export interface ChatHeadsBridge {
   // cycles through them. Server guarantees a non-empty array.
   fetchChatGerunds: (prompt: string) => Promise<string[]>;
 
-  // Chat delegation: server returned a ChatAssistantMessage with a `delegation`
-  // field. Renderer hands the envelope here; main resolves the named repo to
-  // a local cwd, runs a read-only Claude Agent SDK session, streams events
-  // via onDelegatedEvent, and POSTs the final answer back to the server.
+  // Chat delegation: server returned a ChatAssistantMessage with a
+  // `delegation` field. Renderer hands the envelope here; main resolves the
+  // named repo, collects the fixed metadata snapshot, and asks the backend to
+  // compose the final answer.
   runDelegatedChat: (req: DelegatedChatRequest) => Promise<DelegatedChatResponse>;
   onDelegatedEvent: (cb: (event: ChatDelegateEvent) => void) => Unsubscribe;
 

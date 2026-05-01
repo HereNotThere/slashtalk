@@ -16,6 +16,8 @@ import type { AddressInfo } from "node:net";
 import type {
   ChatAskRequest,
   ChatAskResponse,
+  ChatDelegatedWorkRequest,
+  ChatDelegatedWorkResponse,
   ChatHistoryResponse,
   ChatMessage,
   FeedSessionSnapshot,
@@ -814,16 +816,15 @@ export async function fetchChatHistory(): Promise<ChatHistoryResponse> {
   return jsonFetch<ChatHistoryResponse>("/api/chat/history", { method: "GET" });
 }
 
-export async function finalizeDelegatedChat(input: {
+export async function answerDelegatedWork(input: {
   threadId: string;
-  messageId: string;
-  answer: string;
-}): Promise<{ ok: true }> {
-  return jsonFetch<{ ok: true }>(
-    `/api/chat/threads/${encodeURIComponent(input.threadId)}/finalize`,
+  body: ChatDelegatedWorkRequest;
+}): Promise<ChatDelegatedWorkResponse> {
+  return jsonFetch<ChatDelegatedWorkResponse>(
+    `/api/chat/threads/${encodeURIComponent(input.threadId)}/delegated-work`,
     {
       method: "POST",
-      body: { messageId: input.messageId, answer: input.answer },
+      body: input.body,
     },
   );
 }

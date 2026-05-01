@@ -85,10 +85,10 @@ export interface ChatToolContext {
    *  a per-request DB round-trip when provided. */
   visibleRepoIds?: number[];
   /** Caller's visible repo full names (`owner/name`). Used to bind the
-   *  `delegate_to_local_agent` tool's `repoFullName` parameter to the exact
-   *  set the desktop has tracked, so the model can't ask for one we don't
-   *  have. Order matches `visibleRepoIds`; sorting/truncation is the
-   *  caller's responsibility. */
+   *  `summarize_local_work` tool's `repoFullName` parameter to the exact set
+   *  the desktop has tracked, so the model can't ask for one we don't have.
+   *  Order matches `visibleRepoIds`; sorting/truncation is the caller's
+   *  responsibility. */
   visibleRepoFullNames?: string[];
 }
 
@@ -449,10 +449,10 @@ export interface ChatToolDefinition {
   }>;
 }
 
-/** Sentinel emitted by the `delegate_to_local_agent` tool's handler and
+/** Sentinel emitted by the `summarize_local_work` tool's handler and
  *  detected by `runChatAgent`'s loop to short-circuit out of the
- *  Anthropic-side iteration. The tool itself is a signal channel, not an
- *  executor — the actual run happens on the desktop. */
+ *  Anthropic-side iteration. The tool itself is a signal channel: the
+ *  desktop collects a fixed snapshot, then the backend composes the answer. */
 export const DELEGATE_SENTINEL = "__delegate__";
 
 export interface DelegatePayload {
@@ -555,16 +555,16 @@ export function buildChatTools(
       },
     },
     {
-      name: "delegate_to_local_agent",
+      name: "summarize_local_work",
       description:
-        "Hand off the question to a read-only Claude Code agent running on the user's desktop, scoped to one of their tracked repos. Use this when the question requires reading repo source files, inspecting git history (commits, blame, diffs), running build/test commands, or querying authoritative GitHub state via `gh` (PRs, CI runs, issues). Examples: 'where is X defined', 'what changed in Y last week', 'why does typecheck fail in Z', 'how does the auth flow work in this repo', 'is PR 123 merged', 'what's the CI status on branch foo'. The local agent has gh CLI auth, so PR/CI questions go through the GitHub remote and are fresher than the `pr` field from get_team_activity (which is best-effort and can lag). Pass a `task` (one paragraph instructing the local agent what to investigate and answer; rephrase the user's question if it helps) and `repoFullName` if you can identify the target repo from context. Do NOT use this for questions about teammates' presence/activity — those are answered by get_team_activity / get_session.",
+        "Request a fixed metadata-only snapshot from the user's desktop for one tracked repo, then have the backend summarize current work and related PRs. Use only when the user asks about their local work summary, branch status, changed files, recent commits, or PRs related to the current branch. The snapshot contains no file contents, no test output, no CI logs, and no arbitrary GitHub queries, so do NOT use this for source-code explanation, debugging, blame/history archaeology, running commands, or broad GitHub/CI inspection. For teammate presence/activity, use get_team_activity / get_session instead.",
       input_schema: {
         type: "object",
         properties: {
           task: {
             type: "string",
             description:
-              "One-paragraph task description for the local agent. State the question and any context the user gave; the local agent will read the repo, run git or test commands as needed, and return a single concise answer.",
+              "One-paragraph work-summary task to answer from branch/status/diffstat/recent-commit/related-PR metadata. Do not ask for file contents, command execution, or broader inspection.",
           },
           repoFullName: {
             type: "string",
@@ -601,9 +601,9 @@ const MAX_REPOS_IN_DELEGATE_HINT = 50;
 
 function buildRepoFullNameDescription(visibleRepoFullNames: string[] | undefined): string {
   const base =
-    "owner/name of the repo to scope the agent to. Omit if the user's question doesn't clearly map to a specific repo — the desktop will then prompt the user to pick from their tracked set.";
+    "owner/name of the repo whose fixed local snapshot should be summarized. Omit if the user's question doesn't clearly map to a specific repo — the desktop will then prompt the user to pick from their tracked set.";
   if (!visibleRepoFullNames || visibleRepoFullNames.length === 0) {
-    return `${base} The caller has not tracked any repos yet, so delegation will fail until they add one — prefer answering from team-presence tools or telling the user to add a repo from the desktop tray.`;
+    return `${base} The caller has not tracked any repos yet, so snapshot collection will fail until they add one — prefer answering from team-presence tools or telling the user to add a repo from the desktop tray.`;
   }
   const sorted = [...visibleRepoFullNames].sort();
   const shown = sorted.slice(0, MAX_REPOS_IN_DELEGATE_HINT).join(", ");
@@ -611,7 +611,7 @@ function buildRepoFullNameDescription(visibleRepoFullNames: string[] | undefined
     sorted.length > MAX_REPOS_IN_DELEGATE_HINT
       ? `, …and ${sorted.length - MAX_REPOS_IN_DELEGATE_HINT} more`
       : "";
-  return `${base} MUST be exactly one of the caller's tracked repos: ${shown}${overflow}. Never invent a repo or use one not on this list — the desktop has no access to anything else and will refuse the task.`;
+  return `${base} MUST be exactly one of the caller's tracked repos: ${shown}${overflow}. Never invent a repo or use one not on this list — the desktop has no snapshot access to anything else and will refuse the task.`;
 }
 
 function resolveSince(args: GetTeamActivityArgs): Date {

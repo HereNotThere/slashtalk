@@ -404,10 +404,10 @@ export const chatMessages = pgTable(
       .$type<Array<{ sessionId: string; reason: string }>>()
       .notNull()
       .default([]),
-    /** Non-null when this turn was delegated to a desktop-side headless
-     *  agent. The row is inserted with `answer = ""` at delegation time and
-     *  filled in via /api/chat/threads/:threadId/finalize once the local
-     *  run completes. */
+    /** Non-null when this turn is waiting on a desktop-collected fixed repo
+     *  snapshot. The row is inserted with `answer = ""` at delegation time
+     *  and filled by /api/chat/threads/:threadId/delegated-work after the
+     *  backend composes the answer. */
     delegation: jsonb("delegation").$type<{
       task: string;
       repoFullName?: string;

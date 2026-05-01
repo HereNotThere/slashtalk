@@ -1,20 +1,23 @@
 import { Elysia, t } from "elysia";
 import { and, eq, isNotNull } from "drizzle-orm";
+import type { ChatDelegatedWorkRequest } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
 import { runChatAgent } from "./runner";
 import { generateGerunds } from "./gerund";
 import { loadChatHistory } from "./history";
-import { chatMessages } from "../db/schema";
+import { answerDelegatedWork } from "./delegated-work";
+import { chatMessages, repos, userRepos } from "../db/schema";
 import { LlmBudgetExceededError } from "../analyzers/llm-budget";
 import type { RedisBridge } from "../ws/redis-bridge";
 
 const MAX_MESSAGES = 20;
 const MAX_CONTENT_CHARS = 8000;
 const MAX_GERUND_PROMPT_CHARS = 2000;
-// Same upper bound the model uses; the local agent's final answer is plain
-// markdown and rarely exceeds a few KB.
-const MAX_FINALIZE_ANSWER_CHARS = 32_000;
+const MAX_DELEGATED_TASK_CHARS = 4000;
+const MAX_REPO_FULL_NAME_CHARS = 256;
+const MAX_SNAPSHOT_LINE_CHARS = 1000;
+const MAX_SNAPSHOT_DIFF_CHARS = 12_000;
 // chat_messages.thread_id is a Postgres uuid; sending a non-UUID here would
 // otherwise pass body validation and then fail the soft-fail DB insert
 // silently, dropping the turn from history.
@@ -122,40 +125,89 @@ export const chatRoutes = (db: Database, redis: RedisBridge) =>
       }
     })
     .post(
-      "/threads/:threadId/finalize",
+      "/threads/:threadId/delegated-work",
       async ({ user, params, body, set }) => {
-        const trimmed = body.answer.slice(0, MAX_FINALIZE_ANSWER_CHARS);
+        const request = body as ChatDelegatedWorkRequest;
+        const repoFullName = request.repoFullName.trim();
+        if (
+          !repoFullName ||
+          request.snapshot.repo.fullName.toLowerCase() !== repoFullName.toLowerCase()
+        ) {
+          set.status = 400;
+          return { error: "repo mismatch" };
+        }
+
+        const [placeholder] = await db
+          .select({ delegation: chatMessages.delegation })
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.id, request.messageId),
+              eq(chatMessages.threadId, params.threadId),
+              eq(chatMessages.userId, user.id),
+              isNotNull(chatMessages.delegation),
+            ),
+          )
+          .limit(1);
+        const delegation = placeholder?.delegation;
+        if (!delegation) {
+          set.status = 404;
+          return { error: "delegation placeholder not found" };
+        }
+        if (delegation.task !== request.task) {
+          set.status = 409;
+          return { error: "delegation task mismatch" };
+        }
+        if (
+          delegation.repoFullName &&
+          delegation.repoFullName.toLowerCase() !== repoFullName.toLowerCase()
+        ) {
+          set.status = 409;
+          return { error: "delegation repo mismatch" };
+        }
+
+        const [visibleRepo] = await db
+          .select({ id: repos.id })
+          .from(userRepos)
+          .innerJoin(repos, eq(repos.id, userRepos.repoId))
+          .where(and(eq(userRepos.userId, user.id), eq(repos.fullName, repoFullName)))
+          .limit(1);
+        if (!visibleRepo || visibleRepo.id !== request.snapshot.repo.repoId) {
+          set.status = 403;
+          return { error: "repo not visible" };
+        }
+
         try {
-          const updated = await db
+          const result = await answerDelegatedWork({
+            redis,
+            userId: user.id,
+            request: { ...request, repoFullName },
+          });
+          await db
             .update(chatMessages)
-            // Clear `delegation` so the row stops being eligible for
-            // re-finalization (the WHERE below uses isNotNull as a guard).
-            // Also distinguishes completed runs from pending ones in queries.
-            .set({ answer: trimmed, delegation: null })
+            .set({ answer: result.text, delegation: null })
             .where(
               and(
-                eq(chatMessages.id, body.messageId),
+                eq(chatMessages.id, request.messageId),
                 eq(chatMessages.threadId, params.threadId),
                 eq(chatMessages.userId, user.id),
-                // Only finalize delegation placeholders. Defense against a
-                // bug or crafted request from overwriting a non-delegated
-                // chat turn's answer.
                 isNotNull(chatMessages.delegation),
               ),
-            )
-            .returning({ id: chatMessages.id });
-          if (updated.length === 0) {
-            // Either the placeholder doesn't exist, the threadId doesn't
-            // match, or the row belongs to another user. All three look the
-            // same to the caller — don't disclose which.
-            set.status = 404;
-            return { error: "delegation placeholder not found" };
-          }
-          return { ok: true };
+            );
+          return result;
         } catch (err) {
-          console.error("[chat] /finalize failed:", err);
+          if (err instanceof LlmBudgetExceededError) {
+            set.status = 429;
+            return {
+              error: err.code,
+              message: `You've used your daily LLM allowance ($${err.spentUsd.toFixed(2)} of $${err.capUsd.toFixed(2)}). It resets at the next UTC day.`,
+              spentUsd: err.spentUsd,
+              capUsd: err.capUsd,
+            };
+          }
+          console.error("[chat] /delegated-work failed:", err);
           set.status = 500;
-          return { error: "finalize request failed" };
+          return { error: "delegated work request failed" };
         }
       },
       {
@@ -164,7 +216,44 @@ export const chatRoutes = (db: Database, redis: RedisBridge) =>
         }),
         body: t.Object({
           messageId: t.String({ pattern: UUID_PATTERN }),
-          answer: t.String(),
+          task: t.String({ maxLength: MAX_DELEGATED_TASK_CHARS }),
+          repoFullName: t.String({ maxLength: MAX_REPO_FULL_NAME_CHARS }),
+          snapshot: t.Object({
+            repo: t.Object({
+              repoId: t.Number(),
+              fullName: t.String({ maxLength: MAX_REPO_FULL_NAME_CHARS }),
+            }),
+            collectedAt: t.String({ maxLength: 64 }),
+            branch: t.Union([t.String({ maxLength: 256 }), t.Null()]),
+            headSha: t.Union([t.String({ maxLength: 64 }), t.Null()]),
+            statusShort: t.Array(t.String({ maxLength: MAX_SNAPSHOT_LINE_CHARS }), {
+              maxItems: 80,
+            }),
+            changedFiles: t.Array(t.String({ maxLength: MAX_SNAPSHOT_LINE_CHARS }), {
+              maxItems: 200,
+            }),
+            diffStat: t.Union([t.String({ maxLength: MAX_SNAPSHOT_DIFF_CHARS }), t.Null()]),
+            recentCommits: t.Array(t.String({ maxLength: MAX_SNAPSHOT_LINE_CHARS }), {
+              maxItems: 30,
+            }),
+            relatedPrs: t.Array(
+              t.Object({
+                number: t.Number(),
+                title: t.String({ maxLength: 500 }),
+                url: t.String({ maxLength: 1000 }),
+                state: t.Union([t.Literal("open"), t.Literal("closed"), t.Literal("merged")]),
+                headRef: t.Union([t.String({ maxLength: 256 }), t.Null()]),
+                baseRef: t.Union([t.String({ maxLength: 256 }), t.Null()]),
+                authorLogin: t.Union([t.String({ maxLength: 256 }), t.Null()]),
+                updatedAt: t.Union([t.String({ maxLength: 64 }), t.Null()]),
+              }),
+              { maxItems: 20 },
+            ),
+            ghStatus: t.Union([t.Literal("ready"), t.Literal("missing"), t.Literal("unauthed")]),
+            collectionErrors: t.Optional(
+              t.Array(t.String({ maxLength: MAX_SNAPSHOT_LINE_CHARS }), { maxItems: 20 }),
+            ),
+          }),
         }),
       },
     )

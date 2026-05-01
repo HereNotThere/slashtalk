@@ -10,9 +10,12 @@
 // Window is always now − 24h. Cache key is `${callerId}:${targetId}` —
 // per-caller-per-target so a peer's view never inherits PR titles from
 // repos they can't see (the visible-repo set differs across callers, and
-// the composed blurb bakes that filter in).
+// the composed blurb bakes that filter in). Cache values also carry an input
+// fingerprint, so changed PR/session rows bypass the cached blurb without
+// creating unbounded per-fingerprint entries.
 
 import { Elysia, t } from "elysia";
+import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
@@ -23,7 +26,7 @@ import { MODELS } from "../models";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
-import { loadInsightsForSessions } from "../sessions/snapshot";
+import { loadInsightsForSessions, type SessionInsightsForSnapshot } from "../sessions/snapshot";
 import {
   shortRepoName,
   type StandupResponse,
@@ -44,6 +47,11 @@ interface RollingSummaryShape {
 
 interface StandupOutput {
   summary: string;
+}
+
+interface StandupCacheEntry {
+  fingerprint: string;
+  response: StandupResponse;
 }
 
 const STANDUP_SCHEMA = {
@@ -105,7 +113,8 @@ interface DashboardDeps {
   redis: RedisBridge;
 }
 
-const standupCache = new TtlCache<string, StandupResponse>(STANDUP_CACHE_TTL_MS);
+const standupCache = new TtlCache<string, StandupCacheEntry>(STANDUP_CACHE_TTL_MS);
+const standupInFlight = new Map<string, Promise<StandupResponse>>();
 
 /** Drop the user's *self-view* standup cache entry. Called after the desktop
  *  pushes new self-PRs so the next hover composes a fresh blurb instead of
@@ -255,23 +264,41 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
           return { summary: null, noClaimedRepos: true };
         }
 
-        const hit = standupCache.get(key);
-        if (hit) return hit;
-
         try {
-          const body = await composeStandup({
+          const input = await loadStandupInput({
             db,
-            redis: deps.redis,
-            caller: { id: user.id },
             target: resolved,
             since: windowStart(),
           });
-          // A null standup is a transient-prone read: self PR ingest and
-          // session repo attribution can land milliseconds after the first
-          // cold request. Rechecking an empty window is cheap because
-          // composeStandup returns before the LLM call when no rows qualify.
-          if (body.summary !== null) standupCache.set(key, body);
-          return body;
+          if (!standupInputHasRows(input)) {
+            // A null standup is a transient-prone read: self PR ingest and
+            // session repo attribution can land milliseconds after the first
+            // cold request. Rechecking an empty window is cheap because this
+            // path returns before the LLM call when no rows qualify.
+            return { summary: null };
+          }
+
+          const fingerprint = standupInputFingerprint(input);
+          const hit = standupCache.get(key);
+          if (hit?.fingerprint === fingerprint) return hit.response;
+
+          const inFlightKey = `${key}:${fingerprint}`;
+          const existing = standupInFlight.get(inFlightKey);
+          if (existing) return await existing;
+
+          const promise = composeStandup({
+            redis: deps.redis,
+            caller: { id: user.id },
+            input,
+          });
+          standupInFlight.set(inFlightKey, promise);
+          try {
+            const body = await promise;
+            standupCache.set(key, { fingerprint, response: body });
+            return body;
+          } finally {
+            if (standupInFlight.get(inFlightKey) === promise) standupInFlight.delete(inFlightKey);
+          }
         } catch (err) {
           if (err instanceof LlmBudgetExceededError) {
             set.status = 429;
@@ -287,16 +314,37 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
       },
     );
 
-interface ComposeArgs {
+interface StandupPrRow {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  updatedAt: Date | null;
+  repoFullName: string;
+}
+
+interface StandupSessionRow {
+  sessionId: string;
+  title: string | null;
+  repoFullName: string;
+  lastTs: Date | null;
+}
+
+interface StandupInput {
+  sinceIso: string;
+  prs: StandupPrRow[];
+  sessions: StandupSessionRow[];
+  insightsBySessionId: Map<string, SessionInsightsForSnapshot>;
+}
+
+interface LoadStandupInputArgs {
   db: Database;
-  redis: RedisBridge;
-  caller: { id: number };
   target: ResolvedTarget;
   since: Date;
 }
 
-async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
-  const { db, redis, caller, target, since } = args;
+async function loadStandupInput(args: LoadStandupInputArgs): Promise<StandupInput> {
+  const { db, target, since } = args;
   const sinceIso = since.toISOString();
 
   // PRs and sessions are independent — fetch in parallel. The session-insights
@@ -305,7 +353,7 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
   // not the path-slug `sessions.project` (which encodes the dev's local cwd
   // and would otherwise leak filesystem layout into the standup blurb — e.g.
   // "desktop work" because the session's cwd was apps/desktop).
-  const [prRows, sessionRows] = await Promise.all([
+  const [prs, sessionRows] = await Promise.all([
     db
       .select({
         number: pullRequests.number,
@@ -349,33 +397,27 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
       .limit(MAX_SESSIONS_IN_STANDUP),
   ]);
 
-  // Bail without LLM call when there's nothing to summarize. Saves budget
-  // and gives the renderer a clean "hide the section" signal.
-  if (prRows.length === 0 && sessionRows.length === 0) {
-    return { summary: null };
-  }
-
   const insightsBySessionId = await loadInsightsForSessions(
     db,
     sessionRows.map((s) => s.sessionId),
   );
+  return { sinceIso, prs, sessions: sessionRows, insightsBySessionId };
+}
 
-  const prompt = buildStandupPrompt({
-    prs: prRows.map((r) => ({
-      number: r.number,
-      title: r.title,
-      url: r.url,
-      state: r.state,
-      repoFullName: r.repoFullName,
-      updatedAt: r.updatedAt?.toISOString() ?? sinceIso,
-    })),
-    sessions: sessionRows.map((s) => ({
-      title: s.title,
-      repoFullName: s.repoFullName,
-      lastTs: s.lastTs?.toISOString() ?? sinceIso,
-      summary: insightsBySessionId.get(s.sessionId)?.rollingSummary ?? null,
-    })),
-  });
+function standupInputHasRows(input: StandupInput): boolean {
+  return input.prs.length > 0 || input.sessions.length > 0;
+}
+
+interface ComposeArgs {
+  redis: RedisBridge;
+  caller: { id: number };
+  input: StandupInput;
+}
+
+async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
+  const { redis, caller, input } = args;
+  const promptArgs = standupPromptArgs(input);
+  const prompt = buildStandupPrompt(promptArgs);
 
   // Budget the LLM spend against the *caller* (the viewer pays for what they
   // open), not the target. This matches /api/chat/ask's posture and prevents
@@ -391,9 +433,82 @@ async function composeStandup(args: ComposeArgs): Promise<StandupResponse> {
     budget: { redis, userId: caller.id },
   });
 
-  const summary = result.output.summary?.trim() || null;
-  return { summary };
+  const summary =
+    typeof result.output.summary === "string" ? result.output.summary.trim() || null : null;
+  return { summary: summary ?? fallbackStandup(promptArgs) };
 }
+
+function standupPromptArgs(input: StandupInput): StandupPromptArgs {
+  return {
+    prs: input.prs.map((r) => ({
+      number: r.number,
+      title: r.title,
+      url: r.url,
+      state: r.state,
+      repoFullName: r.repoFullName,
+      updatedAt: r.updatedAt?.toISOString() ?? input.sinceIso,
+    })),
+    sessions: input.sessions.map((s) => ({
+      title: s.title,
+      repoFullName: s.repoFullName,
+      lastTs: s.lastTs?.toISOString() ?? input.sinceIso,
+      summary: input.insightsBySessionId.get(s.sessionId)?.rollingSummary ?? null,
+    })),
+  };
+}
+
+function standupInputFingerprint(input: StandupInput): string {
+  const value = {
+    prs: input.prs.map((p) => ({
+      number: p.number,
+      title: p.title,
+      url: p.url,
+      state: p.state,
+      updatedAt: p.updatedAt?.toISOString() ?? null,
+      repoFullName: p.repoFullName,
+    })),
+    sessions: input.sessions.map((s) => {
+      const insight = input.insightsBySessionId.get(s.sessionId)?.rollingSummary ?? null;
+      return {
+        sessionId: s.sessionId,
+        title: s.title,
+        repoFullName: s.repoFullName,
+        lastTs: s.lastTs?.toISOString() ?? null,
+        summary: typeof insight?.summary === "string" ? insight.summary : null,
+        highlights: stringList(insight?.highlights),
+      };
+    }),
+  };
+  return createHash("sha256").update(JSON.stringify(value)).digest("base64url");
+}
+
+function fallbackStandup(args: StandupPromptArgs): string {
+  if (args.prs.length > 0) {
+    const bullets = args.prs.slice(0, 5).map((p) => {
+      const title = truncate(p.title, 80);
+      return `- ${title} [#${p.number}](${p.url})`;
+    });
+    return ["Recent shipped work is ready to review.", ...bullets].join("\n");
+  }
+  const session = args.sessions[0];
+  if (session) {
+    const repo = shortRepoName(session.repoFullName);
+    const title = session.title ? truncate(session.title, 80) : "Recent session activity";
+    return `${repo} work is still being summarized.\n\n- ${title}`;
+  }
+  return "Quiet window — no shipped PRs.";
+}
+
+export function __resetStandupCachesForTest(): void {
+  standupCache.clear();
+  standupInFlight.clear();
+}
+
+export const __standupTest = {
+  fallbackStandup,
+  standupInputFingerprint,
+  standupPromptArgs,
+};
 
 interface StandupPromptArgs {
   prs: Array<{

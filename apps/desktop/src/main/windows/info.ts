@@ -567,15 +567,15 @@ async function fetchDashboardForLogin(
   login: string,
   opts: { force?: boolean } = {},
 ): Promise<InfoDashboardData> {
-  // `force` bypasses BOTH the cache and the in-flight dedupe so callers that
-  // intentionally invalidated state (showInfo, refreshNow) don't get served
-  // a result from a fetch started before the invalidation.
+  // `force` bypasses the cache, but still joins an active same-login fetch.
+  // Launch/WS/hover paths can all request a forced refresh at once; single-
+  // flight keeps those bursts from spawning multiple standup LLM calls.
   if (!opts.force) {
     const cached = dashboardCache.get(login);
     if (cached) return cached;
-    const inFlight = dashboardInFlight.get(login);
-    if (inFlight) return inFlight;
   }
+  const inFlight = dashboardInFlight.get(login);
+  if (inFlight) return inFlight;
 
   // Build the result without writing cache or in-flight tracking inside the
   // IIFE — the caller-visible promise resolves with the data; mutation of

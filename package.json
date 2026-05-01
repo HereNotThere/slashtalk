@@ -17,7 +17,7 @@
     "format:check": "prettier --check .",
     "prepare": "husky",
     "changeset": "changeset",
-    "version": "changeset version",
+    "version": "changeset version && bun install",
     "tag": "changeset tag"
   },
   "devDependencies": {

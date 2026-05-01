@@ -56,6 +56,12 @@ export function registerChatDelegateIpc(
           // user-facing answer (already in `result.text`, returned below).
           console.error("[chat-delegate] finalize failed:", err);
         }
+      } else if (result.errorMessage) {
+        // No answer + a captured SDK error → surface the real reason instead
+        // of falling through to the renderer's generic "empty answer" string.
+        // Most often this is a spawn/PATH/auth failure visible only in the
+        // installed .app (Finder-launched env doesn't inherit the shell).
+        return { kind: "error", message: result.errorMessage };
       }
 
       return {

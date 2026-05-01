@@ -798,7 +798,7 @@ describe("chat history: loadChatHistory", () => {
     expect(oldT.cards.map((c) => c.id)).toEqual([BOB_SESSION]);
   });
 
-  it("drops citation cards to sessions the viewer can't see, keeps the citation token", async () => {
+  it("drops citations to sessions the viewer can't see", async () => {
     await db.delete(chatMessages);
     const tid = "c0000000-0000-0000-0000-000000000b01";
     await db.insert(chatMessages).values({
@@ -816,11 +816,7 @@ describe("chat history: loadChatHistory", () => {
       asker: ALICE_ASKER,
     });
     expect(threads).toHaveLength(1);
-    // Citation array preserved verbatim — caller decides whether to redact.
-    expect(threads[0].turns[0].citations).toEqual([
-      { sessionId: OUTSIDER_SESSION, reason: "cited in answer" },
-    ]);
-    // But cards filtered by viewer's user_repos.
+    expect(threads[0].turns[0].citations).toEqual([]);
     expect(threads[0].cards).toEqual([]);
   });
 

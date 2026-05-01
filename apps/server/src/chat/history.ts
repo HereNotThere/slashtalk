@@ -23,9 +23,8 @@ export interface LoadHistoryParams {
 }
 
 /** Load the most recent threads authored by `authorId`, hydrating SessionCards
- *  using the viewer's repo visibility. Citations are returned verbatim on each
- *  turn — callers that want to drop citations to repos the viewer can't see
- *  should filter them after this returns. */
+ *  using the viewer's repo visibility. Turn citations are filtered to the same
+ *  visible session ids as the cards so hidden session ids do not leak. */
 export async function loadChatHistory(
   db: Database,
   params: LoadHistoryParams,
@@ -94,12 +93,17 @@ export async function loadChatHistory(
       })
       .map((id) => cardById.get(id))
       .filter((c): c is NonNullable<typeof c> => c !== undefined);
+    const visibleCitationIds = new Set(cards.map((c) => c.id));
+    const visibleTurns = turns.map((turn) => ({
+      ...turn,
+      citations: turn.citations.filter((citation) => visibleCitationIds.has(citation.sessionId)),
+    }));
 
     out.push({
       threadId: header.threadId,
       asker: params.asker,
       title: firstPrompt,
-      turns,
+      turns: visibleTurns,
       cards,
       createdAt: new Date(header.firstTs).toISOString(),
       updatedAt: new Date(header.lastTs).toISOString(),

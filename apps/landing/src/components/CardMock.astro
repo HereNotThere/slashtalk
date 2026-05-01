@@ -8,6 +8,10 @@
 //   - PrIcon (GitHub branch glyph) for the PR rows, tinted by state per
 //     PR_STATE_COLOR (open=emerald, merged=blue, closed=red)
 
+// Avatar is bundled locally (vs fetched from avatars.githubusercontent.com)
+// so the page renders deterministically without a third-party request.
+import avatar from "../assets/avatar-557990.jpg";
+
 interface PrRow {
 	title: string;
 	number: number;
@@ -33,7 +37,9 @@ const stateColor: Record<PrRow["state"], string> = {
 >
 	<div class="flex items-start gap-3 px-4 pt-4 pb-3">
 		<img
-			src="https://avatars.githubusercontent.com/u/557990?s=120&v=4"
+			src={avatar.src}
+			width={avatar.width}
+			height={avatar.height}
 			alt=""
 			class="size-10 shrink-0 rounded-full object-cover ring-1 ring-black/5"
 		/>

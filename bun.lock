@@ -15,8 +15,9 @@
       "name": "@slashtalk/blog",
       "version": "0.0.1",
       "dependencies": {
-        "@tailwindcss/vite": "^4.2.4",
+        "@tailwindcss/postcss": "^4.2.4",
         "astro": "^6.2.1",
+        "postcss": "^8.4.49",
         "tailwindcss": "^4.2.4",
       },
     },
@@ -66,8 +67,9 @@
       "name": "@slashtalk/landing",
       "version": "0.0.1",
       "dependencies": {
-        "@tailwindcss/vite": "^4.2.4",
+        "@tailwindcss/postcss": "^4.2.4",
         "astro": "^6.2.1",
+        "postcss": "^8.4.49",
         "tailwindcss": "^4.2.4",
       },
     },
@@ -130,6 +132,8 @@
   ],
   "packages": {
     "7zip-bin": ["7zip-bin@5.2.0", "", {}, "sha512-ukTPVhqG4jNzMro2qA9HSCSSVJN3aN7tlb+hfqYCt3ER0yWroeA2VR38MNrOHLQ/cVj+DaIMad0kFCtWWowh/A=="],
+
+    "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
 
     "@anthropic-ai/claude-agent-sdk": ["@anthropic-ai/claude-agent-sdk@0.2.118", "", { "dependencies": { "@anthropic-ai/sdk": "^0.81.0", "@modelcontextprotocol/sdk": "^1.29.0" }, "optionalDependencies": { "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.2.118", "@anthropic-ai/claude-agent-sdk-darwin-x64": "0.2.118", "@anthropic-ai/claude-agent-sdk-linux-arm64": "0.2.118", "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "0.2.118", "@anthropic-ai/claude-agent-sdk-linux-x64": "0.2.118", "@anthropic-ai/claude-agent-sdk-linux-x64-musl": "0.2.118", "@anthropic-ai/claude-agent-sdk-win32-arm64": "0.2.118", "@anthropic-ai/claude-agent-sdk-win32-x64": "0.2.118" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-OfxCTzmfqvctpTLd3CP+UrpC0JdhYcJp12rD+SK29k+9+hrbblCrLobvhdWpTuYFejTPJuiLVsbHxq0BkEuELQ=="],
 
@@ -568,6 +572,8 @@
     "@tailwindcss/oxide-win32-arm64-msvc": ["@tailwindcss/oxide-win32-arm64-msvc@4.2.4", "", { "os": "win32", "cpu": "arm64" }, "sha512-L9BXqxC4ToVgwMFqj3pmZRqyHEztulpUJzCxUtLjobMCzTPsGt1Fa9enKbOpY2iIyVtaHNeNvAK8ERP/64sqGQ=="],
 
     "@tailwindcss/oxide-win32-x64-msvc": ["@tailwindcss/oxide-win32-x64-msvc@4.2.4", "", { "os": "win32", "cpu": "x64" }, "sha512-ESlKG0EpVJQwRjXDDa9rLvhEAh0mhP1sF7sap9dNZT0yyl9SAG6T7gdP09EH0vIv0UNTlo6jPWyujD6559fZvw=="],
+
+    "@tailwindcss/postcss": ["@tailwindcss/postcss@4.2.4", "", { "dependencies": { "@alloc/quick-lru": "^5.2.0", "@tailwindcss/node": "4.2.4", "@tailwindcss/oxide": "4.2.4", "postcss": "^8.5.6", "tailwindcss": "4.2.4" } }, "sha512-wgAVj6nUWAolAu8YFvzT2cTBIElWHkjZwFYovF+xsqKsW2ADxM/X2opxj5NsF/qVccAOjRNe8X2IdPzMsWyHTg=="],
 
     "@tailwindcss/vite": ["@tailwindcss/vite@4.2.4", "", { "dependencies": { "@tailwindcss/node": "4.2.4", "@tailwindcss/oxide": "4.2.4", "tailwindcss": "4.2.4" }, "peerDependencies": { "vite": "^5.2.0 || ^6 || ^7 || ^8" } }, "sha512-pCvohwOCspk3ZFn6eJzrrX3g4n2JY73H6MmYC87XfGPyTty4YsCjYTMArRZm/zOI8dIt3+EcrLHAFPe5A4bgtw=="],
 

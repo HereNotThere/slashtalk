@@ -1,8 +1,16 @@
 ---
 // Static replica of the Ask response window — shortened for the homepage.
+// Bundled avatar (vs github.com URL) keeps rendering deterministic and
+// avoids a third-party request from a marketing page.
+import avatar from "../assets/avatar-557990.jpg";
 ---
 
+<!-- inert: this is a visual mock, none of the buttons or the input do
+     anything. Marking the subtree inert keeps the fake controls out of
+     keyboard tab order and the accessibility tree. -->
 <div
+	inert
+	aria-hidden="true"
 	class="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_30px_60px_-30px_rgba(0,0,0,0.3)]"
 >
 	<div
@@ -56,7 +64,9 @@
 				class="flex w-full items-center gap-3 rounded-xl bg-neutral-50 px-3 py-2.5 text-left transition hover:bg-neutral-100"
 			>
 				<img
-					src="https://avatars.githubusercontent.com/u/557990?s=80&v=4"
+					src={avatar.src}
+					width={avatar.width}
+					height={avatar.height}
 					alt=""
 					class="size-8 shrink-0 rounded-full object-cover"
 				/>

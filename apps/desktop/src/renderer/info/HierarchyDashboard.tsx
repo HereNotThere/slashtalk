@@ -83,6 +83,7 @@ export function HierarchyDashboard({
           loading={dashboard === null || dashboardFetching}
           subjectLabel={subjectLabel}
           prs={dashboard?.prs ?? []}
+          hasActivity={(sessions?.length ?? 0) > 0 || (dashboard?.prs.length ?? 0) > 0}
         />
         <Divider />
         <PrsSection prs={dashboard?.prs ?? null} ghStatus={dashboard?.ghStatus ?? null} />
@@ -266,11 +267,13 @@ function PastDaySection({
   loading,
   subjectLabel,
   prs,
+  hasActivity,
 }: {
   summary: string | null;
   loading: boolean;
   subjectLabel: string;
   prs: UserPr[];
+  hasActivity: boolean;
 }): JSX.Element {
   const [editing, setEditing] = useState(false);
   return (
@@ -294,6 +297,8 @@ function PastDaySection({
               <span className="text-subtle">
                 <ShimmerText text="Fetching…" />
               </span>
+            ) : hasActivity ? (
+              <span className="text-subtle">Working…</span>
             ) : (
               <span className="text-subtle">Nothing shipped in the past 24h.</span>
             )}

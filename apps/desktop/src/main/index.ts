@@ -72,6 +72,12 @@ import { registerDebug, registerDebugShortcuts } from "./ipc/debug";
 import { registerShellIpc } from "./ipc/shell";
 import { registerChatDelegateIpc } from "./ipc/chatDelegate";
 import { configureUpdater, startUpdateChecks, stopUpdateChecks } from "./updater";
+import { fixPath } from "./fixPath";
+
+// macOS launches via Finder/Dock inherit a stripped PATH that excludes
+// Homebrew bins, so `gh`/`claude` ENOENT before the user ever opens a
+// terminal. Run before any IPC handler can trigger a CLI probe.
+fixPath();
 
 // uncaughtException leaves the process in undefined state — exit so Electron
 // surfaces a crash dialog and the user gets a clean restart. A stray

@@ -33,6 +33,12 @@ jobs:
         with:
           version: bun run version
           publish: bun run tag
+          # Don't auto-create empty GitHub Releases here — the build-mac job
+          # creates the release atomically with assets via
+          # softprops/action-gh-release. If we let changesets create the
+          # release first, a dist:mac failure leaves an empty release that
+          # breaks electron-updater (no latest-mac.yml under the latest tag).
+          createGithubReleases: false
           commit: "chore: version packages"
           title: "chore: version packages"
         env:

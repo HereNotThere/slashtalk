@@ -131,6 +131,11 @@ export interface RunDelegatedChatInput {
 export interface RunDelegatedChatResult {
   text: string;
   hadError: boolean;
+  /** Real reason a run failed (non-success `result` event from the SDK or a
+   *  thrown error). Captured so the IPC handler can surface it instead of the
+   *  generic "empty answer" message — most often this is a spawn/auth/PATH
+   *  issue when the bundled .app launches without the user's shell env. */
+  errorMessage: string | null;
   /** False when `gh auth status` failed at run start. The renderer surfaces
    *  this as a footer note so users know PR/CI answers are from local git
    *  only and may lag the remote. */
@@ -159,6 +164,7 @@ export async function runDelegatedChat(
 
   let finalText = "";
   let hadError = false;
+  let errorMessage: string | null = null;
 
   onEvent({ kind: "phase", label: "Investigating…" });
 
@@ -177,14 +183,19 @@ export async function runDelegatedChat(
         if (turnText) finalText = turnText;
       } else if (msg.type === "result" && msg.subtype !== "success") {
         hadError = true;
+        const detail = msg.errors?.join("\n") || `Agent run failed (${msg.subtype}).`;
+        errorMessage = detail;
+        console.error("[chat-delegate] SDK result error:", detail);
       }
       for (const e of normalizeSdkMessage(msg)) onEvent(e);
     }
   } catch (err) {
     hadError = true;
     const message = err instanceof Error ? err.message : String(err);
+    errorMessage = message;
+    console.error("[chat-delegate] SDK threw:", err);
     onEvent({ kind: "error", message });
   }
 
-  return { text: finalText.trim(), hadError, ghAvailable };
+  return { text: finalText.trim(), hadError, errorMessage, ghAvailable };
 }

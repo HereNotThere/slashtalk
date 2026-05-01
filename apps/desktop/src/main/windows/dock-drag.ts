@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, screen } from "electron";
 import type { DockConfig, DockOrientation } from "../../shared/types";
 import { OVERLAY_WIDTH, computeDockBoundsOn, dockFromPoint, overlaySize } from "./dock-geometry";
 import { animateOverlayTo, cancelOverlayAnimation } from "./overlay-animation";
+import { hardenWindow, rendererWebPreferences } from "./lib";
 
 interface DockDragDeps {
   getOverlay: () => BrowserWindow | null;
@@ -88,10 +89,9 @@ function ensureDockPlaceholder(): BrowserWindow {
     hasShadow: false,
     show: false,
     backgroundColor: "#00000000",
-    webPreferences: {
-      contextIsolation: true,
-    },
+    webPreferences: rendererWebPreferences(),
   });
+  hardenWindow(dockPlaceholderWindow);
   dockPlaceholderWindow.setAlwaysOnTop(true, "floating");
   dockPlaceholderWindow.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,

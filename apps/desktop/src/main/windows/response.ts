@@ -1,6 +1,6 @@
 import { BrowserWindow, nativeTheme } from "electron";
 import type { ResponseOpenPayload } from "../../shared/types";
-import { loadRenderer, preloadPath } from "./lib";
+import { loadRenderer, preloadPath, rendererWebPreferences } from "./lib";
 
 let responseWindow: BrowserWindow | null = null;
 let onClose: (() => void) | null = null;
@@ -37,10 +37,9 @@ function ensureResponseWindow(): BrowserWindow {
     backgroundColor: responseBackgroundColor(),
     alwaysOnTop: true,
     show: false,
-    webPreferences: {
+    webPreferences: rendererWebPreferences({
       preload: preloadPath,
-      contextIsolation: true,
-    },
+    }),
   });
 
   responseWindow.setAlwaysOnTop(true, "floating");

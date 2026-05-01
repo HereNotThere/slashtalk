@@ -1,6 +1,6 @@
 import { BrowserWindow, Tray, nativeImage, screen } from "electron";
 import path from "node:path";
-import { loadRenderer, preloadPath } from "./lib";
+import { loadRenderer, preloadPath, rendererWebPreferences } from "./lib";
 
 const TRAY_POPUP_WIDTH = 320;
 // Start tall enough to fit the signed-in popup with all toggles before the
@@ -34,10 +34,9 @@ function ensureTrayPopup(): BrowserWindow {
     hasShadow: true,
     vibrancy: "popover",
     visualEffectState: "active",
-    webPreferences: {
+    webPreferences: rendererWebPreferences({
       preload: preloadPath,
-      contextIsolation: true,
-    },
+    }),
   });
 
   trayPopup.setAlwaysOnTop(true, "pop-up-menu");

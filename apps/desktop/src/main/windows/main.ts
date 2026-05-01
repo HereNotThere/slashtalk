@@ -1,5 +1,5 @@
 import { BrowserWindow } from "electron";
-import { appState, loadRenderer, preloadPath } from "./lib";
+import { appState, loadRenderer, preloadPath, rendererWebPreferences } from "./lib";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -13,10 +13,9 @@ function createMainWindow(): BrowserWindow {
     height: 640,
     title: "Settings",
     alwaysOnTop: true,
-    webPreferences: {
+    webPreferences: rendererWebPreferences({
       preload: preloadPath,
-      contextIsolation: true,
-    },
+    }),
   });
   // Match the response window's level so focus determines z-order between
   // the two — without this, the response window's `floating` level always

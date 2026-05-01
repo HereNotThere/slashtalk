@@ -10,9 +10,8 @@
 // on subsequent sends. Conversation transcripts are persisted in
 // localTranscripts since there's no server-side event log.
 //
-// Permission model: 'bypassPermissions' for the MVP — no approval UX yet.
-// A future pass should use the canUseTool callback to route through a
-// renderer-side approval dialog.
+// Permission model: use the SDK/default boundary. Delegated/read-only chat adds
+// a stricter allowlist in chatDelegate.ts.
 
 import { query, type Options, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import * as crypto from "node:crypto";
@@ -138,8 +137,7 @@ export async function sendMessage(
     cwd,
     model: agent.model,
     systemPrompt: agent.systemPrompt,
-    permissionMode: "bypassPermissions" as PermissionMode,
-    allowDangerouslySkipPermissions: true,
+    permissionMode: "default" as PermissionMode,
     // Load the user's ~/.claude/settings.json so local agents inherit the same
     // MCP servers (and hooks) the terminal `claude` uses. Project/local scopes
     // are intentionally omitted: 'project' would pull CLAUDE.md and behave

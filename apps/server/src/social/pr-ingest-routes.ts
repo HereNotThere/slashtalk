@@ -14,14 +14,14 @@
 // branch and gh search returned a stale one.
 
 import { Elysia, t } from "elysia";
-import { inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type {
   IngestSelfPrEntry,
   IngestSelfPrsRequest,
   IngestSelfPrsResponse,
 } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { repos, pullRequests } from "../db/schema";
+import { repos, pullRequests, userRepos } from "../db/schema";
 import { apiKeyAuth } from "../auth/middleware";
 import { invalidateSelfStandupCache } from "../user/dashboard";
 
@@ -45,7 +45,13 @@ export const prIngestRoutes = (db: Database) =>
       const repoRows = await db
         .select({ id: repos.id, fullName: repos.fullName })
         .from(repos)
-        .where(inArray(sql<string>`lower(${repos.fullName})`, wanted));
+        .innerJoin(userRepos, eq(userRepos.repoId, repos.id))
+        .where(
+          and(
+            eq(userRepos.userId, user.id),
+            inArray(sql<string>`lower(${repos.fullName})`, wanted),
+          ),
+        );
       const repoIdByName = new Map<string, number>();
       for (const r of repoRows) repoIdByName.set(r.fullName.toLowerCase(), r.id);
 

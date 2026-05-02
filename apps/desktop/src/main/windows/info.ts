@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
 import type { ChatHead, GhStatus, InfoDashboardData, InfoSession } from "../../shared/types";
 import type { ProjectOverviewResponse, StandupResponse, UserPr } from "@slashtalk/shared";
 import * as backend from "../backend";
@@ -76,6 +76,14 @@ let infoHideGraceTimer: NodeJS.Timeout | null = null;
 // Pending `win.hide()` after the renderer has faded out. Cancelled if we
 // re-show before the fade completes.
 let infoHideFadeTimer: NodeJS.Timeout | null = null;
+
+// True when the current view was opened by a click (e.g. an avatar in the
+// project card's Active strip) instead of a hover. Pinned popovers ignore
+// `info:hoverLeave` so they don't auto-dismiss while the cursor sits outside
+// their just-repositioned bounds. The pin "graduates" to hover-managed the
+// first time the cursor enters the window — see `info:hoverEnter` below.
+// ESC and clicking another of our windows still dismiss while pinned.
+let infoPinned = false;
 
 let selectedHeadId: string | null = null;
 // Stashed bubble screen-coords for the selected head. positionInfo's
@@ -341,6 +349,7 @@ async function showInfo(
   bubbleScreen?: { x: number; y: number },
   expandSessionId?: string,
   headOverride?: ChatHead,
+  pinned: boolean = false,
 ): Promise<void> {
   if (getIsDragging()) return;
   // Project heads are synthetic — they don't live in `getHeads()`. Callers
@@ -361,6 +370,9 @@ async function showInfo(
   const win = ensureInfoWindow();
   selectedHeadId = head.id;
   selectedBubbleScreen = bubbleScreen ?? null;
+  // Reassign on every show so a hover-driven re-show after a click-driven
+  // pin demotes back to hover-managed (and vice versa).
+  infoPinned = pinned;
 
   if (win.webContents.isLoading()) {
     await new Promise<void>((resolve) => {
@@ -433,6 +445,14 @@ async function showProjectInfo(
   return showInfo(head.id, bubbleScreen, undefined, head);
 }
 
+/** ESC and click-outside paths force-hide regardless of pin state. Reset the
+ *  pin so the *next* showInfo (which may be a hover) starts clean rather than
+ *  inheriting a stale `true` from a prior click that was just dismissed. */
+function forceHide(): void {
+  infoPinned = false;
+  hideNow();
+}
+
 function scheduleHideInfo(): void {
   if (!infoWindow || infoWindow.isDestroyed()) return;
   if (infoHideGraceTimer) clearTimeout(infoHideGraceTimer);
@@ -456,6 +476,7 @@ function cancelHideInfo(): void {
 export function hideNow(): void {
   selectedHeadId = null;
   selectedBubbleScreen = null;
+  infoPinned = false;
   broadcast("info:state", { visible: false, headId: null }, deps.getOverlay());
   if (infoWindow && !infoWindow.isDestroyed()) {
     infoWindow.webContents.send("info:hide");
@@ -778,9 +799,11 @@ export function registerInfo(d: InfoDeps): void {
       headId: string,
       bubbleScreen?: { x: number; y: number },
       fallbackAvatarUrl?: string,
+      openedByClick?: boolean,
     ): void => {
+      const pinned = openedByClick === true;
       if (d.getHeads().some((h) => h.id === headId)) {
-        void showInfo(headId, bubbleScreen);
+        void showInfo(headId, bubbleScreen, undefined, undefined, pinned);
         return;
       }
       // Not on the rail: synthesize when the headId is a well-formed user
@@ -789,7 +812,13 @@ export function registerInfo(d: InfoDeps): void {
       // from the calling card so the synthetic head paints correctly.
       const login = rail.parseUserHeadId(headId);
       if (!login) return;
-      void showInfo(headId, bubbleScreen, undefined, rail.synthUserHead(login, fallbackAvatarUrl));
+      void showInfo(
+        headId,
+        bubbleScreen,
+        undefined,
+        rail.synthUserHead(login, fallbackAvatarUrl),
+        pinned,
+      );
     },
   );
 
@@ -801,9 +830,32 @@ export function registerInfo(d: InfoDeps): void {
     },
   );
 
-  ipcMain.handle("info:hide", (): void => scheduleHideInfo());
-  ipcMain.handle("info:hoverEnter", (): void => cancelHideInfo());
-  ipcMain.handle("info:hoverLeave", (): void => scheduleHideInfo());
+  // ESC (renderer keydown) routes here. Always dismisses, even when pinned.
+  ipcMain.handle("info:hide", (): void => forceHide());
+  // Cursor entered the info window — graduate any pin to hover-managed so the
+  // next hoverLeave dismisses normally.
+  ipcMain.handle("info:hoverEnter", (): void => {
+    infoPinned = false;
+    cancelHideInfo();
+  });
+  // Cursor left the info window. Pinned popovers ignore this; the user can
+  // hover a different bubble (which fires a fresh showInfo + reposition),
+  // press ESC, or click outside.
+  ipcMain.handle("info:hoverLeave", (): void => {
+    if (infoPinned) return;
+    scheduleHideInfo();
+  });
+
+  // Click-outside while pinned: any other window of ours gaining focus means
+  // the user reached into the chat, dock, or another popover. Dismiss so the
+  // pinned card doesn't outlive the user's attention. The info window itself
+  // gaining focus (e.g. they clicked a button on the card) is fine — leave it.
+  app.on("browser-window-focus", (_e, win) => {
+    if (!infoPinned) return;
+    if (!infoWindow || infoWindow.isDestroyed()) return;
+    if (win === infoWindow) return;
+    forceHide();
+  });
 
   // Renderer signals it has committed the latest info:show payload and reports
   // its measured content height. showInfo awaits this so it can size + place

@@ -230,11 +230,14 @@ function PersonChip({ person }: { person: ProjectActivePerson }): JSX.Element {
   // avatar so main can synthesize a head when the target isn't on the rail
   // (active people are user_repos members; the rail is the social-feed
   // subset, which can omit folks who authored a PR without a session).
+  // `openedByClick: true` pins the popover so it survives the reposition →
+  // mouseleave race that would otherwise dismiss it immediately.
   const open = (): void => {
     void window.chatheads.showInfo(
       `user:${person.login}`,
       undefined,
       person.avatarUrl ?? undefined,
+      true,
     );
   };
   return (

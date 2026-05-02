@@ -542,6 +542,11 @@ export interface ChatHeadsBridge {
      *  social-feed entry). Main synthesizes a basic user head with this
      *  avatar so the popover renders correctly. */
     fallbackAvatarUrl?: string,
+    /** True when the show was triggered by a click rather than a hover. Pins
+     *  the popover so it ignores `info:hoverLeave` until the cursor enters
+     *  the (often repositioned) window — without this, click-opened cards
+     *  dismiss instantly because the cursor is outside their new bounds. */
+    openedByClick?: boolean,
   ) => Promise<void>;
   /** Hover-show a project-card popover anchored to a non-rail-bubble element
    *  (e.g. the SearchBubble). Synthesizes a `kind: "project"` ChatHead from

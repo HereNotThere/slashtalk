@@ -70,18 +70,24 @@ export const devices = pgTable(
   (t) => [uniqueIndex("devices_user_name_unique").on(t.userId, t.deviceName)],
 );
 
-export const apiKeys = pgTable("api_keys", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id")
-    .references(() => users.id, { onDelete: "cascade" })
-    .notNull(),
-  deviceId: integer("device_id")
-    .references(() => devices.id, { onDelete: "cascade" })
-    .notNull(),
-  keyHash: text("key_hash").unique().notNull(),
-  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    deviceId: integer("device_id")
+      .references(() => devices.id, { onDelete: "cascade" })
+      .notNull(),
+    keyHash: text("key_hash").unique().notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  // One active API key per device. Schema-level guarantee so a future
+  // regression in the redemption flow can't leave two valid keys per device.
+  (t) => [uniqueIndex("api_keys_device_unique").on(t.deviceId)],
+);
 
 export const setupTokens = pgTable("setup_tokens", {
   id: serial("id").primaryKey(),

@@ -263,10 +263,11 @@ export const cliAuth = (db: Database) =>
     .post(
       "/exchange",
       async ({ body, set }) => {
+        const tokenHash = await hashToken(body.token);
         const [st] = await db
           .select()
           .from(setupTokens)
-          .where(and(eq(setupTokens.token, body.token), eq(setupTokens.redeemed, false)))
+          .where(and(eq(setupTokens.token, tokenHash), eq(setupTokens.redeemed, false)))
           .limit(1);
 
         if (!st || st.expiresAt < new Date()) {

@@ -91,6 +91,8 @@ Text truncation, keyed request limiting, per-user request limiting, and analyzer
 
 Rationale: small duplication can be cheaper than a vague helper. The useful extractions here are the ones that carry a named policy: request windowing, display truncation, analyzer persistence mapping.
 
+Implementation decision: use `util/rate-limit.ts` for the repeated in-memory sliding-window limiter used by MCP auth, MCP routes, and repo claim throttling. Use `util/text.ts` for ellipsis truncation used by display snippets and prompt-budget snippets. Keep analyzer run result mapping in `analyzers/scheduler.ts` for now because the inventory did not surface a non-analyzer caller with the same mapping responsibility.
+
 ## Risks / Trade-offs
 
 - Security regressions from auth or repo visibility refactors -> add characterization tests first and keep old route prefixes/plugin names intact.

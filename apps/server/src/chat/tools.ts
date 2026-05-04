@@ -7,6 +7,7 @@ import { canReadRepo, visibleRepoIdsForUser, visibleUserIdsForRepoIds } from "..
 import type { EventSource, SessionPr, SessionState } from "@slashtalk/shared";
 import { normalizeFullName } from "../social/github-sync";
 import { isCollisionIgnoredPath } from "../correlate/file-index";
+import { truncateWithEllipsis } from "../util/text";
 
 export interface TeamActivitySessionSummary {
   id: string;
@@ -92,11 +93,6 @@ export interface ChatToolContext {
    *  have. Order matches `visibleRepoIds`; sorting/truncation is the
    *  caller's responsibility. */
   visibleRepoFullNames?: string[];
-}
-
-function truncate(s: string | null, max: number): string | null {
-  if (!s) return s;
-  return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
 /**
@@ -218,7 +214,7 @@ export async function getTeamActivityImpl(
       branch: snapshot.branch,
       lastTs: snapshot.lastTs,
       currentTool: snapshot.currentTool?.name ?? null,
-      lastUserPrompt: truncate(snapshot.lastUserPrompt, LAST_PROMPT_MAX_CHARS),
+      lastUserPrompt: truncateWithEllipsis(snapshot.lastUserPrompt, LAST_PROMPT_MAX_CHARS),
       topFilesEdited: snapshot.topFilesEdited.slice(0, TOP_FILES_IN_ROLLUP).map(([path]) => path),
       toolErrors: snapshot.toolErrors,
       pr: snapshot.pr ?? null,

@@ -31,6 +31,7 @@ import { MODELS } from "../models";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
+import { truncateWithEllipsis } from "../util/text";
 import { loadInsightsForSessions, type SessionInsightsForSnapshot } from "../sessions/snapshot";
 import { shortRepoName, type StandupResponse, type UserPrsResponse } from "@slashtalk/shared";
 
@@ -514,7 +515,7 @@ function diffFingerprintValue(prev: FingerprintValue, next: FingerprintValue): s
 function fallbackStandup(args: StandupPromptArgs): string {
   if (args.prs.length > 0) {
     const bullets = args.prs.slice(0, 5).map((p) => {
-      const title = truncate(p.title, 80);
+      const title = truncateWithEllipsis(p.title, 80);
       return `- ${title} [#${p.number}](${p.url})`;
     });
     return ["Recent shipped work is ready to review.", ...bullets].join("\n");
@@ -522,7 +523,9 @@ function fallbackStandup(args: StandupPromptArgs): string {
   const session = args.sessions[0];
   if (session) {
     const repo = shortRepoName(session.repoFullName);
-    const title = session.title ? truncate(session.title, 80) : "Recent session activity";
+    const title = session.title
+      ? truncateWithEllipsis(session.title, 80)
+      : "Recent session activity";
     return `${repo} work is still being summarized.\n\n- ${title}`;
   }
   return "Quiet window — no shipped PRs.";
@@ -563,7 +566,7 @@ export function buildStandupPrompt(args: StandupPromptArgs): string {
   if (args.prs.length > 0) {
     const lines = args.prs.map((p) => {
       const repo = shortRepoName(p.repoFullName);
-      return `- [${p.state}] ${repo} #${p.number} (url: ${p.url}): ${truncate(p.title, 160)}`;
+      return `- [${p.state}] ${repo} #${p.number} (url: ${p.url}): ${truncateWithEllipsis(p.title, 160)}`;
     });
     parts.push(`PRs authored in window:\n${lines.join("\n")}`);
   } else {
@@ -573,14 +576,14 @@ export function buildStandupPrompt(args: StandupPromptArgs): string {
   if (args.sessions.length > 0) {
     const lines = args.sessions.map((s) => {
       const repo = shortRepoName(s.repoFullName);
-      const title = s.title ? truncate(s.title, 120) : "(untitled)";
+      const title = s.title ? truncateWithEllipsis(s.title, 120) : "(untitled)";
       const summaryText = typeof s.summary?.summary === "string" ? s.summary.summary : null;
-      const summary = summaryText ? truncate(summaryText, 240) : "(no summary)";
+      const summary = summaryText ? truncateWithEllipsis(summaryText, 240) : "(no summary)";
       const highlightsList = stringList(s.summary?.highlights);
       const highlights = highlightsList.length
         ? ` highlights: ${highlightsList
             .slice(0, 3)
-            .map((h) => truncate(h, 80))
+            .map((h) => truncateWithEllipsis(h, 80))
             .join("; ")}`
         : "";
       return `- ${repo} — ${title}\n  ${summary}${highlights}`;
@@ -589,11 +592,6 @@ export function buildStandupPrompt(args: StandupPromptArgs): string {
   }
 
   return parts.join("\n\n");
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1)}…`;
 }
 
 function stringList(value: unknown): string[] {

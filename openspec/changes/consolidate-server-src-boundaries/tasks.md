@@ -26,9 +26,9 @@
 
 ## 5. Consolidate Small Utilities Carefully
 
-- [ ] 5.1 Extract request-window/rate-limit helpers only where the same policy is repeated.
-- [ ] 5.2 Extract text truncation helpers only where the same display or prompt-budget policy is repeated.
-- [ ] 5.3 Extract analyzer run result mapping only within analyzer modules unless another caller appears.
+- [x] 5.1 Extract request-window/rate-limit helpers only where the same policy is repeated.
+- [x] 5.2 Extract text truncation helpers only where the same display or prompt-budget policy is repeated.
+- [x] 5.3 Extract analyzer run result mapping only within analyzer modules unless another caller appears.
 
 ## 6. Coordinate With Source Reorganization
 

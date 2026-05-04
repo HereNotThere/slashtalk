@@ -7,6 +7,7 @@ import { authInstance } from "../auth/instance";
 import { mcpOrigin, mcpResourceUrl, mcpWwwAuthenticate } from "./auth";
 import { McpPresenceStore } from "./presence";
 import { McpSessionPool } from "./session-pool";
+import { SlidingWindowRateLimiter } from "../util/rate-limit";
 
 type McpRouteOptions = {
   requestQuotaMax?: number;
@@ -16,7 +17,7 @@ type McpRouteOptions = {
 
 export const mcpRoutes = (options: McpRouteOptions = {}) => {
   const presence = new McpPresenceStore();
-  const limiter = new PerUserRequestLimiter({
+  const limiter = new SlidingWindowRateLimiter<number>({
     max: options.requestQuotaMax ?? config.mcpRequestQuotaMax,
     windowMs: options.requestQuotaWindowMs ?? config.mcpRequestQuotaWindowMs,
   });
@@ -70,30 +71,6 @@ export const mcpRoutes = (options: McpRouteOptions = {}) => {
       pool.shutdown();
     });
 };
-
-class PerUserRequestLimiter {
-  private buckets = new Map<number, number[]>();
-
-  constructor(private options: { max: number; windowMs: number }) {}
-
-  record(userId: number): { ok: true } | { ok: false; limit: number; windowMs: number } {
-    const now = Date.now();
-    const cutoff = now - this.options.windowMs;
-    const bucket = this.buckets.get(userId)?.filter((ts) => ts > cutoff) ?? [];
-    if (bucket.length >= this.options.max) {
-      this.buckets.set(userId, bucket);
-      return {
-        ok: false,
-        limit: this.options.max,
-        windowMs: this.options.windowMs,
-      };
-    }
-
-    bucket.push(now);
-    this.buckets.set(userId, bucket);
-    return { ok: true };
-  }
-}
 
 type McpAuthResult =
   | {

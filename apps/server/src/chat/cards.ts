@@ -4,13 +4,9 @@ import type { Database } from "../db";
 import { sessions } from "../db/schema";
 import { visibleRepoIdsForUser } from "../repo/visibility";
 import { hydrateSessions } from "../sessions/read-model";
+import { truncateWithEllipsis } from "../util/text";
 
 const CARD_LAST_PROMPT_MAX_CHARS = 240;
-
-function truncate(s: string | null, max: number): string | null {
-  if (!s) return s;
-  return s.length <= max ? s : s.slice(0, max - 1) + "…";
-}
 
 /**
  * Hydrate compact cards for a batch of session IDs the assistant cited.
@@ -63,7 +59,7 @@ export async function loadSessionCards(
       branch: snapshot.branch,
       lastTs: snapshot.lastTs,
       currentTool: snapshot.currentTool?.name ?? null,
-      lastUserPrompt: truncate(snapshot.lastUserPrompt, CARD_LAST_PROMPT_MAX_CHARS),
+      lastUserPrompt: truncateWithEllipsis(snapshot.lastUserPrompt, CARD_LAST_PROMPT_MAX_CHARS),
       source: row.source,
     });
   }

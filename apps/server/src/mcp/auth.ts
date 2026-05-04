@@ -7,6 +7,7 @@ import { oauthAuthorizationCodes, oauthClients, oauthTokens } from "../db/schema
 import { hashToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
 import { createAuthInstanceForDb } from "../auth/instance";
+import { SlidingWindowRateLimiter } from "../util/rate-limit";
 
 const SCOPES = ["mcp:read", "mcp:write"] as const;
 const STATIC_CLIENT_IDS = new Set(["slashtalk-static-claude-code"]);
@@ -96,11 +97,11 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
   const auth = createAuthInstanceForDb(db);
   const metadata = ({ request }: { request: Request }) =>
     authorizationServerMetadata(mcpOrigin(request));
-  const registerLimiter = new KeyedRequestLimiter({
+  const registerLimiter = new SlidingWindowRateLimiter<string>({
     max: options.registerQuotaMax ?? OAUTH_WRITE_QUOTA_MAX,
     windowMs: options.quotaWindowMs ?? OAUTH_WRITE_QUOTA_WINDOW_MS,
   });
-  const tokenLimiter = new KeyedRequestLimiter({
+  const tokenLimiter = new SlidingWindowRateLimiter<string>({
     max: options.tokenQuotaMax ?? OAUTH_WRITE_QUOTA_MAX,
     windowMs: options.quotaWindowMs ?? OAUTH_WRITE_QUOTA_WINDOW_MS,
   });
@@ -243,30 +244,6 @@ function clientIp(request: Request): string {
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-}
-
-class KeyedRequestLimiter {
-  private buckets = new Map<string, number[]>();
-
-  constructor(private options: { max: number; windowMs: number }) {}
-
-  record(key: string): { ok: true } | { ok: false; limit: number; windowMs: number } {
-    const now = Date.now();
-    const cutoff = now - this.options.windowMs;
-    const bucket = this.buckets.get(key)?.filter((ts) => ts > cutoff) ?? [];
-    if (bucket.length >= this.options.max) {
-      this.buckets.set(key, bucket);
-      return {
-        ok: false,
-        limit: this.options.max,
-        windowMs: this.options.windowMs,
-      };
-    }
-
-    bucket.push(now);
-    this.buckets.set(key, bucket);
-    return { ok: true };
-  }
 }
 
 type OAuthClientMetadata = Omit<OAuthClientRegistration, "client_id" | "client_id_issued_at">;

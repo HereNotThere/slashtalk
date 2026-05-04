@@ -20,6 +20,7 @@ import type { Database } from "../db";
 import { repos, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { normalizeFullName } from "../social/github-sync";
+import { SlidingWindowRateLimiter } from "../util/rate-limit";
 import { __clearOrgMembershipsCache, fetchUserOrgMemberships } from "./github-helpers";
 
 // "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
@@ -31,23 +32,17 @@ const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 // CPU + DB writes per session.
 const CLAIM_RATE_WINDOW_MS = 60 * 60 * 1000;
 const CLAIM_RATE_MAX = 30;
-const claimRateBuckets = new Map<number, number[]>();
 const RATE_SWEEP_THRESHOLD = 5_000;
-
-function sweepClaimRateBuckets(now: number): void {
-  if (claimRateBuckets.size < RATE_SWEEP_THRESHOLD) return;
-  const rateCutoff = now - CLAIM_RATE_WINDOW_MS;
-  for (const [userId, ts] of claimRateBuckets) {
-    const fresh = ts.filter((t) => t > rateCutoff);
-    if (fresh.length === 0) claimRateBuckets.delete(userId);
-    else if (fresh.length !== ts.length) claimRateBuckets.set(userId, fresh);
-  }
-}
+const claimRateLimiter = new SlidingWindowRateLimiter<number>({
+  max: CLAIM_RATE_MAX,
+  windowMs: CLAIM_RATE_WINDOW_MS,
+  sweepThreshold: RATE_SWEEP_THRESHOLD,
+});
 
 /** Test-only: reset claim caches + rate-bucket state. */
 export function __clearClaimCaches(): void {
   __clearOrgMembershipsCache();
-  claimRateBuckets.clear();
+  claimRateLimiter.clear();
 }
 
 /** Returns true if `userId` is under the per-hour claim cap; records the
@@ -55,18 +50,7 @@ export function __clearClaimCaches(): void {
  *  the bucket entirely when no fresh entries remain so dormant users don't
  *  linger in memory forever. */
 function recordClaimAttempt(userId: number): boolean {
-  const now = Date.now();
-  sweepClaimRateBuckets(now);
-  const cutoff = now - CLAIM_RATE_WINDOW_MS;
-  const prior = claimRateBuckets.get(userId) ?? [];
-  const fresh = prior.filter((t) => t > cutoff);
-  if (fresh.length >= CLAIM_RATE_MAX) {
-    claimRateBuckets.set(userId, fresh);
-    return false;
-  }
-  fresh.push(now);
-  claimRateBuckets.set(userId, fresh);
-  return true;
+  return claimRateLimiter.record(userId).ok;
 }
 
 type VerifyOutcome =

@@ -32,6 +32,7 @@ import { MODELS } from "../models";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
+import { truncateWithEllipsis } from "../util/text";
 import {
   shortRepoName,
   type ProjectActivePerson,
@@ -96,11 +97,6 @@ interface OverviewDeps {
 }
 
 const overviewCache = new TtlCache<string, ProjectOverviewResponse>(OVERVIEW_CACHE_TTL_MS);
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1)}…`;
-}
 
 // Fingerprint of the in-window PR set. Including (number, state, updatedAt)
 // means any PR transition (open→merged, edit, etc.) busts the cache for the
@@ -304,7 +300,7 @@ interface OverviewPromptArgs {
 
 function buildOverviewPrompt(args: OverviewPromptArgs): string {
   const lines = args.prs.map(
-    (p) => `- #${p.number} [${p.state}] @${p.authorLogin}: ${truncate(p.title, 160)}`,
+    (p) => `- #${p.number} [${p.state}] @${p.authorLogin}: ${truncateWithEllipsis(p.title, 160)}`,
   );
   return [
     `repo: ${args.fullName} (basename: ${shortRepoName(args.fullName)})`,

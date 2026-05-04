@@ -77,9 +77,7 @@ interface FingerprintValue {
 
 interface StandupCacheEntry {
   fingerprint: string;
-  // Retained alongside the hash so a miss can log a structured diff of what
-  // actually changed. Cheap (≤10 PRs + ≤12 sessions of metadata per entry,
-  // 5min TTL) and worth it for the observability.
+  // Kept alongside the hash so a miss can log a structured diff.
   value: FingerprintValue;
   response: StandupResponse;
 }
@@ -304,9 +302,6 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
           const hit = standupCache.get(key);
           if (hit?.fingerprint === fingerprint) return hit.response;
 
-          // Log the diff that's about to trigger a recompose so we can see
-          // whether self-card hover churn is real PR/session change or LLM
-          // non-determinism on identical input.
           const fpTag = fingerprint.slice(0, 8);
           if (hit) {
             const diffs = diffFingerprintValue(hit.value, value);
@@ -564,9 +559,7 @@ function diffFingerprintValue(prev: FingerprintValue, next: FingerprintValue): s
     if (prior.lastTs !== s.lastTs) changes.push("lastTs");
     if (prior.title !== s.title) changes.push("title");
     if (prior.summary !== s.summary) changes.push("summary");
-    if (JSON.stringify(prior.highlights) !== JSON.stringify(s.highlights)) {
-      changes.push("highlights");
-    }
+    if (!stringArraysEqual(prior.highlights, s.highlights)) changes.push("highlights");
     if (changes.length) diffs.push(`session ${tag} ${changes.join(", ")}`);
   }
   for (const id of prevSessions.keys()) {
@@ -664,4 +657,8 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+function stringArraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }

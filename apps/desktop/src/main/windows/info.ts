@@ -614,9 +614,9 @@ async function fetchDashboardForLogin(
       // we parallelized standup with the push (the previous shape), the
       // standup query lands at the server before the upsert and the LLM
       // writes "Quiet window — no shipped PRs." while the PR list right
-      // below it is non-empty. pushSelfPrs invalidates the standup cache on
-      // success, so the subsequent fetchUserStandup recomposes from fresh
-      // data instead of returning a pre-push cached blurb.
+      // below it is non-empty. The server's standup cache uses an input
+      // fingerprint, so an identical re-push hits the cache (no LLM churn)
+      // and a genuine PR change misses naturally — no eager bust needed.
       prsP = (async () => {
         const r = await fetchGhUserPrs(login);
         if (r.prs.length > 0) {

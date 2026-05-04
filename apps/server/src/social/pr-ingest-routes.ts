@@ -23,7 +23,6 @@ import type {
 import type { Database } from "../db";
 import { repos, pullRequests, userRepos } from "../db/schema";
 import { apiKeyAuth } from "../auth/middleware";
-import { invalidateSelfStandupCache } from "../user/dashboard";
 
 const MAX_PRS_PER_INGEST = 100;
 
@@ -79,6 +78,10 @@ export const prIngestRoutes = (db: Database) =>
         // the row we tried to insert, so the conflict path picks up the
         // freshest values without us re-listing them per-row. headRef is
         // omitted from SET — pr-poller is authoritative.
+        // No cache bust here: the standup endpoint's input fingerprint
+        // already covers any PR field that would change the blurb, so a
+        // genuinely fresh PR misses the cache naturally on the next read,
+        // and an identical re-push hits the cache (no LLM churn).
         await db
           .insert(pullRequests)
           .values(rows)
@@ -92,7 +95,6 @@ export const prIngestRoutes = (db: Database) =>
               updatedAt: sql`excluded.updated_at`,
             },
           });
-        invalidateSelfStandupCache(user.id);
       }
       return { upserted: rows.length, unknownRepos };
     },

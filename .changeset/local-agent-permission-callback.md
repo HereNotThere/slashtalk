@@ -2,4 +2,4 @@
 "@slashtalk/electron": patch
 ---
 
-Route local-agent permission requests through the denial-by-default SDK callback.
+Let the SDK type-check the local-agent default permission mode directly.

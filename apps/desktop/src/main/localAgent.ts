@@ -19,7 +19,6 @@ import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
 import * as agentStore from "./agentStore";
-import { denyByDefault } from "./chatDelegate";
 import { resolveBundledClaudeBin } from "./claudeBin";
 import * as localTranscripts from "./localTranscripts";
 import type { AgentStreamEvent } from "./anthropic";
@@ -139,7 +138,6 @@ export async function sendMessage(
     model: agent.model,
     systemPrompt: agent.systemPrompt,
     permissionMode: "default",
-    canUseTool: denyByDefault,
     // Load the user's ~/.claude/settings.json so local agents inherit the same
     // MCP servers (and hooks) the terminal `claude` uses. Project/local scopes
     // are intentionally omitted: 'project' would pull CLAUDE.md and behave

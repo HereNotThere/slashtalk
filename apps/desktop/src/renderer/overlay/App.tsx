@@ -58,6 +58,11 @@ export function App(): JSX.Element {
   });
   const hoverShowTimer = useRef<number | null>(null);
   const [stackExpanded, setStackExpanded] = useState(false);
+  // Hysteresis on stack collapse. The rail stays centered as it grows
+  // (dock-geometry anchors at center), so expanding shifts bubbles under a
+  // stationary cursor and fires spurious mouseLeave/Enter pairs. Without a
+  // delay, those pairs oscillate stackExpanded and the rail flickers.
+  const stackCollapseTimer = useRef<number | null>(null);
   const [infoOpenHeadId, setInfoOpenHeadId] = useState<string | null>(null);
   // Mirror main's default (`getRailCollapseInactive` returns true unless the
   // user opted out). Matching here avoids a false→true flip on first paint
@@ -305,6 +310,29 @@ export function App(): JSX.Element {
     void window.chatheads.infoHoverLeave();
   };
 
+  const handleStackEnter = (): void => {
+    if (stackCollapseTimer.current != null) {
+      window.clearTimeout(stackCollapseTimer.current);
+      stackCollapseTimer.current = null;
+    }
+    setStackExpanded(true);
+  };
+
+  const handleStackLeave = (): void => {
+    if (stackCollapseTimer.current != null) {
+      window.clearTimeout(stackCollapseTimer.current);
+    }
+    // Outlast the 280ms margin transition + macOS's ~200ms NSWindow animator
+    // so the centering-induced cursor jitter settles before we decide to
+    // collapse. A real cursor-out reaches this branch and stays out for the
+    // full delay; an animation-induced false leave gets canceled by the
+    // matching mouseEnter that follows it.
+    stackCollapseTimer.current = window.setTimeout(() => {
+      stackCollapseTimer.current = null;
+      setStackExpanded(false);
+    }, 350);
+  };
+
   const registerBubble =
     (id: string) =>
     (el: HTMLDivElement | null): void => {
@@ -457,8 +485,8 @@ export function App(): JSX.Element {
           {inactivePeers.length > 0 && (
             <div
               className={`flex items-center shrink-0 ${isHorizontal ? "flex-row" : "flex-col"}`}
-              onMouseEnter={() => setStackExpanded(true)}
-              onMouseLeave={() => setStackExpanded(false)}
+              onMouseEnter={handleStackEnter}
+              onMouseLeave={handleStackLeave}
             >
               {inactivePeers.map((h, i) => {
                 // Each wrapper is STACK_WRAPPER_PX on the main axis.

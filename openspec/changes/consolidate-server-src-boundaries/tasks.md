@@ -19,8 +19,8 @@
 
 ## 4. Consolidate Session And PR Read Models
 
-- [ ] 4.1 Introduce a session read-model owner for repeated card/snapshot/session summary shaping.
-- [ ] 4.2 Move dashboard, feed, chat-tool, and snapshot callers onto the shared session read surface where they need the same concept.
+- [x] 4.1 Introduce a session read-model owner for repeated card/snapshot/session summary shaping.
+- [x] 4.2 Move dashboard, feed, chat-tool, and snapshot callers onto the shared session read surface where they need the same concept.
 - [ ] 4.3 Introduce a pull request owner for common PR upserts, dedupe, repo summaries, dashboard summaries, and session enrichment.
 - [ ] 4.4 Preserve public response payload shapes and existing PR/session ordering semantics.
 

@@ -8,12 +8,8 @@ import {
   visiblePeerIdsForUser,
   visibleRepoIdsForUser,
 } from "../repo/visibility";
-import {
-  toSnapshot,
-  sortByStateThenTime,
-  loadInsightsForSessions,
-  loadPrsForSessions,
-} from "../sessions/snapshot";
+import { sortByStateThenTime } from "../sessions/snapshot";
+import { hydrateSessions } from "../sessions/read-model";
 import { HEARTBEAT_FRESH_S } from "../sessions/state";
 import { normalizeFullName } from "./github-sync";
 import { loadChatHistory } from "../chat/history";
@@ -66,63 +62,13 @@ export const socialRoutes = (db: Database) =>
           }
         }
 
-        // Get heartbeats for state classification
-        const sessionIds = sessionRows.map((s) => s.sessionId);
-        const hbRows =
-          sessionIds.length > 0
-            ? await db.select().from(heartbeats).where(inArray(heartbeats.sessionId, sessionIds))
-            : [];
-        const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
-
-        // Get user info for augmentation
-        const userIds = [...new Set(sessionRows.map((s) => s.userId))];
-        const userRows =
-          userIds.length > 0
-            ? await db
-                .select({
-                  id: users.id,
-                  githubLogin: users.githubLogin,
-                  avatarUrl: users.avatarUrl,
-                })
-                .from(users)
-                .where(inArray(users.id, userIds))
-            : [];
-        const userMap = new Map(userRows.map((u) => [u.id, u]));
-
-        // Get repo info for augmentation
-        const repoIdSet = [
-          ...new Set(sessionRows.map((s) => s.repoId).filter(Boolean) as number[]),
-        ];
-        const repoRows =
-          repoIdSet.length > 0
-            ? await db
-                .select({ id: repos.id, fullName: repos.fullName })
-                .from(repos)
-                .where(inArray(repos.id, repoIdSet))
-            : [];
-        const repoMap = new Map(repoRows.map((r) => [r.id, r]));
-
-        const insightsMap = await loadInsightsForSessions(db, sessionIds);
-        const prMap = await loadPrsForSessions(
-          db,
-          sessionRows.map((r) => ({
-            sessionId: r.sessionId,
-            repoId: r.repoId,
-            branch: r.branch,
-          })),
-        );
-
         // Build augmented snapshots
-        let snapshots = sessionRows.map((s) => {
-          const hb = hbMap.get(s.sessionId) ?? null;
-          const snapshot = toSnapshot(
-            s,
-            hb,
-            insightsMap.get(s.sessionId) ?? null,
-            prMap.get(s.sessionId) ?? null,
-          );
-          const u = userMap.get(s.userId);
-          const r = s.repoId ? repoMap.get(s.repoId) : null;
+        let snapshots = (
+          await hydrateSessions(db, sessionRows, {
+            includeUsers: true,
+            includeRepos: true,
+          })
+        ).map(({ snapshot, user: u, repo: r }) => {
           return {
             ...snapshot,
             github_login: u?.githubLogin ?? "unknown",

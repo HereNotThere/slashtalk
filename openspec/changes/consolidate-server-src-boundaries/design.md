@@ -75,6 +75,8 @@ Session cards, recent prompts, counts, token totals, activity state, and repo la
 
 Rationale: the server already has `sessions/snapshot.ts`, but several callers still build related summaries directly. Naming the read model clarifies when a caller wants a session record versus a product-facing session card.
 
+Implementation decision: use `sessions/read-model.ts` to hydrate session rows with heartbeat state, analyzer insights, matched PRs, and optional user/repo labels. Session routes, feed shaping, chat activity, chat session detail, and citation cards now share that hydration surface while preserving their existing response-specific payload shapes.
+
 ### 5. Give pull request persistence and read queries one owner
 
 Pull request upserts, ingest dedupe, poller writes, repo overview summaries, dashboard summaries, and session snapshot enrichment should share a pull request module.

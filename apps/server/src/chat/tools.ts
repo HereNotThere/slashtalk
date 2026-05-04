@@ -1,7 +1,8 @@
 import { and, eq, gt, inArray, or, sql } from "drizzle-orm";
 import type { Database } from "../db";
-import { sessions, users, repos, heartbeats } from "../db/schema";
-import { loadInsightsForSessions, loadPrsForSessions, toSnapshot } from "../sessions/snapshot";
+import { sessions, users, repos } from "../db/schema";
+import type { toSnapshot } from "../sessions/snapshot";
+import { hydrateSession, hydrateSessions } from "../sessions/read-model";
 import { canReadRepo, visibleRepoIdsForUser, visibleUserIdsForRepoIds } from "../repo/visibility";
 import type { EventSource, SessionPr, SessionState } from "@slashtalk/shared";
 import { normalizeFullName } from "../social/github-sync";
@@ -175,43 +176,11 @@ export async function getTeamActivityImpl(
     )
     .orderBy(sql`${sessions.lastTs} desc nulls last`)
     .limit(200);
-  const sessionIds = sessionRows.map((s) => s.sessionId);
-  const repoIdsInUse = [
-    ...new Set(sessionRows.map((s) => s.repoId).filter((id): id is number => id !== null)),
-  ];
-
-  const [hbRows, userRows, repoRows, insightsMap, prMap] = await Promise.all([
-    sessionIds.length
-      ? db.select().from(heartbeats).where(inArray(heartbeats.sessionId, sessionIds))
-      : Promise.resolve([]),
-    db
-      .select({
-        id: users.id,
-        login: users.githubLogin,
-        displayName: users.displayName,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(users)
-      .where(inArray(users.id, userIdScope)),
-    repoIdsInUse.length
-      ? db
-          .select({ id: repos.id, fullName: repos.fullName })
-          .from(repos)
-          .where(inArray(repos.id, repoIdsInUse))
-      : Promise.resolve([]),
-    loadInsightsForSessions(db, sessionIds),
-    loadPrsForSessions(
-      db,
-      sessionRows.map((s) => ({
-        sessionId: s.sessionId,
-        repoId: s.repoId,
-        branch: s.branch,
-      })),
-    ),
-  ]);
-  const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
-  const userMap = new Map(userRows.map((u) => [u.id, u]));
-  const repoMap = new Map(repoRows.map((r) => [r.id, r]));
+  const hydratedRows = await hydrateSessions(db, sessionRows, {
+    includeUsers: true,
+    includeRepos: true,
+  });
+  const prMap = new Map(hydratedRows.map(({ row, snapshot }) => [row.sessionId, snapshot.pr]));
 
   // Default behavior: hide `ended` sessions from the rollup so "what's the
   // team doing" doesn't drown in merge cleanup from earlier in the window.
@@ -220,24 +189,19 @@ export async function getTeamActivityImpl(
 
   // Track filePath-matched sessions before the ended filter so openPrs[]
   // can surface PRs from sessions whose author has already moved on.
-  const filePathMatchedSessions: typeof sessionRows = [];
+  const filePathMatchedSessions: typeof hydratedRows = [];
 
   // sessionRows is already ordered `lastTs desc nulls last`, so the first
   // time a user's id appears is their most recent session — we rely on that
   // to sort teammates without a second sort pass.
   const byUser = new Map<number, TeamActivitySessionSummary[]>();
-  for (const s of sessionRows) {
-    const snapshot = toSnapshot(
-      s,
-      hbMap.get(s.sessionId) ?? null,
-      insightsMap.get(s.sessionId) ?? null,
-      prMap.get(s.sessionId) ?? null,
-    );
+  for (const hydrated of hydratedRows) {
+    const { row: s, snapshot, repo } = hydrated;
     if (args.filePath) {
       const editedPaths = snapshot.topFilesEdited.map(([p]) => p);
       if (!editedPaths.some((p) => pathMatches(p, args.filePath!))) continue;
       if (!args.state || snapshot.state === args.state) {
-        filePathMatchedSessions.push(s);
+        filePathMatchedSessions.push(hydrated);
       }
     }
     if (args.state && snapshot.state !== args.state) continue;
@@ -250,7 +214,7 @@ export async function getTeamActivityImpl(
       description: snapshot.description,
       state: snapshot.state,
       source: s.source,
-      repo: s.repoId ? (repoMap.get(s.repoId)?.fullName ?? null) : null,
+      repo: repo?.fullName ?? null,
       branch: snapshot.branch,
       lastTs: snapshot.lastTs,
       currentTool: snapshot.currentTool?.name ?? null,
@@ -263,9 +227,9 @@ export async function getTeamActivityImpl(
   }
 
   const teammates: TeamActivityTeammate[] = [...byUser.entries()].map(([uid, sess]) => {
-    const u = userMap.get(uid);
+    const u = hydratedRows.find((hydrated) => hydrated.row.userId === uid)?.user;
     return {
-      login: u?.login ?? "unknown",
+      login: u?.githubLogin ?? "unknown",
       name: u?.displayName ?? null,
       avatarUrl: u?.avatarUrl ?? null,
       isSelf: uid === userId,
@@ -288,9 +252,9 @@ export async function getTeamActivityImpl(
     // Walk filePath-matched sessions newest-first and dedupe by (repo, PR#).
     const seen = new Set<string>();
     const openPrs: OpenPrOverlap[] = [];
-    for (const s of filePathMatchedSessions) {
+    for (const { row: s, snapshot, repo } of filePathMatchedSessions) {
       if (s.userId === userId) continue;
-      const pr = prMap.get(s.sessionId);
+      const pr = snapshot.pr;
       if (!pr || pr.state !== "open") continue;
       const key = `${s.repoId}:${pr.number}`;
       if (seen.has(key)) continue;
@@ -299,7 +263,7 @@ export async function getTeamActivityImpl(
         prNumber: pr.number,
         prUrl: pr.url,
         prTitle: pr.title,
-        repo: s.repoId ? (repoMap.get(s.repoId)?.fullName ?? "") : "",
+        repo: repo?.fullName ?? "",
         branch: s.branch ?? "",
         authorLogin: pr.authorLogin,
         sessionId: s.sessionId,
@@ -392,31 +356,20 @@ export async function getSessionImpl(
     return { kind: "error", message: "session not visible to caller" };
   }
 
-  const [hbRows, insightsMap, userRows, repoRows, prMap] = await Promise.all([
-    db.select().from(heartbeats).where(eq(heartbeats.sessionId, args.sessionId)).limit(1),
-    loadInsightsForSessions(db, [args.sessionId]),
-    db
-      .select({ login: users.githubLogin, displayName: users.displayName })
-      .from(users)
-      .where(eq(users.id, row.userId))
-      .limit(1),
-    db.select({ fullName: repos.fullName }).from(repos).where(eq(repos.id, row.repoId)).limit(1),
-    loadPrsForSessions(db, [{ sessionId: args.sessionId, repoId: row.repoId, branch: row.branch }]),
-  ]);
-  const snapshot = toSnapshot(
-    row,
-    hbRows[0] ?? null,
-    insightsMap.get(args.sessionId) ?? null,
-    prMap.get(args.sessionId) ?? null,
-  );
-  const u = userRows[0];
-  const r = repoRows[0];
+  const {
+    snapshot,
+    user: u,
+    repo: r,
+  } = await hydrateSession(db, row, {
+    includeUsers: true,
+    includeRepos: true,
+  });
 
   return {
     kind: "ok",
     session: {
       ...snapshot,
-      user: u ? { login: u.login, name: u.displayName ?? null } : null,
+      user: u ? { login: u.githubLogin, name: u.displayName ?? null } : null,
       repo: r?.fullName ?? null,
     },
   };

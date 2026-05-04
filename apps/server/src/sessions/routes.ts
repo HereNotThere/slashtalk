@@ -1,15 +1,11 @@
 import { Elysia, t } from "elysia";
-import { eq, sql, and, inArray } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import { SessionState } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { sessions, events, heartbeats } from "../db/schema";
+import { sessions, events } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
-import {
-  toSnapshot,
-  loadInsightsForSessions,
-  loadPrsForSessions,
-  sortByStateThenTime,
-} from "./snapshot";
+import { sortByStateThenTime } from "./snapshot";
+import { hydrateSession, hydrateSessions } from "./read-model";
 import { loadAccessibleSession } from "./access";
 
 const SESSION_STATE_VALUES = Object.values(SessionState);
@@ -32,31 +28,7 @@ export const sessionRoutes = (db: Database) =>
           .orderBy(sql`${sessions.lastTs} desc nulls last`)
           .limit(100);
 
-        const sessionIds = rows.map((s) => s.sessionId);
-        const hbRows =
-          sessionIds.length > 0
-            ? await db.select().from(heartbeats).where(inArray(heartbeats.sessionId, sessionIds))
-            : [];
-        const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
-        const insightsMap = await loadInsightsForSessions(db, sessionIds);
-        const prMap = await loadPrsForSessions(
-          db,
-          rows.map((r) => ({
-            sessionId: r.sessionId,
-            repoId: r.repoId,
-            branch: r.branch,
-          })),
-        );
-
-        let snapshots = rows.map((s) => {
-          const hb = hbMap.get(s.sessionId) ?? null;
-          return toSnapshot(
-            s,
-            hb,
-            insightsMap.get(s.sessionId) ?? null,
-            prMap.get(s.sessionId) ?? null,
-          );
-        });
+        let snapshots = (await hydrateSessions(db, rows)).map((s) => s.snapshot);
 
         if (query.state) {
           snapshots = snapshots.filter((s) => s.state === query.state);
@@ -85,26 +57,7 @@ export const sessionRoutes = (db: Database) =>
           return { error: "Session not found" };
         }
 
-        const [hb] = await db
-          .select()
-          .from(heartbeats)
-          .where(eq(heartbeats.sessionId, params.id))
-          .limit(1);
-
-        const insightsMap = await loadInsightsForSessions(db, [params.id]);
-        const prMap = await loadPrsForSessions(db, [
-          {
-            sessionId: session.sessionId,
-            repoId: session.repoId,
-            branch: session.branch,
-          },
-        ]);
-        return toSnapshot(
-          session,
-          hb ?? null,
-          insightsMap.get(params.id) ?? null,
-          prMap.get(params.id) ?? null,
-        );
+        return (await hydrateSession(db, session)).snapshot;
       },
       { params: t.Object({ id: t.String() }) },
     )

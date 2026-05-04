@@ -19,6 +19,24 @@ This file is the **map** — start here, then follow links. Deep content lives i
 - [`docs/references/`](docs/references/) — 3rd-party library notes (Elysia, Drizzle, ioredis, Electron, Anthropic SDK)
 - [`docs/templates/`](docs/templates/) — page shapes for every doc type
 
+## Load-bearing memories
+
+Rules live in [`docs/design-docs/core-beliefs.md`](docs/design-docs/core-beliefs.md); the list below is a pared-down memory aid for the ones most often broken. Violating one causes a visible regression or data loss. Tier 3 of the harness plan will convert each to a mechanical CI check; until then, honor manually.
+
+1. **Bun only.** No npm/pnpm/yarn. Version pinned in [`.tool-versions`](.tool-versions).
+2. **Route prefix encodes auth.** `/v1/*` = API key, `/auth/*` + `/api/*` = JWT. Never mix on the same plugin. Detail: [`core-beliefs #2`](docs/design-docs/core-beliefs.md#2-route-prefix-encodes-auth).
+3. **Elysia plugin `name` is required and globally unique.** Preserve on every edit.
+4. **Drizzle migrations are append-only.** Never hand-edit `apps/server/drizzle/meta/_journal.json` or `*_snapshot.json`. Never resequence. Fix broken migrations with a corrective one. Memory: `feedback_drizzle_journal_when`.
+5. **`@slashtalk/shared` is source-only.** No build step, no `dist/`.
+6. **Strict-tracking gate in the desktop uploader.** [`localRepos.isPathTracked(cwd)`](apps/desktop/src/main/uploader.ts) runs before every upload/heartbeat. Don't loosen. Memory: `feedback_strict_tracking`.
+7. **Redis publishing is soft-fail.** Never `await redis.publish(...)` outside [`apps/server/src/ws/redis-bridge.ts`](apps/server/src/ws/redis-bridge.ts).
+8. **Latest Claude model IDs only:** `claude-haiku-4-5-20251001`, `claude-sonnet-4-6`, `claude-opus-4-7`. Update pricing in [`apps/server/src/analyzers/llm.ts`](apps/server/src/analyzers/llm.ts) when adding.
+9. **Run tests after server changes.** From `apps/server/`: `bun run typecheck && bun run test`. Fast (seconds). CI runs the same on every push — don't push a red typecheck.
+10. **Refresh [`docs/generated/db-schema.md`](docs/generated/db-schema.md) when schema changes.** `bun run gen:db-schema` in `apps/server/`. CI will check.
+11. **Identity is user OAuth; no GitHub App.** Every GitHub API call uses the calling user's decrypted token. No installation flow, no org-admin dependency. OAuth scope stays `read:user read:org`. Detail: [`core-beliefs #11`](docs/design-docs/core-beliefs.md#11-identity-is-user-oauth-no-github-app).
+12. **Repo claims gate on org membership or personal namespace.** `POST /api/me/repos` accepts iff `owner` is in the caller's active orgs (`GET /user/memberships/orgs?state=active`) or `owner === user.githubLogin`. Else `403 no_access`. Detail: [`core-beliefs #12`](docs/design-docs/core-beliefs.md#12-repo-access-is-verified-not-asserted).
+13. **`user_repos` is the only authorization for cross-user reads.** Feed, sessions, events, WS channels all gate on it. Any new cross-user surface must go through the same check. Detail: [`core-beliefs #13`](docs/design-docs/core-beliefs.md#13-user_repos-is-the-only-authorization-for-cross-user-reads).
+
 ## Workspaces
 
 Bun workspace monorepo. **`bun` is the only supported package manager** ([core-beliefs #1](docs/design-docs/core-beliefs.md#1-bun-is-the-only-package-manager)). Version pinned in [`.tool-versions`](.tool-versions).
@@ -108,4 +126,4 @@ Today only `@slashtalk/electron` is versioned ([`.changeset/config.json`](.chang
 
 When you change: a workspace, auth scheme, ingest protocol, Redis channel design, analyzer plugin contract, or add a BrowserWindow — update the relevant `AGENTS.md` and the affected file under `docs/` in the same commit. A subtly wrong map is worse than a missing one.
 
-CLAUDE.md is now a thin redirect to this file plus the load-bearing memories; Codex and other agents find AGENTS.md by convention.
+`CLAUDE.md` is a symlink to this file; Codex and other agents find `AGENTS.md` by convention.

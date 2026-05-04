@@ -5,7 +5,7 @@ import { db } from "../db";
 import { users, apiKeys, devices, oauthTokens } from "../db/schema";
 import { authAudit } from "../auth/audit";
 import { hashToken } from "../auth/tokens";
-import { mcpOrigin, mcpResourceUrl, mcpWwwAuthenticate } from "../oauth/mcp";
+import { mcpOrigin, mcpResourceUrl, mcpWwwAuthenticate } from "./auth";
 import { McpPresenceStore } from "./presence";
 import { McpSessionPool } from "./session-pool";
 

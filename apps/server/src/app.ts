@@ -16,7 +16,7 @@ import { chatRoutes } from "./chat/routes";
 import { spotifyPresenceRoutes, presenceReadRoutes } from "./presence/routes";
 import { managedAgentSessionRoutes } from "./managed-agent-sessions/routes";
 import { mcpRoutes } from "./mcp/routes";
-import { mcpOAuthRoutes } from "./oauth/mcp";
+import { mcpOAuthRoutes } from "./mcp/auth";
 import { wsHandler } from "./ws/handler";
 import { webAppRoutes } from "./web/routes";
 import { blogRoutes } from "./web/blog-routes";

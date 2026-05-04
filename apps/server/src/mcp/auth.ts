@@ -108,7 +108,7 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
     windowMs: options.quotaWindowMs ?? OAUTH_WRITE_QUOTA_WINDOW_MS,
   });
 
-  return new Elysia({ name: "oauth/mcp" })
+  return new Elysia({ name: "mcp/auth" })
     .use(jwt({ name: "jwt", secret: config.jwtSecret }))
     .get("/.well-known/oauth-protected-resource", ({ request }) =>
       protectedResourceMetadata(mcpOrigin(request)),

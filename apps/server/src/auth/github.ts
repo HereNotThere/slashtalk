@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
-import { eq, and } from "drizzle-orm";
+import { eq, and, gt } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
 import { users, setupTokens, devices, apiKeys } from "../db/schema";
@@ -263,19 +263,25 @@ export const cliAuth = (db: Database) =>
     .post(
       "/exchange",
       async ({ body, set }) => {
+        // Claim the row atomically — splitting this into select+update lets two
+        // concurrent callers both pass the redeemed check and mint two API keys.
         const tokenHash = await hashToken(body.token);
         const [st] = await db
-          .select()
-          .from(setupTokens)
-          .where(and(eq(setupTokens.token, tokenHash), eq(setupTokens.redeemed, false)))
-          .limit(1);
+          .update(setupTokens)
+          .set({ redeemed: true })
+          .where(
+            and(
+              eq(setupTokens.token, tokenHash),
+              eq(setupTokens.redeemed, false),
+              gt(setupTokens.expiresAt, new Date()),
+            ),
+          )
+          .returning();
 
-        if (!st || st.expiresAt < new Date()) {
+        if (!st) {
           set.status = 400;
           return { error: "Invalid or expired setup token" };
         }
-
-        await db.update(setupTokens).set({ redeemed: true }).where(eq(setupTokens.id, st.id));
 
         // Upsert by (userId, deviceName): a second sign-in on the same
         // machine reuses the existing device row so device_repo_paths and

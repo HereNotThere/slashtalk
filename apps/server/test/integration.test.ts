@@ -9,9 +9,11 @@ import {
   deviceRepoPaths,
   deviceExcludedRepos,
   apiKeys,
+  setupTokens,
 } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
+import { hashToken } from "../src/auth/tokens";
 import {
   resetDatabase,
   mockGitHubAuth,
@@ -144,6 +146,13 @@ describe("social feed integration", () => {
       token: string;
     };
     expect(setupToken).toBeTruthy();
+    const [storedSetupToken] = await db
+      .select({ token: setupTokens.token })
+      .from(setupTokens)
+      .where(eq(setupTokens.token, await hashToken(setupToken)))
+      .limit(1);
+    expect(storedSetupToken?.token).toBe(await hashToken(setupToken));
+    expect(storedSetupToken?.token).not.toBe(setupToken);
 
     // Exchange for API key
     const exchangeRes = await fetch(`${baseUrl}/v1/auth/exchange`, {

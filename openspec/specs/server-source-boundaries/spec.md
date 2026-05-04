@@ -1,7 +1,8 @@
 # server-source-boundaries Specification
 
 ## Purpose
-TBD - created by archiving change consolidate-server-src-boundaries. Update Purpose after archive.
+Define the server-local ownership boundaries for repeated authorization, credential lookup, session read shaping, pull request persistence, and shared utility policies so future server changes preserve behavior while avoiding duplicated domain logic.
+
 ## Requirements
 ### Requirement: Cross-user reads use one repo visibility owner
 
@@ -86,4 +87,3 @@ The consolidation SHALL stay within `apps/server/src` and SHALL NOT move public 
 
 - **WHEN** repeated query logic is moved behind shared owners
 - **THEN** Drizzle table definitions, migrations, and generated database docs do not change as part of this consolidation
-

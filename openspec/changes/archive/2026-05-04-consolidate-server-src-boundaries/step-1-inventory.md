@@ -50,9 +50,9 @@ Open decision for step 2: whether to preserve `last_used_at` differences exactly
 | User dashboard target | `apps/server/src/user/dashboard.ts:140` | Self path uses caller's repo IDs. Peer path uses caller-target repo intersection; empty overlap returns `no_access`. |
 | Repo overview access | `apps/server/src/repo/overview.ts:115` | Resolves repo by full name, then requires caller `user_repos` row for the repo or returns 403 `no_access`. |
 | Repo overview active strip | `apps/server/src/repo/overview.ts:240` | Only includes session authors and PR authors who have `user_repos` rows for the repo. |
-| Chat team activity | `apps/server/src/chat/tools.ts:105` | Starts from caller visible repo IDs, then computes visible peers and optional repo/login scopes. |
+| Chat team activity | `apps/server/src/chat/tools.ts:105` | Starts from caller-visible repo IDs, then computes visible peers and optional repo/login scopes. |
 | Chat get_session | `apps/server/src/chat/tools.ts:384` | Loads session directly, then requires caller `user_repos` row for the session repo; returns an error message instead of HTTP status. |
-| Chat cards | `apps/server/src/chat/cards.ts:21` | Hydrates cited session IDs after filtering by caller visible repo IDs. Preserves input order and silently drops invisible or unknown IDs. |
+| Chat cards | `apps/server/src/chat/cards.ts:21` | Hydrates cited session IDs after filtering by caller-visible repo IDs. Preserves input order and silently drops invisible or unknown IDs. |
 | Presence read | `apps/server/src/presence/routes.ts:89` | Peer set is self plus any user sharing a claimed repo with caller. |
 | WebSocket subscribe | `apps/server/src/ws/handler.ts:43` | On open, subscribes user to every repo channel from their `user_repos` rows. |
 

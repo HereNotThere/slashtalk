@@ -1,6 +1,12 @@
-/** Generate a random API key (UUID v4) */
+/** Generate a random bearer token. */
+export function generateOpaqueToken(bytes = 32): string {
+  const raw = crypto.getRandomValues(new Uint8Array(bytes));
+  return Buffer.from(raw).toString("base64url");
+}
+
+/** Generate a random API key. */
 export function generateApiKey(): string {
-  return crypto.randomUUID();
+  return generateOpaqueToken();
 }
 
 /** SHA-256 hash a token string (for storing hashed keys/tokens) */

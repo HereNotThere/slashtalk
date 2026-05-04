@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
-import { eq, and } from "drizzle-orm";
+import { eq, and, gt } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
 import { users, setupTokens, devices, apiKeys } from "../db/schema";
@@ -263,49 +263,68 @@ export const cliAuth = (db: Database) =>
     .post(
       "/exchange",
       async ({ body, set }) => {
-        const [st] = await db
-          .select()
-          .from(setupTokens)
-          .where(and(eq(setupTokens.token, body.token), eq(setupTokens.redeemed, false)))
-          .limit(1);
+        const tokenHash = await hashToken(body.token);
 
-        if (!st || st.expiresAt < new Date()) {
-          set.status = 400;
-          return { error: "Invalid or expired setup token" };
-        }
+        return await db.transaction(async (tx) => {
+          const now = new Date();
+          const [st] = await tx
+            .select()
+            .from(setupTokens)
+            .where(and(eq(setupTokens.token, tokenHash), eq(setupTokens.redeemed, false)))
+            .limit(1);
 
-        await db.update(setupTokens).set({ redeemed: true }).where(eq(setupTokens.id, st.id));
+          if (!st || st.expiresAt < now) {
+            set.status = 400;
+            return { error: "Invalid or expired setup token" };
+          }
 
-        // Upsert by (userId, deviceName): a second sign-in on the same
-        // machine reuses the existing device row so device_repo_paths and
-        // sessions linked to that device survive sign-out/in cycles.
-        const [device] = await db
-          .insert(devices)
-          .values({
+          const [redeemed] = await tx
+            .update(setupTokens)
+            .set({ redeemed: true })
+            .where(
+              and(
+                eq(setupTokens.id, st.id),
+                eq(setupTokens.redeemed, false),
+                gt(setupTokens.expiresAt, now),
+              ),
+            )
+            .returning();
+          if (!redeemed) {
+            set.status = 400;
+            return { error: "Invalid or expired setup token" };
+          }
+
+          // Upsert by (userId, deviceName): a second sign-in on the same
+          // machine reuses the existing device row so device_repo_paths and
+          // sessions linked to that device survive sign-out/in cycles.
+          const [device] = await tx
+            .insert(devices)
+            .values({
+              userId: st.userId,
+              deviceName: body.deviceName,
+              os: body.os ?? null,
+              lastSeenAt: now,
+            })
+            .onConflictDoUpdate({
+              target: [devices.userId, devices.deviceName],
+              set: { os: body.os ?? null, lastSeenAt: now },
+            })
+            .returning();
+
+          // One active API key per device. Revoke any prior keys before issuing
+          // the new one so an old machine-captured key can't outlive a sign-in.
+          await tx.delete(apiKeys).where(eq(apiKeys.deviceId, device.id));
+
+          const rawKey = generateApiKey();
+          const keyHash = await hashToken(rawKey);
+          await tx.insert(apiKeys).values({
             userId: st.userId,
-            deviceName: body.deviceName,
-            os: body.os ?? null,
-            lastSeenAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: [devices.userId, devices.deviceName],
-            set: { os: body.os ?? null, lastSeenAt: new Date() },
-          })
-          .returning();
+            deviceId: device.id,
+            keyHash,
+          });
 
-        // One active API key per device. Revoke any prior keys before issuing
-        // the new one so an old machine-captured key can't outlive a sign-in.
-        await db.delete(apiKeys).where(eq(apiKeys.deviceId, device.id));
-
-        const rawKey = generateApiKey();
-        const keyHash = await hashToken(rawKey);
-        await db.insert(apiKeys).values({
-          userId: st.userId,
-          deviceId: device.id,
-          keyHash,
+          return { apiKey: rawKey, deviceId: device.id };
         });
-
-        return { apiKey: rawKey, deviceId: device.id };
       },
       {
         body: t.Object({

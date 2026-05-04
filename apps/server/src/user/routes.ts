@@ -13,6 +13,7 @@ import {
   sessions,
 } from "../db/schema";
 import { jwtAuth, apiKeyAuth } from "../auth/middleware";
+import { generateOpaqueToken, hashToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
@@ -73,12 +74,13 @@ export const userRoutes = (db: Database) =>
 
     // POST /api/me/setup-token — generate a new setup token
     .post("/setup-token", async ({ user }) => {
-      const token = crypto.randomUUID();
+      const token = generateOpaqueToken();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      const tokenHash = await hashToken(token);
 
       await db.insert(setupTokens).values({
         userId: user.id,
-        token,
+        token: tokenHash,
         expiresAt,
       });
 

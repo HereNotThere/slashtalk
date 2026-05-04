@@ -193,10 +193,11 @@ describe("session state classification", () => {
 
 describe("setup token exchange", () => {
   it("rejects expired setup token", async () => {
+    const token = "expired-token-test";
     // Insert an expired token directly
     await db.insert(setupTokens).values({
       userId: aliceUserId,
-      token: "expired-token-test",
+      token: await hashToken(token),
       expiresAt: new Date(Date.now() - 60_000), // 1 min ago
       redeemed: false,
     });
@@ -205,7 +206,7 @@ describe("setup token exchange", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        token: "expired-token-test",
+        token,
         deviceName: "expired-device",
       }),
     });
@@ -215,9 +216,10 @@ describe("setup token exchange", () => {
   });
 
   it("rejects already-redeemed setup token", async () => {
+    const token = "redeemed-token-test";
     await db.insert(setupTokens).values({
       userId: aliceUserId,
-      token: "redeemed-token-test",
+      token: await hashToken(token),
       expiresAt: new Date(Date.now() + 600_000),
       redeemed: true,
     });
@@ -226,7 +228,7 @@ describe("setup token exchange", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        token: "redeemed-token-test",
+        token,
         deviceName: "redeemed-device",
       }),
     });

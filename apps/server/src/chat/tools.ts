@@ -190,8 +190,12 @@ export async function getTeamActivityImpl(
   // time a user's id appears is their most recent session — we rely on that
   // to sort teammates without a second sort pass.
   const byUser = new Map<number, TeamActivitySessionSummary[]>();
+  const userById = new Map<number, (typeof hydratedRows)[number]["user"]>();
   for (const hydrated of hydratedRows) {
     const { row: s, snapshot, repo } = hydrated;
+    if (!userById.has(s.userId)) {
+      userById.set(s.userId, hydrated.user);
+    }
     if (args.filePath) {
       const editedPaths = snapshot.topFilesEdited.map(([p]) => p);
       if (!editedPaths.some((p) => pathMatches(p, args.filePath!))) continue;
@@ -222,7 +226,7 @@ export async function getTeamActivityImpl(
   }
 
   const teammates: TeamActivityTeammate[] = [...byUser.entries()].map(([uid, sess]) => {
-    const u = hydratedRows.find((hydrated) => hydrated.row.userId === uid)?.user;
+    const u = userById.get(uid);
     return {
       login: u?.githubLogin ?? "unknown",
       name: u?.displayName ?? null,

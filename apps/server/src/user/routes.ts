@@ -11,7 +11,7 @@ import {
   deviceRepoPaths,
   sessions,
 } from "../db/schema";
-import { jwtAuth, apiKeyAuth } from "../auth/middleware";
+import { jwtAuth, apiKeyAuth, apiKeyAuthWithoutLastUsedTouch } from "../auth/middleware";
 import { authAudit } from "../auth/audit";
 import { visibleReposForUser } from "../repo/visibility";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
@@ -91,7 +91,7 @@ export const userRoutes = (db: Database) =>
  */
 export const deviceReposRoutes = (db: Database) =>
   new Elysia({ prefix: "/v1/devices", name: "device-repos" })
-    .use(apiKeyAuth)
+    .use(apiKeyAuthWithoutLastUsedTouch)
 
     // GET /v1/devices/:id/repos — the paths this device has registered.
     // Used by the desktop on sign-in to rehydrate its tracked-repo list.

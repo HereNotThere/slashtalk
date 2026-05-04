@@ -24,22 +24,28 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
     return { user };
   });
 
-/** API key auth plugin — validates Bearer header, derives `user` and `device` */
-export const apiKeyAuth = new Elysia({ name: "auth/apiKey" }).derive(
-  { as: "scoped" },
-  async ({ headers, set }) => {
+function createApiKeyAuth(name: string, options: { touchLastUsedAt: boolean }) {
+  return new Elysia({ name }).derive({ as: "scoped" }, async ({ headers, set }) => {
     const token = authInstance.bearerToken(headers.authorization);
     if (!token) {
       set.status = 401;
       throw new Error("Missing API key");
     }
 
-    const resolved = await authInstance.resolveApiKey(token, { touchLastUsedAt: true });
+    const resolved = await authInstance.resolveApiKey(token, options);
     if (!resolved.ok) {
       set.status = 401;
       throw new Error(resolved.reason === "unknown_user" ? "User not found" : "Invalid API key");
     }
 
     return { user: resolved.value.user, device: resolved.value.device };
-  },
-);
+  });
+}
+
+/** API key auth plugin — validates Bearer header, derives `user` and `device` */
+export const apiKeyAuth = createApiKeyAuth("auth/apiKey", { touchLastUsedAt: true });
+
+/** API key auth for high-frequency routes that must not update usage timestamps. */
+export const apiKeyAuthWithoutLastUsedTouch = createApiKeyAuth("auth/apiKey/noLastUsedTouch", {
+  touchLastUsedAt: false,
+});

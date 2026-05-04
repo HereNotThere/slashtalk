@@ -38,6 +38,6 @@
 
 ## 7. Verify
 
-- [ ] 7.1 Run `bun run typecheck` from `apps/server/`.
-- [ ] 7.2 Run `bun run test` from `apps/server/`.
-- [ ] 7.3 Inspect response-shape diffs and auth/access tests for accidental behavior changes.
+- [x] 7.1 Run `bun run typecheck` from `apps/server/`.
+- [x] 7.2 Run `bun run test` from `apps/server/`.
+- [x] 7.3 Inspect response-shape diffs and auth/access tests for accidental behavior changes.

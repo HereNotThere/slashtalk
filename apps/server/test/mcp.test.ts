@@ -15,7 +15,7 @@ import {
 } from "../src/db/schema";
 import { hashToken } from "../src/auth/tokens";
 import { mcpRoutes } from "../src/mcp/routes";
-import { mcpOAuthRoutes } from "../src/oauth/mcp";
+import { mcpOAuthRoutes } from "../src/mcp/auth";
 import { RedisBridge } from "../src/ws/redis-bridge";
 import { SUMMARY_ANALYZER } from "../src/analyzers/names";
 import { resetDatabase, mockGitHubAuth, getCookie, signInAs } from "./helpers";

@@ -464,7 +464,7 @@ describe("chat tool: get_team_activity — filePath overlap", () => {
         topFilesEdited: {
           "/Users/dev/team/slashtalk/apps/server/src/auth/middleware.ts": 5,
           "/Users/dev/team/slashtalk/apps/server/src/auth/tokens.ts": 2,
-          "/Users/dev/team/slashtalk/apps/server/src/oauth/mcp.ts": 1,
+          "/Users/dev/team/slashtalk/apps/server/src/auth/oauth-callback.ts": 1,
         },
       })
       .where(eq(sessions.sessionId, BOB_SESSION));
@@ -486,7 +486,7 @@ describe("chat tool: get_team_activity — filePath overlap", () => {
     expect(result.teammates.map((t) => t.login)).toEqual(["bob"]);
   });
 
-  it("does not match on substring overlap (auth.ts must not match oauth/mcp.ts)", async () => {
+  it("does not match on substring overlap (auth.ts must not match oauth-callback.ts)", async () => {
     const result = await getTeamActivityImpl(db, aliceId, {
       sinceHours: 24,
       filePath: "auth.ts",

@@ -3,12 +3,12 @@
  * that matches upload.spec.md exactly.
  */
 
-import { inArray, or, and, eq, sql } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { classifySessionState } from "./state";
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, SessionPr } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { pullRequests, sessionInsights } from "../db/schema";
+import { sessionInsights } from "../db/schema";
 import { SUMMARY_ANALYZER, ROLLING_SUMMARY_ANALYZER } from "../analyzers/names";
 
 interface SessionRow {
@@ -250,74 +250,6 @@ export async function loadInsightsForSessions(
       slot.rollingSummary = row.output as SessionInsightsForSnapshot["rollingSummary"];
     }
     result.set(row.sessionId, slot);
-  }
-  return result;
-}
-
-/**
- * Batch-load PRs matching (repo_id, branch) for a set of sessions. Returns a
- * map keyed by session_id → PR (or undefined when no match). "No match" is
- * common and not an error: the poller's coverage is best-effort.
- *
- * When multiple PRs share a (repo_id, head_ref) we pick the most recent by
- * `updated_at`. In practice GitHub only allows one open PR per head ref, so
- * duplicates only happen across open+closed/merged history.
- */
-export async function loadPrsForSessions(
-  db: Database,
-  rows: { sessionId: string; repoId: number | null; branch: string | null }[],
-): Promise<Map<string, SessionPr>> {
-  const result = new Map<string, SessionPr>();
-  const eligible = rows.filter(
-    (r): r is { sessionId: string; repoId: number; branch: string } =>
-      r.repoId != null && !!r.branch,
-  );
-  if (eligible.length === 0) return result;
-
-  const uniquePairs = new Map<string, { repoId: number; headRef: string }>();
-  for (const r of eligible) {
-    uniquePairs.set(`${r.repoId}:${r.branch}`, {
-      repoId: r.repoId,
-      headRef: r.branch,
-    });
-  }
-  const pairs = [...uniquePairs.values()];
-
-  const conditions = pairs.map((p) =>
-    and(eq(pullRequests.repoId, p.repoId), eq(pullRequests.headRef, p.headRef)),
-  );
-  const prRows = await db
-    .select({
-      repoId: pullRequests.repoId,
-      number: pullRequests.number,
-      headRef: pullRequests.headRef,
-      title: pullRequests.title,
-      url: pullRequests.url,
-      state: pullRequests.state,
-      authorLogin: pullRequests.authorLogin,
-      updatedAt: pullRequests.updatedAt,
-    })
-    .from(pullRequests)
-    .where(or(...conditions))
-    .orderBy(sql`${pullRequests.updatedAt} desc nulls last`);
-
-  const byPair = new Map<string, (typeof prRows)[number]>();
-  for (const pr of prRows) {
-    const k = `${pr.repoId}:${pr.headRef}`;
-    // First row wins (desc order → most recent).
-    if (!byPair.has(k)) byPair.set(k, pr);
-  }
-
-  for (const r of eligible) {
-    const pr = byPair.get(`${r.repoId}:${r.branch}`);
-    if (!pr) continue;
-    result.set(r.sessionId, {
-      number: pr.number,
-      title: pr.title,
-      url: pr.url,
-      state: pr.state,
-      authorLogin: pr.authorLogin,
-    });
   }
   return result;
 }

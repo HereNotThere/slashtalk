@@ -1,7 +1,8 @@
 import { inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { heartbeats, repos, sessions, users } from "../db/schema";
-import { loadInsightsForSessions, loadPrsForSessions, toSnapshot } from "./snapshot";
+import { loadPrsForSessions } from "../social/pull-requests";
+import { loadInsightsForSessions, toSnapshot } from "./snapshot";
 
 type SessionRow = typeof sessions.$inferSelect;
 type SessionSnapshot = ReturnType<typeof toSnapshot>;

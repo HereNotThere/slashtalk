@@ -25,6 +25,7 @@ import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
 import { pullRequests, repos, sessions, userRepos, users } from "../db/schema";
 import { canReadRepo } from "./visibility";
+import { loadProjectPullRequests } from "../social/pull-requests";
 import { LlmBudgetExceededError } from "../analyzers/llm-budget";
 import { callStructured } from "../analyzers/llm";
 import { MODELS } from "../models";
@@ -188,40 +189,7 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
   );
 
 async function loadPrs(db: Database, repoId: number, since: Date): Promise<ProjectPr[]> {
-  const sinceIso = since.toISOString();
-  const rows = await db
-    .select({
-      number: pullRequests.number,
-      title: pullRequests.title,
-      url: pullRequests.url,
-      state: pullRequests.state,
-      authorLogin: pullRequests.authorLogin,
-      updatedAt: pullRequests.updatedAt,
-      authorAvatarUrl: users.avatarUrl,
-    })
-    .from(pullRequests)
-    // leftJoin: PR authors aren't guaranteed to exist in our `users` table
-    // (external contributors, deleted accounts). Author login is canonical;
-    // avatar is best-effort.
-    .leftJoin(users, eq(users.githubLogin, pullRequests.authorLogin))
-    .where(and(eq(pullRequests.repoId, repoId), gte(pullRequests.updatedAt, since)))
-    .orderBy(desc(pullRequests.updatedAt))
-    .limit(MAX_PRS_IN_OVERVIEW);
-
-  return rows.map((r) => ({
-    number: r.number,
-    title: r.title,
-    url: r.url,
-    state: r.state,
-    authorLogin: r.authorLogin,
-    authorAvatarUrl: r.authorAvatarUrl ?? null,
-    // Stable fallback (per-request, not wall-clock): a non-deterministic
-    // value here would feed into hashPrs and bust the overview cache on
-    // every hover. `since` is the window-start so any null-updatedAt PR
-    // returned by the query (in practice none, since the WHERE filters by
-    // gte(updatedAt, since)) gets a deterministic stamp.
-    updatedAt: r.updatedAt?.toISOString() ?? sinceIso,
-  }));
+  return loadProjectPullRequests(db, repoId, since, MAX_PRS_IN_OVERVIEW);
 }
 
 // Active = anyone who authored a PR or had a session in window, *and* who is

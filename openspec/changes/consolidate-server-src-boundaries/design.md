@@ -83,6 +83,8 @@ Pull request upserts, ingest dedupe, poller writes, repo overview summaries, das
 
 Rationale: PR data is currently a cross-cutting secondary read model. Keeping its writes and common reads together reduces repeated Drizzle clauses and makes poller/domain boundaries clearer.
 
+Implementation decision: use `social/pull-requests.ts` as the PR owner for batch upserts, per-session PR enrichment, project overview PR rows, and user/dashboard PR rows. Desktop PR ingest preserves existing `head_ref` update semantics while poller writes remain authoritative for branch/head-ref changes.
+
 ### 6. Extract small utilities only when the interface stays obvious
 
 Text truncation, keyed request limiting, per-user request limiting, and analyzer result mapping are valid candidates, but they should be extracted only when at least two call sites clearly share the same semantics.

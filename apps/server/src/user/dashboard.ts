@@ -22,8 +22,9 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
-import { pullRequests, repos, sessions, users } from "../db/schema";
+import { repos, sessions, users } from "../db/schema";
 import { sharedRepoIdsForUsers, visibleRepoIdsForUser } from "../repo/visibility";
+import { loadUserPullRequestRows, loadUserPullRequests } from "../social/pull-requests";
 import { LlmBudgetExceededError } from "../analyzers/llm-budget";
 import { callStructured } from "../analyzers/llm";
 import { MODELS } from "../models";
@@ -31,12 +32,7 @@ import type { RedisBridge } from "../ws/redis-bridge";
 import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
 import { loadInsightsForSessions, type SessionInsightsForSnapshot } from "../sessions/snapshot";
-import {
-  shortRepoName,
-  type StandupResponse,
-  type UserPr,
-  type UserPrsResponse,
-} from "@slashtalk/shared";
+import { shortRepoName, type StandupResponse, type UserPrsResponse } from "@slashtalk/shared";
 
 // Cap on how many sessions/PRs feed into the standup prompt. Keeps the
 // Anthropic call bounded for power users with dozens of sessions in a day.
@@ -208,35 +204,13 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
         }
 
         const since = windowStart();
-        const rows = await db
-          .select({
-            number: pullRequests.number,
-            title: pullRequests.title,
-            url: pullRequests.url,
-            state: pullRequests.state,
-            updatedAt: pullRequests.updatedAt,
-            repoFullName: repos.fullName,
-          })
-          .from(pullRequests)
-          .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-          .where(
-            and(
-              inArray(pullRequests.repoId, resolved.visibleRepoIds),
-              eq(pullRequests.authorLogin, resolved.githubLogin),
-              gte(pullRequests.updatedAt, since),
-            ),
-          )
-          .orderBy(desc(pullRequests.updatedAt));
-
-        const prs: UserPr[] = rows.map((r) => ({
-          number: r.number,
-          title: r.title,
-          url: r.url,
-          state: r.state,
-          repoFullName: r.repoFullName,
-          updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
-        }));
-        return { prs };
+        return {
+          prs: await loadUserPullRequests(db, {
+            authorLogin: resolved.githubLogin,
+            repoIds: resolved.visibleRepoIds,
+            since,
+          }),
+        };
       },
       {
         params: t.Object({ login: t.String() }),
@@ -370,26 +344,12 @@ async function loadStandupInput(args: LoadStandupInputArgs): Promise<StandupInpu
   // and would otherwise leak filesystem layout into the standup blurb — e.g.
   // "desktop work" because the session's cwd was apps/desktop).
   const [prs, sessionRows] = await Promise.all([
-    db
-      .select({
-        number: pullRequests.number,
-        title: pullRequests.title,
-        url: pullRequests.url,
-        state: pullRequests.state,
-        updatedAt: pullRequests.updatedAt,
-        repoFullName: repos.fullName,
-      })
-      .from(pullRequests)
-      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-      .where(
-        and(
-          eq(pullRequests.authorLogin, target.githubLogin),
-          gte(pullRequests.updatedAt, since),
-          inArray(pullRequests.repoId, target.visibleRepoIds),
-        ),
-      )
-      .orderBy(desc(pullRequests.updatedAt))
-      .limit(MAX_PRS_IN_STANDUP),
+    loadUserPullRequestRows(db, {
+      authorLogin: target.githubLogin,
+      repoIds: target.visibleRepoIds,
+      since,
+      limit: MAX_PRS_IN_STANDUP,
+    }),
     db
       .select({
         sessionId: sessions.sessionId,

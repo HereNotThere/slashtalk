@@ -21,8 +21,9 @@ import type {
   IngestSelfPrsResponse,
 } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { repos, pullRequests, userRepos } from "../db/schema";
+import { repos, userRepos } from "../db/schema";
 import { apiKeyAuth } from "../auth/middleware";
+import { upsertPullRequests, type PullRequestUpsert } from "./pull-requests";
 
 const MAX_PRS_PER_INGEST = 100;
 
@@ -54,7 +55,7 @@ export const prIngestRoutes = (db: Database) =>
       const repoIdByName = new Map<string, number>();
       for (const r of repoRows) repoIdByName.set(r.fullName.toLowerCase(), r.id);
 
-      const rows: (typeof pullRequests.$inferInsert)[] = [];
+      const rows: PullRequestUpsert[] = [];
       let unknownRepos = 0;
       for (const e of entries) {
         const repoId = repoIdByName.get(e.repoFullName.toLowerCase());
@@ -82,19 +83,7 @@ export const prIngestRoutes = (db: Database) =>
         // already covers any PR field that would change the blurb, so a
         // genuinely fresh PR misses the cache naturally on the next read,
         // and an identical re-push hits the cache (no LLM churn).
-        await db
-          .insert(pullRequests)
-          .values(rows)
-          .onConflictDoUpdate({
-            target: [pullRequests.repoId, pullRequests.number],
-            set: {
-              title: sql`excluded.title`,
-              url: sql`excluded.url`,
-              state: sql`excluded.state`,
-              authorLogin: sql`excluded.author_login`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          });
+        await upsertPullRequests(db, rows, { preserveHeadRef: true });
       }
       return { upserted: rows.length, unknownRepos };
     },

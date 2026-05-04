@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "api_keys_device_unique" ON "api_keys" USING btree ("device_id");

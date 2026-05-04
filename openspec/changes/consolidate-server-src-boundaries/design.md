@@ -57,6 +57,8 @@ Cross-user reads must continue to be authorized by `user_repos`, but the query s
 
 Rationale: this is the highest-leverage consolidation because it protects core belief #13 and affects multiple user-facing surfaces.
 
+Implementation decision: start with `repo/visibility.ts` as the server-local owner for visible repo ids/names, shared repo intersections, visible peers, direct repo access checks, and session access by caller. Existing route callers can move onto this surface incrementally in follow-up tasks.
+
 ### 3. Share auth credential lookup without hiding route auth rules
 
 The route plugins should keep encoding auth by prefix, but the database/token lookup details should have one owner. JWT, API key, MCP token, and WebSocket token handling can share pure lookup/verification helpers while the plugins retain their public names and prefixes.

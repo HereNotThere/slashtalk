@@ -13,7 +13,7 @@
 
 ## 3. Consolidate Repo Visibility And Access
 
-- [ ] 3.1 Introduce a repo visibility/access owner around `user_repos` authorization.
+- [x] 3.1 Introduce a repo visibility/access owner around `user_repos` authorization.
 - [ ] 3.2 Move feed, session access, repo overview, dashboard, chat tools, and presence authorization checks onto the shared access surface.
 - [ ] 3.3 Keep repo claim validation separate from cross-user read authorization unless implementation shows a shared helper is genuinely clearer.
 

@@ -94,7 +94,7 @@
       },
       "devDependencies": {
         "@slashtalk/config": "workspace:*",
-        "@types/bun": "^1.2.0",
+        "@types/bun": "^1.3.0",
         "drizzle-kit": "^0.31.0",
         "typescript": "^5.8.0",
       },
@@ -128,6 +128,7 @@
       "name": "@slashtalk/shared",
       "version": "0.0.1",
       "devDependencies": {
+        "@slashtalk/config": "workspace:*",
         "typescript": "^5.8.0",
       },
     },

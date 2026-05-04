@@ -1,10 +1,9 @@
 import { Elysia } from "elysia";
-import { eq } from "drizzle-orm";
 import { config } from "../config";
 import { db } from "../db";
-import { users, apiKeys, devices, oauthTokens } from "../db/schema";
+import type { AuthDevice, AuthUser } from "../auth/resolvers";
 import { authAudit } from "../auth/audit";
-import { hashToken } from "../auth/tokens";
+import { authInstance } from "../auth/instance";
 import { mcpOrigin, mcpResourceUrl, mcpWwwAuthenticate } from "./auth";
 import { McpPresenceStore } from "./presence";
 import { McpSessionPool } from "./session-pool";
@@ -99,56 +98,32 @@ class PerUserRequestLimiter {
 type McpAuthResult =
   | {
       ok: true;
-      user: typeof users.$inferSelect;
-      device: typeof devices.$inferSelect | null;
+      user: AuthUser;
+      device: AuthDevice | null;
       method: "api_key" | "oauth";
     }
   | { ok: false; reason?: string };
 
 async function authenticateMcpRequest(request: Request): Promise<McpAuthResult> {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return { ok: false };
+  const bearer = authInstance.bearerToken(request.headers.get("authorization"));
+  if (!bearer) return { ok: false };
 
-  const bearer = authHeader.slice(7);
-  const tokenHash = await hashToken(bearer);
-
-  const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, tokenHash)).limit(1);
-  if (apiKey) {
-    const [user] = await db.select().from(users).where(eq(users.id, apiKey.userId)).limit(1);
-    if (!user) return { ok: false, reason: "unknown user" };
-
-    const [device] = await db
-      .select()
-      .from(devices)
-      .where(eq(devices.id, apiKey.deviceId))
-      .limit(1);
-
-    await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, apiKey.id));
-
-    return { ok: true, user, device: device ?? null, method: "api_key" };
+  const apiKey = await authInstance.resolveApiKey(bearer, { touchLastUsedAt: true });
+  if (apiKey.ok) {
+    return {
+      ok: true,
+      user: apiKey.value.user,
+      device: apiKey.value.device,
+      method: "api_key",
+    };
   }
+  if (apiKey.reason === "unknown_user") return { ok: false, reason: "unknown user" };
 
-  const [oauthToken] = await db
-    .select()
-    .from(oauthTokens)
-    .where(eq(oauthTokens.accessTokenHash, tokenHash))
-    .limit(1);
-  if (!oauthToken) return { ok: false, reason: "unknown token" };
-  if (oauthToken.revokedAt) return { ok: false, reason: "revoked" };
-  if (oauthToken.accessExpiresAt < new Date()) {
-    return { ok: false, reason: "expired" };
-  }
+  const oauth = await authInstance.resolveMcpAccessToken(
+    bearer,
+    mcpResourceUrl(mcpOrigin(request)),
+  );
+  if (!oauth.ok) return { ok: false, reason: oauth.reason };
 
-  const expectedResource = mcpResourceUrl(mcpOrigin(request));
-  if (oauthToken.resource !== expectedResource) {
-    return { ok: false, reason: "resource mismatch" };
-  }
-  if (!oauthToken.scope.split(/\s+/).includes("mcp:read")) {
-    return { ok: false, reason: "insufficient scope" };
-  }
-
-  const [user] = await db.select().from(users).where(eq(users.id, oauthToken.userId)).limit(1);
-  if (!user) return { ok: false, reason: "unknown user" };
-
-  return { ok: true, user, device: null, method: "oauth" };
+  return { ok: true, user: oauth.user, device: null, method: "oauth" };
 }

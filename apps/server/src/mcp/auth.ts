@@ -3,14 +3,10 @@ import { jwt } from "@elysiajs/jwt";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import { oauthAuthorizationCodes, oauthClients, oauthTokens, users } from "../db/schema";
+import { oauthAuthorizationCodes, oauthClients, oauthTokens } from "../db/schema";
 import { hashToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
-import {
-  isSessionCredentialFresh,
-  type SessionJwtVerifier,
-  verifySessionJwt,
-} from "../auth/session";
+import { createAuthInstanceForDb } from "../auth/instance";
 
 const SCOPES = ["mcp:read", "mcp:write"] as const;
 const STATIC_CLIENT_IDS = new Set(["slashtalk-static-claude-code"]);
@@ -97,6 +93,7 @@ export function authorizationServerMetadata(origin: string) {
 }
 
 export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
+  const auth = createAuthInstanceForDb(db);
   const metadata = ({ request }: { request: Request }) =>
     authorizationServerMetadata(mcpOrigin(request));
   const registerLimiter = new KeyedRequestLimiter({
@@ -154,7 +151,7 @@ export function mcpOAuthRoutes(db: Database, options: OAuthRouteOptions = {}) {
       const url = new URL(request.url);
       const sessionToken =
         typeof cookie.session?.value === "string" ? cookie.session.value : undefined;
-      const user = await sessionUser(db, jwt, sessionToken);
+      const user = await auth.resolveSessionJwt(jwt, sessionToken);
       if (!user) {
         set.status = 302;
         set.headers.location = `/auth/github?${new URLSearchParams({
@@ -270,24 +267,6 @@ class KeyedRequestLimiter {
     this.buckets.set(key, bucket);
     return { ok: true };
   }
-}
-
-async function sessionUser(
-  db: Database,
-  jwt: SessionJwtVerifier | undefined,
-  token: string | undefined,
-) {
-  if (!token) return null;
-  const payload = await verifySessionJwt(jwt, token);
-  if (!payload) return null;
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, Number(payload.sub)))
-    .limit(1);
-  if (!user) return null;
-  if (!isSessionCredentialFresh(user, payload)) return null;
-  return user;
 }
 
 type OAuthClientMetadata = Omit<OAuthClientRegistration, "client_id" | "client_id_issued_at">;

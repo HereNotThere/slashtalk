@@ -3,13 +3,9 @@ import { jwt } from "@elysiajs/jwt";
 import { eq } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import { users, apiKeys, userRepos } from "../db/schema";
-import {
-  isSessionCredentialFresh,
-  type SessionJwtVerifier,
-  verifySessionJwt,
-} from "../auth/session";
-import { hashToken } from "../auth/tokens";
+import { userRepos } from "../db/schema";
+import { createAuthInstanceForDb } from "../auth/instance";
+import type { SessionJwtVerifier } from "../auth/session";
 import type { RedisBridge } from "./redis-bridge";
 
 const PING_INTERVAL_MS = 30_000;
@@ -27,11 +23,12 @@ export const wsHandler = (db: Database, redis: RedisBridge) =>
       const queryToken = ws.data.query.token;
       const cookieToken = jwtPlugin.cookie?.session?.value;
       const origin = jwtPlugin.headers?.origin;
+      const auth = createAuthInstanceForDb(db);
       const userId = queryToken
-        ? await authenticateQueryToken(db, jwtPlugin.jwt, queryToken)
+        ? await authenticateQueryToken(auth, jwtPlugin.jwt, queryToken)
         : typeof cookieToken === "string"
           ? isAllowedCookieWebSocketOrigin(origin)
-            ? await authenticateJwt(db, jwtPlugin.jwt, cookieToken)
+            ? ((await auth.resolveSessionJwt(jwtPlugin.jwt, cookieToken))?.id ?? null)
             : null
           : null;
 
@@ -81,33 +78,14 @@ export const wsHandler = (db: Database, redis: RedisBridge) =>
   });
 
 async function authenticateQueryToken(
-  db: Database,
+  auth: ReturnType<typeof createAuthInstanceForDb>,
   jwtVerifier: SessionJwtVerifier | undefined,
   token: string,
 ): Promise<number | null> {
-  return (await authenticateJwt(db, jwtVerifier, token)) ?? authenticateApiKey(db, token);
-}
-
-async function authenticateJwt(
-  db: Database,
-  jwtVerifier: SessionJwtVerifier | undefined,
-  token: string,
-): Promise<number | null> {
-  const payload = await verifySessionJwt(jwtVerifier, token);
-  if (!payload) return null;
-
-  const [user] = await db
-    .select({
-      id: users.id,
-      credentialsRevokedAt: users.credentialsRevokedAt,
-    })
-    .from(users)
-    .where(eq(users.id, Number(payload.sub)))
-    .limit(1);
-  if (!user) return null;
-  if (!isSessionCredentialFresh(user, payload)) return null;
-
-  return user.id;
+  const sessionUser = await auth.resolveSessionJwt(jwtVerifier, token);
+  if (sessionUser) return sessionUser.id;
+  const apiKey = await auth.resolveApiKey(token, { touchLastUsedAt: false });
+  return apiKey.ok ? apiKey.value.user.id : null;
 }
 
 export function isAllowedCookieWebSocketOrigin(origin: string | undefined): boolean {
@@ -126,10 +104,4 @@ export function isAllowedCookieWebSocketOrigin(origin: string | undefined): bool
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-}
-
-async function authenticateApiKey(db: Database, token: string): Promise<number | null> {
-  const keyHash = await hashToken(token);
-  const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash)).limit(1);
-  return apiKey?.userId ?? null;
 }

@@ -13,6 +13,7 @@ import {
   sessions,
 } from "../db/schema";
 import { jwtAuth, apiKeyAuth } from "../auth/middleware";
+import { createAuthInstanceForDb } from "../auth/instance";
 import { authAudit } from "../auth/audit";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
@@ -92,40 +93,23 @@ export const userRoutes = (db: Database) =>
 export const deviceReposRoutes = (db: Database) =>
   new Elysia({ prefix: "/v1/devices", name: "device-repos" })
     .use(
-      // Use API key auth (imported inline to avoid circular dep)
       new Elysia({ name: "device-repos/auth" }).derive(
         { as: "scoped" },
         async ({ headers, set }) => {
-          const { apiKeyAuth } = await import("../auth/middleware");
-          // Reuse the apiKeyAuth derive logic inline
-          const authHeader = headers.authorization;
-          if (!authHeader?.startsWith("Bearer ")) {
+          const auth = createAuthInstanceForDb(db);
+          const token = auth.bearerToken(headers.authorization);
+          if (!token) {
             set.status = 401;
             throw new Error("Missing API key");
           }
-          const { hashToken } = await import("../auth/tokens");
-          const key = authHeader.slice(7);
-          const keyHash = await hashToken(key);
-          const [apiKey] = await db
-            .select()
-            .from(apiKeys)
-            .where(eq(apiKeys.keyHash, keyHash))
-            .limit(1);
-          if (!apiKey) {
+          const resolved = await auth.resolveApiKey(token, { touchLastUsedAt: false });
+          if (!resolved.ok) {
             set.status = 401;
-            throw new Error("Invalid API key");
+            throw new Error(
+              resolved.reason === "unknown_user" ? "User not found" : "Invalid API key",
+            );
           }
-          const [user] = await db.select().from(users).where(eq(users.id, apiKey.userId)).limit(1);
-          if (!user) {
-            set.status = 401;
-            throw new Error("User not found");
-          }
-          const [device] = await db
-            .select()
-            .from(devices)
-            .where(eq(devices.id, apiKey.deviceId))
-            .limit(1);
-          return { user, device: device ?? null };
+          return { user: resolved.value.user, device: resolved.value.device };
         },
       ),
     )

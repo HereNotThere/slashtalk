@@ -12,7 +12,10 @@
 // repos they can't see (the visible-repo set differs across callers, and
 // the composed blurb bakes that filter in). Cache values also carry an input
 // fingerprint, so changed PR/session rows bypass the cached blurb without
-// creating unbounded per-fingerprint entries.
+// creating unbounded per-fingerprint entries. Self-standup invalidation
+// relies on the fingerprint alone — eagerly busting the cache after every
+// `pushSelfPrs` (an earlier design) re-ran the LLM on every hover even when
+// the input was unchanged, because `gh` returns the same PR rows each call.
 
 import { Elysia, t } from "elysia";
 import { createHash } from "node:crypto";
@@ -49,8 +52,35 @@ interface StandupOutput {
   summary: string;
 }
 
+interface FingerprintPr {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  updatedAt: string | null;
+  repoFullName: string;
+}
+
+interface FingerprintSession {
+  sessionId: string;
+  title: string | null;
+  repoFullName: string;
+  lastTs: string | null;
+  summary: string | null;
+  highlights: string[];
+}
+
+interface FingerprintValue {
+  prs: FingerprintPr[];
+  sessions: FingerprintSession[];
+}
+
 interface StandupCacheEntry {
   fingerprint: string;
+  // Retained alongside the hash so a miss can log a structured diff of what
+  // actually changed. Cheap (≤10 PRs + ≤12 sessions of metadata per entry,
+  // 5min TTL) and worth it for the observability.
+  value: FingerprintValue;
   response: StandupResponse;
 }
 
@@ -115,15 +145,6 @@ interface DashboardDeps {
 
 const standupCache = new TtlCache<string, StandupCacheEntry>(STANDUP_CACHE_TTL_MS);
 const standupInFlight = new Map<string, Promise<StandupResponse>>();
-
-/** Drop the user's *self-view* standup cache entry. Called after the desktop
- *  pushes new self-PRs so the next hover composes a fresh blurb instead of
- *  waiting STANDUP_CACHE_TTL_MS. We don't bother invalidating
- *  peer-viewing-self entries — peers already accept some lag, and tracking
- *  them would mean iterating the cache. */
-export function invalidateSelfStandupCache(userId: number): void {
-  standupCache.delete(`${userId}:${userId}`);
-}
 
 interface ResolvedTarget {
   id: number;
@@ -278,9 +299,26 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
             return { summary: null };
           }
 
-          const fingerprint = standupInputFingerprint(input);
+          const value = standupFingerprintValue(input);
+          const fingerprint = hashFingerprintValue(value);
           const hit = standupCache.get(key);
           if (hit?.fingerprint === fingerprint) return hit.response;
+
+          // Log the diff that's about to trigger a recompose so we can see
+          // whether self-card hover churn is real PR/session change or LLM
+          // non-determinism on identical input.
+          const fpTag = fingerprint.slice(0, 8);
+          if (hit) {
+            const diffs = diffFingerprintValue(hit.value, value);
+            const summary = diffs.length ? diffs.join(" | ") : "(no structural diff)";
+            console.log(
+              `[standup] ${key} recompose ${hit.fingerprint.slice(0, 8)}→${fpTag} changes: ${summary}`,
+            );
+          } else {
+            console.log(
+              `[standup] ${key} cold compose ${fpTag} prs=${value.prs.length} sessions=${value.sessions.length}`,
+            );
+          }
 
           const inFlightKey = `${key}:${fingerprint}`;
           const existing = standupInFlight.get(inFlightKey);
@@ -294,7 +332,7 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
           standupInFlight.set(inFlightKey, promise);
           try {
             const body = await promise;
-            standupCache.set(key, { fingerprint, response: body });
+            standupCache.set(key, { fingerprint, value, response: body });
             return body;
           } finally {
             if (standupInFlight.get(inFlightKey) === promise) standupInFlight.delete(inFlightKey);
@@ -457,8 +495,8 @@ function standupPromptArgs(input: StandupInput): StandupPromptArgs {
   };
 }
 
-function standupInputFingerprint(input: StandupInput): string {
-  const value = {
+function standupFingerprintValue(input: StandupInput): FingerprintValue {
+  return {
     prs: input.prs.map((p) => ({
       number: p.number,
       title: p.title,
@@ -479,7 +517,62 @@ function standupInputFingerprint(input: StandupInput): string {
       };
     }),
   };
+}
+
+function hashFingerprintValue(value: FingerprintValue): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("base64url");
+}
+
+function standupInputFingerprint(input: StandupInput): string {
+  return hashFingerprintValue(standupFingerprintValue(input));
+}
+
+// Structural diff between two fingerprint values. Returns short, single-line
+// strings ready to join with " | " for log output. Used only on cache miss
+// to explain *why* the LLM is being re-run, so we can tell at a glance
+// whether the input actually changed or the LLM is just non-deterministic
+// on identical input.
+function diffFingerprintValue(prev: FingerprintValue, next: FingerprintValue): string[] {
+  const diffs: string[] = [];
+  const prevPrs = new Map(prev.prs.map((p) => [p.number, p]));
+  const nextPrs = new Map(next.prs.map((p) => [p.number, p]));
+  for (const [num, p] of nextPrs) {
+    const prior = prevPrs.get(num);
+    if (!prior) {
+      diffs.push(`pr#${num} added (${p.state})`);
+      continue;
+    }
+    const changes: string[] = [];
+    if (prior.state !== p.state) changes.push(`state ${prior.state}→${p.state}`);
+    if (prior.title !== p.title) changes.push("title");
+    if (prior.updatedAt !== p.updatedAt) changes.push("updatedAt");
+    if (changes.length) diffs.push(`pr#${num} ${changes.join(", ")}`);
+  }
+  for (const num of prevPrs.keys()) {
+    if (!nextPrs.has(num)) diffs.push(`pr#${num} removed`);
+  }
+  const prevSessions = new Map(prev.sessions.map((s) => [s.sessionId, s]));
+  const nextSessions = new Map(next.sessions.map((s) => [s.sessionId, s]));
+  for (const [id, s] of nextSessions) {
+    const prior = prevSessions.get(id);
+    const tag = id.slice(0, 8);
+    if (!prior) {
+      diffs.push(`session ${tag} added`);
+      continue;
+    }
+    const changes: string[] = [];
+    if (prior.lastTs !== s.lastTs) changes.push("lastTs");
+    if (prior.title !== s.title) changes.push("title");
+    if (prior.summary !== s.summary) changes.push("summary");
+    if (JSON.stringify(prior.highlights) !== JSON.stringify(s.highlights)) {
+      changes.push("highlights");
+    }
+    if (changes.length) diffs.push(`session ${tag} ${changes.join(", ")}`);
+  }
+  for (const id of prevSessions.keys()) {
+    if (!nextSessions.has(id)) diffs.push(`session ${id.slice(0, 8)} removed`);
+  }
+  return diffs;
 }
 
 function fallbackStandup(args: StandupPromptArgs): string {

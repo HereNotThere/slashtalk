@@ -176,7 +176,6 @@ export async function getTeamActivityImpl(
     includeUsers: true,
     includeRepos: true,
   });
-  const prMap = new Map(hydratedRows.map(({ row, snapshot }) => [row.sessionId, snapshot.pr]));
 
   // Default behavior: hide `ended` sessions from the rollup so "what's the
   // team doing" doesn't drown in merge cleanup from earlier in the window.

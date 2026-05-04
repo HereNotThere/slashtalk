@@ -12,6 +12,7 @@ import {
   sessions,
 } from "../db/schema";
 import { jwtAuth, apiKeyAuth, apiKeyAuthWithoutLastUsedTouch } from "../auth/middleware";
+import { hashToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
 import { visibleReposForUser } from "../repo/visibility";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
@@ -71,14 +72,14 @@ export const userRoutes = (db: Database) =>
       { params: t.Object({ id: t.String() }) },
     )
 
-    // POST /api/me/setup-token — generate a new setup token
     .post("/setup-token", async ({ user }) => {
       const token = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
+      // Persist the SHA-256 hash; raw token is returned once and never re-read.
       await db.insert(setupTokens).values({
         userId: user.id,
-        token,
+        token: await hashToken(token),
         expiresAt,
       });
 

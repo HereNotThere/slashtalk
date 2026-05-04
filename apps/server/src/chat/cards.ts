@@ -1,7 +1,8 @@
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import type { SessionCard } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { heartbeats, repos, sessions, userRepos, users } from "../db/schema";
+import { heartbeats, repos, sessions, users } from "../db/schema";
+import { visibleRepoIdsForUser } from "../repo/visibility";
 import { loadInsightsForSessions, toSnapshot } from "../sessions/snapshot";
 
 const CARD_LAST_PROMPT_MAX_CHARS = 240;
@@ -31,11 +32,7 @@ export async function loadSessionCards(
     db.select().from(sessions).where(inArray(sessions.sessionId, orderedUnique)),
     cachedVisibleRepoIds
       ? Promise.resolve(new Set(cachedVisibleRepoIds))
-      : db
-          .select({ id: userRepos.repoId })
-          .from(userRepos)
-          .where(eq(userRepos.userId, callerId))
-          .then((rows) => new Set(rows.map((r) => r.id))),
+      : visibleRepoIdsForUser(db, callerId).then((ids) => new Set(ids)),
   ]);
 
   const visible = sessionRows.filter((r) => r.repoId !== null && visibleRepoIds.has(r.repoId));

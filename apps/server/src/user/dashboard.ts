@@ -22,7 +22,8 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
-import { pullRequests, repos, sessions, userRepos, users } from "../db/schema";
+import { pullRequests, repos, sessions, users } from "../db/schema";
+import { sharedRepoIdsForUsers, visibleRepoIdsForUser } from "../repo/visibility";
 import { LlmBudgetExceededError } from "../analyzers/llm-budget";
 import { callStructured } from "../analyzers/llm";
 import { MODELS } from "../models";
@@ -172,33 +173,15 @@ async function resolveTarget(
   if (!target) return { error: "not_found" };
 
   if (target.id === caller.id) {
-    const callerRepos = await db
-      .select({ repoId: userRepos.repoId })
-      .from(userRepos)
-      .where(eq(userRepos.userId, caller.id));
-    return { ...target, visibleRepoIds: callerRepos.map((r) => r.repoId) };
+    return { ...target, visibleRepoIds: await visibleRepoIdsForUser(db, caller.id) };
   }
 
   // Peer: compute caller ∩ target. The same shape as the gate in
   // /api/users/:login/questions, but we keep the result so we can use it as
   // the visible-repo filter on PRs and standup queries.
-  const overlap = await db
-    .select({ repoId: userRepos.repoId })
-    .from(userRepos)
-    .where(
-      and(
-        eq(userRepos.userId, target.id),
-        inArray(
-          userRepos.repoId,
-          db
-            .select({ repoId: userRepos.repoId })
-            .from(userRepos)
-            .where(eq(userRepos.userId, caller.id)),
-        ),
-      ),
-    );
+  const overlap = await sharedRepoIdsForUsers(db, caller.id, target.id);
   if (overlap.length === 0) return { error: "no_access" };
-  return { ...target, visibleRepoIds: overlap.map((r) => r.repoId) };
+  return { ...target, visibleRepoIds: overlap };
 }
 
 export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>

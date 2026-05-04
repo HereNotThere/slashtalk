@@ -1,11 +1,10 @@
 import { Elysia, t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
-import { eq } from "drizzle-orm";
 import { config } from "../config";
 import type { Database } from "../db";
-import { userRepos } from "../db/schema";
 import { createAuthInstanceForDb } from "../auth/instance";
 import type { SessionJwtVerifier } from "../auth/session";
+import { visibleRepoIdsForUser } from "../repo/visibility";
 import type { RedisBridge } from "./redis-bridge";
 
 const PING_INTERVAL_MS = 30_000;
@@ -38,10 +37,7 @@ export const wsHandler = (db: Database, redis: RedisBridge) =>
       }
 
       // Subscribe to all user's repo channels
-      const repoRows = await db
-        .select({ repoId: userRepos.repoId })
-        .from(userRepos)
-        .where(eq(userRepos.userId, userId));
+      const repoIds = await visibleRepoIdsForUser(db, userId);
 
       const handler = (_channel: string, message: string) => {
         ws.send(message);
@@ -51,8 +47,8 @@ export const wsHandler = (db: Database, redis: RedisBridge) =>
       (ws.data as any)._redisHandler = handler;
       (ws.data as any)._userId = userId;
 
-      for (const row of repoRows) {
-        await redis.subscribe(`repo:${row.repoId}`, handler);
+      for (const repoId of repoIds) {
+        await redis.subscribe(`repo:${repoId}`, handler);
       }
       // Also subscribe to personal channel
       await redis.subscribe(`user:${userId}`, handler);

@@ -63,6 +63,16 @@ export async function visiblePeerIdsForUser(
   return ids.filter((id) => id !== userId);
 }
 
+export async function visibleUserIdsForRepoIds(db: Database, repoIds: number[]): Promise<number[]> {
+  if (repoIds.length === 0) return [];
+
+  const rows = await db
+    .selectDistinct({ userId: userRepos.userId })
+    .from(userRepos)
+    .where(inArray(userRepos.repoId, repoIds));
+  return rows.map((row) => row.userId);
+}
+
 export async function canReadRepo(db: Database, userId: number, repoId: number): Promise<boolean> {
   const [access] = await db
     .select({ repoId: userRepos.repoId })

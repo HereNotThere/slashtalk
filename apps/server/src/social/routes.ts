@@ -4,6 +4,11 @@ import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import {
+  sharedRepoIdsForUsers,
+  visiblePeerIdsForUser,
+  visibleRepoIdsForUser,
+} from "../repo/visibility";
+import {
   toSnapshot,
   sortByStateThenTime,
   loadInsightsForSessions,
@@ -22,12 +27,7 @@ export const socialRoutes = (db: Database) =>
       "/feed",
       async ({ user, query }) => {
         // Get all repo IDs the user has access to
-        const myRepoIds = await db
-          .select({ repoId: userRepos.repoId })
-          .from(userRepos)
-          .where(eq(userRepos.userId, user.id));
-
-        const repoIds = myRepoIds.map((r) => r.repoId);
+        const repoIds = await visibleRepoIdsForUser(db, user.id);
         if (repoIds.length === 0) return [];
 
         // Get sessions for those repos
@@ -151,20 +151,7 @@ export const socialRoutes = (db: Database) =>
     // GET /api/feed/users — users in social graph with session counts
     .get("/feed/users", async ({ user }) => {
       const freshHeartbeatCutoff = new Date(Date.now() - HEARTBEAT_FRESH_S * 1000);
-      const peerUserIds = await db
-        .selectDistinct({ userId: userRepos.userId })
-        .from(userRepos)
-        .where(
-          inArray(
-            userRepos.repoId,
-            db
-              .select({ repoId: userRepos.repoId })
-              .from(userRepos)
-              .where(eq(userRepos.userId, user.id)),
-          ),
-        );
-
-      const userIds = peerUserIds.map((r) => r.userId).filter((id) => id !== user.id);
+      const userIds = await visiblePeerIdsForUser(db, user.id);
       if (userIds.length === 0) return [];
 
       const peerUsers = await db.select().from(users).where(inArray(users.id, userIds));
@@ -252,23 +239,8 @@ export const socialRoutes = (db: Database) =>
           if (target.id !== user.id) {
             // Author gate: callers can only see questions from teammates they
             // share a repo with. The query is symmetric to /api/feed/users.
-            const [overlap] = await db
-              .select({ repoId: userRepos.repoId })
-              .from(userRepos)
-              .where(
-                and(
-                  eq(userRepos.userId, target.id),
-                  inArray(
-                    userRepos.repoId,
-                    db
-                      .select({ repoId: userRepos.repoId })
-                      .from(userRepos)
-                      .where(eq(userRepos.userId, user.id)),
-                  ),
-                ),
-              )
-              .limit(1);
-            if (!overlap) {
+            const overlap = await sharedRepoIdsForUsers(db, user.id, target.id);
+            if (overlap.length === 0) {
               set.status = 403;
               return { error: "no_access" };
             }

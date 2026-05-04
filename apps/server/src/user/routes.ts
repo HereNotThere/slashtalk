@@ -5,7 +5,6 @@ import {
   users,
   devices,
   repos,
-  userRepos,
   setupTokens,
   apiKeys,
   deviceExcludedRepos,
@@ -15,6 +14,7 @@ import {
 import { jwtAuth, apiKeyAuth } from "../auth/middleware";
 import { createAuthInstanceForDb } from "../auth/instance";
 import { authAudit } from "../auth/audit";
+import { visibleReposForUser } from "../repo/visibility";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
 import { __clearOrgsCaches } from "./orgs";
@@ -161,14 +161,9 @@ export const deviceReposRoutes = (db: Database) =>
           return { error: "Device not found" };
         }
 
-        const visibleRepos = await db
-          .select({ repoId: repos.id, fullName: repos.fullName })
-          .from(userRepos)
-          .innerJoin(repos, eq(repos.id, userRepos.repoId))
-          .where(eq(userRepos.userId, user.id));
-
-        const repoIdByFullName = new Map(visibleRepos.map((repo) => [repo.fullName, repo.repoId]));
-        const visibleRepoIds = new Set(visibleRepos.map((repo) => repo.repoId));
+        const visibleRepos = await visibleReposForUser(db, user.id);
+        const repoIdByFullName = new Map(visibleRepos.map((repo) => [repo.fullName, repo.id]));
+        const visibleRepoIds = new Set(visibleRepos.map((repo) => repo.id));
         const skippedRepos: string[] = [];
 
         const resolveRepoId = (input: {

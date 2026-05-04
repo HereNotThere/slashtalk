@@ -8,6 +8,7 @@ import {
   visiblePeerIdsForUser,
   visibleRepoIdsForUser,
   visibleReposForUser,
+  visibleUserIdsForRepoIds,
 } from "../src/repo/visibility";
 import { resetDatabase } from "./helpers";
 
@@ -116,6 +117,7 @@ describe("repo visibility owner", () => {
   it("computes shared repos and visible peers from user_repos", async () => {
     expect(await sharedRepoIdsForUsers(db, aliceId, bobId)).toEqual([sharedRepoId]);
     expect(await sharedRepoIdsForUsers(db, bobId, outsiderId)).toEqual([]);
+    expect((await visibleUserIdsForRepoIds(db, [sharedRepoId])).sort()).toEqual([aliceId, bobId]);
     expect(await visiblePeerIdsForUser(db, aliceId)).toEqual([bobId]);
     expect(await visiblePeerIdsForUser(db, aliceId, { includeSelf: true })).toEqual([
       aliceId,

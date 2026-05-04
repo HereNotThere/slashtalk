@@ -1,7 +1,8 @@
 import { and, eq, gt, inArray, or, sql } from "drizzle-orm";
 import type { Database } from "../db";
-import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
+import { sessions, users, repos, heartbeats } from "../db/schema";
 import { loadInsightsForSessions, loadPrsForSessions, toSnapshot } from "../sessions/snapshot";
+import { canReadRepo, visibleRepoIdsForUser, visibleUserIdsForRepoIds } from "../repo/visibility";
 import type { EventSource, SessionPr, SessionState } from "@slashtalk/shared";
 import { normalizeFullName } from "../social/github-sync";
 import { isCollisionIgnoredPath } from "../correlate/file-index";
@@ -120,11 +121,7 @@ export async function getTeamActivityImpl(
   if (ctx?.visibleRepoIds) {
     repoIdScope = ctx.visibleRepoIds;
   } else {
-    const myRepoRows = await db
-      .select({ id: userRepos.repoId })
-      .from(userRepos)
-      .where(eq(userRepos.userId, userId));
-    repoIdScope = myRepoRows.map((r) => r.id);
+    repoIdScope = await visibleRepoIdsForUser(db, userId);
   }
   if (repoIdScope.length === 0) {
     return { teammates: [], since: since.toISOString() };
@@ -137,11 +134,7 @@ export async function getTeamActivityImpl(
   // be linked via a different shared repo.
   const fullVisibleRepoIds = repoIdScope;
 
-  const fullVisiblePeerRows = await db
-    .selectDistinct({ userId: userRepos.userId })
-    .from(userRepos)
-    .where(inArray(userRepos.repoId, fullVisibleRepoIds));
-  const fullVisiblePeerIds = fullVisiblePeerRows.map((r) => r.userId);
+  const fullVisiblePeerIds = await visibleUserIdsForRepoIds(db, fullVisibleRepoIds);
 
   // `resolvedLogins` lets the model distinguish "name didn't match any peer"
   // (empty) from "matched but no sessions in scope" (non-empty + empty
@@ -395,13 +388,7 @@ export async function getSessionImpl(
   if (!row.repoId) {
     return { kind: "error", message: "session not matched to a repo" };
   }
-
-  const [access] = await db
-    .select({ id: userRepos.repoId })
-    .from(userRepos)
-    .where(and(eq(userRepos.userId, userId), eq(userRepos.repoId, row.repoId)))
-    .limit(1);
-  if (!access) {
+  if (!(await canReadRepo(db, userId, row.repoId))) {
     return { kind: "error", message: "session not visible to caller" };
   }
 

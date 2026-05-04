@@ -24,6 +24,7 @@ import { createHash } from "node:crypto";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
 import { pullRequests, repos, sessions, userRepos, users } from "../db/schema";
+import { canReadRepo } from "./visibility";
 import { LlmBudgetExceededError } from "../analyzers/llm-budget";
 import { callStructured } from "../analyzers/llm";
 import { MODELS } from "../models";
@@ -128,12 +129,7 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
         return { error: "not_found" };
       }
 
-      const [access] = await db
-        .select({ userId: userRepos.userId })
-        .from(userRepos)
-        .where(and(eq(userRepos.userId, user.id), eq(userRepos.repoId, repo.id)))
-        .limit(1);
-      if (!access) {
+      if (!(await canReadRepo(db, user.id, repo.id))) {
         set.status = 403;
         return { error: "no_access" };
       }

@@ -72,7 +72,9 @@ apps/server/src/
 └── lib/
     ├── correlate/
     ├── models.ts
+    ├── rate-limit.ts
     ├── semaphore.ts
+    ├── text.ts
     ├── time-window.ts
     └── ttl-cache.ts
 ```
@@ -109,6 +111,15 @@ This change should move files and update imports first. It should not simultaneo
 Rationale: behavior-preserving source organization is already broad. Combining it with deeper module design would make the diff harder to review and risk hiding behavioral changes.
 
 Alternative considered: refactor DB access while moving folders. Deferred. Good candidates exist, especially `user_repos` authorization and session snapshot reads, but those deserve separate proposals because they change module interfaces.
+
+Coordination note: `consolidate-server-src-boundaries` is landing those deeper interfaces before this source move. Treat these as existing owners and move them mechanically:
+
+- `auth/instance.ts` and `auth/resolvers.ts` -> `domains/auth`
+- `repo/visibility.ts` and `social/pull-requests.ts` -> `domains/repos`
+- `sessions/read-model.ts` -> `domains/sessions`
+- `util/rate-limit.ts` and `util/text.ts` -> `lib`
+
+Analyzer run result mapping intentionally remains local to the analyzer scheduler, so the source move should rehome it with the analyzer job rather than split out a new persistence helper.
 
 ### 5. Rename only when the new name clarifies ownership
 

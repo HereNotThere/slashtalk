@@ -42,6 +42,7 @@ src/repo/visibility.ts              src/domains/repos/visibility.ts
 src/sessions/read-model.ts          src/domains/sessions/read-model.ts
 src/social/pull-requests.ts         src/domains/repos/pull-requests.ts
 src/util/rate-limit.ts              src/lib/rate-limit.ts
+src/util/text.ts                    src/lib/text.ts
 ```
 
 Rationale: the valuable decision is ownership. The physical path should follow whichever structural change lands first.
@@ -92,6 +93,17 @@ Text truncation, keyed request limiting, per-user request limiting, and analyzer
 Rationale: small duplication can be cheaper than a vague helper. The useful extractions here are the ones that carry a named policy: request windowing, display truncation, analyzer persistence mapping.
 
 Implementation decision: use `util/rate-limit.ts` for the repeated in-memory sliding-window limiter used by MCP auth, MCP routes, and repo claim throttling. Use `util/text.ts` for ellipsis truncation used by display snippets and prompt-budget snippets. Keep analyzer run result mapping in `analyzers/scheduler.ts` for now because the inventory did not surface a non-analyzer caller with the same mapping responsibility.
+
+### 7. Coordinate destinations with `reorganize-server-src`
+
+This consolidation is landing before the source move, so the new owners stay in the current tree for review:
+
+- `auth/instance.ts` and `auth/resolvers.ts` should move with `domains/auth`.
+- `repo/visibility.ts` and `social/pull-requests.ts` should move with `domains/repos`.
+- `sessions/read-model.ts` should move with `domains/sessions`.
+- `util/rate-limit.ts` and `util/text.ts` should move with `lib`.
+
+The `reorganize-server-src` design notes now treat these as existing owners to rehome mechanically, not as new interfaces to invent during the folder move.
 
 ## Risks / Trade-offs
 

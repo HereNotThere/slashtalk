@@ -32,9 +32,9 @@
 
 ## 6. Coordinate With Source Reorganization
 
-- [ ] 6.1 If this lands before `reorganize-server-src`, keep paths in the current tree but document their intended destination.
-- [ ] 6.2 If `reorganize-server-src` lands first, place the new owners directly in the reorganized tree.
-- [ ] 6.3 Update `reorganize-server-src` design notes if the chosen owners change the proposed folder map.
+- [x] 6.1 If this lands before `reorganize-server-src`, keep paths in the current tree but document their intended destination.
+- [x] 6.2 Confirm `reorganize-server-src` has not landed, so no direct placement in the reorganized tree is needed.
+- [x] 6.3 Update `reorganize-server-src` design notes if the chosen owners change the proposed folder map.
 
 ## 7. Verify
 

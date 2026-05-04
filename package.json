@@ -1,10 +1,15 @@
 {
   "name": "slashtalk",
+  "version": "0.0.0",
   "private": true,
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
+  "packageManager": "bun@1.3.3",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
   "scripts": {
     "dev": "concurrently -k --no-color --names server,desktop \"bun run dev:server\" \"bun run dev:desktop\"",
     "dev:server": "cd apps/server && bun --watch --no-clear-screen src/index.ts",

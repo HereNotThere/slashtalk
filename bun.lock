@@ -93,7 +93,8 @@
         "zod": "^4",
       },
       "devDependencies": {
-        "@types/bun": "^1.2.0",
+        "@slashtalk/config": "workspace:*",
+        "@types/bun": "^1.3.0",
         "drizzle-kit": "^0.31.0",
         "typescript": "^5.8.0",
       },
@@ -119,10 +120,15 @@
         "vite": "^5.4.9",
       },
     },
+    "packages/config": {
+      "name": "@slashtalk/config",
+      "version": "0.0.1",
+    },
     "packages/shared": {
       "name": "@slashtalk/shared",
       "version": "0.0.1",
       "devDependencies": {
+        "@slashtalk/config": "workspace:*",
         "typescript": "^5.8.0",
       },
     },
@@ -533,6 +539,8 @@
     "@sindresorhus/is": ["@sindresorhus/is@4.6.0", "", {}, "sha512-t09vSN3MdfsyCHoFcTRCH/iUtG7OJ0CsjzB8cjAmKc/va/kIgeDI/TxsigdncE/4be734m0cvIYwNaV4i2XqAw=="],
 
     "@slashtalk/blog": ["@slashtalk/blog@workspace:apps/blog"],
+
+    "@slashtalk/config": ["@slashtalk/config@workspace:packages/config"],
 
     "@slashtalk/electron": ["@slashtalk/electron@workspace:apps/desktop"],
 

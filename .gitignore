@@ -142,3 +142,6 @@ vite.config.ts.timestamp-*
 # Claude Code local state
 .claude/
 .compound-engineering
+
+# SDD
+openspec

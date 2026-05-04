@@ -13,12 +13,13 @@
 // Permission model: use the SDK/default boundary. Delegated/read-only chat adds
 // a stricter allowlist in chatDelegate.ts.
 
-import { query, type Options, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
+import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
 import * as agentStore from "./agentStore";
+import { denyByDefault } from "./chatDelegate";
 import { resolveBundledClaudeBin } from "./claudeBin";
 import * as localTranscripts from "./localTranscripts";
 import type { AgentStreamEvent } from "./anthropic";
@@ -137,7 +138,8 @@ export async function sendMessage(
     cwd,
     model: agent.model,
     systemPrompt: agent.systemPrompt,
-    permissionMode: "default" as PermissionMode,
+    permissionMode: "default",
+    canUseTool: denyByDefault,
     // Load the user's ~/.claude/settings.json so local agents inherit the same
     // MCP servers (and hooks) the terminal `claude` uses. Project/local scopes
     // are intentionally omitted: 'project' would pull CLAUDE.md and behave

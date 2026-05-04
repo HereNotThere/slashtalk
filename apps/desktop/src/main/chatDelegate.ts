@@ -115,7 +115,7 @@ ${ghBehaviorLine}
 ${linksLine}`;
 }
 
-const denyByDefault: CanUseTool = async (toolName) => {
+export const denyByDefault: CanUseTool = async (toolName) => {
   const result: PermissionResult = {
     behavior: "deny",
     message: `Slashtalk chat is read-only — \`${toolName}\` is not on the allowlist. If you need this, the user must run the question in a regular Claude Code session.`,

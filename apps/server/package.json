@@ -30,6 +30,7 @@
     "zod": "^4"
   },
   "devDependencies": {
+    "@slashtalk/config": "workspace:*",
     "@types/bun": "^1.2.0",
     "drizzle-kit": "^0.31.0",
     "typescript": "^5.8.0"

@@ -30,6 +30,14 @@ const STACK_WRAPPER_PX = 59;
 const STACK_PEEK_PX = 8;
 // Negative margin needed to overlap wrappers down to the peek.
 const STACK_COLLAPSED_OVERLAP_PX = STACK_WRAPPER_PX - STACK_PEEK_PX;
+// Grace window before re-collapsing the inactive-peer stack after the cursor
+// leaves. The expand animation (margin transition + rail window resize) lasts
+// ~280ms and shifts every bubble's screen position, so a cursor that started
+// inside the stack can briefly fall outside the hit area while layout settles.
+// Without this delay the stack yoyos: expand → mouseleave → collapse →
+// mouseenter → expand. 640ms covers the transition with headroom for slow
+// systems where the window-bounds animation lags the renderer.
+const STACK_COLLAPSE_GRACE_MS = 640;
 
 // Compact "time since" — "now" / "5m" / "3h" / "2d".
 function formatAge(ms: number): string {
@@ -57,6 +65,7 @@ export function App(): JSX.Element {
     side: "end",
   });
   const hoverShowTimer = useRef<number | null>(null);
+  const stackCollapseTimer = useRef<number | null>(null);
   const [stackExpanded, setStackExpanded] = useState(false);
   const [infoOpenHeadId, setInfoOpenHeadId] = useState<string | null>(null);
   // Mirror main's default (`getRailCollapseInactive` returns true unless the
@@ -305,6 +314,33 @@ export function App(): JSX.Element {
     void window.chatheads.infoHoverLeave();
   };
 
+  const handleStackEnter = (): void => {
+    if (stackCollapseTimer.current != null) {
+      window.clearTimeout(stackCollapseTimer.current);
+      stackCollapseTimer.current = null;
+    }
+    setStackExpanded(true);
+  };
+
+  const handleStackLeave = (): void => {
+    if (stackCollapseTimer.current != null) {
+      window.clearTimeout(stackCollapseTimer.current);
+    }
+    stackCollapseTimer.current = window.setTimeout(() => {
+      stackCollapseTimer.current = null;
+      setStackExpanded(false);
+    }, STACK_COLLAPSE_GRACE_MS);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (stackCollapseTimer.current != null) {
+        window.clearTimeout(stackCollapseTimer.current);
+        stackCollapseTimer.current = null;
+      }
+    };
+  }, []);
+
   const registerBubble =
     (id: string) =>
     (el: HTMLDivElement | null): void => {
@@ -457,8 +493,8 @@ export function App(): JSX.Element {
           {inactivePeers.length > 0 && (
             <div
               className={`flex items-center shrink-0 ${isHorizontal ? "flex-row" : "flex-col"}`}
-              onMouseEnter={() => setStackExpanded(true)}
-              onMouseLeave={() => setStackExpanded(false)}
+              onMouseEnter={handleStackEnter}
+              onMouseLeave={handleStackLeave}
             >
               {inactivePeers.map((h, i) => {
                 // Each wrapper is STACK_WRAPPER_PX on the main axis.

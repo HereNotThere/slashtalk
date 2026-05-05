@@ -8,6 +8,12 @@ import { publishInsightsUpdate } from "./publish";
 import type { Analyzer, AnalyzerContext } from "./types";
 
 const INITIAL_DELAY_MS = 5_000;
+// Sessions touched in the freshness window are always candidates; never-
+// analyzed sessions are only candidates inside the backfill window. The
+// product surfaces (NOW = 2h, past-24h standup) never read insights for
+// sessions older than the backfill cap.
+const FRESHNESS_INTERVAL = sql`interval '1 hour'`;
+const BACKFILL_INTERVAL = sql`interval '48 hours'`;
 // One in-process guard so a slow tick doesn't overlap with the next interval
 // fire. When we actually run multiple replicas, add a Redis-backed lock here.
 let tickInFlight = false;
@@ -35,20 +41,26 @@ async function tick(db: Database, redis: RedisBridge): Promise<void> {
   console.log("[analyzers] tick starting");
 
   try {
+    // Equivalent to `freshness OR (backfill AND never-analyzed)`, but the
+    // common `lastTs > now() - backfill` factor is hoisted so the planner can
+    // satisfy it from one index range scan instead of an OR-of-ranges.
     const candidates = await db
       .select()
       .from(sessions)
       .where(
-        or(
-          gt(sessions.lastTs, sql`now() - interval '1 hour'`),
-          sql`NOT EXISTS (SELECT 1 FROM ${sessionInsights} si WHERE si.session_id = ${sessions.sessionId})`,
+        and(
+          gt(sessions.lastTs, sql`now() - ${BACKFILL_INTERVAL}`),
+          or(
+            gt(sessions.lastTs, sql`now() - ${FRESHNESS_INTERVAL}`),
+            sql`NOT EXISTS (SELECT 1 FROM ${sessionInsights} si WHERE si.session_id = ${sessions.sessionId})`,
+          ),
         ),
       )
       .orderBy(desc(sessions.lastTs))
       .limit(config.analyzerMaxSessionsPerTick);
 
     console.log(
-      `[analyzers] selected ${candidates.length} candidate sessions (touched in last 1h or never analyzed), running ${analyzers.length} analyzers`,
+      `[analyzers] selected ${candidates.length} candidate sessions (touched in last 1h, or touched in last 48h and never analyzed), running ${analyzers.length} analyzers`,
     );
 
     if (candidates.length === 0) {

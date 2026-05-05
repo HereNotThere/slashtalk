@@ -434,15 +434,21 @@ function standupPromptArgs(input: StandupInput): StandupPromptArgs {
 }
 
 function standupFingerprintValue(input: StandupInput): FingerprintValue {
-  return {
-    prs: input.prs.map((p) => ({
+  // Sort by stable identifiers (PR number, sessionId) so the hash is
+  // order-independent. The query orders rows by updatedAt/lastTs desc, so an
+  // event on an older row reshuffles the array — without this sort, that
+  // reshuffle alone would bust the cache even though row content is unchanged.
+  const prs = input.prs
+    .map((p) => ({
       number: p.number,
       title: p.title,
       url: p.url,
       state: p.state,
       repoFullName: p.repoFullName,
-    })),
-    sessions: input.sessions.map((s) => {
+    }))
+    .sort((a, b) => a.number - b.number);
+  const sessions = input.sessions
+    .map((s) => {
       const insight = input.insightsBySessionId.get(s.sessionId)?.rollingSummary ?? null;
       return {
         sessionId: s.sessionId,
@@ -451,8 +457,9 @@ function standupFingerprintValue(input: StandupInput): FingerprintValue {
         summary: typeof insight?.summary === "string" ? insight.summary : null,
         highlights: stringList(insight?.highlights),
       };
-    }),
-  };
+    })
+    .sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
+  return { prs, sessions };
 }
 
 function hashFingerprintValue(value: FingerprintValue): string {

@@ -288,6 +288,43 @@ describe("standup prompt context", () => {
     expect(unchanged).toBe(same);
     expect(changed).not.toBe(same);
     expect(livePulse).toBe(same);
+
+    // Row order is driven by updatedAt/lastTs desc — a timestamp tick on an
+    // older row reshuffles the array. The fingerprint must stay stable.
+    const twoPrBase = {
+      ...base,
+      prs: [
+        base.prs[0],
+        {
+          number: 261,
+          title: "Add standup highlight tags",
+          url: "https://github.com/HereNotThere/slashtalk/pull/261",
+          state: "open",
+          repoFullName: "HereNotThere/slashtalk",
+          updatedAt: new Date("2026-05-01T17:00:00.000Z"),
+        },
+      ],
+      sessions: [
+        base.sessions[0],
+        {
+          sessionId: "session-2",
+          title: "Tweak avatar bg",
+          repoFullName: "HereNotThere/slashtalk",
+          lastTs: new Date("2026-05-01T17:30:00.000Z"),
+        },
+      ],
+      insightsBySessionId: new Map([
+        ...base.insightsBySessionId,
+        ["session-2", { rollingSummary: { summary: "Avatar bg work.", highlights: [] } }],
+      ]),
+    };
+    const ordered = __standupTest.standupInputFingerprint(twoPrBase as never);
+    const reordered = __standupTest.standupInputFingerprint({
+      ...twoPrBase,
+      prs: [...twoPrBase.prs].reverse(),
+      sessions: [...twoPrBase.sessions].reverse(),
+    } as never);
+    expect(reordered).toBe(ordered);
   });
 });
 

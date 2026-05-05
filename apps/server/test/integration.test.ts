@@ -8,6 +8,7 @@ import {
   sessions,
   deviceRepoPaths,
   deviceExcludedRepos,
+  apiKeys,
 } from "../src/db/schema";
 import { createApp } from "../src/app";
 import { RedisBridge } from "../src/ws/redis-bridge";
@@ -300,6 +301,13 @@ describe("social feed integration", () => {
         localPath: "/Users/alice/src/repo-common",
       },
     ]);
+
+    const [apiKey] = await db
+      .select({ lastUsedAt: apiKeys.lastUsedAt })
+      .from(apiKeys)
+      .where(eq(apiKeys.deviceId, aliceDeviceId))
+      .limit(1);
+    expect(apiKey.lastUsedAt).toBeNull();
   });
 
   it("re-exchanging with the same deviceName reuses the device row", async () => {

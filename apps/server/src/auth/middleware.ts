@@ -1,24 +1,7 @@
 import { Elysia } from "elysia";
 import { jwt } from "@elysiajs/jwt";
-import { eq } from "drizzle-orm";
 import { config } from "../config";
-import { db } from "../db";
-import { users, apiKeys, devices } from "../db/schema";
-import { isSessionCredentialFresh, verifySessionJwt } from "./session";
-import { hashToken } from "./tokens";
-
-const authUserColumns = {
-  id: users.id,
-  githubId: users.githubId,
-  githubLogin: users.githubLogin,
-  avatarUrl: users.avatarUrl,
-  displayName: users.displayName,
-  githubToken: users.githubToken,
-  credentialsRevokedAt: users.credentialsRevokedAt,
-  timezone: users.timezone,
-  createdAt: users.createdAt,
-  updatedAt: users.updatedAt,
-};
+import { authInstance } from "./instance";
 
 /** JWT auth plugin — validates cookie-based JWT, derives `user` into context */
 export const jwtAuth = new Elysia({ name: "auth/jwt" })
@@ -29,30 +12,11 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
     }),
   )
   .derive({ as: "scoped" }, async ({ jwt, cookie: { session }, set }) => {
-    const token = session?.value;
-    if (!token) {
-      set.status = 401;
-      throw new Error("Unauthorized");
-    }
-
-    const payload = await verifySessionJwt(jwt, token as string);
-    if (!payload) {
-      set.status = 401;
-      throw new Error("Invalid token");
-    }
-
-    const [user] = await db
-      .select(authUserColumns)
-      .from(users)
-      .where(eq(users.id, Number(payload.sub)))
-      .limit(1);
-
+    const user = await authInstance.resolveSessionJwt(
+      jwt,
+      typeof session?.value === "string" ? session.value : undefined,
+    );
     if (!user) {
-      set.status = 401;
-      throw new Error("User not found");
-    }
-
-    if (!isSessionCredentialFresh(user, payload)) {
       set.status = 401;
       throw new Error("Invalid token");
     }
@@ -60,46 +24,28 @@ export const jwtAuth = new Elysia({ name: "auth/jwt" })
     return { user };
   });
 
-/** API key auth plugin — validates Bearer header, derives `user` and `device` */
-export const apiKeyAuth = new Elysia({ name: "auth/apiKey" }).derive(
-  { as: "scoped" },
-  async ({ headers, set }) => {
-    const authHeader = headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) {
+function createApiKeyAuth(name: string, options: { touchLastUsedAt: boolean }) {
+  return new Elysia({ name }).derive({ as: "scoped" }, async ({ headers, set }) => {
+    const token = authInstance.bearerToken(headers.authorization);
+    if (!token) {
       set.status = 401;
       throw new Error("Missing API key");
     }
 
-    const key = authHeader.slice(7);
-    const keyHash = await hashToken(key);
-
-    const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash)).limit(1);
-
-    if (!apiKey) {
+    const resolved = await authInstance.resolveApiKey(token, options);
+    if (!resolved.ok) {
       set.status = 401;
-      throw new Error("Invalid API key");
+      throw new Error(resolved.reason === "unknown_user" ? "User not found" : "Invalid API key");
     }
 
-    const [user] = await db
-      .select(authUserColumns)
-      .from(users)
-      .where(eq(users.id, apiKey.userId))
-      .limit(1);
+    return { user: resolved.value.user, device: resolved.value.device };
+  });
+}
 
-    if (!user) {
-      set.status = 401;
-      throw new Error("User not found");
-    }
+/** API key auth plugin — validates Bearer header, derives `user` and `device` */
+export const apiKeyAuth = createApiKeyAuth("auth/apiKey", { touchLastUsedAt: true });
 
-    const [device] = await db
-      .select()
-      .from(devices)
-      .where(eq(devices.id, apiKey.deviceId))
-      .limit(1);
-
-    // Update last_used_at
-    await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, apiKey.id));
-
-    return { user, device: device ?? null };
-  },
-);
+/** API key auth for high-frequency routes that must not update usage timestamps. */
+export const apiKeyAuthWithoutLastUsedTouch = createApiKeyAuth("auth/apiKey/noLastUsedTouch", {
+  touchLastUsedAt: false,
+});

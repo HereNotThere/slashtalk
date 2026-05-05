@@ -8,12 +8,13 @@
 // repo.
 
 import { Elysia, t } from "elysia";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import type { SpotifyPresence } from "@slashtalk/shared";
 import type { Database } from "../db";
 import { apiKeyAuth, jwtAuth } from "../auth/middleware";
 import type { RedisBridge } from "../ws/redis-bridge";
-import { userRepos, users } from "../db/schema";
+import { users } from "../db/schema";
+import { visiblePeerIdsForUser, visibleRepoIdsForUser } from "../repo/visibility";
 
 const TTL_SECONDS = 120;
 const SPOTIFY_TRACK_ID_PATTERN = "^[A-Za-z0-9]{1,64}$";
@@ -31,10 +32,7 @@ async function publishPresence(
   githubLogin: string,
   spotify: SpotifyPresence | null,
 ): Promise<void> {
-  const repoRows = await db
-    .select({ repoId: userRepos.repoId })
-    .from(userRepos)
-    .where(eq(userRepos.userId, userId));
+  const repoIds = await visibleRepoIdsForUser(db, userId);
 
   const msg = {
     type: "presence_updated",
@@ -44,8 +42,8 @@ async function publishPresence(
   } as const;
 
   void redis.publish(`user:${userId}`, msg);
-  for (const r of repoRows) {
-    void redis.publish(`repo:${r.repoId}`, msg);
+  for (const repoId of repoIds) {
+    void redis.publish(`repo:${repoId}`, msg);
   }
 }
 
@@ -89,15 +87,7 @@ export const spotifyPresenceRoutes = (db: Database, redis: RedisBridge) =>
 // Peer set = every user who shares ≥1 claimed repo with me. Self is always
 // included so the caller can render its own card without a second fetch.
 async function getPeerUserIds(db: Database, userId: number): Promise<number[]> {
-  const myRepoIds = db
-    .select({ repoId: userRepos.repoId })
-    .from(userRepos)
-    .where(eq(userRepos.userId, userId));
-  const peerRows = await db
-    .selectDistinct({ userId: userRepos.userId })
-    .from(userRepos)
-    .where(inArray(userRepos.repoId, myRepoIds));
-  return [...new Set([userId, ...peerRows.map((r) => r.userId)])];
+  return visiblePeerIdsForUser(db, userId, { includeSelf: true });
 }
 
 export const presenceReadRoutes = (db: Database, redis: RedisBridge) =>

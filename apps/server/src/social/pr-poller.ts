@@ -13,11 +13,12 @@
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "../db";
-import { users, repos, sessions, pullRequests, userRepos } from "../db/schema";
+import { users, repos, sessions, userRepos } from "../db/schema";
 import { decryptGithubToken } from "../auth/tokens";
 import { config } from "../config";
 import type { RedisBridge } from "../ws/redis-bridge";
 import type { PrActivityMessage, SessionUpdatedMessage } from "@slashtalk/shared";
+import { upsertPullRequests } from "./pull-requests";
 
 const POLL_INTERVAL_MS = 60_000;
 // Stagger users so we don't pin a single tick at hundreds of req/sec.
@@ -251,9 +252,8 @@ async function backfillRepo(
   for (const pr of prs) {
     const headRef = pr.head?.ref;
     if (!headRef || !pr.number) continue;
-    await db
-      .insert(pullRequests)
-      .values({
+    await upsertPullRequests(db, [
+      {
         repoId,
         number: pr.number,
         headRef,
@@ -262,18 +262,8 @@ async function backfillRepo(
         state: "open",
         authorLogin: pr.user?.login ?? "",
         updatedAt: new Date(pr.updated_at),
-      })
-      .onConflictDoUpdate({
-        target: [pullRequests.repoId, pullRequests.number],
-        set: {
-          headRef,
-          title: pr.title ?? "",
-          url: pr.html_url,
-          state: "open",
-          authorLogin: pr.user?.login ?? "",
-          updatedAt: new Date(pr.updated_at),
-        },
-      });
+      },
+    ]);
 
     const matches = await db
       .select({
@@ -336,9 +326,8 @@ export async function persistPrFromEvent(
   const url = pr.html_url ?? `https://github.com/${ev.repo.name}/pull/${number}`;
   const authorLogin = pr.user?.login ?? ev.actor.login;
 
-  await db
-    .insert(pullRequests)
-    .values({
+  await upsertPullRequests(db, [
+    {
       repoId: repoRow.id,
       number,
       headRef,
@@ -347,18 +336,8 @@ export async function persistPrFromEvent(
       state,
       authorLogin,
       updatedAt: new Date(ev.created_at),
-    })
-    .onConflictDoUpdate({
-      target: [pullRequests.repoId, pullRequests.number],
-      set: {
-        headRef,
-        title: pr.title ?? "",
-        url,
-        state,
-        authorLogin,
-        updatedAt: new Date(ev.created_at),
-      },
-    });
+    },
+  ]);
   console.log(`[pr-poller] upserted PR ${ev.repo.name}#${number} head=${headRef} state=${state}`);
 
   // Announce to every session on this (repo, branch) so the UI refreshes.

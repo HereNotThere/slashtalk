@@ -5,10 +5,10 @@ import type {
   ToolUseBlock,
 } from "@anthropic-ai/sdk/resources/messages";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import type { ChatAssistantMessage, ChatCitation, ChatMessage } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { chatMessages, repos, userRepos } from "../db/schema";
+import { chatMessages } from "../db/schema";
+import { visibleReposForUser } from "../repo/visibility";
 import { MODELS, calculateCostUsd } from "../models";
 import { getAnthropicClient } from "../analyzers/anthropic-client";
 import {
@@ -87,11 +87,7 @@ export async function runChatAgent(params: RunChatParams): Promise<RunChatResult
     throw new LlmBudgetExceededError(user.id, budget.spentUsd, budget.capUsd);
   }
 
-  const visibleRepos = await db
-    .select({ id: repos.id, fullName: repos.fullName })
-    .from(userRepos)
-    .innerJoin(repos, eq(repos.id, userRepos.repoId))
-    .where(eq(userRepos.userId, user.id));
+  const visibleRepos = await visibleReposForUser(db, user.id);
 
   const tools = buildChatTools(db, user.id, {
     visibleRepoIds: visibleRepos.map((r) => r.id),

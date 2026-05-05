@@ -24,12 +24,15 @@ import { createHash } from "node:crypto";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
 import { pullRequests, repos, sessions, userRepos, users } from "../db/schema";
+import { canReadRepo } from "./visibility";
+import { loadProjectPullRequests } from "../social/pull-requests";
 import { LlmBudgetExceededError } from "../analyzers/llm-budget";
 import { callStructured } from "../analyzers/llm";
 import { MODELS } from "../models";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
+import { truncateWithEllipsis } from "../util/text";
 import {
   shortRepoName,
   type ProjectActivePerson,
@@ -95,11 +98,6 @@ interface OverviewDeps {
 
 const overviewCache = new TtlCache<string, ProjectOverviewResponse>(OVERVIEW_CACHE_TTL_MS);
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1)}…`;
-}
-
 // Fingerprint of the in-window PR set. Including (number, state, updatedAt)
 // means any PR transition (open→merged, edit, etc.) busts the cache for the
 // next request. Sorted for stability. Exported for testing.
@@ -128,12 +126,7 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
         return { error: "not_found" };
       }
 
-      const [access] = await db
-        .select({ userId: userRepos.userId })
-        .from(userRepos)
-        .where(and(eq(userRepos.userId, user.id), eq(userRepos.repoId, repo.id)))
-        .limit(1);
-      if (!access) {
+      if (!(await canReadRepo(db, user.id, repo.id))) {
         set.status = 403;
         return { error: "no_access" };
       }
@@ -192,40 +185,7 @@ export const repoOverviewRoutes = (db: Database, deps: OverviewDeps) =>
   );
 
 async function loadPrs(db: Database, repoId: number, since: Date): Promise<ProjectPr[]> {
-  const sinceIso = since.toISOString();
-  const rows = await db
-    .select({
-      number: pullRequests.number,
-      title: pullRequests.title,
-      url: pullRequests.url,
-      state: pullRequests.state,
-      authorLogin: pullRequests.authorLogin,
-      updatedAt: pullRequests.updatedAt,
-      authorAvatarUrl: users.avatarUrl,
-    })
-    .from(pullRequests)
-    // leftJoin: PR authors aren't guaranteed to exist in our `users` table
-    // (external contributors, deleted accounts). Author login is canonical;
-    // avatar is best-effort.
-    .leftJoin(users, eq(users.githubLogin, pullRequests.authorLogin))
-    .where(and(eq(pullRequests.repoId, repoId), gte(pullRequests.updatedAt, since)))
-    .orderBy(desc(pullRequests.updatedAt))
-    .limit(MAX_PRS_IN_OVERVIEW);
-
-  return rows.map((r) => ({
-    number: r.number,
-    title: r.title,
-    url: r.url,
-    state: r.state,
-    authorLogin: r.authorLogin,
-    authorAvatarUrl: r.authorAvatarUrl ?? null,
-    // Stable fallback (per-request, not wall-clock): a non-deterministic
-    // value here would feed into hashPrs and bust the overview cache on
-    // every hover. `since` is the window-start so any null-updatedAt PR
-    // returned by the query (in practice none, since the WHERE filters by
-    // gte(updatedAt, since)) gets a deterministic stamp.
-    updatedAt: r.updatedAt?.toISOString() ?? sinceIso,
-  }));
+  return loadProjectPullRequests(db, repoId, since, MAX_PRS_IN_OVERVIEW);
 }
 
 // Active = anyone who authored a PR or had a session in window, *and* who is
@@ -340,7 +300,7 @@ interface OverviewPromptArgs {
 
 function buildOverviewPrompt(args: OverviewPromptArgs): string {
   const lines = args.prs.map(
-    (p) => `- #${p.number} [${p.state}] @${p.authorLogin}: ${truncate(p.title, 160)}`,
+    (p) => `- #${p.number} [${p.state}] @${p.authorLogin}: ${truncateWithEllipsis(p.title, 160)}`,
   );
   return [
     `repo: ${args.fullName} (basename: ${shortRepoName(args.fullName)})`,

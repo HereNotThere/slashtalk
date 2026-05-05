@@ -4,11 +4,12 @@ import type { Database } from "../db";
 import { sessions, users, repos, userRepos, heartbeats } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import {
-  toSnapshot,
-  sortByStateThenTime,
-  loadInsightsForSessions,
-  loadPrsForSessions,
-} from "../sessions/snapshot";
+  sharedRepoIdsForUsers,
+  visiblePeerIdsForUser,
+  visibleRepoIdsForUser,
+} from "../repo/visibility";
+import { sortByStateThenTime } from "../sessions/snapshot";
+import { hydrateSessions } from "../sessions/read-model";
 import { HEARTBEAT_FRESH_S } from "../sessions/state";
 import { normalizeFullName } from "./github-sync";
 import { loadChatHistory } from "../chat/history";
@@ -22,12 +23,7 @@ export const socialRoutes = (db: Database) =>
       "/feed",
       async ({ user, query }) => {
         // Get all repo IDs the user has access to
-        const myRepoIds = await db
-          .select({ repoId: userRepos.repoId })
-          .from(userRepos)
-          .where(eq(userRepos.userId, user.id));
-
-        const repoIds = myRepoIds.map((r) => r.repoId);
+        const repoIds = await visibleRepoIdsForUser(db, user.id);
         if (repoIds.length === 0) return [];
 
         // Get sessions for those repos
@@ -66,63 +62,13 @@ export const socialRoutes = (db: Database) =>
           }
         }
 
-        // Get heartbeats for state classification
-        const sessionIds = sessionRows.map((s) => s.sessionId);
-        const hbRows =
-          sessionIds.length > 0
-            ? await db.select().from(heartbeats).where(inArray(heartbeats.sessionId, sessionIds))
-            : [];
-        const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
-
-        // Get user info for augmentation
-        const userIds = [...new Set(sessionRows.map((s) => s.userId))];
-        const userRows =
-          userIds.length > 0
-            ? await db
-                .select({
-                  id: users.id,
-                  githubLogin: users.githubLogin,
-                  avatarUrl: users.avatarUrl,
-                })
-                .from(users)
-                .where(inArray(users.id, userIds))
-            : [];
-        const userMap = new Map(userRows.map((u) => [u.id, u]));
-
-        // Get repo info for augmentation
-        const repoIdSet = [
-          ...new Set(sessionRows.map((s) => s.repoId).filter(Boolean) as number[]),
-        ];
-        const repoRows =
-          repoIdSet.length > 0
-            ? await db
-                .select({ id: repos.id, fullName: repos.fullName })
-                .from(repos)
-                .where(inArray(repos.id, repoIdSet))
-            : [];
-        const repoMap = new Map(repoRows.map((r) => [r.id, r]));
-
-        const insightsMap = await loadInsightsForSessions(db, sessionIds);
-        const prMap = await loadPrsForSessions(
-          db,
-          sessionRows.map((r) => ({
-            sessionId: r.sessionId,
-            repoId: r.repoId,
-            branch: r.branch,
-          })),
-        );
-
         // Build augmented snapshots
-        let snapshots = sessionRows.map((s) => {
-          const hb = hbMap.get(s.sessionId) ?? null;
-          const snapshot = toSnapshot(
-            s,
-            hb,
-            insightsMap.get(s.sessionId) ?? null,
-            prMap.get(s.sessionId) ?? null,
-          );
-          const u = userMap.get(s.userId);
-          const r = s.repoId ? repoMap.get(s.repoId) : null;
+        let snapshots = (
+          await hydrateSessions(db, sessionRows, {
+            includeUsers: true,
+            includeRepos: true,
+          })
+        ).map(({ snapshot, user: u, repo: r }) => {
           return {
             ...snapshot,
             github_login: u?.githubLogin ?? "unknown",
@@ -151,20 +97,7 @@ export const socialRoutes = (db: Database) =>
     // GET /api/feed/users — users in social graph with session counts
     .get("/feed/users", async ({ user }) => {
       const freshHeartbeatCutoff = new Date(Date.now() - HEARTBEAT_FRESH_S * 1000);
-      const peerUserIds = await db
-        .selectDistinct({ userId: userRepos.userId })
-        .from(userRepos)
-        .where(
-          inArray(
-            userRepos.repoId,
-            db
-              .select({ repoId: userRepos.repoId })
-              .from(userRepos)
-              .where(eq(userRepos.userId, user.id)),
-          ),
-        );
-
-      const userIds = peerUserIds.map((r) => r.userId).filter((id) => id !== user.id);
+      const userIds = await visiblePeerIdsForUser(db, user.id);
       if (userIds.length === 0) return [];
 
       const peerUsers = await db.select().from(users).where(inArray(users.id, userIds));
@@ -252,23 +185,8 @@ export const socialRoutes = (db: Database) =>
           if (target.id !== user.id) {
             // Author gate: callers can only see questions from teammates they
             // share a repo with. The query is symmetric to /api/feed/users.
-            const [overlap] = await db
-              .select({ repoId: userRepos.repoId })
-              .from(userRepos)
-              .where(
-                and(
-                  eq(userRepos.userId, target.id),
-                  inArray(
-                    userRepos.repoId,
-                    db
-                      .select({ repoId: userRepos.repoId })
-                      .from(userRepos)
-                      .where(eq(userRepos.userId, user.id)),
-                  ),
-                ),
-              )
-              .limit(1);
-            if (!overlap) {
+            const overlap = await sharedRepoIdsForUsers(db, user.id, target.id);
+            if (overlap.length === 0) {
               set.status = 403;
               return { error: "no_access" };
             }

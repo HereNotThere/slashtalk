@@ -5,15 +5,15 @@ import {
   users,
   devices,
   repos,
-  userRepos,
   setupTokens,
   apiKeys,
   deviceExcludedRepos,
   deviceRepoPaths,
   sessions,
 } from "../db/schema";
-import { jwtAuth, apiKeyAuth } from "../auth/middleware";
+import { jwtAuth, apiKeyAuth, apiKeyAuthWithoutLastUsedTouch } from "../auth/middleware";
 import { authAudit } from "../auth/audit";
+import { visibleReposForUser } from "../repo/visibility";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
 import { __clearOrgsCaches } from "./orgs";
@@ -91,44 +91,7 @@ export const userRoutes = (db: Database) =>
  */
 export const deviceReposRoutes = (db: Database) =>
   new Elysia({ prefix: "/v1/devices", name: "device-repos" })
-    .use(
-      // Use API key auth (imported inline to avoid circular dep)
-      new Elysia({ name: "device-repos/auth" }).derive(
-        { as: "scoped" },
-        async ({ headers, set }) => {
-          const { apiKeyAuth } = await import("../auth/middleware");
-          // Reuse the apiKeyAuth derive logic inline
-          const authHeader = headers.authorization;
-          if (!authHeader?.startsWith("Bearer ")) {
-            set.status = 401;
-            throw new Error("Missing API key");
-          }
-          const { hashToken } = await import("../auth/tokens");
-          const key = authHeader.slice(7);
-          const keyHash = await hashToken(key);
-          const [apiKey] = await db
-            .select()
-            .from(apiKeys)
-            .where(eq(apiKeys.keyHash, keyHash))
-            .limit(1);
-          if (!apiKey) {
-            set.status = 401;
-            throw new Error("Invalid API key");
-          }
-          const [user] = await db.select().from(users).where(eq(users.id, apiKey.userId)).limit(1);
-          if (!user) {
-            set.status = 401;
-            throw new Error("User not found");
-          }
-          const [device] = await db
-            .select()
-            .from(devices)
-            .where(eq(devices.id, apiKey.deviceId))
-            .limit(1);
-          return { user, device: device ?? null };
-        },
-      ),
-    )
+    .use(apiKeyAuthWithoutLastUsedTouch)
 
     // GET /v1/devices/:id/repos — the paths this device has registered.
     // Used by the desktop on sign-in to rehydrate its tracked-repo list.
@@ -177,14 +140,9 @@ export const deviceReposRoutes = (db: Database) =>
           return { error: "Device not found" };
         }
 
-        const visibleRepos = await db
-          .select({ repoId: repos.id, fullName: repos.fullName })
-          .from(userRepos)
-          .innerJoin(repos, eq(repos.id, userRepos.repoId))
-          .where(eq(userRepos.userId, user.id));
-
-        const repoIdByFullName = new Map(visibleRepos.map((repo) => [repo.fullName, repo.repoId]));
-        const visibleRepoIds = new Set(visibleRepos.map((repo) => repo.repoId));
+        const visibleRepos = await visibleReposForUser(db, user.id);
+        const repoIdByFullName = new Map(visibleRepos.map((repo) => [repo.fullName, repo.id]));
+        const visibleRepoIds = new Set(visibleRepos.map((repo) => repo.id));
         const skippedRepos: string[] = [];
 
         const resolveRepoId = (input: {

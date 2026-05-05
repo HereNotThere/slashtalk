@@ -1,15 +1,12 @@
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import type { SessionCard } from "@slashtalk/shared";
 import type { Database } from "../db";
-import { heartbeats, repos, sessions, userRepos, users } from "../db/schema";
-import { loadInsightsForSessions, toSnapshot } from "../sessions/snapshot";
+import { sessions } from "../db/schema";
+import { visibleRepoIdsForUser } from "../repo/visibility";
+import { hydrateSessions } from "../sessions/read-model";
+import { truncateWithEllipsis } from "../util/text";
 
 const CARD_LAST_PROMPT_MAX_CHARS = 240;
-
-function truncate(s: string | null, max: number): string | null {
-  if (!s) return s;
-  return s.length <= max ? s : s.slice(0, max - 1) + "…";
-}
 
 /**
  * Hydrate compact cards for a batch of session IDs the assistant cited.
@@ -31,59 +28,28 @@ export async function loadSessionCards(
     db.select().from(sessions).where(inArray(sessions.sessionId, orderedUnique)),
     cachedVisibleRepoIds
       ? Promise.resolve(new Set(cachedVisibleRepoIds))
-      : db
-          .select({ id: userRepos.repoId })
-          .from(userRepos)
-          .where(eq(userRepos.userId, callerId))
-          .then((rows) => new Set(rows.map((r) => r.id))),
+      : visibleRepoIdsForUser(db, callerId).then((ids) => new Set(ids)),
   ]);
 
   const visible = sessionRows.filter((r) => r.repoId !== null && visibleRepoIds.has(r.repoId));
   if (visible.length === 0) return [];
 
-  const visibleIds = visible.map((s) => s.sessionId);
-  const userIds = [...new Set(visible.map((s) => s.userId))];
-  // `visible` is already filtered to rows with non-null repoId, so the `!` is safe.
-  const repoIds = [...new Set(visible.map((s) => s.repoId!))];
-
-  const [hbRows, userRows, repoRows, insightsMap] = await Promise.all([
-    db.select().from(heartbeats).where(inArray(heartbeats.sessionId, visibleIds)),
-    db
-      .select({
-        id: users.id,
-        login: users.githubLogin,
-        displayName: users.displayName,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(users)
-      .where(inArray(users.id, userIds)),
-    db
-      .select({ id: repos.id, fullName: repos.fullName })
-      .from(repos)
-      .where(inArray(repos.id, repoIds)),
-    loadInsightsForSessions(db, visibleIds),
-  ]);
-
-  const hbMap = new Map(hbRows.map((h) => [h.sessionId, h]));
-  const userMap = new Map(userRows.map((u) => [u.id, u]));
-  const repoMap = new Map(repoRows.map((r) => [r.id, r]));
-  const byId = new Map(visible.map((s) => [s.sessionId, s]));
+  const hydrated = await hydrateSessions(db, visible, {
+    includeUsers: true,
+    includeRepos: true,
+    includePrs: false,
+  });
+  const byId = new Map(hydrated.map((s) => [s.row.sessionId, s]));
 
   const cards: SessionCard[] = [];
   for (const id of orderedUnique) {
-    const row = byId.get(id);
-    if (!row) continue;
-    const snapshot = toSnapshot(
-      row,
-      hbMap.get(row.sessionId) ?? null,
-      insightsMap.get(row.sessionId) ?? null,
-    );
-    const u = userMap.get(row.userId);
-    const r = row.repoId ? repoMap.get(row.repoId) : null;
+    const hydratedSession = byId.get(id);
+    if (!hydratedSession) continue;
+    const { row, snapshot, user: u, repo: r } = hydratedSession;
     cards.push({
       id: snapshot.id,
       user: {
-        login: u?.login ?? "unknown",
+        login: u?.githubLogin ?? "unknown",
         displayName: u?.displayName ?? null,
         avatarUrl: u?.avatarUrl ?? null,
       },
@@ -93,7 +59,7 @@ export async function loadSessionCards(
       branch: snapshot.branch,
       lastTs: snapshot.lastTs,
       currentTool: snapshot.currentTool?.name ?? null,
-      lastUserPrompt: truncate(snapshot.lastUserPrompt, CARD_LAST_PROMPT_MAX_CHARS),
+      lastUserPrompt: truncateWithEllipsis(snapshot.lastUserPrompt, CARD_LAST_PROMPT_MAX_CHARS),
       source: row.source,
     });
   }

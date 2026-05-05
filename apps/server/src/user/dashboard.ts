@@ -22,20 +22,18 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { jwtAuth } from "../auth/middleware";
-import { pullRequests, repos, sessions, userRepos, users } from "../db/schema";
+import { repos, sessions, users } from "../db/schema";
+import { sharedRepoIdsForUsers, visibleRepoIdsForUser } from "../repo/visibility";
+import { loadUserPullRequestRows, loadUserPullRequests } from "../social/pull-requests";
 import { LlmBudgetExceededError } from "../analyzers/llm-budget";
 import { callStructured } from "../analyzers/llm";
 import { MODELS } from "../models";
 import type { RedisBridge } from "../ws/redis-bridge";
 import { TtlCache } from "../util/ttl-cache";
 import { windowStart } from "../util/time-window";
+import { truncateWithEllipsis } from "../util/text";
 import { loadInsightsForSessions, type SessionInsightsForSnapshot } from "../sessions/snapshot";
-import {
-  shortRepoName,
-  type StandupResponse,
-  type UserPr,
-  type UserPrsResponse,
-} from "@slashtalk/shared";
+import { shortRepoName, type StandupResponse, type UserPrsResponse } from "@slashtalk/shared";
 
 // Cap on how many sessions/PRs feed into the standup prompt. Keeps the
 // Anthropic call bounded for power users with dozens of sessions in a day.
@@ -172,33 +170,15 @@ async function resolveTarget(
   if (!target) return { error: "not_found" };
 
   if (target.id === caller.id) {
-    const callerRepos = await db
-      .select({ repoId: userRepos.repoId })
-      .from(userRepos)
-      .where(eq(userRepos.userId, caller.id));
-    return { ...target, visibleRepoIds: callerRepos.map((r) => r.repoId) };
+    return { ...target, visibleRepoIds: await visibleRepoIdsForUser(db, caller.id) };
   }
 
   // Peer: compute caller ∩ target. The same shape as the gate in
   // /api/users/:login/questions, but we keep the result so we can use it as
   // the visible-repo filter on PRs and standup queries.
-  const overlap = await db
-    .select({ repoId: userRepos.repoId })
-    .from(userRepos)
-    .where(
-      and(
-        eq(userRepos.userId, target.id),
-        inArray(
-          userRepos.repoId,
-          db
-            .select({ repoId: userRepos.repoId })
-            .from(userRepos)
-            .where(eq(userRepos.userId, caller.id)),
-        ),
-      ),
-    );
+  const overlap = await sharedRepoIdsForUsers(db, caller.id, target.id);
   if (overlap.length === 0) return { error: "no_access" };
-  return { ...target, visibleRepoIds: overlap.map((r) => r.repoId) };
+  return { ...target, visibleRepoIds: overlap };
 }
 
 export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
@@ -225,35 +205,13 @@ export const dashboardRoutes = (db: Database, deps: DashboardDeps) =>
         }
 
         const since = windowStart();
-        const rows = await db
-          .select({
-            number: pullRequests.number,
-            title: pullRequests.title,
-            url: pullRequests.url,
-            state: pullRequests.state,
-            updatedAt: pullRequests.updatedAt,
-            repoFullName: repos.fullName,
-          })
-          .from(pullRequests)
-          .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-          .where(
-            and(
-              inArray(pullRequests.repoId, resolved.visibleRepoIds),
-              eq(pullRequests.authorLogin, resolved.githubLogin),
-              gte(pullRequests.updatedAt, since),
-            ),
-          )
-          .orderBy(desc(pullRequests.updatedAt));
-
-        const prs: UserPr[] = rows.map((r) => ({
-          number: r.number,
-          title: r.title,
-          url: r.url,
-          state: r.state,
-          repoFullName: r.repoFullName,
-          updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
-        }));
-        return { prs };
+        return {
+          prs: await loadUserPullRequests(db, {
+            authorLogin: resolved.githubLogin,
+            repoIds: resolved.visibleRepoIds,
+            since,
+          }),
+        };
       },
       {
         params: t.Object({ login: t.String() }),
@@ -387,26 +345,12 @@ async function loadStandupInput(args: LoadStandupInputArgs): Promise<StandupInpu
   // and would otherwise leak filesystem layout into the standup blurb — e.g.
   // "desktop work" because the session's cwd was apps/desktop).
   const [prs, sessionRows] = await Promise.all([
-    db
-      .select({
-        number: pullRequests.number,
-        title: pullRequests.title,
-        url: pullRequests.url,
-        state: pullRequests.state,
-        updatedAt: pullRequests.updatedAt,
-        repoFullName: repos.fullName,
-      })
-      .from(pullRequests)
-      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-      .where(
-        and(
-          eq(pullRequests.authorLogin, target.githubLogin),
-          gte(pullRequests.updatedAt, since),
-          inArray(pullRequests.repoId, target.visibleRepoIds),
-        ),
-      )
-      .orderBy(desc(pullRequests.updatedAt))
-      .limit(MAX_PRS_IN_STANDUP),
+    loadUserPullRequestRows(db, {
+      authorLogin: target.githubLogin,
+      repoIds: target.visibleRepoIds,
+      since,
+      limit: MAX_PRS_IN_STANDUP,
+    }),
     db
       .select({
         sessionId: sessions.sessionId,
@@ -571,7 +515,7 @@ function diffFingerprintValue(prev: FingerprintValue, next: FingerprintValue): s
 function fallbackStandup(args: StandupPromptArgs): string {
   if (args.prs.length > 0) {
     const bullets = args.prs.slice(0, 5).map((p) => {
-      const title = truncate(p.title, 80);
+      const title = truncateWithEllipsis(p.title, 80);
       return `- ${title} [#${p.number}](${p.url})`;
     });
     return ["Recent shipped work is ready to review.", ...bullets].join("\n");
@@ -579,7 +523,9 @@ function fallbackStandup(args: StandupPromptArgs): string {
   const session = args.sessions[0];
   if (session) {
     const repo = shortRepoName(session.repoFullName);
-    const title = session.title ? truncate(session.title, 80) : "Recent session activity";
+    const title = session.title
+      ? truncateWithEllipsis(session.title, 80)
+      : "Recent session activity";
     return `${repo} work is still being summarized.\n\n- ${title}`;
   }
   return "Quiet window — no shipped PRs.";
@@ -620,7 +566,7 @@ export function buildStandupPrompt(args: StandupPromptArgs): string {
   if (args.prs.length > 0) {
     const lines = args.prs.map((p) => {
       const repo = shortRepoName(p.repoFullName);
-      return `- [${p.state}] ${repo} #${p.number} (url: ${p.url}): ${truncate(p.title, 160)}`;
+      return `- [${p.state}] ${repo} #${p.number} (url: ${p.url}): ${truncateWithEllipsis(p.title, 160)}`;
     });
     parts.push(`PRs authored in window:\n${lines.join("\n")}`);
   } else {
@@ -630,14 +576,14 @@ export function buildStandupPrompt(args: StandupPromptArgs): string {
   if (args.sessions.length > 0) {
     const lines = args.sessions.map((s) => {
       const repo = shortRepoName(s.repoFullName);
-      const title = s.title ? truncate(s.title, 120) : "(untitled)";
+      const title = s.title ? truncateWithEllipsis(s.title, 120) : "(untitled)";
       const summaryText = typeof s.summary?.summary === "string" ? s.summary.summary : null;
-      const summary = summaryText ? truncate(summaryText, 240) : "(no summary)";
+      const summary = summaryText ? truncateWithEllipsis(summaryText, 240) : "(no summary)";
       const highlightsList = stringList(s.summary?.highlights);
       const highlights = highlightsList.length
         ? ` highlights: ${highlightsList
             .slice(0, 3)
-            .map((h) => truncate(h, 80))
+            .map((h) => truncateWithEllipsis(h, 80))
             .join("; ")}`
         : "";
       return `- ${repo} — ${title}\n  ${summary}${highlights}`;
@@ -646,11 +592,6 @@ export function buildStandupPrompt(args: StandupPromptArgs): string {
   }
 
   return parts.join("\n\n");
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1)}…`;
 }
 
 function stringList(value: unknown): string[] {

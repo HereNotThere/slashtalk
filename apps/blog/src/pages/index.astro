@@ -8,6 +8,9 @@ import DockBar from '../../../landing/src/components/DockBar.astro';
 import CardMock from '../../../landing/src/components/CardMock.astro';
 import AskMock from '../../../landing/src/components/AskMock.astro';
 import Wordmark from '../../../landing/src/components/Wordmark.astro';
+
+const MAC_DOWNLOAD_URL =
+	'https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg';
 ---
 
 <Layout title="Slashtalk — we built a presence dock for our team. Here's why.">
@@ -27,13 +30,55 @@ import Wordmark from '../../../landing/src/components/Wordmark.astro';
 					class="hidden text-sm font-medium text-neutral-600 transition hover:text-neutral-900 sm:inline"
 					>GitHub</a
 				>
-				<button
-					type="button"
+				<a
+					href={MAC_DOWNLOAD_URL}
 					data-download
-					class="rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
+					class="dl-mac rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
 				>
 					Download
-				</button>
+				</a>
+				<div class="relative sm:hidden" data-mobile-menu>
+					<button
+						type="button"
+						aria-label="Open menu"
+						aria-expanded="false"
+						aria-controls="mobile-menu"
+						data-mobile-menu-toggle
+						class="-mr-2 inline-flex size-9 items-center justify-center rounded-full text-neutral-700 transition hover:bg-neutral-100"
+					>
+						<svg
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							width="20"
+							height="20"
+							aria-hidden="true"
+						>
+							<line x1="4" y1="7" x2="20" y2="7"></line>
+							<line x1="4" y1="12" x2="20" y2="12"></line>
+							<line x1="4" y1="17" x2="20" y2="17"></line>
+						</svg>
+					</button>
+					<div
+						id="mobile-menu"
+						data-mobile-menu-panel
+						hidden
+						class="absolute top-full right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-[0_20px_40px_-20px_rgba(15,23,42,0.25)]"
+					>
+						<a
+							href="/blog"
+							class="block px-4 py-2.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50 hover:text-neutral-900"
+							>Blog</a
+						>
+						<a
+							href="https://github.com/HereNotThere/slashtalk"
+							class="block px-4 py-2.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50 hover:text-neutral-900"
+							>GitHub</a
+						>
+					</div>
+				</div>
 			</nav>
 		</header>
 
@@ -136,10 +181,10 @@ import Wordmark from '../../../landing/src/components/Wordmark.astro';
 
 				<div id="install" class="scroll-mt-8 pt-4">
 					<div class="flex flex-col items-center gap-4 sm:flex-row">
-						<button
-							type="button"
+						<a
+							href={MAC_DOWNLOAD_URL}
 							data-download
-							class="inline-flex items-center gap-2.5 rounded-full bg-neutral-900 px-7 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-neutral-700"
+							class="dl-mac items-center gap-2.5 rounded-full bg-neutral-900 px-7 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-neutral-700"
 						>
 							<svg
 								viewBox="0 0 24 24"
@@ -153,7 +198,13 @@ import Wordmark from '../../../landing/src/components/Wordmark.astro';
 								></path>
 							</svg>
 							Download for macOS
-						</button>
+						</a>
+						<span
+							aria-disabled="true"
+							class="dl-not-mac cursor-not-allowed items-center gap-2.5 rounded-full bg-neutral-200 px-7 py-3.5 text-base font-medium text-neutral-500"
+						>
+							Visit on desktop to download
+						</span>
 						<span class="text-sm text-neutral-500">
 							Free · macOS 13+ · Apple Silicon &amp; Intel
 						</span>
@@ -191,10 +242,41 @@ import Wordmark from '../../../landing/src/components/Wordmark.astro';
 
 <script>
 	document
-		.querySelectorAll<HTMLButtonElement>('[data-download]')
-		.forEach((button) => {
-			button.addEventListener('click', () => {
+		.querySelectorAll<HTMLElement>('[data-download]')
+		.forEach((el) => {
+			el.addEventListener('click', () => {
 				console.log('[slashtalk] Download for macOS clicked');
+			});
+		});
+
+	document
+		.querySelectorAll<HTMLElement>('[data-mobile-menu]')
+		.forEach((root) => {
+			const toggle = root.querySelector<HTMLButtonElement>(
+				'[data-mobile-menu-toggle]',
+			);
+			const panel = root.querySelector<HTMLElement>(
+				'[data-mobile-menu-panel]',
+			);
+			if (!toggle || !panel) return;
+
+			const setOpen = (open: boolean) => {
+				panel.hidden = !open;
+				toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+			};
+
+			toggle.addEventListener('click', (e) => {
+				e.stopPropagation();
+				setOpen(panel.hidden);
+			});
+
+			document.addEventListener('click', (e) => {
+				if (panel.hidden) return;
+				if (!root.contains(e.target as Node)) setOpen(false);
+			});
+
+			document.addEventListener('keydown', (e) => {
+				if (e.key === 'Escape') setOpen(false);
 			});
 		});
 </script>

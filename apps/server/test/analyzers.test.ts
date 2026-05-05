@@ -279,9 +279,17 @@ describe("standup prompt context", () => {
       ...base,
       prs: [{ ...base.prs[0], title: "Fix standup summary cache races" }],
     } as never);
+    // Fields not fed to the prompt (sessions.lastTs, prs.updatedAt) must not
+    // bust the fingerprint — otherwise live ingest churns the LLM cache.
+    const livePulse = __standupTest.standupInputFingerprint({
+      ...base,
+      prs: [{ ...base.prs[0], updatedAt: new Date("2026-05-01T19:00:00.000Z") }],
+      sessions: [{ ...base.sessions[0], lastTs: new Date("2026-05-01T19:05:00.000Z") }],
+    } as never);
 
     expect(unchanged).toBe(same);
     expect(changed).not.toBe(same);
+    expect(livePulse).toBe(same);
   });
 });
 

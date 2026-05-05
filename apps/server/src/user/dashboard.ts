@@ -16,6 +16,9 @@
 // relies on the fingerprint alone — eagerly busting the cache after every
 // `pushSelfPrs` (an earlier design) re-ran the LLM on every hover even when
 // the input was unchanged, because `gh` returns the same PR rows each call.
+// The fingerprint mirrors only fields that reach `buildStandupPrompt`;
+// session `lastTs` and PR `updatedAt` deliberately stay out so live ingest
+// events don't churn the cache while the prompt text is unchanged.
 
 import { Elysia, t } from "elysia";
 import { createHash } from "node:crypto";
@@ -50,12 +53,16 @@ interface StandupOutput {
   summary: string;
 }
 
+// Fingerprint shapes mirror the fields actually fed into `buildStandupPrompt`.
+// Anything that doesn't change the prompt text (and therefore can't change the
+// LLM output) stays out — most importantly `sessions.lastTs`, which ticks on
+// every ingest batch during a live session and would otherwise bust the cache
+// once a second while the user is working.
 interface FingerprintPr {
   number: number;
   title: string;
   url: string;
   state: "open" | "closed" | "merged";
-  updatedAt: string | null;
   repoFullName: string;
 }
 
@@ -63,7 +70,6 @@ interface FingerprintSession {
   sessionId: string;
   title: string | null;
   repoFullName: string;
-  lastTs: string | null;
   summary: string | null;
   highlights: string[];
 }
@@ -441,7 +447,6 @@ function standupFingerprintValue(input: StandupInput): FingerprintValue {
       title: p.title,
       url: p.url,
       state: p.state,
-      updatedAt: p.updatedAt?.toISOString() ?? null,
       repoFullName: p.repoFullName,
     })),
     sessions: input.sessions.map((s) => {
@@ -450,7 +455,6 @@ function standupFingerprintValue(input: StandupInput): FingerprintValue {
         sessionId: s.sessionId,
         title: s.title,
         repoFullName: s.repoFullName,
-        lastTs: s.lastTs?.toISOString() ?? null,
         summary: typeof insight?.summary === "string" ? insight.summary : null,
         highlights: stringList(insight?.highlights),
       };
@@ -484,7 +488,6 @@ function diffFingerprintValue(prev: FingerprintValue, next: FingerprintValue): s
     const changes: string[] = [];
     if (prior.state !== p.state) changes.push(`state ${prior.state}→${p.state}`);
     if (prior.title !== p.title) changes.push("title");
-    if (prior.updatedAt !== p.updatedAt) changes.push("updatedAt");
     if (changes.length) diffs.push(`pr#${num} ${changes.join(", ")}`);
   }
   for (const num of prevPrs.keys()) {
@@ -500,7 +503,6 @@ function diffFingerprintValue(prev: FingerprintValue, next: FingerprintValue): s
       continue;
     }
     const changes: string[] = [];
-    if (prior.lastTs !== s.lastTs) changes.push("lastTs");
     if (prior.title !== s.title) changes.push("title");
     if (prior.summary !== s.summary) changes.push("summary");
     if (!stringArraysEqual(prior.highlights, s.highlights)) changes.push("highlights");

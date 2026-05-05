@@ -200,7 +200,6 @@ describe("standup prompt context", () => {
         {
           title: "Fix standup summary cache",
           repoFullName: "herenotthere/slashtalk",
-          lastTs: "2026-05-01T18:30:00.000Z",
           summary: {
             summary: "Auditing the standup path.",
             highlights: "not-an-array",
@@ -222,7 +221,6 @@ describe("standup prompt context", () => {
           url: "https://github.com/HereNotThere/slashtalk/pull/260",
           state: "merged",
           repoFullName: "HereNotThere/slashtalk",
-          updatedAt: "2026-05-01T18:30:00.000Z",
         },
       ],
       sessions: [],
@@ -279,9 +277,54 @@ describe("standup prompt context", () => {
       ...base,
       prs: [{ ...base.prs[0], title: "Fix standup summary cache races" }],
     } as never);
+    // Fields not fed to the prompt (sessions.lastTs, prs.updatedAt) must not
+    // bust the fingerprint — otherwise live ingest churns the LLM cache.
+    const livePulse = __standupTest.standupInputFingerprint({
+      ...base,
+      prs: [{ ...base.prs[0], updatedAt: new Date("2026-05-01T19:00:00.000Z") }],
+      sessions: [{ ...base.sessions[0], lastTs: new Date("2026-05-01T19:05:00.000Z") }],
+    } as never);
 
     expect(unchanged).toBe(same);
     expect(changed).not.toBe(same);
+    expect(livePulse).toBe(same);
+
+    // Row order is driven by updatedAt/lastTs desc — a timestamp tick on an
+    // older row reshuffles the array. The fingerprint must stay stable.
+    const twoPrBase = {
+      ...base,
+      prs: [
+        base.prs[0],
+        {
+          number: 261,
+          title: "Add standup highlight tags",
+          url: "https://github.com/HereNotThere/slashtalk/pull/261",
+          state: "open",
+          repoFullName: "HereNotThere/slashtalk",
+          updatedAt: new Date("2026-05-01T17:00:00.000Z"),
+        },
+      ],
+      sessions: [
+        base.sessions[0],
+        {
+          sessionId: "session-2",
+          title: "Tweak avatar bg",
+          repoFullName: "HereNotThere/slashtalk",
+          lastTs: new Date("2026-05-01T17:30:00.000Z"),
+        },
+      ],
+      insightsBySessionId: new Map([
+        ...base.insightsBySessionId,
+        ["session-2", { rollingSummary: { summary: "Avatar bg work.", highlights: [] } }],
+      ]),
+    };
+    const ordered = __standupTest.standupInputFingerprint(twoPrBase as never);
+    const reordered = __standupTest.standupInputFingerprint({
+      ...twoPrBase,
+      prs: [...twoPrBase.prs].reverse(),
+      sessions: [...twoPrBase.sessions].reverse(),
+    } as never);
+    expect(reordered).toBe(ordered);
   });
 });
 

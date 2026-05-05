@@ -50,12 +50,14 @@ interface StandupOutput {
   summary: string;
 }
 
+// Mirrors the fields `buildStandupPrompt` actually renders. `sessions.lastTs`
+// in particular ticks on every ingest batch during a live session — including
+// it would bust the cache once a second while the user is working.
 interface FingerprintPr {
   number: number;
   title: string;
   url: string;
   state: "open" | "closed" | "merged";
-  updatedAt: string | null;
   repoFullName: string;
 }
 
@@ -63,7 +65,6 @@ interface FingerprintSession {
   sessionId: string;
   title: string | null;
   repoFullName: string;
-  lastTs: string | null;
   summary: string | null;
   highlights: string[];
 }
@@ -423,39 +424,42 @@ function standupPromptArgs(input: StandupInput): StandupPromptArgs {
       url: r.url,
       state: r.state,
       repoFullName: r.repoFullName,
-      updatedAt: r.updatedAt?.toISOString() ?? input.sinceIso,
     })),
     sessions: input.sessions.map((s) => ({
       title: s.title,
       repoFullName: s.repoFullName,
-      lastTs: s.lastTs?.toISOString() ?? input.sinceIso,
       summary: input.insightsBySessionId.get(s.sessionId)?.rollingSummary ?? null,
     })),
   };
 }
 
 function standupFingerprintValue(input: StandupInput): FingerprintValue {
-  return {
-    prs: input.prs.map((p) => ({
+  // Sort by stable identifiers (PR number, sessionId) so the hash is
+  // order-independent. The query orders rows by updatedAt/lastTs desc, so an
+  // event on an older row reshuffles the array — without this sort, that
+  // reshuffle alone would bust the cache even though row content is unchanged.
+  const prs = input.prs
+    .map((p) => ({
       number: p.number,
       title: p.title,
       url: p.url,
       state: p.state,
-      updatedAt: p.updatedAt?.toISOString() ?? null,
       repoFullName: p.repoFullName,
-    })),
-    sessions: input.sessions.map((s) => {
+    }))
+    .sort((a, b) => a.number - b.number);
+  const sessions = input.sessions
+    .map((s) => {
       const insight = input.insightsBySessionId.get(s.sessionId)?.rollingSummary ?? null;
       return {
         sessionId: s.sessionId,
         title: s.title,
         repoFullName: s.repoFullName,
-        lastTs: s.lastTs?.toISOString() ?? null,
         summary: typeof insight?.summary === "string" ? insight.summary : null,
         highlights: stringList(insight?.highlights),
       };
-    }),
-  };
+    })
+    .sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
+  return { prs, sessions };
 }
 
 function hashFingerprintValue(value: FingerprintValue): string {
@@ -484,7 +488,6 @@ function diffFingerprintValue(prev: FingerprintValue, next: FingerprintValue): s
     const changes: string[] = [];
     if (prior.state !== p.state) changes.push(`state ${prior.state}→${p.state}`);
     if (prior.title !== p.title) changes.push("title");
-    if (prior.updatedAt !== p.updatedAt) changes.push("updatedAt");
     if (changes.length) diffs.push(`pr#${num} ${changes.join(", ")}`);
   }
   for (const num of prevPrs.keys()) {
@@ -500,7 +503,6 @@ function diffFingerprintValue(prev: FingerprintValue, next: FingerprintValue): s
       continue;
     }
     const changes: string[] = [];
-    if (prior.lastTs !== s.lastTs) changes.push("lastTs");
     if (prior.title !== s.title) changes.push("title");
     if (prior.summary !== s.summary) changes.push("summary");
     if (!stringArraysEqual(prior.highlights, s.highlights)) changes.push("highlights");
@@ -549,12 +551,10 @@ interface StandupPromptArgs {
     url: string;
     state: "open" | "closed" | "merged";
     repoFullName: string;
-    updatedAt: string;
   }>;
   sessions: Array<{
     title: string | null;
     repoFullName: string;
-    lastTs: string;
     summary: RollingSummaryShape | null;
   }>;
 }

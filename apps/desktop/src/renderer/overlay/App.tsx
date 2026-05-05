@@ -388,10 +388,6 @@ export function App(): JSX.Element {
   const shouldStack = (h: ChatHead): boolean => collapseInactive && isPeerInactive(h);
   const activePeers = allPeers.filter((h) => !shouldStack(h));
   const inactivePeers = allPeers.filter(shouldStack);
-  // Show an "+ add repo" bubble whenever the user has no repos selected for
-  // the rail (zero tracked, or all unchecked in the tray). Clicks open the
-  // tray for the actual flow. Selection already implies an empty rail, so no
-  // peer-count guard is needed.
   const noSelectedRepos = useNoSelectedRepos();
   const showAddRepoHint = noSelectedRepos === true;
   const stackPinnedByInfo =

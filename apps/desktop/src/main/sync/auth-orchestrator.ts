@@ -57,9 +57,7 @@ export function registerAuthOrchestrator(): void {
   // Tray popup shows sign-in state too — mirror to it so the CTA flips live.
   backend.onChange((state) => broadcast("backend:authState", state, getTrayPopup()));
 
-  // Overlay is included so the rail's add-repo bubble reacts to add/remove
-  // and to selection toggles — without it the bubble stays after the first
-  // repo is added and never reappears when the last one is unchecked.
+  // Overlay must receive these — the rail's add-repo bubble keys off them.
   localRepos.onChange((repos) =>
     broadcast("backend:trackedRepos", repos, getMainWindow(), getTrayPopup(), getOverlayWindow()),
   );

@@ -7,7 +7,7 @@ const MCP_TARGETS: McpTarget[] = ["claude-code", "codex"];
 export function RailPreferences(): JSX.Element {
   const [pinned, setPinned] = useState<boolean>(true);
   const [sessionOnly, setSessionOnly] = useState<boolean>(false);
-  const [collapseInactive, setCollapseInactive] = useState<boolean>(false);
+  const [showInactive, setShowInactive] = useState<boolean>(false);
   const [showActivityTimestamps, setShowActivityTimestamps] = useState<boolean>(true);
   const [spotifySupported, setSpotifySupported] = useState<boolean>(false);
   const [spotifyShare, setSpotifyShare] = useState<boolean>(false);
@@ -39,10 +39,10 @@ export function RailPreferences(): JSX.Element {
 
   useEffect(() => {
     let alive = true;
-    void window.chatheads.rail.getCollapseInactive().then((v) => {
-      if (alive) setCollapseInactive(v);
+    void window.chatheads.rail.getShowInactive().then((v) => {
+      if (alive) setShowInactive(v);
     });
-    const off = window.chatheads.rail.onCollapseInactiveChange((v) => setCollapseInactive(v));
+    const off = window.chatheads.rail.onShowInactiveChange((v) => setShowInactive(v));
     return () => {
       alive = false;
       off();
@@ -98,9 +98,9 @@ export function RailPreferences(): JSX.Element {
     setSessionOnly(v);
     void window.chatheads.rail.setSessionOnlyMode(v);
   };
-  const onCollapseInactiveChange = (v: boolean): void => {
-    setCollapseInactive(v);
-    void window.chatheads.rail.setCollapseInactive(v);
+  const onShowInactiveChange = (v: boolean): void => {
+    setShowInactive(v);
+    void window.chatheads.rail.setShowInactive(v);
   };
   const onShowActivityTimestampsChange = (v: boolean): void => {
     setShowActivityTimestamps(v);
@@ -120,7 +120,7 @@ export function RailPreferences(): JSX.Element {
       <McpRow />
       <PinRow pinned={pinned} onChange={onPinnedChange} />
       <SessionOnlyRow enabled={sessionOnly} disabled={pinned} onChange={onSessionOnlyChange} />
-      <CollapseInactiveRow enabled={collapseInactive} onChange={onCollapseInactiveChange} />
+      <ShowInactiveRow enabled={showInactive} onChange={onShowInactiveChange} />
       <ShowActivityTimestampsRow
         shown={showActivityTimestamps}
         onChange={onShowActivityTimestampsChange}
@@ -281,7 +281,7 @@ function SessionOnlyRow({
   );
 }
 
-function CollapseInactiveRow({
+function ShowInactiveRow({
   enabled,
   onChange,
 }: {
@@ -300,7 +300,7 @@ function CollapseInactiveRow({
       "
     >
       <Checkbox checked={enabled} />
-      <span className="flex-1 text-base">Stack inactive teammates</span>
+      <span className="flex-1 text-base">Show inactive teammates</span>
     </button>
   );
 }

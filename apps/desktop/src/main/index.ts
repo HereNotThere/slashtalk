@@ -19,18 +19,18 @@ import * as anthropic from "./anthropic";
 import * as githubAuth from "./githubDeviceAuth";
 import * as peerPresence from "./peerPresence";
 import {
-  broadcastRailCollapseInactive,
   broadcastRailPinned,
   broadcastRailSessionOnlyMode,
+  broadcastRailShowInactive,
   broadcastShowActivityTimestamps,
   configureRailState,
-  getRailCollapseInactive,
   getRailPinned,
   getRailSessionOnlyMode,
+  getRailShowInactive,
   getShowActivityTimestamps,
-  setRailCollapseInactive,
   setRailPinned,
   setRailSessionOnlyMode,
+  setRailShowInactive,
   setShowActivityTimestamps,
 } from "./windows/rail-state";
 import {
@@ -194,10 +194,10 @@ ipcMain.handle("rail:setSessionOnlyMode", (_e, enabled: boolean): void => {
   broadcastRailSessionOnlyMode();
 });
 
-ipcMain.handle("rail:getCollapseInactive", (): boolean => getRailCollapseInactive());
-ipcMain.handle("rail:setCollapseInactive", (_e, enabled: boolean): void => {
-  setRailCollapseInactive(enabled);
-  broadcastRailCollapseInactive();
+ipcMain.handle("rail:getShowInactive", (): boolean => getRailShowInactive());
+ipcMain.handle("rail:setShowInactive", (_e, enabled: boolean): void => {
+  setRailShowInactive(enabled);
+  broadcastRailShowInactive();
 });
 
 ipcMain.handle("rail:getShowActivityTimestamps", (): boolean => getShowActivityTimestamps());

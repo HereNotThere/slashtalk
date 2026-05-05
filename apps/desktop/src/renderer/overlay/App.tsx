@@ -3,7 +3,7 @@ import type { ChatHead, DockConfig } from "../../shared/types";
 import { useHeads } from "../shared/useHeads";
 import { useActivityBadgeUpdate } from "../shared/useActivityBadgeUpdate";
 import { MagnifyingGlassIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { useNoTrackedRepos } from "../shared/useNoTrackedRepos";
+import { useNoSelectedRepos } from "../shared/useNoSelectedRepos";
 
 const DRAG_THRESHOLD = 4;
 const REORDER_ANIM_MS = 280;
@@ -388,17 +388,12 @@ export function App(): JSX.Element {
   const shouldStack = (h: ChatHead): boolean => collapseInactive && isPeerInactive(h);
   const activePeers = allPeers.filter((h) => !shouldStack(h));
   const inactivePeers = allPeers.filter(shouldStack);
-  // When the user has zero tracked repos, the rail collapses to self + search
-  // with no signal that more was supposed to appear. Slip an "+ add repo"
-  // bubble between them — clicks open the tray for the actual flow. Peer
-  // guards keep it from firing when the rail still has teammates; under
-  // SLASHTALK_DEBUG_EMPTY we skip them so the bubble is previewable against
-  // a real account that already has peers loaded.
-  const noTrackedRepos = useNoTrackedRepos();
-  const debugEmptyState = window.chatheads.debug.emptyState;
-  const showAddRepoHint =
-    noTrackedRepos === true &&
-    (debugEmptyState || (activePeers.length === 0 && inactivePeers.length === 0));
+  // Show an "+ add repo" bubble whenever the user has no repos selected for
+  // the rail (zero tracked, or all unchecked in the tray). Clicks open the
+  // tray for the actual flow. Selection already implies an empty rail, so no
+  // peer-count guard is needed.
+  const noSelectedRepos = useNoSelectedRepos();
+  const showAddRepoHint = noSelectedRepos === true;
   const stackPinnedByInfo =
     infoOpenHeadId != null && inactivePeers.some((p) => p.id === infoOpenHeadId);
   const stackVisuallyExpanded = stackExpanded || stackPinnedByInfo;

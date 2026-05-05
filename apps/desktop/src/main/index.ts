@@ -456,6 +456,10 @@ app
     }
     backend.restore();
     await backend.validateStoredSession();
+    // First launch (or any launch where the stored session is gone/expired)
+    // needs a visible entry point — `activate` fires on dock reopen, not on
+    // initial launch, so without this the user sees only a tray icon.
+    if (!backend.getAuthState().signedIn) showMainWindow();
     chatheadsAuth.restore();
     anthropic.restore();
     githubAuth.restore();

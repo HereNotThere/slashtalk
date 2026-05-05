@@ -16,9 +16,6 @@
 // relies on the fingerprint alone — eagerly busting the cache after every
 // `pushSelfPrs` (an earlier design) re-ran the LLM on every hover even when
 // the input was unchanged, because `gh` returns the same PR rows each call.
-// The fingerprint mirrors only fields that reach `buildStandupPrompt`;
-// session `lastTs` and PR `updatedAt` deliberately stay out so live ingest
-// events don't churn the cache while the prompt text is unchanged.
 
 import { Elysia, t } from "elysia";
 import { createHash } from "node:crypto";
@@ -53,11 +50,9 @@ interface StandupOutput {
   summary: string;
 }
 
-// Fingerprint shapes mirror the fields actually fed into `buildStandupPrompt`.
-// Anything that doesn't change the prompt text (and therefore can't change the
-// LLM output) stays out — most importantly `sessions.lastTs`, which ticks on
-// every ingest batch during a live session and would otherwise bust the cache
-// once a second while the user is working.
+// Mirrors the fields `buildStandupPrompt` actually renders. `sessions.lastTs`
+// in particular ticks on every ingest batch during a live session — including
+// it would bust the cache once a second while the user is working.
 interface FingerprintPr {
   number: number;
   title: string;
@@ -429,12 +424,10 @@ function standupPromptArgs(input: StandupInput): StandupPromptArgs {
       url: r.url,
       state: r.state,
       repoFullName: r.repoFullName,
-      updatedAt: r.updatedAt?.toISOString() ?? input.sinceIso,
     })),
     sessions: input.sessions.map((s) => ({
       title: s.title,
       repoFullName: s.repoFullName,
-      lastTs: s.lastTs?.toISOString() ?? input.sinceIso,
       summary: input.insightsBySessionId.get(s.sessionId)?.rollingSummary ?? null,
     })),
   };
@@ -551,12 +544,10 @@ interface StandupPromptArgs {
     url: string;
     state: "open" | "closed" | "merged";
     repoFullName: string;
-    updatedAt: string;
   }>;
   sessions: Array<{
     title: string | null;
     repoFullName: string;
-    lastTs: string;
     summary: RollingSummaryShape | null;
   }>;
 }

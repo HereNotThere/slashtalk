@@ -200,7 +200,6 @@ describe("standup prompt context", () => {
         {
           title: "Fix standup summary cache",
           repoFullName: "herenotthere/slashtalk",
-          lastTs: "2026-05-01T18:30:00.000Z",
           summary: {
             summary: "Auditing the standup path.",
             highlights: "not-an-array",
@@ -222,7 +221,6 @@ describe("standup prompt context", () => {
           url: "https://github.com/HereNotThere/slashtalk/pull/260",
           state: "merged",
           repoFullName: "HereNotThere/slashtalk",
-          updatedAt: "2026-05-01T18:30:00.000Z",
         },
       ],
       sessions: [],

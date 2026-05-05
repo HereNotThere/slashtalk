@@ -19,13 +19,14 @@ export interface LoadHistoryParams {
   authorId: number;
   /** Pre-resolved asker identity so callers can skip an extra users lookup. */
   asker: AskerInfo;
+  /** Drop threads that cited sessions, but none the viewer can see. */
+  dropThreadsWithOnlyHiddenCitations?: boolean;
   limit?: number;
 }
 
 /** Load the most recent threads authored by `authorId`, hydrating SessionCards
- *  using the viewer's repo visibility. Citations are returned verbatim on each
- *  turn — callers that want to drop citations to repos the viewer can't see
- *  should filter them after this returns. */
+ *  using the viewer's repo visibility. Turn citations are filtered to the same
+ *  visible session ids as the cards so hidden session ids do not leak. */
 export async function loadChatHistory(
   db: Database,
   params: LoadHistoryParams,
@@ -84,6 +85,7 @@ export async function loadChatHistory(
   for (const header of threadHeaders) {
     const turns = turnsByThread.get(header.threadId) ?? [];
     if (turns.length === 0) continue;
+    const hadCitations = turns.some((t) => t.citations.length > 0);
     const firstPrompt = turns[0].prompt;
     const seen = new Set<string>();
     const cards = (citationIdsByThread.get(header.threadId) ?? [])
@@ -94,12 +96,20 @@ export async function loadChatHistory(
       })
       .map((id) => cardById.get(id))
       .filter((c): c is NonNullable<typeof c> => c !== undefined);
+    if (params.dropThreadsWithOnlyHiddenCitations && hadCitations && cards.length === 0) {
+      continue;
+    }
+    const visibleCitationIds = new Set(cards.map((c) => c.id));
+    const visibleTurns = turns.map((turn) => ({
+      ...turn,
+      citations: turn.citations.filter((citation) => visibleCitationIds.has(citation.sessionId)),
+    }));
 
     out.push({
       threadId: header.threadId,
       asker: params.asker,
       title: firstPrompt,
-      turns,
+      turns: visibleTurns,
       cards,
       createdAt: new Date(header.firstTs).toISOString(),
       updatedAt: new Date(header.lastTs).toISOString(),

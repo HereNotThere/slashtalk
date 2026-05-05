@@ -35,20 +35,27 @@ async function tick(db: Database, redis: RedisBridge): Promise<void> {
   console.log("[analyzers] tick starting");
 
   try {
+    // Backfill of never-analyzed sessions is bounded to 48h. Past-24h standup
+    // and the 2h NOW window are the only product surfaces that read insights,
+    // so paying $0.003/session to summarize work nobody will see (most often
+    // happens after a dev DB drop or insights wipe) isn't worth it.
     const candidates = await db
       .select()
       .from(sessions)
       .where(
         or(
           gt(sessions.lastTs, sql`now() - interval '1 hour'`),
-          sql`NOT EXISTS (SELECT 1 FROM ${sessionInsights} si WHERE si.session_id = ${sessions.sessionId})`,
+          and(
+            gt(sessions.lastTs, sql`now() - interval '48 hours'`),
+            sql`NOT EXISTS (SELECT 1 FROM ${sessionInsights} si WHERE si.session_id = ${sessions.sessionId})`,
+          ),
         ),
       )
       .orderBy(desc(sessions.lastTs))
       .limit(config.analyzerMaxSessionsPerTick);
 
     console.log(
-      `[analyzers] selected ${candidates.length} candidate sessions (touched in last 1h or never analyzed), running ${analyzers.length} analyzers`,
+      `[analyzers] selected ${candidates.length} candidate sessions (touched in last 1h or never analyzed within 48h), running ${analyzers.length} analyzers`,
     );
 
     if (candidates.length === 0) {

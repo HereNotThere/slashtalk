@@ -13,6 +13,7 @@ import * as prIngest from "./pr-ingest";
 import * as spotifyToggle from "./spotify-toggle";
 import { broadcast } from "../windows/broadcast";
 import { getMainWindow } from "../windows/main";
+import { getOverlayWindow } from "../windows/overlay";
 import { getTrayPopup } from "../windows/tray";
 
 function applySyncForAuth(signedIn: boolean): void {
@@ -56,11 +57,18 @@ export function registerAuthOrchestrator(): void {
   // Tray popup shows sign-in state too — mirror to it so the CTA flips live.
   backend.onChange((state) => broadcast("backend:authState", state, getTrayPopup()));
 
+  // Overlay must receive these — the rail's add-repo bubble keys off them.
   localRepos.onChange((repos) =>
-    broadcast("backend:trackedRepos", repos, getMainWindow(), getTrayPopup()),
+    broadcast("backend:trackedRepos", repos, getMainWindow(), getTrayPopup(), getOverlayWindow()),
   );
   localRepos.onSelectionChange((ids) =>
-    broadcast("trackedRepos:selectionChange", [...ids], getMainWindow(), getTrayPopup()),
+    broadcast(
+      "trackedRepos:selectionChange",
+      [...ids],
+      getMainWindow(),
+      getTrayPopup(),
+      getOverlayWindow(),
+    ),
   );
   // A newly-claimed repo means the server now accepts PRs for it that the
   // previous tick discarded as unknown — push again immediately so the

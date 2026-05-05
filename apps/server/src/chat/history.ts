@@ -19,6 +19,8 @@ export interface LoadHistoryParams {
   authorId: number;
   /** Pre-resolved asker identity so callers can skip an extra users lookup. */
   asker: AskerInfo;
+  /** Drop threads that cited sessions, but none the viewer can see. */
+  dropThreadsWithOnlyHiddenCitations?: boolean;
   limit?: number;
 }
 
@@ -83,6 +85,7 @@ export async function loadChatHistory(
   for (const header of threadHeaders) {
     const turns = turnsByThread.get(header.threadId) ?? [];
     if (turns.length === 0) continue;
+    const hadCitations = turns.some((t) => t.citations.length > 0);
     const firstPrompt = turns[0].prompt;
     const seen = new Set<string>();
     const cards = (citationIdsByThread.get(header.threadId) ?? [])
@@ -93,6 +96,9 @@ export async function loadChatHistory(
       })
       .map((id) => cardById.get(id))
       .filter((c): c is NonNullable<typeof c> => c !== undefined);
+    if (params.dropThreadsWithOnlyHiddenCitations && hadCitations && cards.length === 0) {
+      continue;
+    }
     const visibleCitationIds = new Set(cards.map((c) => c.id));
     const visibleTurns = turns.map((turn) => ({
       ...turn,

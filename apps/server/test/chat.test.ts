@@ -880,6 +880,8 @@ describe("GET /api/users/:login/questions", () => {
     // BOB_THREAD_HIDDEN cites only OUTSIDER_SESSION (not in Alice's repos) → dropped.
     // BOB_THREAD_UNCITED has no citations → kept (visible to social graph).
     expect(ids).toEqual([BOB_THREAD_UNCITED, BOB_THREAD_VISIBLE].sort());
+    const visible = body.threads.find((t) => t.threadId === BOB_THREAD_VISIBLE);
+    expect(visible).toBeTruthy();
   });
 
   it("rejects with 403 when caller shares no repo with target", async () => {

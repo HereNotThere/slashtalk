@@ -282,17 +282,10 @@ export const socialRoutes = (db: Database) =>
               displayName: target.displayName,
               avatarUrl: target.avatarUrl,
             },
+            dropThreadsWithOnlyHiddenCitations: true,
           });
 
-          const filtered = threads.filter((thread) => {
-            const hadCitations = thread.turns.some((t) => t.citations.length > 0);
-            if (!hadCitations) return true;
-            // Had citations originally — keep only if at least one survived
-            // the viewer's user_repos gate inside loadSessionCards.
-            return thread.cards.length > 0;
-          });
-
-          return { threads: filtered };
+          return { threads };
         } catch (err) {
           console.error("[social] /api/users/:login/questions failed:", err);
           set.status = 500;

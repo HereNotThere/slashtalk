@@ -9,7 +9,8 @@ import { resetDatabase } from "./helpers";
 const NOW = new Date("2026-05-04T19:00:00.000Z");
 
 let userId: number;
-let deviceId: number;
+let touchDeviceId: number;
+let noTouchDeviceId: number;
 let touchKey = "";
 let noTouchKey = "";
 let mcpAccessToken = "";
@@ -29,24 +30,28 @@ beforeAll(async () => {
     .returning();
   userId = user.id;
 
-  const [device] = await db
+  const [touchDevice, noTouchDevice] = await db
     .insert(devices)
-    .values({ userId, deviceName: "resolver-laptop", os: "darwin" })
+    .values([
+      { userId, deviceName: "resolver-laptop", os: "darwin" },
+      { userId, deviceName: "resolver-desktop", os: "linux" },
+    ])
     .returning();
-  deviceId = device.id;
+  touchDeviceId = touchDevice.id;
+  noTouchDeviceId = noTouchDevice.id;
 
   touchKey = `resolver_touch_${crypto.randomUUID()}`;
   noTouchKey = `resolver_no_touch_${crypto.randomUUID()}`;
   await db.insert(apiKeys).values([
     {
       userId,
-      deviceId,
+      deviceId: touchDeviceId,
       keyHash: await hashToken(touchKey),
       lastUsedAt: null,
     },
     {
       userId,
-      deviceId,
+      deviceId: noTouchDeviceId,
       keyHash: await hashToken(noTouchKey),
       lastUsedAt: null,
     },

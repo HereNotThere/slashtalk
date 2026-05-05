@@ -42,6 +42,9 @@ Drizzle export: `apiKeys`.
 | `last_used_at` | `PgTimestamp` | — |
 | `created_at` | `PgTimestamp` | has default |
 
+**Indexes:**
+- `api_keys_device_unique` (unique index) on `(device_id)`
+
 ## `chat_messages`
 
 Drizzle export: `chatMessages`.

@@ -49,7 +49,14 @@ export function StaleWrapper({
   }
 
   useEffect(() => {
-    if (signature === displayed.sig) return;
+    if (signature === displayed.sig) {
+      // Data ping-ponged back to the displayed payload while the hold timer
+      // was in flight (A→B→A within 1s). Cancel the pending transition so
+      // the shimmer doesn't stick — the cleanup above already cleared the
+      // timer.
+      setTransitioning(false);
+      return;
+    }
     // First fill (or clear back to empty) → swap instantly. Holding shimmer
     // over an empty placeholder or skipping the very first paint would both
     // look broken.

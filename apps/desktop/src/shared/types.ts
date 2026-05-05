@@ -488,12 +488,12 @@ export interface ChatHeadsBridge {
     getSessionOnlyMode: () => Promise<boolean>;
     setSessionOnlyMode: (enabled: boolean) => Promise<void>;
     onSessionOnlyModeChange: (cb: (enabled: boolean) => void) => Unsubscribe;
-    /** When on, peers idle past the inactivity threshold collapse into a
+    /** When on, peers idle past the inactivity threshold render as a
      *  hover-expanding stack at the bottom of the rail. Off by default so
-     *  long-tail teams aren't hidden until the user opts in. */
-    getCollapseInactive: () => Promise<boolean>;
-    setCollapseInactive: (enabled: boolean) => Promise<void>;
-    onCollapseInactiveChange: (cb: (enabled: boolean) => void) => Unsubscribe;
+     *  the rail stays compact; flip on to surface long-tail teammates. */
+    getShowInactive: () => Promise<boolean>;
+    setShowInactive: (enabled: boolean) => Promise<void>;
+    onShowInactiveChange: (cb: (enabled: boolean) => void) => Unsubscribe;
     /** When on, each chathead renders an "Xm/Xh/Xd" activity timestamp badge.
      *  Default on; tray toggle clears the badges to declutter the rail. */
     getShowActivityTimestamps: () => Promise<boolean>;

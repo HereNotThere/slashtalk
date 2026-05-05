@@ -1,4 +1,4 @@
-// Rail-state preferences (pinned / session-only / collapse-inactive /
+// Rail-state preferences (pinned / session-only / show-inactive /
 // show-timestamps / spotify-share) — the store-backed knobs the user
 // controls from the tray popup. This module owns the persistence keys, the
 // getter/setter pairs, and the rail-target broadcasts that fan each change
@@ -14,7 +14,7 @@ import { broadcast } from "./broadcast";
 
 const PINNED_KEY = "railPinned";
 const SESSION_ONLY_KEY = "railSessionOnlyMode";
-const COLLAPSE_INACTIVE_KEY = "railCollapseInactive";
+const SHOW_INACTIVE_KEY = "railShowInactive";
 const SHOW_ACTIVITY_TIMESTAMPS_KEY = "showActivityTimestamps";
 const SPOTIFY_SHARE_KEY = "spotifyShareEnabled";
 
@@ -54,11 +54,11 @@ export function getSpotifyShareEnabled(): boolean {
   return store.get<boolean>(SPOTIFY_SHARE_KEY) ?? false;
 }
 
-/** On by default — peers idle past 24h collapse into a hover-expanding
- *  stack so the rail stays compact. Users can opt out via the tray to
- *  render every teammate inline. */
-export function getRailCollapseInactive(): boolean {
-  return store.get<boolean>(COLLAPSE_INACTIVE_KEY) ?? true;
+/** Off by default — peers idle past 24h are hidden so the rail stays
+ *  compact. Flip on via the tray to surface them as a hover-expanding
+ *  stack at the bottom of the rail. */
+export function getRailShowInactive(): boolean {
+  return store.get<boolean>(SHOW_INACTIVE_KEY) ?? false;
 }
 
 /** On by default — the "Xm" / "Xh" / "Xd" age pill renders on each
@@ -77,8 +77,8 @@ export function setRailSessionOnlyMode(value: boolean): void {
   store.set(SESSION_ONLY_KEY, value);
 }
 
-export function setRailCollapseInactive(value: boolean): void {
-  store.set(COLLAPSE_INACTIVE_KEY, value);
+export function setRailShowInactive(value: boolean): void {
+  store.set(SHOW_INACTIVE_KEY, value);
 }
 
 export function setShowActivityTimestamps(value: boolean): void {
@@ -106,8 +106,8 @@ export function broadcastRailSessionOnlyMode(): void {
   broadcastToRailTargets("rail:sessionOnlyMode", getRailSessionOnlyMode());
 }
 
-export function broadcastRailCollapseInactive(): void {
-  broadcastToRailTargets("rail:collapseInactive", getRailCollapseInactive());
+export function broadcastRailShowInactive(): void {
+  broadcastToRailTargets("rail:showInactive", getRailShowInactive());
 }
 
 export function broadcastShowActivityTimestamps(): void {

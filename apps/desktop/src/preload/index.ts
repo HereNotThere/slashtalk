@@ -111,10 +111,10 @@ const bridge: ChatHeadsBridge = {
     setSessionOnlyMode: (enabled: boolean) =>
       ipcRenderer.invoke("rail:setSessionOnlyMode", enabled) as Promise<void>,
     onSessionOnlyModeChange: (cb) => subscribe<boolean>("rail:sessionOnlyMode", cb),
-    getCollapseInactive: () => ipcRenderer.invoke("rail:getCollapseInactive") as Promise<boolean>,
-    setCollapseInactive: (enabled: boolean) =>
-      ipcRenderer.invoke("rail:setCollapseInactive", enabled) as Promise<void>,
-    onCollapseInactiveChange: (cb) => subscribe<boolean>("rail:collapseInactive", cb),
+    getShowInactive: () => ipcRenderer.invoke("rail:getShowInactive") as Promise<boolean>,
+    setShowInactive: (enabled: boolean) =>
+      ipcRenderer.invoke("rail:setShowInactive", enabled) as Promise<void>,
+    onShowInactiveChange: (cb) => subscribe<boolean>("rail:showInactive", cb),
     getShowActivityTimestamps: () =>
       ipcRenderer.invoke("rail:getShowActivityTimestamps") as Promise<boolean>,
     setShowActivityTimestamps: (shown: boolean) =>

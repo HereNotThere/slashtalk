@@ -68,10 +68,11 @@ export function App(): JSX.Element {
   const stackCollapseTimer = useRef<number | null>(null);
   const [stackExpanded, setStackExpanded] = useState(false);
   const [infoOpenHeadId, setInfoOpenHeadId] = useState<string | null>(null);
-  // Mirror main's default (`getRailCollapseInactive` returns true unless the
-  // user opted out). Matching here avoids a false→true flip on first paint
-  // when settings load asynchronously, which read as an expand/collapse yoyo.
-  const [collapseInactive, setCollapseInactive] = useState(true);
+  // Mirror main's default (`getRailShowInactive` returns false unless the
+  // user opted in). Matching here avoids a flicker on first paint when
+  // settings load asynchronously, which would read as the inactive stack
+  // popping in and out.
+  const [showInactive, setShowInactive] = useState(false);
   const [showActivityTimestamps, setShowActivityTimestamps] = useState(true);
   // Repo the SearchBubble's project-card hover targets. Resolved from the
   // tray's repo-selection (∩ tracked) — null when nothing is picked, in which
@@ -171,10 +172,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     let alive = true;
-    void window.chatheads.rail.getCollapseInactive().then((v) => {
-      if (alive) setCollapseInactive(v);
+    void window.chatheads.rail.getShowInactive().then((v) => {
+      if (alive) setShowInactive(v);
     });
-    const off = window.chatheads.rail.onCollapseInactiveChange((v) => setCollapseInactive(v));
+    const off = window.chatheads.rail.onShowInactiveChange((v) => setShowInactive(v));
     return () => {
       alive = false;
       off();
@@ -377,17 +378,16 @@ export function App(): JSX.Element {
   const self = heads.find((h) => h.kind === "user") ?? null;
   const allPeers = heads.filter((h) => h !== self);
   const now = Date.now();
-  // Inactivity is a property of the peer's last action — independent of the
-  // tray toggle. The toggle only controls whether inactive peers get split
-  // into a stack; the pale ("bleak") treatment follows them regardless.
+  // Inactivity is a property of the peer's last action. Inactive peers
+  // always render as a hover-expanding stack at the bottom of the rail;
+  // the tray toggle only controls whether the stack is rendered at all.
   const isPeerInactive = (h: ChatHead): boolean => {
     if (h.live === true) return false;
     if (h.lastActionAt == null) return true;
     return now - h.lastActionAt > INACTIVE_THRESHOLD_MS;
   };
-  const shouldStack = (h: ChatHead): boolean => collapseInactive && isPeerInactive(h);
-  const activePeers = allPeers.filter((h) => !shouldStack(h));
-  const inactivePeers = allPeers.filter(shouldStack);
+  const activePeers = allPeers.filter((h) => !isPeerInactive(h));
+  const inactivePeers = showInactive ? allPeers.filter(isPeerInactive) : [];
   const noSelectedRepos = useNoSelectedRepos();
   const showAddRepoHint = noSelectedRepos === true;
   const stackPinnedByInfo =

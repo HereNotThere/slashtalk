@@ -36,7 +36,7 @@ export function ProjectDashboard({
     <div>
       {/* Header stays outside the StaleWrapper so the repo title doesn't pulse. */}
       <ProjectHeader repoFullName={repoFullName} activeCount={active.length} />
-      <StaleWrapper stale={fetching && overview !== null}>
+      <StaleWrapper data={overview} subjectKey={repoFullName}>
         <Divider />
         <PulseSection
           pulse={overview?.pulse ?? null}

@@ -432,12 +432,22 @@ function PrRow({ pr }: { pr: UserPr }): JSX.Element {
 }
 
 function repoLabel(s: InfoSession): string | null {
-  if ("repo_full_name" in s && s.repo_full_name) {
+  // Peer sessions (FeedSessionSnapshot): show the matched repo, or nothing
+  // while it's still loading. A cwd-basename fallback here would flash a
+  // misleading label like "desktop" before the real repo name lands.
+  if ("repo_full_name" in s) {
+    if (!s.repo_full_name) return null;
     const slash = s.repo_full_name.lastIndexOf("/");
     return slash >= 0 ? s.repo_full_name.slice(slash + 1) : s.repo_full_name;
   }
-  const parts = s.project.split(/[-/]/).filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1]! : null;
+  // Own session (plain SessionSnapshot): cwd basename is local truth. Don't
+  // touch `s.project`; it's a dash-slugified path that chops names like
+  // `test-repo` if you split it.
+  if (s.cwd) {
+    const slash = s.cwd.lastIndexOf("/");
+    return slash >= 0 ? s.cwd.slice(slash + 1) : s.cwd;
+  }
+  return null;
 }
 
 interface StatusInfo {

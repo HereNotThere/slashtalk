@@ -436,8 +436,14 @@ function repoLabel(s: InfoSession): string | null {
     const slash = s.repo_full_name.lastIndexOf("/");
     return slash >= 0 ? s.repo_full_name.slice(slash + 1) : s.repo_full_name;
   }
-  const parts = s.project.split(/[-/]/).filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1]! : null;
+  // `s.project` is a dash-slugified path (e.g. `-Users-fei-test-repo`), so
+  // splitting on `-` chops legitimate dashes inside repo names. cwd keeps
+  // real `/` boundaries.
+  if (s.cwd) {
+    const slash = s.cwd.lastIndexOf("/");
+    return slash >= 0 ? s.cwd.slice(slash + 1) : s.cwd;
+  }
+  return s.project || null;
 }
 
 interface StatusInfo {

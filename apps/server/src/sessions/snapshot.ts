@@ -236,13 +236,17 @@ export async function loadInsightsForSessions(
       sessionId: sessionInsights.sessionId,
       analyzerName: sessionInsights.analyzerName,
       output: sessionInsights.output,
-      errorText: sessionInsights.errorText,
     })
     .from(sessionInsights)
     .where(inArray(sessionInsights.sessionId, sessionIds));
 
+  // Surface the row even when it carries an errorText: upsertError preserves
+  // the prior successful output across transient failures (LLM blip, JSON
+  // parse, rate limit), so dropping it here would clear the description until
+  // the next successful refresh — often 10+ minutes away. Empty `output: {}`
+  // (first-run failure with no prior success) naturally maps to undefined
+  // fields downstream, so the snapshot's optional chaining still yields null.
   for (const row of rows) {
-    if (row.errorText) continue;
     const slot = result.get(row.sessionId) ?? {};
     if (row.analyzerName === SUMMARY_ANALYZER) {
       slot.summary = row.output as SessionInsightsForSnapshot["summary"];

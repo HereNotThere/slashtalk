@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { XMarkIcon } from "@heroicons/react/20/solid";
 import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 import { Checkbox } from "../shared/Checkbox";
 import { RailPreferences } from "../shared/RailPreferences";
 import { UpdateStatus } from "../shared/UpdateStatus";
+import { parseIpcError, truncatePath, type ParsedIpcError } from "../shared/ipcError";
 
 export function App(): JSX.Element {
   useAutoResize();
@@ -12,7 +14,7 @@ export function App(): JSX.Element {
   const repos = useTrackedRepos();
   const selected = useSelection();
   const [busy, setBusy] = useState<null | "add">(null);
-  const [addError, setAddError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<ParsedIpcError | null>(null);
 
   if (!auth.signedIn) {
     // Settings are only meaningful once you're signed in — the dock,
@@ -34,7 +36,7 @@ export function App(): JSX.Element {
     try {
       await window.chatheads.backend.addLocalRepo();
     } catch (err) {
-      setAddError((err as Error).message);
+      setAddError(parseIpcError(err));
     } finally {
       setBusy(null);
     }
@@ -49,7 +51,7 @@ export function App(): JSX.Element {
         selected={selected}
         onRemove={(repoId) => void window.chatheads.backend.removeLocalRepo(repoId)}
       />
-      {addError ? <ErrorNote message={addError} /> : null}
+      {addError ? <ErrorNote error={addError} onDismiss={() => setAddError(null)} /> : null}
       <AddButton busy={busy === "add"} onClick={onAdd} />
       <Divider />
       <RailPreferences />
@@ -188,8 +190,41 @@ function AddButton({ busy, onClick }: { busy: boolean; onClick: () => void }): J
   );
 }
 
-function ErrorNote({ message }: { message: string }): JSX.Element {
-  return <div className="px-1.5 py-1 text-sm text-danger">{message}</div>;
+function ErrorNote({
+  error,
+  onDismiss,
+}: {
+  error: ParsedIpcError;
+  onDismiss: () => void;
+}): JSX.Element {
+  return (
+    <div
+      role="alert"
+      className="relative flex flex-col gap-1 px-3 py-2 pr-7 rounded-md border border-danger/40 bg-danger/10 text-sm text-danger leading-snug"
+    >
+      {error.context ? (
+        <div className="font-medium whitespace-nowrap overflow-hidden" title={error.context}>
+          Couldn&rsquo;t add{" "}
+          <code className="font-mono text-[12px] bg-danger/10 px-1 py-0.5 rounded">
+            {truncatePath(error.context)}
+          </code>
+        </div>
+      ) : null}
+      <div className="break-words">{error.message}</div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss error"
+        className="
+          absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded
+          bg-transparent border-none text-danger/70 cursor-pointer [font:inherit]
+          hover:bg-danger/15 hover:text-danger
+        "
+      >
+        <XMarkIcon className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
 }
 
 // ---------- Footer / signed-out CTA ----------

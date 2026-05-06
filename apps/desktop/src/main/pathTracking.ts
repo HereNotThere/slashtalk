@@ -51,6 +51,23 @@ function canonicalize(p: string): string | null {
   }
 }
 
+// Parse the `gitdir: <path>` pointer from a `.git` file (linked worktree or
+// submodule) and return the resolved absolute path. Returns null when the
+// file is missing/unreadable or doesn't carry a gitdir line. Stops at "I
+// found a .git file but it's malformed" — callers must not silently fall
+// through to a parent dir, which would widen the strict-tracking gate.
+export function readGitdirPointer(dotGitFile: string): string | null {
+  let contents: string;
+  try {
+    contents = fs.readFileSync(dotGitFile, "utf8");
+  } catch {
+    return null;
+  }
+  const m = contents.match(/^gitdir:\s*(.+?)\s*$/m);
+  if (!m) return null;
+  return path.resolve(path.dirname(dotGitFile), m[1]);
+}
+
 // A linked worktree's `.git` is a file: `gitdir: <main>/.git/worktrees/<name>`.
 // Walk up from cwd, and if we find that shape, return <main>.
 function resolveWorktreeMainRepo(startDir: string): string | null {
@@ -65,15 +82,8 @@ function resolveWorktreeMainRepo(startDir: string): string | null {
     }
     if (stat?.isDirectory()) return null; // plain repo, not a worktree
     if (stat?.isFile()) {
-      let contents: string;
-      try {
-        contents = fs.readFileSync(gitPath, "utf8");
-      } catch {
-        return null;
-      }
-      const m = contents.match(/^gitdir:\s*(.+?)\s*$/m);
-      if (!m) return null;
-      const gitdir = path.resolve(dir, m[1]);
+      const gitdir = readGitdirPointer(gitPath);
+      if (!gitdir) return null;
       const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
       const idx = gitdir.indexOf(marker);
       return idx === -1 ? null : gitdir.slice(0, idx);

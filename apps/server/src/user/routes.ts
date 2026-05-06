@@ -14,6 +14,7 @@ import {
 import { jwtAuth, apiKeyAuth, apiKeyAuthWithoutLastUsedTouch } from "../auth/middleware";
 import { hashToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
+import { config } from "../config";
 import { visibleReposForUser } from "../repo/visibility";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
@@ -30,13 +31,17 @@ export const userRoutes = (db: Database) =>
   new Elysia({ prefix: "/api/me", name: "user" })
     .use(jwtAuth)
 
-    // GET /api/me — current user profile
+    // GET /api/me — current user profile. `githubClientId` is the public
+    // OAuth client ID (appears in every `?client_id=…` redirect); returning
+    // it lets the desktop build OAuth-app deep links without baking the
+    // same env var into its build.
     .get("/", ({ user }) => ({
       id: user.id,
       githubLogin: user.githubLogin,
       avatarUrl: user.avatarUrl,
       displayName: user.displayName,
       createdAt: user.createdAt,
+      githubClientId: config.githubClientId,
     }))
 
     // GET /api/me/devices — list user's devices

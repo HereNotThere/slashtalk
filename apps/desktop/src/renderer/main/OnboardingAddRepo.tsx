@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { GrantOrgAccessButton } from "../shared/GrantOrgAccessButton";
 import { SlashtalkLogo } from "../shared/icons";
 import { parseIpcError, truncatePath, type ParsedIpcError } from "../shared/ipcError";
 import { StepLabel } from "./StepLabel";
@@ -56,7 +57,10 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
       </div>
 
       {error ? (
-        <div role="alert" className="flex flex-col gap-1 text-sm text-danger leading-snug max-w-md">
+        <div
+          role="alert"
+          className="flex flex-col items-center gap-2 text-sm text-danger leading-snug max-w-md"
+        >
           {error.context ? (
             <div className="font-medium whitespace-nowrap overflow-hidden" title={error.context}>
               Couldn&rsquo;t add{" "}
@@ -66,6 +70,7 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
             </div>
           ) : null}
           <div>{error.message}</div>
+          {error.action === "no_access" ? <GrantOrgAccessButton size="sm" className="mt-1" /> : null}
         </div>
       ) : null}
     </div>

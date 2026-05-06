@@ -7,6 +7,7 @@ import { dialog } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { formatActionMarker } from "../shared/ipcAction";
 import type { TrackedRepo } from "../shared/types";
 import * as backend from "./backend";
 import * as store from "./store";
@@ -352,8 +353,9 @@ async function addLocalRepoForPath(localPath: string): Promise<TrackedRepo> {
         case "no_access":
           throw new Error(
             `${fullName} is owned by ${remote.owner}, which isn't your GitHub account or one of your active orgs. ` +
-              `slashtalk only tracks repos in your own namespace or in orgs you're a member of (with OAuth approved if the org restricts apps). ` +
-              `Collaborator-only access on someone else's personal repo isn't supported.`,
+              `If you are a member of ${remote.owner}, slashtalk needs OAuth access to that org — grant it on GitHub and try again. ` +
+              `Collaborator-only access on someone else's personal repo isn't supported.\n` +
+              formatActionMarker("no_access"),
             { cause: err },
           );
         case "rate_limited":

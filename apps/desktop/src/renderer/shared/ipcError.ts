@@ -4,21 +4,31 @@
 // also encodes the failed path on the first line so we can render a heading
 // like "Couldn't add <path>" above the human reason.
 
+import { ACTION_LINE_REGEX, type IpcErrorAction } from "../../shared/ipcAction";
+
+export type { IpcErrorAction };
+
 export type ParsedIpcError = {
-  // First line of the original message if the main-process throw used the
-  // `<path>\n<reason>` convention (currently just `addLocalRepo`). Null
-  // otherwise — callers should fall back to message-only rendering.
   context: string | null;
   message: string;
+  action: IpcErrorAction | null;
 };
 
 export function parseIpcError(err: unknown): ParsedIpcError {
   const raw = (err instanceof Error ? err.message : String(err))
     .replace(/^Error invoking remote method '[^']+':\s*/, "")
     .replace(/^Error:\s*/, "");
-  const idx = raw.indexOf("\n");
-  if (idx === -1) return { context: null, message: raw };
-  return { context: raw.slice(0, idx), message: raw.slice(idx + 1) };
+  const lines = raw.split("\n");
+  let action: IpcErrorAction | null = null;
+  const lastMatch = lines[lines.length - 1]?.match(ACTION_LINE_REGEX);
+  if (lastMatch) {
+    action = lastMatch[1] as IpcErrorAction;
+    lines.pop();
+  }
+  if (lines.length <= 1) {
+    return { context: null, message: lines.join("\n"), action };
+  }
+  return { context: lines[0], message: lines.slice(1).join("\n"), action };
 }
 
 // Truncate a path so it fits a one-line heading in narrow surfaces (the

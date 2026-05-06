@@ -670,6 +670,19 @@ function parseClaimError(body: string): ClaimErrorBody | null {
   }
 }
 
+/** Returns null when not signed in or the fetch fails — the caller falls
+ *  back to a baked-in env var. */
+export async function fetchGithubClientId(): Promise<string | null> {
+  if (!creds) return null;
+  try {
+    const me = await jsonFetch<{ githubClientId?: string }>("/api/me/", { method: "GET" });
+    return me.githubClientId ?? null;
+  } catch (err) {
+    console.warn("[backend] fetchGithubClientId failed:", err);
+    return null;
+  }
+}
+
 export async function listTeammates(): Promise<TeammateSummary[]> {
   console.log("[rail] GET /api/feed/users …");
   const raw = await jsonFetch<FeedUser[]>("/api/feed/users", { method: "GET" });

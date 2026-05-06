@@ -3,6 +3,7 @@ import { XMarkIcon } from "@heroicons/react/20/solid";
 import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 import { Checkbox } from "../shared/Checkbox";
+import { GrantOrgAccessButton } from "../shared/GrantOrgAccessButton";
 import { RailPreferences } from "../shared/RailPreferences";
 import { UpdateStatus } from "../shared/UpdateStatus";
 import { parseIpcError, truncatePath, type ParsedIpcError } from "../shared/ipcError";
@@ -211,6 +212,9 @@ function ErrorNote({
         </div>
       ) : null}
       <div className="break-words">{error.message}</div>
+      {error.action === "no_access" ? (
+        <GrantOrgAccessButton size="xs" className="self-start mt-1" />
+      ) : null}
       <button
         type="button"
         onClick={onDismiss}

@@ -86,6 +86,12 @@ export function __clearOrgMembershipsCache(): void {
   orgMembershipsCache.clear();
 }
 
+/** Drops one user's cache entry so the next `fetchUserOrgMemberships`
+ *  call hits GitHub. */
+export function invalidateUserOrgMemberships(userId: number): void {
+  orgMembershipsCache.delete(userId);
+}
+
 /**
  * Lists the user's *active* org memberships from `GET /user/memberships/orgs`.
  * Returns lowercased org logins so the claim path can `Set.has`-match against

@@ -1,4 +1,6 @@
 import { app, clipboard, dialog, ipcMain, shell } from "electron";
+import { fetchGithubClientId } from "../backend";
+import { githubClientId } from "../config";
 import { isSafeExternalUrl } from "../safeUrl";
 import { openTrayPopup } from "../windows/tray";
 
@@ -22,6 +24,20 @@ export function registerShellIpc(): void {
       return;
     }
     await shell.openExternal(url);
+  });
+
+  // Falls back to the server because dev environments routinely lack the
+  // baked `MAIN_VITE_GITHUB_CLIENT_ID`.
+  ipcMain.handle("shell:openGithubOAuthAppSettings", async (): Promise<void> => {
+    let clientId = githubClientId();
+    if (!clientId) {
+      clientId = (await fetchGithubClientId()) ?? "";
+    }
+    if (!clientId) {
+      console.warn("[shell:openGithubOAuthAppSettings] no GitHub client ID available");
+      return;
+    }
+    await shell.openExternal(`https://github.com/settings/connections/applications/${clientId}`);
   });
 
   ipcMain.handle(

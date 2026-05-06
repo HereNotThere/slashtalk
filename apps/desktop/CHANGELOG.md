@@ -1,5 +1,28 @@
 # @slashtalk/electron
 
+## 0.2.0
+
+### Minor Changes
+
+- 6b9804b: Inactive teammates (idle >24h) are now hidden from the rail by default and surface as a hover-expanding stack only when the new "Show inactive teammates" tray toggle is on. Replaces the previous "Stack inactive teammates" toggle — stacking is now the only display mode for inactive peers.
+
+### Patch Changes
+
+- 68af310: "Add local repo" now gives a precise reason when it fails: distinguishes a folder that isn't a git repo (and lists git child folders if the picked dir is a parent of repos), a repo with no remotes, a repo with a non-GitHub remote, and a repo already tracked (with the path it's tracked at). Linked git worktrees now resolve transparently to the main repo. The `no_access` claim error is rewritten to name the specific owner and to acknowledge both the org-OAuth-restriction and the collaborator-only-on-someone-else's-personal-repo cases. The error in the tray popup now renders as a dismissible warning box headed with "Couldn't add `<path>`" (the path is middle-truncated to fit) above the human reason, instead of small inline text. The tray popup re-focuses itself after the folder picker closes (so any error stays visible without re-clicking the tray), and the underlying message no longer leaks the IPC channel prefix ("Error invoking remote method 'backend:addLocalRepo': Error: …").
+- 4ee25d3: When "Add local repo" fails because the repo's owning org hasn't authorized slashtalk's GitHub OAuth app, the error now shows a "Grant access on GitHub →" button that opens slashtalk's authorized-OAuth-apps page on github.com. From there a single click on "Grant" next to the org unblocks the claim. Previously the error explained the cause but left the user to find the page themselves. The server now also busts its 60-second org-membership cache after a `no_access` outcome and refetches once before giving up — without this, the user would keep seeing the same error for up to a minute after granting access on GitHub.
+- 878ed61: Fix the first-launch experience: signed-out users now see the sign-in window
+  on app start (previously only a tray icon was visible), and the rail's
+  "+ add repo" bubble reacts live to repo add/remove and to the tray's
+  checkbox selection — so it disappears once you add a repo and reappears if
+  you uncheck all of them.
+- 720f15b: Fix two info-card glitches: the shimmer no longer flashes on every cached refetch, and it no longer fires when hovering between teammate or project cards. The transition only runs when the same card's payload actually changes — old content is held under shimmer for ~1s, then swaps to the new render.
+- 6445d28: Let the SDK type-check the local-agent default permission mode directly.
+- 5ca1b01: Fix the info popover dismissing instantly when opened by clicking an avatar in a project card's Active strip. The popover used the same hover-managed lifecycle for click and hover, so a click that triggered a reposition (the new head's bubble lives elsewhere on the rail than the previous one) immediately fired `mouseleave` and dismissed the card before the user could interact with it.
+
+  Click-opened popovers are now pinned: `info:hoverLeave` is a no-op until the cursor enters the window, at which point the pin "graduates" to the normal hover-managed mode (so hovering off → onto another bubble dismisses naturally). ESC and clicking another of our windows still dismiss while pinned. No new UI affordance.
+
+- 99dc14e: Fix the repo label on info-dashboard "Now" cards. Previously the fallback split a dash-slugified project path on `/` and `-`, so a repo named `test-repo` rendered as `repo`. Two changes: peer sessions (with a matched `repo_full_name`) now render that name; while the match is still loading they render nothing instead of flashing a misleading cwd segment like "desktop". Own sessions fall back to the cwd basename, which preserves dashes inside repo names.
+
 ## 0.1.7
 
 ### Patch Changes

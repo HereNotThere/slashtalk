@@ -74,7 +74,7 @@ export function HierarchyDashboard({
           <Divider />
         </>
       )}
-      <StaleWrapper stale={dashboardFetching && dashboard !== null}>
+      <StaleWrapper data={dashboard} subjectKey={head?.id ?? null}>
         <PastDaySection
           summary={dashboard?.standup ?? null}
           // `loading` only drives the shimmer when there's no summary to show.

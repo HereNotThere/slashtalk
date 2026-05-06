@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { SlashtalkLogo } from "../shared/icons";
+import { parseIpcError, truncatePath, type ParsedIpcError } from "../shared/ipcError";
 import { StepLabel } from "./StepLabel";
 
 export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Element {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ParsedIpcError | null>(null);
 
   const addRepo = async (): Promise<void> => {
     setBusy(true);
@@ -15,7 +16,7 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
       // forward to the share step automatically.
       await window.chatheads.backend.addLocalRepo();
     } catch (err) {
-      setError((err as Error).message);
+      setError(parseIpcError(err));
     } finally {
       setBusy(false);
     }
@@ -54,7 +55,19 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
         </button>
       </div>
 
-      {error ? <div className="text-sm text-danger leading-snug">{error}</div> : null}
+      {error ? (
+        <div className="flex flex-col gap-1 text-sm text-danger leading-snug max-w-md">
+          {error.context ? (
+            <div className="font-medium whitespace-nowrap overflow-hidden" title={error.context}>
+              Couldn&rsquo;t add{" "}
+              <code className="font-mono text-[12px] bg-danger/10 px-1 py-0.5 rounded">
+                {truncatePath(error.context, 44)}
+              </code>
+            </div>
+          ) : null}
+          <div>{error.message}</div>
+        </div>
+      ) : null}
     </div>
   );
 }

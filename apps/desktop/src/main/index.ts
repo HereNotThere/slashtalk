@@ -375,7 +375,20 @@ registerWsHandlers();
 registerAuthOrchestrator();
 
 ipcMain.handle("backend:listTrackedRepos", () => localRepos.list());
-ipcMain.handle("backend:addLocalRepo", () => localRepos.addLocalRepo());
+ipcMain.handle("backend:addLocalRepo", async (event) => {
+  try {
+    return await localRepos.addLocalRepo();
+  } finally {
+    // The native folder picker steals focus, which on the tray popup triggers
+    // its blur-listener auto-hide (see windows/tray.ts). Re-show + refocus
+    // the caller so any success state or error banner stays visible.
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      if (!win.isVisible()) win.show();
+      win.focus();
+    }
+  }
+});
 ipcMain.handle("backend:removeLocalRepo", (_e, repoId: number) =>
   localRepos.removeLocalRepo(repoId),
 );

@@ -11,7 +11,7 @@ import type { TrackedRepo } from "../shared/types";
 import * as backend from "./backend";
 import * as store from "./store";
 import { createEmitter } from "./emitter";
-import { isPathTrackedAgainst } from "./pathTracking";
+import { isPathTrackedAgainst, readGitdirPointer } from "./pathTracking";
 
 const execFileAsync = promisify(execFile);
 
@@ -285,19 +285,49 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
   if (result.canceled || result.filePaths.length === 0) return null;
 
   const localPath = result.filePaths[0];
+  try {
+    return await addLocalRepoForPath(localPath);
+  } catch (err) {
+    // Prefix the failed path on the first line so the renderer can render a
+    // "Couldn't add <path>" heading above the human reason. Electron IPC
+    // strips custom Error fields, so message-encoded is the lightest contract
+    // that survives the boundary.
+    const reason = err instanceof Error ? err.message : String(err);
+    const wrapped = new Error(`${localPath}\n${reason}`);
+    if (err instanceof Error) wrapped.cause = err;
+    throw wrapped;
+  }
+}
+
+async function addLocalRepoForPath(localPath: string): Promise<TrackedRepo> {
   const remote = await readGithubRemote(localPath);
   if (remote.kind === "not_git") {
-    throw new Error(`${localPath} is not a git repository`);
+    const base = path.basename(localPath) || localPath;
+    if (remote.childGitRepos.length > 0) {
+      const shown = remote.childGitRepos.slice(0, 5).join(", ");
+      const more =
+        remote.childGitRepos.length > 5 ? ` (+${remote.childGitRepos.length - 5} more)` : "";
+      throw new Error(
+        `${base} isn't a git repo, but it contains: ${shown}${more}. Pick one of those instead.`,
+      );
+    }
+    throw new Error(`${base} isn't a git repository (no .git found).`);
   }
-  if (remote.kind === "no_github_remote") {
-    throw new Error("No GitHub remote found in this repo");
+  if (remote.kind === "no_remotes") {
+    throw new Error("This git repo has no remotes. Push it to GitHub first, then try again.");
+  }
+  if (remote.kind === "non_github_remote") {
+    throw new Error(
+      `This repo's remote is on ${remote.hosts.join(", ")}. slashtalk only tracks GitHub repos.`,
+    );
   }
 
   const fullName = `${remote.owner}/${remote.name}`;
   // GitHub repo names are case-insensitive; dedupe across casings to avoid
   // registering the same repo twice if the user has two clones.
-  if (tracked.some((t) => t.fullName.toLowerCase() === fullName.toLowerCase())) {
-    throw new Error(`${fullName} is already tracked`);
+  const existing = tracked.find((t) => t.fullName.toLowerCase() === fullName.toLowerCase());
+  if (existing) {
+    throw new Error(`${fullName} is already tracked at ${existing.localPath}.`);
   }
 
   let claimed;
@@ -305,14 +335,44 @@ export async function addLocalRepo(): Promise<TrackedRepo | null> {
     claimed = await backend.claimRepo(fullName);
   } catch (err) {
     // The server-side claim-gate (core-beliefs #12) returns structured errors
-    // that carry a user-facing `message`. On `token_expired`, also flip the UI
-    // to signed-out — the stored OAuth token no longer sees this user's
-    // repos, so everything downstream is broken until they re-auth.
+    // by `kind`. We rewrite them desktop-side so the message can name the
+    // specific repo and cover both org-OAuth-restriction and personal-
+    // collaborator cases — the server's prose can't distinguish them.
     if (err instanceof backend.ClaimRepoError) {
-      if (err.kind === "token_expired") {
-        void backend.signOut().catch(() => {});
+      switch (err.kind) {
+        case "token_expired":
+          // Stored OAuth token no longer sees this user's repos; flip to
+          // signed-out so everything downstream isn't silently broken.
+          void backend.signOut().catch(() => {});
+          throw new Error("Your GitHub session expired. Sign in again.", { cause: err });
+        case "no_access":
+          throw new Error(
+            `${fullName} is owned by ${remote.owner}, which isn't your GitHub account or one of your active orgs. ` +
+              `slashtalk only tracks repos in your own namespace or in orgs you're a member of (with OAuth approved if the org restricts apps). ` +
+              `Collaborator-only access on someone else's personal repo isn't supported.`,
+            { cause: err },
+          );
+        case "rate_limited":
+          throw new Error(
+            "Too many claim attempts in a short time. Wait a few minutes and try again.",
+            { cause: err },
+          );
+        case "upstream_unavailable":
+          throw new Error("Couldn't reach GitHub. Check your connection and try again.", {
+            cause: err,
+          });
+        case "invalid_full_name":
+        case "unknown":
+          // invalid_full_name is unreachable in practice — fullName is built
+          // from `.git/config` and matches the server's FULL_NAME regex.
+          // "unknown" carries opaque server prose worth surfacing verbatim.
+          throw new Error(err.message, { cause: err });
+        default:
+          // Compile-time exhaustiveness — adding a new kind to ClaimRepoError
+          // surfaces here as a type error.
+          err.kind satisfies never;
+          throw new Error(err.message, { cause: err });
       }
-      throw new Error(err.message, { cause: err });
     }
     throw err;
   }
@@ -359,8 +419,11 @@ export function clearOnSignOut(): void {
 
 type RemoteResult =
   | { kind: "ok"; owner: string; name: string }
-  | { kind: "not_git" }
-  | { kind: "no_github_remote" };
+  // `childGitRepos` is the basenames of immediate children that are git repos —
+  // empty for a leaf folder, populated when the user picked a parent dir.
+  | { kind: "not_git"; childGitRepos: string[] }
+  | { kind: "no_remotes" }
+  | { kind: "non_github_remote"; hosts: string[] };
 
 type ParsedRemote = {
   kind: "https" | "ssh";
@@ -439,32 +502,102 @@ async function resolvesToGithub(parsed: ParsedRemote): Promise<boolean> {
   return resolved !== null && GITHUB_HOSTS.has(resolved);
 }
 
+// Resolve the directory whose `config` file holds the canonical remote list
+// for the repo at `localPath`. Returns:
+//   - `<localPath>/.git` for a plain repo
+//   - the commondir for a linked worktree (where remotes actually live)
+//   - the gitdir itself for a submodule (its .git is a file but no commondir)
+//   - null if `<localPath>` isn't a git repo at all
+function resolveGitConfigDir(localPath: string): string | null {
+  const dotGit = path.join(localPath, ".git");
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(dotGit);
+  } catch {
+    return null;
+  }
+  if (stat.isDirectory()) return dotGit;
+  if (!stat.isFile()) return null;
+  const gitdir = readGitdirPointer(dotGit);
+  if (!gitdir) return null;
+  // Linked worktrees share remotes via `commondir`. Submodules don't have
+  // one — their gitdir holds `config` directly.
+  try {
+    const commondirRaw = fs.readFileSync(path.join(gitdir, "commondir"), "utf8").trim();
+    if (commondirRaw) return path.resolve(gitdir, commondirRaw);
+  } catch {
+    /* submodule */
+  }
+  return gitdir;
+}
+
+// Lists basenames of immediate children of `parent` that look like git repos
+// (have a `.git` dir or file). Used to suggest alternatives when the user
+// picks a parent folder. Capped + bounded so a huge dir doesn't stall the UI.
+function scanChildGitRepos(parent: string): string[] {
+  const MAX_ENTRIES = 200;
+  const MAX_RESULTS = 20;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(parent, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  let scanned = 0;
+  for (const entry of entries) {
+    if (scanned++ >= MAX_ENTRIES) break;
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith(".")) continue;
+    try {
+      fs.statSync(path.join(parent, entry.name, ".git"));
+      out.push(entry.name);
+      if (out.length >= MAX_RESULTS) break;
+    } catch {
+      /* not a repo */
+    }
+  }
+  return out.sort();
+}
+
 async function readGithubRemote(localPath: string): Promise<RemoteResult> {
+  const gitConfigDir = resolveGitConfigDir(localPath);
+  if (!gitConfigDir) {
+    return { kind: "not_git", childGitRepos: scanChildGitRepos(localPath) };
+  }
   let contents: string;
   try {
-    contents = fs.readFileSync(path.join(localPath, ".git", "config"), "utf8");
+    contents = fs.readFileSync(path.join(gitConfigDir, "config"), "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { kind: "not_git" };
+      // We resolved a `.git` but its `config` is missing — corrupt or stale
+      // worktree. The folder *is* a repo, so don't suggest siblings.
+      return { kind: "not_git", childGitRepos: [] };
     }
     throw err;
   }
 
   const urls = extractRemoteUrls(contents);
+  if (urls.size === 0) {
+    return { kind: "no_remotes" };
+  }
+
   // Origin wins if present, even when it points elsewhere — matches prior
   // behavior and avoids silently tracking a non-origin remote. Only scan
   // other remotes when `origin` is absent.
   const origin = urls.get("origin");
   const candidates = origin ? [origin] : [...urls.values()];
 
+  const seenHosts = new Set<string>();
   for (const url of candidates) {
     const parsed = parseGitRemote(url);
     if (!parsed) continue;
     if (await resolvesToGithub(parsed)) {
       return { kind: "ok", owner: parsed.owner, name: parsed.name };
     }
+    seenHosts.add(parsed.host);
   }
-  return { kind: "no_github_remote" };
+  return { kind: "non_github_remote", hosts: [...seenHosts] };
 }
 
 function extractRemoteUrls(config: string): Map<string, string> {

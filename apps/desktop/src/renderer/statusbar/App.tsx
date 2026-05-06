@@ -198,7 +198,10 @@ function ErrorNote({
   onDismiss: () => void;
 }): JSX.Element {
   return (
-    <div className="relative flex flex-col gap-1 px-3 py-2 pr-7 rounded-md border border-danger/40 bg-danger/10 text-sm text-danger leading-snug">
+    <div
+      role="alert"
+      className="relative flex flex-col gap-1 px-3 py-2 pr-7 rounded-md border border-danger/40 bg-danger/10 text-sm text-danger leading-snug"
+    >
       {error.context ? (
         <div className="font-medium whitespace-nowrap overflow-hidden" title={error.context}>
           Couldn&rsquo;t add{" "}

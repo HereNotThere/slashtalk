@@ -56,7 +56,7 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
       </div>
 
       {error ? (
-        <div className="flex flex-col gap-1 text-sm text-danger leading-snug max-w-md">
+        <div role="alert" className="flex flex-col gap-1 text-sm text-danger leading-snug max-w-md">
           {error.context ? (
             <div className="font-medium whitespace-nowrap overflow-hidden" title={error.context}>
               Couldn&rsquo;t add{" "}

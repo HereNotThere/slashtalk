@@ -317,9 +317,13 @@ async function addLocalRepoForPath(localPath: string): Promise<TrackedRepo> {
     throw new Error("This git repo has no remotes. Push it to GitHub first, then try again.");
   }
   if (remote.kind === "non_github_remote") {
-    throw new Error(
-      `This repo's remote is on ${remote.hosts.join(", ")}. slashtalk only tracks GitHub repos.`,
-    );
+    // Empty `hosts` means every remote URL was unparseable (exotic protocol,
+    // malformed config) — we know it's not GitHub but not where it points.
+    const reason =
+      remote.hosts.length > 0
+        ? `This repo's remote is on ${remote.hosts.join(", ")}.`
+        : "This repo's remote URL couldn't be parsed.";
+    throw new Error(`${reason} slashtalk only tracks GitHub repos.`);
   }
 
   const fullName = `${remote.owner}/${remote.name}`;

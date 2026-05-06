@@ -1,5 +1,0 @@
----
-"@slashtalk/electron": patch
----
-
-"Add local repo" now gives a precise reason when it fails: distinguishes a folder that isn't a git repo (and lists git child folders if the picked dir is a parent of repos), a repo with no remotes, a repo with a non-GitHub remote, and a repo already tracked (with the path it's tracked at). Linked git worktrees now resolve transparently to the main repo. The `no_access` claim error is rewritten to name the specific owner and to acknowledge both the org-OAuth-restriction and the collaborator-only-on-someone-else's-personal-repo cases. The error in the tray popup now renders as a dismissible warning box headed with "Couldn't add `<path>`" (the path is middle-truncated to fit) above the human reason, instead of small inline text. The tray popup re-focuses itself after the folder picker closes (so any error stays visible without re-clicking the tray), and the underlying message no longer leaks the IPC channel prefix ("Error invoking remote method 'backend:addLocalRepo': Error: …").

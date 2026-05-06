@@ -41,7 +41,10 @@ export async function upsertPullRequests(
       target: [pullRequests.repoId, pullRequests.number],
       set: {
         ...(options.preserveHeadRef ? {} : { headRef: sql`excluded.head_ref` }),
-        title: sql`excluded.title`,
+        // Belt against callers that send an empty title (e.g. an events-API
+        // payload that arrived without `pull_request.title`). Keep the
+        // already-stored title rather than clobbering it with "".
+        title: sql`COALESCE(NULLIF(excluded.title, ''), ${pullRequests.title})`,
         url: sql`excluded.url`,
         state: sql`excluded.state`,
         authorLogin: sql`excluded.author_login`,

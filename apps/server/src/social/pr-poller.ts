@@ -252,12 +252,17 @@ async function backfillRepo(
   for (const pr of prs) {
     const headRef = pr.head?.ref;
     if (!headRef || !pr.number) continue;
+    const title = pr.title?.trim();
+    if (!title) {
+      console.warn(`[pr-poller] backfill ${fullName}#${pr.number}: skipping — missing title`);
+      continue;
+    }
     await upsertPullRequests(db, [
       {
         repoId,
         number: pr.number,
         headRef,
-        title: pr.title ?? "",
+        title,
         url: pr.html_url,
         state: "open",
         authorLogin: pr.user?.login ?? "",
@@ -325,13 +330,18 @@ export async function persistPrFromEvent(
 
   const url = pr.html_url ?? `https://github.com/${ev.repo.name}/pull/${number}`;
   const authorLogin = pr.user?.login ?? ev.actor.login;
+  const title = pr.title?.trim();
+  if (!title) {
+    console.warn(`[pr-poller] event ${ev.repo.name}#${number}: skipping — missing title`);
+    return;
+  }
 
   await upsertPullRequests(db, [
     {
       repoId: repoRow.id,
       number,
       headRef,
-      title: pr.title ?? "",
+      title,
       url,
       state,
       authorLogin,

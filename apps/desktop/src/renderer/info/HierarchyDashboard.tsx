@@ -229,13 +229,11 @@ function NowSection({
       <div className="px-4 pb-3">
         <div className="flex items-start gap-2.5">
           <div className="flex-1 min-w-0">
-            <p className="text-sm leading-snug">
-              {summary ? (
+            {summary && (
+              <p className="text-sm leading-snug">
                 <span className="text-fg">{summary}</span>
-              ) : (
-                <span className="text-subtle italic">Summarizing…</span>
-              )}
-            </p>
+              </p>
+            )}
             {(repo || tokens || status) && (
               <div className={`mt-1 flex items-center gap-2 text-[11px] text-subtle min-w-0`}>
                 {repo && (

@@ -252,10 +252,12 @@ async function backfillRepo(
   for (const pr of prs) {
     const headRef = pr.head?.ref;
     if (!headRef || !pr.number) continue;
-    const title = pr.title?.trim();
+    const title = pr.title?.trim() ?? "";
     if (!title) {
-      console.warn(`[pr-poller] backfill ${fullName}#${pr.number}: skipping — missing title`);
-      continue;
+      // Don't skip the upsert — state/updatedAt still need to land. The SQL
+      // COALESCE in upsertPullRequests preserves any existing title; new
+      // rows will be inserted titleless and heal on the next titled touch.
+      console.warn(`[pr-poller] backfill ${fullName}#${pr.number}: missing title`);
     }
     await upsertPullRequests(db, [
       {
@@ -330,10 +332,13 @@ export async function persistPrFromEvent(
 
   const url = pr.html_url ?? `https://github.com/${ev.repo.name}/pull/${number}`;
   const authorLogin = pr.user?.login ?? ev.actor.login;
-  const title = pr.title?.trim();
+  const title = pr.title?.trim() ?? "";
   if (!title) {
-    console.warn(`[pr-poller] event ${ev.repo.name}#${number}: skipping — missing title`);
-    return;
+    // Don't bail — state transitions (open → closed/merged) and the WS
+    // fan-out below still need to run. The SQL COALESCE in
+    // upsertPullRequests preserves any existing title; a brand-new row
+    // gets inserted titleless and heals on the next titled touch.
+    console.warn(`[pr-poller] event ${ev.repo.name}#${number}: missing title (action=${action})`);
   }
 
   await upsertPullRequests(db, [

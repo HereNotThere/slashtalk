@@ -31,15 +31,10 @@ export const userRoutes = (db: Database) =>
   new Elysia({ prefix: "/api/me", name: "user" })
     .use(jwtAuth)
 
-    // GET /api/me — current user profile.
-    //
-    // Includes `githubClientId` so the desktop can construct deep links like
-    // `https://github.com/settings/connections/applications/<id>` (the page
-    // where users grant org OAuth access) without needing the same env var
-    // baked into its own build. The server's GITHUB_CLIENT_ID is the
-    // canonical source — desktop dev environments often lack it. Public
-    // value: it appears in every OAuth `?client_id=…` redirect, so
-    // returning it to an authed caller leaks nothing.
+    // GET /api/me — current user profile. `githubClientId` is the public
+    // OAuth client ID (appears in every `?client_id=…` redirect); returning
+    // it lets the desktop build OAuth-app deep links without baking the
+    // same env var into its build.
     .get("/", ({ user }) => ({
       id: user.id,
       githubLogin: user.githubLogin,

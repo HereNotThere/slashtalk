@@ -3,6 +3,7 @@ import { XMarkIcon } from "@heroicons/react/20/solid";
 import type { BackendAuthState, TrackedRepo } from "../../shared/types";
 import { useAutoResize } from "../shared/useAutoResize";
 import { Checkbox } from "../shared/Checkbox";
+import { GrantOrgAccessButton } from "../shared/GrantOrgAccessButton";
 import { RailPreferences } from "../shared/RailPreferences";
 import { UpdateStatus } from "../shared/UpdateStatus";
 import { parseIpcError, truncatePath, type ParsedIpcError } from "../shared/ipcError";
@@ -212,13 +213,7 @@ function ErrorNote({
       ) : null}
       <div className="break-words">{error.message}</div>
       {error.action === "no_access" ? (
-        <button
-          type="button"
-          onClick={() => void window.chatheads.openGithubOAuthAppSettings()}
-          className="self-start mt-1 inline-flex items-center rounded-md border border-danger/40 bg-danger/5 px-2 py-1 text-xs font-medium text-danger hover:bg-danger/15 cursor-pointer [font:inherit]"
-        >
-          Grant access on GitHub →
-        </button>
+        <GrantOrgAccessButton size="xs" className="self-start mt-1" />
       ) : null}
       <button
         type="button"

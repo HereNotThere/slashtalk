@@ -4,22 +4,15 @@
 // also encodes the failed path on the first line so we can render a heading
 // like "Couldn't add <path>" above the human reason.
 
-/** Action hints the main process can attach to a thrown error so the
- *  renderer can offer a recovery button (e.g. open GitHub to grant org
- *  OAuth). Encoded as a `__action:<kind>__` line at the very end of the
- *  message — the message-only carrier survives Electron IPC. */
-export type IpcErrorAction = "no_access";
+import { ACTION_LINE_REGEX, type IpcErrorAction } from "../../shared/ipcAction";
+
+export type { IpcErrorAction };
 
 export type ParsedIpcError = {
-  // First line of the original message if the main-process throw used the
-  // `<path>\n<reason>` convention (currently just `addLocalRepo`). Null
-  // otherwise — callers should fall back to message-only rendering.
   context: string | null;
   message: string;
   action: IpcErrorAction | null;
 };
-
-const ACTION_LINE = /^__action:(no_access)__$/;
 
 export function parseIpcError(err: unknown): ParsedIpcError {
   const raw = (err instanceof Error ? err.message : String(err))
@@ -27,7 +20,7 @@ export function parseIpcError(err: unknown): ParsedIpcError {
     .replace(/^Error:\s*/, "");
   const lines = raw.split("\n");
   let action: IpcErrorAction | null = null;
-  const lastMatch = lines[lines.length - 1]?.match(ACTION_LINE);
+  const lastMatch = lines[lines.length - 1]?.match(ACTION_LINE_REGEX);
   if (lastMatch) {
     action = lastMatch[1] as IpcErrorAction;
     lines.pop();

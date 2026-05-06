@@ -65,13 +65,9 @@ type VerifyOutcome =
  *  (personal namespace, no GitHub call) OR appears in the caller's active
  *  org memberships from `/user/memberships/orgs?state=active`.
  *
- *  Negative results (`no_access`) trigger one cache-busting refetch before
- *  giving up. Without this, a user who grants OAuth for `owner` between
- *  their first failed claim and a retry would keep hitting `no_access` for
- *  the full 60s cache TTL — the fetched-once-per-minute optimization
- *  silently swallows the recovery path. The retry costs at most one extra
- *  GitHub call per genuinely-failed claim, bounded further by the per-user
- *  claim rate limit (30/hour). */
+ *  Negative results refetch once with the cache invalidated so a user who
+ *  grants OAuth between attempts isn't pinned at `no_access` for the
+ *  cache TTL. Bounded by the per-user claim rate limit (30/hour). */
 async function verifyOrgOrSelf(
   db: Database,
   userId: number,

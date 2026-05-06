@@ -86,12 +86,8 @@ export function __clearOrgMembershipsCache(): void {
   orgMembershipsCache.clear();
 }
 
-/** Drops a single user's cache entry so the next `fetchUserOrgMemberships`
- *  call hits GitHub. Used by the claim path to recover from the
- *  grant-OAuth-then-retry race: a stale "no Early-Days" entry would
- *  otherwise pin the user's claim attempts at no_access for up to the full
- *  TTL after they grant access. Targeted (per-userId) so concurrent users'
- *  cache entries are unaffected. */
+/** Drops one user's cache entry so the next `fetchUserOrgMemberships`
+ *  call hits GitHub. */
 export function invalidateUserOrgMemberships(userId: number): void {
   orgMembershipsCache.delete(userId);
 }

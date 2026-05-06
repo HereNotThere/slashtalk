@@ -670,12 +670,8 @@ function parseClaimError(body: string): ClaimErrorBody | null {
   }
 }
 
-/** Fetches the GitHub OAuth app client ID from the server. The server's
- *  `GITHUB_CLIENT_ID` is the canonical source — packaged desktop builds bake
- *  it in via `MAIN_VITE_GITHUB_CLIENT_ID`, but dev environments routinely
- *  don't, so falling through to the server keeps the OAuth-app-settings
- *  deep link working everywhere. Returns null if the user isn't
- *  authenticated or the call fails — the caller handles the missing case. */
+/** Returns null when not signed in or the fetch fails — the caller falls
+ *  back to a baked-in env var. */
 export async function fetchGithubClientId(): Promise<string | null> {
   if (!creds) return null;
   try {

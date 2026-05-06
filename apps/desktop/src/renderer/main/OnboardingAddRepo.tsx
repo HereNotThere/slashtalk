@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { GrantOrgAccessButton } from "../shared/GrantOrgAccessButton";
 import { SlashtalkLogo } from "../shared/icons";
 import { parseIpcError, truncatePath, type ParsedIpcError } from "../shared/ipcError";
 import { StepLabel } from "./StepLabel";
@@ -69,15 +70,7 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
             </div>
           ) : null}
           <div>{error.message}</div>
-          {error.action === "no_access" ? (
-            <button
-              type="button"
-              onClick={() => void window.chatheads.openGithubOAuthAppSettings()}
-              className="mt-1 inline-flex items-center rounded-md border border-danger/40 bg-danger/5 px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/15 cursor-pointer [font:inherit]"
-            >
-              Grant access on GitHub →
-            </button>
-          ) : null}
+          {error.action === "no_access" ? <GrantOrgAccessButton size="sm" className="mt-1" /> : null}
         </div>
       ) : null}
     </div>

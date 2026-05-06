@@ -670,6 +670,23 @@ function parseClaimError(body: string): ClaimErrorBody | null {
   }
 }
 
+/** Fetches the GitHub OAuth app client ID from the server. The server's
+ *  `GITHUB_CLIENT_ID` is the canonical source — packaged desktop builds bake
+ *  it in via `MAIN_VITE_GITHUB_CLIENT_ID`, but dev environments routinely
+ *  don't, so falling through to the server keeps the OAuth-app-settings
+ *  deep link working everywhere. Returns null if the user isn't
+ *  authenticated or the call fails — the caller handles the missing case. */
+export async function fetchGithubClientId(): Promise<string | null> {
+  if (!creds) return null;
+  try {
+    const me = await jsonFetch<{ githubClientId?: string }>("/api/me/", { method: "GET" });
+    return me.githubClientId ?? null;
+  } catch (err) {
+    console.warn("[backend] fetchGithubClientId failed:", err);
+    return null;
+  }
+}
+
 export async function listTeammates(): Promise<TeammateSummary[]> {
   console.log("[rail] GET /api/feed/users …");
   const raw = await jsonFetch<FeedUser[]>("/api/feed/users", { method: "GET" });

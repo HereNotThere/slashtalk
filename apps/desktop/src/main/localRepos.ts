@@ -350,10 +350,16 @@ async function addLocalRepoForPath(localPath: string): Promise<TrackedRepo> {
           void backend.signOut().catch(() => {});
           throw new Error("Your GitHub session expired. Sign in again.", { cause: err });
         case "no_access":
+          // Trailing `__action:no_access__` marker tells the renderer to
+          // render a "Grant access on GitHub" button alongside the message.
+          // The marker survives Electron IPC's message-only error
+          // serialization (cause/properties don't), so encoding it into the
+          // string is the simplest carrier. parseIpcError strips it.
           throw new Error(
             `${fullName} is owned by ${remote.owner}, which isn't your GitHub account or one of your active orgs. ` +
-              `slashtalk only tracks repos in your own namespace or in orgs you're a member of (with OAuth approved if the org restricts apps). ` +
-              `Collaborator-only access on someone else's personal repo isn't supported.`,
+              `If you are a member of ${remote.owner}, slashtalk needs OAuth access to that org — grant it on GitHub and try again. ` +
+              `Collaborator-only access on someone else's personal repo isn't supported.\n` +
+              `__action:no_access__`,
             { cause: err },
           );
         case "rate_limited":

@@ -211,6 +211,15 @@ function ErrorNote({
         </div>
       ) : null}
       <div className="break-words">{error.message}</div>
+      {error.action === "no_access" ? (
+        <button
+          type="button"
+          onClick={() => void window.chatheads.openGithubOAuthAppSettings()}
+          className="self-start mt-1 inline-flex items-center rounded-md border border-danger/40 bg-danger/5 px-2 py-1 text-xs font-medium text-danger hover:bg-danger/15 cursor-pointer [font:inherit]"
+        >
+          Grant access on GitHub →
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onDismiss}

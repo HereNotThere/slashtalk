@@ -56,7 +56,10 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
       </div>
 
       {error ? (
-        <div role="alert" className="flex flex-col gap-1 text-sm text-danger leading-snug max-w-md">
+        <div
+          role="alert"
+          className="flex flex-col items-center gap-2 text-sm text-danger leading-snug max-w-md"
+        >
           {error.context ? (
             <div className="font-medium whitespace-nowrap overflow-hidden" title={error.context}>
               Couldn&rsquo;t add{" "}
@@ -66,6 +69,15 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
             </div>
           ) : null}
           <div>{error.message}</div>
+          {error.action === "no_access" ? (
+            <button
+              type="button"
+              onClick={() => void window.chatheads.openGithubOAuthAppSettings()}
+              className="mt-1 inline-flex items-center rounded-md border border-danger/40 bg-danger/5 px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/15 cursor-pointer [font:inherit]"
+            >
+              Grant access on GitHub →
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

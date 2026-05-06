@@ -648,6 +648,11 @@ export interface ChatHeadsBridge {
   // System utilities
   copyText: (text: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
+  /** Open GitHub's authorized-OAuth-apps page for slashtalk, where the user
+   *  can grant or request OAuth access for orgs they belong to. Used by the
+   *  no_access error recovery action when a claim fails because the user
+   *  hasn't approved slashtalk for the repo's owning org. */
+  openGithubOAuthAppSettings: () => Promise<void>;
   selectDirectory: (defaultPath?: string) => Promise<string | null>;
 
   // Auto-size the calling window to the renderer's content height

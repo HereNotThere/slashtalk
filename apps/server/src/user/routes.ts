@@ -14,6 +14,7 @@ import {
 import { jwtAuth, apiKeyAuth, apiKeyAuthWithoutLastUsedTouch } from "../auth/middleware";
 import { hashToken } from "../auth/tokens";
 import { authAudit } from "../auth/audit";
+import { config } from "../config";
 import { visibleReposForUser } from "../repo/visibility";
 import { matchSessionRepo, normalizeFullName } from "../social/github-sync";
 import { __clearClaimCaches } from "./claim";
@@ -30,13 +31,22 @@ export const userRoutes = (db: Database) =>
   new Elysia({ prefix: "/api/me", name: "user" })
     .use(jwtAuth)
 
-    // GET /api/me — current user profile
+    // GET /api/me — current user profile.
+    //
+    // Includes `githubClientId` so the desktop can construct deep links like
+    // `https://github.com/settings/connections/applications/<id>` (the page
+    // where users grant org OAuth access) without needing the same env var
+    // baked into its own build. The server's GITHUB_CLIENT_ID is the
+    // canonical source — desktop dev environments often lack it. Public
+    // value: it appears in every OAuth `?client_id=…` redirect, so
+    // returning it to an authed caller leaks nothing.
     .get("/", ({ user }) => ({
       id: user.id,
       githubLogin: user.githubLogin,
       avatarUrl: user.avatarUrl,
       displayName: user.displayName,
       createdAt: user.createdAt,
+      githubClientId: config.githubClientId,
     }))
 
     // GET /api/me/devices — list user's devices

@@ -205,7 +205,28 @@ describe("POST /api/me/repos — org-or-self gate", () => {
 
     const rows = await db.select().from(userRepos).where(eq(userRepos.userId, aliceUserId));
     expect(rows.length).toBe(0);
-    expect(orgMembershipsFetchCount).toBe(1);
+    // 2 fetches: the first negative result triggers a single cache-busting
+    // refetch to recover from the grant-OAuth-then-retry race. Both calls
+    // here return the same orgs, so the gate still says no_access.
+    expect(orgMembershipsFetchCount).toBe(2);
+  });
+
+  it("recovers when GitHub starts returning the org on retry (user granted OAuth between attempts)", async () => {
+    // First call: stale "no Acme" answer (e.g. user hadn't granted OAuth
+    // yet when the cache was populated). Second call: post-grant, GitHub
+    // now lists Acme. Without the cache-bust on no_access, the user would
+    // see no_access for up to the full TTL (60s).
+    orgMembershipsResponses = [
+      { status: 200, body: [] },
+      { status: 200, body: [activeMembership("acme")] },
+    ];
+
+    const res = await claim("acme/foo");
+    expect(res.status).toBe(200);
+    expect(orgMembershipsFetchCount).toBe(2);
+
+    const rows = await db.select().from(userRepos).where(eq(userRepos.userId, aliceUserId));
+    expect(rows.length).toBe(1);
   });
 
   it("ignores pending memberships (only state=active counts)", async () => {

@@ -21,7 +21,11 @@ import { repos, userRepos } from "../db/schema";
 import { jwtAuth } from "../auth/middleware";
 import { normalizeFullName } from "../social/github-sync";
 import { SlidingWindowRateLimiter } from "../util/rate-limit";
-import { __clearOrgMembershipsCache, fetchUserOrgMemberships } from "./github-helpers";
+import {
+  __clearOrgMembershipsCache,
+  fetchUserOrgMemberships,
+  invalidateUserOrgMemberships,
+} from "./github-helpers";
 
 // "owner/name" — GitHub's constraints apply: 1-39 chars for owner, 1-100 for name.
 const FULL_NAME = /^[A-Za-z0-9._-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
@@ -59,7 +63,15 @@ type VerifyOutcome =
 
 /** The claim gate. Accepts iff `owner` is the caller's own GitHub login
  *  (personal namespace, no GitHub call) OR appears in the caller's active
- *  org memberships from `/user/memberships/orgs?state=active`. */
+ *  org memberships from `/user/memberships/orgs?state=active`.
+ *
+ *  Negative results (`no_access`) trigger one cache-busting refetch before
+ *  giving up. Without this, a user who grants OAuth for `owner` between
+ *  their first failed claim and a retry would keep hitting `no_access` for
+ *  the full 60s cache TTL — the fetched-once-per-minute optimization
+ *  silently swallows the recovery path. The retry costs at most one extra
+ *  GitHub call per genuinely-failed claim, bounded further by the per-user
+ *  claim rate limit (30/hour). */
 async function verifyOrgOrSelf(
   db: Database,
   userId: number,
@@ -69,10 +81,15 @@ async function verifyOrgOrSelf(
   if (owner.toLowerCase() === userLogin.toLowerCase()) {
     return { ok: true };
   }
-  const result = await fetchUserOrgMemberships(db, userId);
-  if (!result.ok) return { ok: false, kind: result.kind };
   const ownerLower = owner.toLowerCase();
-  if (result.orgs.includes(ownerLower)) return { ok: true };
+  const first = await fetchUserOrgMemberships(db, userId);
+  if (!first.ok) return { ok: false, kind: first.kind };
+  if (first.orgs.includes(ownerLower)) return { ok: true };
+
+  invalidateUserOrgMemberships(userId);
+  const refreshed = await fetchUserOrgMemberships(db, userId);
+  if (!refreshed.ok) return { ok: false, kind: refreshed.kind };
+  if (refreshed.orgs.includes(ownerLower)) return { ok: true };
   return { ok: false, kind: "no_access" };
 }
 

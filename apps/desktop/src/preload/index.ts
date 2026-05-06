@@ -222,6 +222,8 @@ const bridge: ChatHeadsBridge = {
 
   copyText: (text) => ipcRenderer.invoke("clipboard:writeText", text) as Promise<void>,
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
+  openGithubOAuthAppSettings: () =>
+    ipcRenderer.invoke("shell:openGithubOAuthAppSettings") as Promise<void>,
   selectDirectory: (defaultPath) =>
     ipcRenderer.invoke("dialog:selectDirectory", defaultPath) as Promise<string | null>,
 

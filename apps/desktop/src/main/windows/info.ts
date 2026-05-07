@@ -542,11 +542,19 @@ export function repositionIfVisibleAtStash(): void {
 
 // ---------- Cache + fetchers ----------
 
-export async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
-  const cached = sessionCache.get(headId);
-  if (cached && Date.now() - cached.at < SESSION_CACHE_TTL_MS) return cached.rows;
-  const inFlight = sessionInFlight.get(headId);
-  if (inFlight) return inFlight;
+export async function fetchSessionsForHead(
+  headId: string,
+  opts: { force?: boolean } = {},
+): Promise<InfoSession[]> {
+  // `force` bypasses TTL + in-flight join: a WS-triggered refresh landing
+  // while a poll fetch is mid-flight would otherwise join that in-flight and
+  // resolve with pre-event data.
+  if (!opts.force) {
+    const cached = sessionCache.get(headId);
+    if (cached && Date.now() - cached.at < SESSION_CACHE_TTL_MS) return cached.rows;
+    const inFlight = sessionInFlight.get(headId);
+    if (inFlight) return inFlight;
+  }
 
   const state = backend.getAuthState();
   if (!state.signedIn) return [];
@@ -771,7 +779,7 @@ function refreshNow(): void {
   // `force: true` bypasses any in-flight that started before this signal.
   const pushFollowUp = (): void => pushInfoShowSnapshot(infoWindow, head, undefined);
   if (head.kind !== "project") {
-    void fetchSessionsForHead(head.id)
+    void fetchSessionsForHead(head.id, { force: true })
       .catch((e) => console.warn("[ws] refreshNow sessions failed:", e))
       .finally(pushFollowUp);
   }

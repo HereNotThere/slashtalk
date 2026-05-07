@@ -178,6 +178,16 @@ export function getCachedSessions(headId: string): InfoSession[] | undefined {
   return sessionCache.get(headId)?.rows;
 }
 
+// `sessionCache.has(headId)` returns true even for TTL-expired entries, which
+// would let `showInfo` and `onHeadsChanged` skip a refetch on re-hover and
+// keep painting from the stale snapshot until the next 15s poll. Both gating
+// sites use this instead so the TTL is honored at every "should we fetch?"
+// decision, not just inside fetchSessionsForHead.
+function hasFreshSessionCache(headId: string): boolean {
+  const cached = sessionCache.get(headId);
+  return cached != null && Date.now() - cached.at < SESSION_CACHE_TTL_MS;
+}
+
 // ---------- Cache invalidation ----------
 
 export function invalidateSessionCache(headId: string): void {
@@ -438,7 +448,7 @@ async function showInfo(
   // user may have manually collapsed mid-fetch.
   const pushFollowUp = (): void => pushInfoShowSnapshot(infoWindow, head, undefined);
   // Project heads don't have per-head sessions — skip the session fetch.
-  if (head.kind !== "project" && !sessionCache.has(head.id)) {
+  if (head.kind !== "project" && !hasFreshSessionCache(head.id)) {
     void fetchSessionsForHead(head.id).finally(pushFollowUp);
   }
   if (dashboardPromise) void dashboardPromise.finally(pushFollowUp);
@@ -793,7 +803,7 @@ export function onHeadsChanged(heads: ChatHead[]): void {
     repositionIfVisibleAtStash();
   }
   for (const h of heads) {
-    if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
+    if (!hasFreshSessionCache(h.id)) void fetchSessionsForHead(h.id);
   }
 }
 

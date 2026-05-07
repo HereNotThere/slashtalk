@@ -167,7 +167,11 @@ function AskTrigger({
 // Pick the session that the "Now" section should describe.
 // Priority: any BUSY/ACTIVE session (most recent wins), else the most-recent
 // IDLE/RECENT session whose lastTs is within the last 2h. ENDED is excluded.
-// Returns null if nothing qualifies — caller hides the section.
+// Sessions without an analyzer-produced description are also excluded — the
+// summary analyzer needs ≥3 events to spin up, and showing a "Summarizing…"
+// placeholder for a brand-new session reads as broken. Hiding the section
+// until there's real content is the cleaner default. Returns null if nothing
+// qualifies — caller hides the section.
 function pickNowSession(sessions: InfoSession[] | null): InfoSession | null {
   if (!sessions || sessions.length === 0) return null;
   const cutoff = Date.now() - NOW_WINDOW_MS;
@@ -176,6 +180,7 @@ function pickNowSession(sessions: InfoSession[] | null): InfoSession | null {
   let bestRecent: InfoSession | null = null;
   let bestRecentTs = -Infinity;
   for (const s of sessions) {
+    if (!s.description) continue;
     const ts = s.lastTs ? new Date(s.lastTs).getTime() : 0;
     const isLive = s.state === SessionState.BUSY || s.state === SessionState.ACTIVE;
     if (isLive) {

@@ -11,6 +11,10 @@ const MARKDOWN_CLASSES =
   // like "[#224]" get pulled up onto the previous line instead of stranded
   // alone at the bottom of a bullet.
   "text-pretty [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 " +
+  // Strip the leading/trailing margin so the markdown block aligns flush with
+  // its container — otherwise the first <p>/<ul>'s my-2 stacks on top of the
+  // parent's padding and visibly drifts content downward.
+  "[&>:first-child]:mt-0 [&>:last-child]:mb-0 " +
   // Tailwind preflight resets `list-style: none` on ul/ol, so bullet glyphs
   // never render unless we re-enable them here. Padding-left makes room for
   // the disc/decimal marker without it clipping at the container edge.

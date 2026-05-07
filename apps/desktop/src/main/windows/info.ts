@@ -93,7 +93,18 @@ let selectedHeadId: string | null = null;
 // moved, so the stash is stale.
 let selectedBubbleScreen: { x: number; y: number } | null = null;
 
-const sessionCache = new Map<string, InfoSession[]>();
+// Used to hold rows indefinitely, invalidated only on `session_updated` WS
+// messages — but those only fire on state changes, so a stuck `inTurn=true`
+// or a single dropped packet during the BUSY → IDLE transition stranded the
+// cache forever. 10s TTL is the safety net; the renderer's 15s polling tick
+// always refetches, fast re-hovers inside the window still hit cache.
+interface SessionCacheEntry {
+  rows: InfoSession[];
+  at: number;
+}
+const sessionCache = new Map<string, SessionCacheEntry>();
+const sessionInFlight = new Map<string, Promise<InfoSession[]>>();
+const SESSION_CACHE_TTL_MS = 10_000;
 
 // Per-login dashboard cache covering both PRs and standup for that user.
 // Keyed by github login because the data is target-specific (a PR list /
@@ -164,7 +175,17 @@ export function getSelectedHeadId(): string | null {
 }
 
 export function getCachedSessions(headId: string): InfoSession[] | undefined {
-  return sessionCache.get(headId);
+  return sessionCache.get(headId)?.rows;
+}
+
+// `sessionCache.has(headId)` returns true even for TTL-expired entries, which
+// would let `showInfo` and `onHeadsChanged` skip a refetch on re-hover and
+// keep painting from the stale snapshot until the next 15s poll. Both gating
+// sites use this instead so the TTL is honored at every "should we fetch?"
+// decision, not just inside fetchSessionsForHead.
+function hasFreshSessionCache(headId: string): boolean {
+  const cached = sessionCache.get(headId);
+  return cached != null && Date.now() - cached.at < SESSION_CACHE_TTL_MS;
 }
 
 // ---------- Cache invalidation ----------
@@ -332,7 +353,7 @@ function pushInfoShowSnapshot(
   const projectOverviewFetching = repoFullName ? projectOverviewInFlight.has(repoFullName) : false;
   win.webContents.send("info:show", {
     head,
-    sessions: sessionCache.get(head.id) ?? null,
+    sessions: sessionCache.get(head.id)?.rows ?? null,
     expandSessionId: expandSessionId ?? null,
     spotify: login ? (peerPresence.get(login) ?? null) : null,
     location: login ? (peerLocations.get(login) ?? null) : null,
@@ -427,7 +448,7 @@ async function showInfo(
   // user may have manually collapsed mid-fetch.
   const pushFollowUp = (): void => pushInfoShowSnapshot(infoWindow, head, undefined);
   // Project heads don't have per-head sessions — skip the session fetch.
-  if (head.kind !== "project" && !sessionCache.has(head.id)) {
+  if (head.kind !== "project" && !hasFreshSessionCache(head.id)) {
     void fetchSessionsForHead(head.id).finally(pushFollowUp);
   }
   if (dashboardPromise) void dashboardPromise.finally(pushFollowUp);
@@ -523,26 +544,42 @@ export function repositionIfVisibleAtStash(): void {
 
 export async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
   const cached = sessionCache.get(headId);
-  if (cached) return cached;
+  if (cached && Date.now() - cached.at < SESSION_CACHE_TTL_MS) return cached.rows;
+  const inFlight = sessionInFlight.get(headId);
+  if (inFlight) return inFlight;
 
   const state = backend.getAuthState();
   if (!state.signedIn) return [];
 
   const login = rail.parseUserHeadId(headId);
-  if (login) {
+  if (!login) return [];
+
+  // Mirrors fetchProjectOverviewForRepo's pattern: dedupe overlapping callers
+  // (preload + poll + onHeadsChanged can all race after TTL expiry) and only
+  // commit to the cache when this fetch is still the active in-flight, so a
+  // superseded write can't clobber fresher data.
+  const promise = (async (): Promise<InfoSession[]> => {
     try {
-      const sessions =
-        state.user.githubLogin === login
-          ? await backend.listOwnSessions()
-          : await backend.listFeedSessionsForUser(login);
-      sessionCache.set(headId, sessions);
-      return sessions;
+      return state.user.githubLogin === login
+        ? await backend.listOwnSessions()
+        : await backend.listFeedSessionsForUser(login);
     } catch {
       return [];
     }
-  }
-
-  return [];
+  })();
+  sessionInFlight.set(headId, promise);
+  void promise
+    .then((sessions) => {
+      if (sessionInFlight.get(headId) === promise) {
+        sessionCache.set(headId, { rows: sessions, at: Date.now() });
+      }
+    })
+    .finally(() => {
+      if (sessionInFlight.get(headId) === promise) {
+        sessionInFlight.delete(headId);
+      }
+    });
+  return promise;
 }
 
 async function fetchProjectOverviewForRepo(
@@ -704,7 +741,7 @@ export function scheduleRefresh(sessionId: string | null): void {
   // If we know which session changed, skip refreshes whose session isn't in
   // the currently-shown head. Fall through when we can't tell.
   if (sessionId) {
-    const cached = sessionCache.get(selectedHeadId);
+    const cached = sessionCache.get(selectedHeadId)?.rows;
     if (cached && !cached.some((s) => s.id === sessionId)) return;
   }
   if (refreshTimer) return;
@@ -766,7 +803,7 @@ export function onHeadsChanged(heads: ChatHead[]): void {
     repositionIfVisibleAtStash();
   }
   for (const h of heads) {
-    if (!sessionCache.has(h.id)) void fetchSessionsForHead(h.id);
+    if (!hasFreshSessionCache(h.id)) void fetchSessionsForHead(h.id);
   }
 }
 

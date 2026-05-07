@@ -30,3 +30,26 @@ html {
     display: none;
   }
 }
+
+/* Scroll-driven reveal + drift. The .fx-on class is set synchronously by an
+ * inline <head> script in Layout.astro so the hidden state is in place before
+ * first paint — without it, JS-disabled visitors would see invisible text. */
+@media (prefers-reduced-motion: no-preference) {
+  .fx-on [data-fx="reveal"] {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+    transition:
+      opacity 0.9s cubic-bezier(0.22, 0.61, 0.36, 1),
+      transform 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);
+    transition-delay: var(--fx-delay, 0ms);
+  }
+  .fx-on [data-fx="reveal"][data-fx-visible] {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+  .fx-on [data-fx="drift"] {
+    display: inline-block;
+    transform: translate3d(0, var(--fx-drift, 0px), 0);
+    will-change: transform;
+  }
+}

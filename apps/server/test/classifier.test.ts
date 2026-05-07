@@ -182,6 +182,54 @@ describe("classifier: codex", () => {
   });
 });
 
+describe("classifier: pi", () => {
+  it("classifies session metadata and user messages", () => {
+    const session = classifyEvent("pi", {
+      type: "session",
+      version: 3,
+      id: "11111111-1111-1111-1111-111111111111",
+      timestamp: "2026-05-07T10:00:00.000Z",
+      cwd: "/tmp/repo",
+    });
+    const user = classifyEvent("pi", {
+      type: "message",
+      id: "a1b2c3d4",
+      parentId: null,
+      timestamp: "2026-05-07T10:00:01.000Z",
+      message: { role: "user", content: "hello", timestamp: 1778148001000 },
+    });
+    expect(session.kind).toBe("meta");
+    expect(session.eventId).toBe("11111111-1111-1111-1111-111111111111");
+    expect(user.kind).toBe("user_msg");
+    expect(user.rawType).toBe("message.user");
+    expect(user.eventId).toBe("a1b2c3d4");
+  });
+
+  it("classifies assistant tool calls and tool results", () => {
+    const call = classifyEvent("pi", {
+      type: "message",
+      id: "b2c3d4e5",
+      parentId: "a1b2c3d4",
+      timestamp: "2026-05-07T10:00:02.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call_1", name: "read", arguments: { path: "x.ts" } }],
+      },
+    });
+    const result = classifyEvent("pi", {
+      type: "message",
+      id: "c3d4e5f6",
+      parentId: "b2c3d4e5",
+      timestamp: "2026-05-07T10:00:03.000Z",
+      message: { role: "toolResult", toolCallId: "call_1", toolName: "read", isError: false },
+    });
+    expect(call.kind).toBe("tool_call");
+    expect(call.callId).toBe("call_1");
+    expect(result.kind).toBe("tool_result");
+    expect(result.callId).toBe("call_1");
+  });
+});
+
 describe("classifier: cursor", () => {
   it("classifies user and assistant transcript lines by role", () => {
     const user = classifyEvent("cursor", {

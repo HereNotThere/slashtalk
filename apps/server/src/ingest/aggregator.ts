@@ -11,6 +11,7 @@ interface ContentBlock {
   id?: string;
   name?: string;
   input?: Record<string, unknown>;
+  arguments?: Record<string, unknown>;
   tool_use_id?: string;
   is_error?: boolean;
 }
@@ -61,6 +62,40 @@ interface CursorEventPayload {
   version?: string;
   message?: {
     content?: string | ContentBlock[];
+  };
+}
+
+interface PiEventPayload {
+  type?: string;
+  id?: string;
+  parentId?: string | null;
+  timestamp?: string;
+  version?: number;
+  cwd?: string;
+  provider?: string;
+  modelId?: string;
+  name?: string;
+  message?: {
+    role?: string;
+    content?: string | ContentBlock[];
+    provider?: string;
+    model?: string;
+    usage?: {
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+      totalTokens?: number;
+    };
+    stopReason?: string;
+    timestamp?: number;
+    toolCallId?: string;
+    toolName?: string;
+    isError?: boolean;
+    command?: string;
+    exitCode?: number;
+    cancelled?: boolean;
+    truncated?: boolean;
   };
 }
 
@@ -142,6 +177,13 @@ function asString(v: unknown): string | null {
 
 function asNumber(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function asProvider(v: unknown): Provider | null {
+  if (typeof v !== "string") return null;
+  if (v === "anthropic" || v.startsWith("anthropic-")) return "anthropic";
+  if (v === "openai" || v.startsWith("openai-")) return "openai";
+  return null;
 }
 
 function parseJsonObject(v: unknown): JsonObj | null {
@@ -396,9 +438,27 @@ function summarizeClaudeEvent(event: ClaudeEventPayload): string | null {
   return event.type;
 }
 
-const FILE_TOOLS_READ = new Set(["Read", "Grep", "Glob"]);
-const FILE_TOOLS_EDIT = new Set(["Edit", "MultiEdit", "StrReplace"]);
-const FILE_TOOLS_WRITE = new Set(["Write"]);
+const FILE_TOOLS_READ = new Set(["read", "grep", "glob", "find", "ls"]);
+const FILE_TOOLS_EDIT = new Set(["edit", "multiedit", "strreplace"]);
+const FILE_TOOLS_WRITE = new Set(["write"]);
+
+function isReadTool(name: string): boolean {
+  return FILE_TOOLS_READ.has(name.toLowerCase());
+}
+
+function isEditTool(name: string): boolean {
+  return FILE_TOOLS_EDIT.has(name.toLowerCase());
+}
+
+function isWriteTool(name: string): boolean {
+  return FILE_TOOLS_WRITE.has(name.toLowerCase());
+}
+
+function trackToolPath(state: SessionUpdates, name: string, filePath: string): void {
+  if (isReadTool(name)) incMap(state.topFilesRead, filePath);
+  if (isEditTool(name)) incMap(state.topFilesEdited, filePath);
+  if (isWriteTool(name)) incMap(state.topFilesWritten, filePath);
+}
 
 function processClaudeEvents(current: CurrentSession, newEvents: unknown[]): SessionUpdates {
   const state = initState(current);
@@ -479,13 +539,7 @@ function processClaudeEvents(current: CurrentSession, newEvents: unknown[]): Ses
             (typeof block.input?.["file_path"] === "string" ? block.input["file_path"] : null) ??
             (typeof block.input?.["path"] === "string" ? block.input["path"] : null);
           if (!filePath || typeof filePath !== "string") continue;
-          if (FILE_TOOLS_READ.has(block.name)) incMap(state.topFilesRead, filePath);
-          if (FILE_TOOLS_EDIT.has(block.name)) {
-            incMap(state.topFilesEdited, filePath);
-          }
-          if (FILE_TOOLS_WRITE.has(block.name)) {
-            incMap(state.topFilesWritten, filePath);
-          }
+          trackToolPath(state, block.name, filePath);
         }
       }
 
@@ -602,9 +656,7 @@ function processCursorEvents(current: CurrentSession, newEvents: unknown[]): Ses
 
       const target = cursorToolPath(block);
       if (!target) continue;
-      if (FILE_TOOLS_READ.has(block.name)) incMap(state.topFilesRead, target);
-      if (FILE_TOOLS_EDIT.has(block.name)) incMap(state.topFilesEdited, target);
-      if (FILE_TOOLS_WRITE.has(block.name)) incMap(state.topFilesWritten, target);
+      trackToolPath(state, block.name, target);
     }
   }
 
@@ -830,6 +882,185 @@ function processCodexEvents(current: CurrentSession, newEvents: unknown[]): Sess
   return finalizeState(state);
 }
 
+function piTimestamp(event: PiEventPayload): string | null {
+  if (typeof event.message?.timestamp === "number") {
+    return new Date(event.message.timestamp).toISOString();
+  }
+  return event.timestamp ?? null;
+}
+
+function extractPiText(content: unknown): string | null {
+  if (typeof content === "string") return content.trim() || null;
+  if (!Array.isArray(content)) return null;
+  const parts: string[] = [];
+  for (const block of content) {
+    if (typeof block === "string") parts.push(block);
+    else if (isObj(block) && block.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    } else if (isObj(block) && block.type === "image") {
+      parts.push("[image]");
+    }
+  }
+  return parts.join("\n").trim() || null;
+}
+
+function piToolPath(args: Record<string, unknown> | undefined): string | null {
+  if (!args) return null;
+  if (typeof args.file_path === "string") return args.file_path;
+  if (typeof args.path === "string") return args.path;
+  return null;
+}
+
+function summarizePiToolCall(block: ContentBlock): string {
+  const args = block.arguments;
+  if (!block.name) return "tool call";
+  const path = piToolPath(args);
+  if (path) return `${block.name} ${shortenPath(path)}`;
+  if (block.name === "bash" && typeof args?.command === "string") {
+    return truncate(`bash: ${args.command.replace(/\s+/g, " ").trim()}`, 80);
+  }
+  return block.name;
+}
+
+function summarizePiEvent(event: PiEventPayload): string | null {
+  if (event.type === "session") return "session started";
+  if (event.type === "model_change") return `model: ${event.modelId ?? "unknown"}`;
+  if (event.type === "thinking_level_change") return "thinking level changed";
+  if (event.type === "compaction") return "context compacted";
+  if (event.type === "branch_summary") return "branch summary";
+  if (event.type === "session_info" && event.name) return `named: ${event.name}`;
+  if (event.type !== "message") return event.type ?? "unknown";
+
+  const msg = event.message;
+  if (!msg) return "message";
+  if (msg.role === "user") return truncate(extractPiText(msg.content) ?? "(user message)", 80);
+  if (msg.role === "assistant") {
+    const content = msg.content;
+    if (Array.isArray(content)) {
+      const toolCall = content.find((block) => isObj(block) && block.type === "toolCall") as
+        | ContentBlock
+        | undefined;
+      if (toolCall) return summarizePiToolCall(toolCall);
+      const thinking = content.find((block) => isObj(block) && block.type === "thinking");
+      if (thinking) return "thinking…";
+      const text = extractPiText(content);
+      if (text) return truncate(text, 80);
+    }
+    return "(assistant)";
+  }
+  if (msg.role === "toolResult") return `tool result: ${msg.toolName ?? msg.toolCallId ?? "call"}`;
+  if (msg.role === "bashExecution") {
+    return msg.command ? truncate(`bash: ${msg.command.replace(/\s+/g, " ").trim()}`, 80) : "bash";
+  }
+  if (msg.role === "compactionSummary") return "context compacted";
+  if (msg.role === "branchSummary") return "branch summary";
+  return msg.role ?? "message";
+}
+
+function processPiEvents(current: CurrentSession, newEvents: unknown[]): SessionUpdates {
+  const state = initState(current);
+
+  for (const raw of newEvents) {
+    const event = raw as PiEventPayload;
+    state.events++;
+    const timestamp = piTimestamp(event);
+    if (!timestamp) continue;
+    const ts = updateTimestamps(state, timestamp);
+    if (!ts) continue;
+
+    const summary = summarizePiEvent(event);
+    if (summary) pushRecent(state, timestamp, event.type ?? "unknown", summary);
+
+    if (event.type === "session") {
+      if (event.cwd) state.cwd = event.cwd;
+      if (typeof event.version === "number") state.version = `pi-session-v${event.version}`;
+      continue;
+    }
+
+    if (event.type === "model_change") {
+      if (typeof event.provider === "string") state.provider = asProvider(event.provider);
+      if (event.modelId) state.model = event.modelId;
+      continue;
+    }
+
+    if (event.type === "session_info") {
+      if (event.name) state.title = truncate(event.name, 80);
+      continue;
+    }
+
+    if (event.type !== "message" || !event.message) continue;
+
+    const msg = event.message;
+    if (typeof msg.provider === "string") {
+      state.provider = asProvider(msg.provider);
+    }
+    if (msg.model) state.model = msg.model;
+
+    if (msg.role === "user") {
+      state.userMsgs++;
+      const promptText = extractPiText(msg.content);
+      if (promptText) recordUserPrompt(state, timestamp, promptText);
+      state.inTurn = true;
+      state.lastBoundaryTs = ts;
+      continue;
+    }
+
+    if (msg.role === "assistant") {
+      state.assistantMsgs++;
+      if (msg.usage) {
+        state.tokensIn += msg.usage.input ?? 0;
+        state.tokensOut += msg.usage.output ?? 0;
+        state.tokensCacheRead += msg.usage.cacheRead ?? 0;
+        state.tokensCacheWrite += msg.usage.cacheWrite ?? 0;
+      }
+
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (!isObj(block) || block.type !== "toolCall") continue;
+          const name = asString(block.name) ?? "toolCall";
+          const id = asString(block.id);
+          const args = isObj(block.arguments) ? block.arguments : undefined;
+          state.toolCalls++;
+          incMap(state.toolUseNames, name);
+          if (id) {
+            state.outstandingTools[id] = {
+              name,
+              desc: args ? truncate(`${name} ${JSON.stringify(args)}`, 120) : null,
+              started: ts.getTime(),
+            };
+          }
+          const target = piToolPath(args);
+          if (target) trackToolPath(state, name, target);
+        }
+      }
+
+      if (msg.stopReason && msg.stopReason !== "toolUse") {
+        state.inTurn = false;
+        state.currentTurnId = null;
+        state.lastBoundaryTs = ts;
+      }
+      continue;
+    }
+
+    if (msg.role === "toolResult") {
+      const callId = msg.toolCallId;
+      if (callId) delete state.outstandingTools[callId];
+      if (msg.isError) state.toolErrors++;
+      continue;
+    }
+
+    if (msg.role === "bashExecution") {
+      state.toolCalls++;
+      incMap(state.toolUseNames, "bash");
+      if ((typeof msg.exitCode === "number" && msg.exitCode !== 0) || msg.cancelled) {
+        state.toolErrors++;
+      }
+    }
+  }
+
+  return finalizeState(state);
+}
+
 function finalizeState(state: SessionUpdates): SessionUpdates {
   return {
     ...state,
@@ -847,5 +1078,6 @@ export function processEvents(
 ): SessionUpdates {
   if (source === "claude") return processClaudeEvents(current, newEvents);
   if (source === "codex") return processCodexEvents(current, newEvents);
+  if (source === "pi") return processPiEvents(current, newEvents);
   return processCursorEvents(current, newEvents);
 }

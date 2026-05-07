@@ -217,3 +217,65 @@ describe("processEvents — queued_command attachment shapes", () => {
     expect(updates.queued).toEqual([]);
   });
 });
+
+describe("processEvents — pi sessions", () => {
+  it("folds Pi JSONL entries into session aggregates", () => {
+    const updates = processEvents("pi", EMPTY_SESSION, [
+      {
+        type: "session",
+        version: 3,
+        id: "11111111-1111-1111-1111-111111111111",
+        timestamp: "2026-05-07T10:00:00.000Z",
+        cwd: "/Users/alice/repo",
+      },
+      {
+        type: "message",
+        id: "a1b2c3d4",
+        parentId: null,
+        timestamp: "2026-05-07T10:00:01.000Z",
+        message: { role: "user", content: "wire pi ingest", timestamp: 1778148001000 },
+      },
+      {
+        type: "message",
+        id: "b2c3d4e5",
+        parentId: "a1b2c3d4",
+        timestamp: "2026-05-07T10:00:02.000Z",
+        message: {
+          role: "assistant",
+          provider: "openai-codex",
+          model: "gpt-5.5",
+          usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1 },
+          stopReason: "toolUse",
+          content: [
+            { type: "text", text: "I'll inspect it." },
+            {
+              type: "toolCall",
+              id: "call_1",
+              name: "read",
+              arguments: { path: "src/main/uploader.ts" },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "c3d4e5f6",
+        parentId: "b2c3d4e5",
+        timestamp: "2026-05-07T10:00:03.000Z",
+        message: { role: "toolResult", toolCallId: "call_1", toolName: "read", isError: false },
+      },
+    ]);
+
+    expect(updates.cwd).toBe("/Users/alice/repo");
+    expect(updates.version).toBe("pi-session-v3");
+    expect(updates.provider).toBe("openai");
+    expect(updates.model).toBe("gpt-5.5");
+    expect(updates.userMsgs).toBe(1);
+    expect(updates.assistantMsgs).toBe(1);
+    expect(updates.toolCalls).toBe(1);
+    expect(updates.tokensIn).toBe(10);
+    expect(updates.tokensOut).toBe(5);
+    expect(updates.topFilesRead).toEqual({ "src/main/uploader.ts": 1 });
+    expect(updates.lastUserPrompt).toBe("wire pi ingest");
+  });
+});

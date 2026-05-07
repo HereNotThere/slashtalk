@@ -144,11 +144,11 @@ Rules: [core-beliefs #4](../../docs/design-docs/core-beliefs.md#4-drizzle-migrat
 4. Handle on the desktop in [`apps/desktop/src/main/ws.ts`](../../apps/desktop/src/main/ws.ts)'s switch.
 5. WS clients must ignore unknown `type` fields — keep this property when adding new messages.
 
-## Adding a new event source (beyond Claude / Codex)
+## Adding a new event source (beyond Claude / Codex / Cursor / Pi)
 
 1. Add the source string to `SOURCES` in [`packages/shared/src/index.ts`](../../packages/shared/src/index.ts).
 2. Extend [`src/ingest/classifier.ts`](src/ingest/classifier.ts) to map the source's raw events to `EVENT_KINDS`.
-3. Aggregation in [`src/ingest/aggregator.ts`](src/ingest/aggregator.ts) is currently Claude-only. Decide: parallel aggregator, or generalize.
+3. Extend [`src/ingest/aggregator.ts`](src/ingest/aggregator.ts) to fold the source into session aggregates without weakening existing source behavior.
 4. Add a test file `test/classifier-<source>.test.ts` mirroring `classifier.test.ts`.
 
 ## Before committing

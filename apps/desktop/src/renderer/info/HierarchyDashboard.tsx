@@ -499,10 +499,17 @@ function fmtTokens(tokens: TokenUsage | undefined): string | null {
 }
 
 function ProviderIcon({ source }: { source: EventSource }): JSX.Element {
-  const label = source === "codex" ? "OpenAI Codex" : "Claude Code";
+  const label =
+    source === "codex"
+      ? "OpenAI Codex"
+      : source === "pi"
+        ? "Pi"
+        : source === "cursor"
+          ? "Cursor"
+          : "Claude Code";
   return (
     <span className="shrink-0 text-subtle" title={label} aria-label={label}>
-      {source === "codex" ? <OpenAIIcon /> : <ClaudeIcon />}
+      {source === "codex" ? <OpenAIIcon /> : source === "pi" ? "π" : <ClaudeIcon />}
     </span>
   );
 }

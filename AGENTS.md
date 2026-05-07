@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Slashtalk is a floating presence feed for Claude Code / Codex sessions. Avatars of teammates who share a GitHub repo with you; hover to peek at their live sessions (prompt, files, tokens, LLM-generated title).
+Slashtalk is a floating presence feed for Claude Code / Codex / Cursor / Pi sessions. Avatars of teammates who share a GitHub repo with you; hover to peek at their live sessions (prompt, files, tokens, LLM-generated title).
 
 This file is the **map** — start here, then follow links. Deep content lives in [`docs/`](docs/) and per-workspace `AGENTS.md` files.
 

@@ -53,6 +53,12 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
 			rel="stylesheet"
 		/>
 		<title>{title}</title>
+		<script is:inline>
+			// Set synchronously so the scroll-reveal CSS hides marketing text
+			// before first paint. Without this, [data-fx="reveal"] elements
+			// would briefly flash visible while the page-bottom script boots.
+			document.documentElement.classList.add('fx-on');
+		</script>
 	</head>
 	<body class="bg-white text-neutral-900 antialiased">
 		<slot />

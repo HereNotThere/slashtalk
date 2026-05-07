@@ -609,15 +609,20 @@ async function fetchDashboardForLogin(
     let prsP: Promise<{ prs: UserPr[]; ghStatus: GhStatus }>;
     let standupP: Promise<StandupResponse>;
     if (backend.isSelf(login)) {
-      // Serialize gh-fetch → pushSelfPrs → fetchUserStandup so the server-side
-      // standup composer reads the freshly-upserted `pull_requests` rows. If
-      // we parallelized standup with the push (the previous shape), the
-      // standup query lands at the server before the upsert and the LLM
-      // writes "Quiet window — no shipped PRs." while the PR list right
-      // below it is non-empty. The server's standup cache uses an input
-      // fingerprint, so an identical re-push hits the cache (no LLM churn)
-      // and a genuine PR change misses naturally — no eager bust needed.
-      prsP = (async () => {
+      // gh is the *writer*: pushSelfPrs feeds the server's `pull_requests`
+      // table (gated by `user_repos` in pr-ingest-routes.ts) so the standup
+      // composer sees the day's PRs without poller lag. The *display* list
+      // comes from the same server endpoint the peer path uses, which
+      // applies the user_repos visibility gate (core-belief #13). Reading
+      // straight from gh would leak PRs from repos the caller hasn't
+      // claimed in slashtalk — visible asymmetry vs. the (claim-gated)
+      // standup blurb rendered right next to the list.
+      //
+      // Order matters: gh-fetch → pushSelfPrs → (fetchUserPrs ‖ fetchUserStandup).
+      // Both readers run after the push so the server-side reads see the
+      // fresh upsert; running them in parallel before the upsert lands gives
+      // the renderer a stale list and a "Quiet window" blurb.
+      const writeP = (async () => {
         const r = await fetchGhUserPrs(login);
         if (r.prs.length > 0) {
           try {
@@ -628,18 +633,19 @@ async function fetchDashboardForLogin(
               );
             }
           } catch (err) {
-            // Soft-fail: network blip must not break the user-card. Standup
-            // will compose from whatever the server already had — same shape
-            // as the previous fire-and-forget posture.
+            // Soft-fail: network blip must not break the user-card. The
+            // server-backed read below will return whatever was already in
+            // pull_requests — same posture as the previous fire-and-forget.
             console.warn(`[info] pushSelfPrs failed:`, (err as Error).message);
           }
         }
-        return { prs: r.prs, ghStatus: r.ghStatus };
+        return r.ghStatus;
       })();
-      // Settle prsP before fetching the standup. Resolved/rejected both flow
-      // into the same call — a prsP rejection (shouldn't happen;
-      // fetchGhUserPrs always resolves) shouldn't strand the standup.
-      standupP = prsP.then(
+      prsP = writeP.then(async (ghStatus) => {
+        const server = await backend.fetchUserPrs(login);
+        return { prs: server.prs, ghStatus };
+      });
+      standupP = writeP.then(
         () => backend.fetchUserStandup(login),
         () => backend.fetchUserStandup(login),
       );

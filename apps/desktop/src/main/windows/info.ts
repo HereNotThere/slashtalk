@@ -94,6 +94,15 @@ let selectedHeadId: string | null = null;
 let selectedBubbleScreen: { x: number; y: number } | null = null;
 
 const sessionCache = new Map<string, InfoSession[]>();
+// Parallel timestamp map for sessionCache. The cache used to hold rows
+// indefinitely until a `session_updated` WS message invalidated them — but
+// when the server's classification changes without emitting one (BUSY→IDLE
+// transitions only publish on state change, and a single dropped packet
+// strands the desktop), the cache served stale "live" snapshots forever.
+// 10s TTL means the renderer's 15s polling tick always refetches; a fast
+// re-hover within the window still hits cache for snappy paint.
+const sessionCacheAt = new Map<string, number>();
+const SESSION_CACHE_TTL_MS = 10_000;
 
 // Per-login dashboard cache covering both PRs and standup for that user.
 // Keyed by github login because the data is target-specific (a PR list /
@@ -171,6 +180,7 @@ export function getCachedSessions(headId: string): InfoSession[] | undefined {
 
 export function invalidateSessionCache(headId: string): void {
   sessionCache.delete(headId);
+  sessionCacheAt.delete(headId);
 }
 
 // ---------- Window plumbing ----------
@@ -523,7 +533,8 @@ export function repositionIfVisibleAtStash(): void {
 
 export async function fetchSessionsForHead(headId: string): Promise<InfoSession[]> {
   const cached = sessionCache.get(headId);
-  if (cached) return cached;
+  const cachedAt = sessionCacheAt.get(headId) ?? 0;
+  if (cached && Date.now() - cachedAt < SESSION_CACHE_TTL_MS) return cached;
 
   const state = backend.getAuthState();
   if (!state.signedIn) return [];
@@ -536,6 +547,7 @@ export async function fetchSessionsForHead(headId: string): Promise<InfoSession[
           ? await backend.listOwnSessions()
           : await backend.listFeedSessionsForUser(login);
       sessionCache.set(headId, sessions);
+      sessionCacheAt.set(headId, Date.now());
       return sessions;
     } catch {
       return [];
@@ -728,6 +740,7 @@ function refreshNow(): void {
     : deps.getHeads().find((h) => h.id === selectedHeadId);
   if (!head) return;
   sessionCache.delete(head.id);
+  sessionCacheAt.delete(head.id);
   const login = rail.parseUserHeadId(head.id);
   // Push each fetch independently — session data should reach the renderer
   // ASAP without blocking on the slower standup/overview LLM calls.

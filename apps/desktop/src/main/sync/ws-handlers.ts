@@ -14,14 +14,12 @@ import type { InfoSession } from "../../shared/types";
  *  together. Used by both the WS path (production) and the debug picker. */
 export async function verifyAndMarkCollision(login: string, filePath: string): Promise<void> {
   const headId = rail.userHeadId(login);
-  // Drop the cache so we re-fetch with the latest topFiles. The server fires
-  // collision_detected after session_updated but the WS messages can arrive
-  // out of order or before our fetch completes; an explicit refresh
-  // guarantees we see the post-update aggregates.
-  info.invalidateSessionCache(headId);
+  // `force: true` skips TTL + in-flight join. WS messages can arrive out of
+  // order or while a poll fetch is mid-flight; without force we'd join the
+  // pre-event in-flight, see pre-update topFiles, and silently skip the ring.
   let sessions: InfoSession[];
   try {
-    sessions = await info.fetchSessionsForHead(headId);
+    sessions = await info.fetchSessionsForHead(headId, { force: true });
   } catch (err) {
     console.warn(`[collision] verify failed to fetch sessions for ${login}:`, err);
     return;

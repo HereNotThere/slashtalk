@@ -81,6 +81,20 @@ export function ClaudeIcon(): JSX.Element {
   );
 }
 
+/** Cursor-style pointer glyph (provider attribution). */
+export function CursorIcon(): JSX.Element {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path
+        d="M2 1.5L9.5 6L6.35 6.7L4.65 10.5L2 1.5Z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** OpenAI wordmark glyph (provider attribution). */
 export function OpenAIIcon(): JSX.Element {
   return (

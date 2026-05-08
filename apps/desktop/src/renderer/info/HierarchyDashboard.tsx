@@ -9,7 +9,7 @@ import {
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, TokenUsage, UserPr } from "@slashtalk/shared";
 import type { ChatHead, InfoDashboardData, InfoSession } from "../../shared/types";
-import { ClaudeIcon, OpenAIIcon } from "../shared/icons";
+import { ClaudeIcon, CursorIcon, OpenAIIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
 import { PrItem } from "../shared/PrItem";
 import { PrLinkProvider } from "../shared/PrLinkContext";
@@ -509,7 +509,15 @@ function ProviderIcon({ source }: { source: EventSource }): JSX.Element {
           : "Claude Code";
   return (
     <span className="shrink-0 text-subtle" title={label} aria-label={label}>
-      {source === "codex" ? <OpenAIIcon /> : source === "pi" ? "π" : <ClaudeIcon />}
+      {source === "codex" ? (
+        <OpenAIIcon />
+      ) : source === "pi" ? (
+        "π"
+      ) : source === "cursor" ? (
+        <CursorIcon />
+      ) : (
+        <ClaudeIcon />
+      )}
     </span>
   );
 }

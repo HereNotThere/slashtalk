@@ -1,5 +1,32 @@
 # @slashtalk/electron
 
+## 0.3.0
+
+### Minor Changes
+
+- 87229c3: Add Pi session-folder support so Slashtalk can ingest and show local Pi coding sessions alongside Claude Code, Codex, and Cursor sessions, with Pi extension-state entries and large signature/image payloads scrubbed before upload.
+
+### Patch Changes
+
+- a4aaf4c: Tighten the gap above markdown blocks (e.g. PAST 24H summary in the hierarchy dashboard) by stripping the leading/trailing margin on the first and last children. The first paragraph's `my-2` was stacking on top of the container's padding, making the section look visibly looser than the adjacent "Now" block.
+- f45293f: Hide the info window's "Now" section for sessions that don't yet have an analyzer-generated description.
+
+  Brand-new sessions (under three events) haven't run the summary analyzer, so their description is `null` and the "Now" card was rendering a placeholder ("Summarizing…") that read as broken. The picker now skips description-less sessions in both the live and recent-fallback branches; if nothing qualifies, the section hides and the past-day standup takes its place until Haiku catches up.
+
+- f3359dc: Stop the info window's "Now" section from sticking on a stale BUSY/ACTIVE session.
+
+  The desktop's per-head session cache held rows indefinitely until a `session_updated` WebSocket message invalidated them, but those messages are only emitted when the server's classification changes — so a stuck `inTurn=true` (or a single dropped packet during the BUSY → IDLE transition) left the cache serving "working now…" forever. Cache entries now expire after 10 seconds, so the renderer's 15s polling tick always refetches; rapid re-hovers within the window still hit cache for snappy paint.
+
+- 1f185bc: The PR list on your own user-card now respects the `user_repos` claim gate, matching the standup blurb rendered next to it. Previously the list came straight from `gh api graphql` (no repo filter) and showed PRs from any repo you'd authored on GitHub in the past 24h, even ones you hadn't claimed in slashtalk — visibly inconsistent with the standup, which only ever mentioned claimed-repo PRs. The desktop now uses `gh` only as the writer (push fresh PRs into the server's `pull_requests` table, which already gates upserts on `user_repos`), and reads the displayed list from the same server endpoint the peer path uses (`/api/users/:login/prs`).
+- 0814fcd: Force WS-triggered session refreshes to bypass the 15s-poll in-flight. Without
+  this, a `session_updated` or `collision_detected` event landing while the
+  renderer's poll fetch is mid-flight would join that in-flight, resolve with
+  pre-event data, and repopulate the cache stale — defeating the invalidation.
+  Most visible failure mode: collision rings silently not painting on a real
+  collision when the verify call raced a poll fetch. Now `fetchSessionsForHead`
+  takes `{ force?: boolean }` mirroring `fetchProjectOverviewForRepo`, threaded
+  through `refreshNow` and the collision verifier.
+
 ## 0.2.1
 
 ### Patch Changes

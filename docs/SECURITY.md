@@ -112,12 +112,14 @@ Data that flows to the server and is stored:
 
 - `users`: GitHub ID, login, avatar URL, display name.
 - `sessions`: `project` (slugified cwd), `cwd`, `branch`, `model`, `version`, `title`, `last_user_prompt`, aggregated token counts, top file paths.
-- `events.payload`: raw JSONL lines. Includes prompts, tool inputs/outputs, file contents (for `Read`/`Edit`/`Write` tools), shell commands.
+- `events.payload`: uploaded coding-agent JSONL lines. Includes prompts, tool inputs/outputs, file contents (for `Read`/`Edit`/`Write` tools), shell commands.
+- Pi sessions (`~/.pi/agent/sessions` or `PI_CODING_AGENT_SESSION_DIR`) are sanitized before upload: extension persistence entries (`custom` / `custom_message`) are dropped, image/base64 payloads are redacted, and Pi signature/encrypted-content fields are stripped. Conversation prompts, assistant text, tool calls/results, and shell/file tool outputs still upload when the session passes the tracked-repo gate.
 
 Data that does **not** leave the desktop:
 
 - Git remote URLs (we only see the `fullName` the user claimed).
-- File contents outside what the `events.payload` preserves.
+- File contents outside what the uploaded `events.payload` preserves.
+- Pi extension-authored data stored in `custom` / `custom_message` session entries.
 - Any session that fails the [strict-tracking gate](design-docs/core-beliefs.md#6-strict-tracking-gate-in-the-desktop-uploader).
 
 ## Secrets in WS payloads

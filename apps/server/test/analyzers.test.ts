@@ -190,6 +190,44 @@ describe("event compaction", () => {
     expect(assistant).toContain("reply: I will inspect ingest memory use.");
     expect(tool).toContain("exec_command: bun test test/analyzers.test.ts");
   });
+
+  it("extracts Pi tool-call and tool-result details", () => {
+    const tool = compactEvent({
+      kind: "tool_call",
+      ts: new Date("2026-05-07T20:00:02.000Z"),
+      payload: {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call_1",
+              name: "read",
+              arguments: { path: "src/main/uploader.ts" },
+            },
+          ],
+        },
+      },
+    } as never);
+    const result = compactEvent({
+      kind: "tool_result",
+      ts: new Date("2026-05-07T20:00:03.000Z"),
+      payload: {
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolCallId: "call_1",
+          toolName: "read",
+          content: [{ type: "text", text: "ok" }],
+          isError: false,
+        },
+      },
+    } as never);
+
+    expect(tool).toContain("read(src/main/uploader.ts)");
+    expect(result).toContain("result: read: ok");
+  });
 });
 
 describe("standup prompt context", () => {

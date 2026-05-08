@@ -9,7 +9,7 @@ import {
 import { SessionState } from "@slashtalk/shared";
 import type { EventSource, TokenUsage, UserPr } from "@slashtalk/shared";
 import type { ChatHead, InfoDashboardData, InfoSession } from "../../shared/types";
-import { ClaudeIcon, OpenAIIcon } from "../shared/icons";
+import { ClaudeIcon, CursorIcon, OpenAIIcon } from "../shared/icons";
 import { Markdown } from "../shared/Markdown";
 import { PrItem } from "../shared/PrItem";
 import { PrLinkProvider } from "../shared/PrLinkContext";
@@ -499,10 +499,25 @@ function fmtTokens(tokens: TokenUsage | undefined): string | null {
 }
 
 function ProviderIcon({ source }: { source: EventSource }): JSX.Element {
-  const label = source === "codex" ? "OpenAI Codex" : "Claude Code";
+  const label =
+    source === "codex"
+      ? "OpenAI Codex"
+      : source === "pi"
+        ? "Pi"
+        : source === "cursor"
+          ? "Cursor"
+          : "Claude Code";
   return (
     <span className="shrink-0 text-subtle" title={label} aria-label={label}>
-      {source === "codex" ? <OpenAIIcon /> : <ClaudeIcon />}
+      {source === "codex" ? (
+        <OpenAIIcon />
+      ) : source === "pi" ? (
+        "π"
+      ) : source === "cursor" ? (
+        <CursorIcon />
+      ) : (
+        <ClaudeIcon />
+      )}
     </span>
   );
 }

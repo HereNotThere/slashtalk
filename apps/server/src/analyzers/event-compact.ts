@@ -50,7 +50,7 @@ export function findBlock(content: unknown, type: string): JsonObj | null {
 
 export function describeToolCall(block: JsonObj): string {
   const name = typeof block.name === "string" ? block.name : "tool";
-  const input = block.input;
+  const input = block.input ?? block.arguments;
   if (!input || typeof input !== "object") return name;
   const i = input as JsonObj;
   if (typeof i.file_path === "string") return `${name}(${i.file_path})`;
@@ -64,7 +64,7 @@ export function describeToolCall(block: JsonObj): string {
 }
 
 export function describeToolResult(block: JsonObj): string {
-  const isError = block.is_error === true;
+  const isError = block.is_error === true || block.isError === true;
   const content = block.content;
   const text =
     typeof content === "string" ? content : Array.isArray(content) ? extractText(content) : "";
@@ -92,7 +92,7 @@ export function compactEvent(e: typeof events.$inferSelect): string {
     }
     case "assistant_msg": {
       const text = typeof inner.message === "string" ? inner.message : extractText(content);
-      const toolUse = findBlock(content, "tool_use");
+      const toolUse = findBlock(content, "tool_use") ?? findBlock(content, "toolCall");
       if (toolUse) {
         const toolDesc = describeToolCall(toolUse);
         return text
@@ -103,6 +103,10 @@ export function compactEvent(e: typeof events.$inferSelect): string {
     }
     case "tool_result": {
       const block = findBlock(content, "tool_result");
+      if (!block && message.role === "toolResult") {
+        const name = typeof message.toolName === "string" ? message.toolName : "tool";
+        return `[${ts}] result: ${name}: ${describeToolResult(message)}`;
+      }
       if (!block && typeof inner.output === "string") {
         return `[${ts}] result: ${snippet(inner.output, 140) || "(ok)"}`;
       }
@@ -112,6 +116,8 @@ export function compactEvent(e: typeof events.$inferSelect): string {
       return block ? `[${ts}] result: ${describeToolResult(block)}` : `[${ts}] result`;
     }
     case "tool_call": {
+      const toolCall = findBlock(content, "toolCall");
+      if (toolCall) return `[${ts}] → ${describeToolCall(toolCall)}`;
       const name =
         typeof inner.name === "string"
           ? inner.name

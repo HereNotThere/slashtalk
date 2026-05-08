@@ -1,11 +1,10 @@
-// Watches Claude, Codex, and Cursor session JSONLs and ships new lines to
-// /v1/ingest. Claude, Codex, and Cursor only upload when the cwd is under a
+// Watches Claude, Codex, Cursor, and Pi session JSONLs and ships new lines to
+// /v1/ingest. Claude, Codex, Cursor, and Pi only upload when the cwd is under a
 // tracked repo; server-side sharing still comes from repo matching + user_repos.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import type { FSWatcher } from "node:fs";
 import type { EventSource } from "@slashtalk/shared";
@@ -13,11 +12,14 @@ import * as backend from "./backend";
 import * as claudeSessionMeta from "./claudeSessionMeta";
 import { createEmitter } from "./emitter";
 import * as localRepos from "./localRepos";
+import { sanitizePiChunk } from "./piSessionSanitizer";
+import {
+  CLAUDE_PROJECTS_DIR,
+  CODEX_SESSIONS_DIR,
+  CURSOR_PROJECTS_DIR,
+  PI_SESSIONS_DIR,
+} from "./sessionDirs";
 import * as store from "./store";
-
-const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
-const CODEX_SESSIONS_DIR = path.join(os.homedir(), ".codex", "sessions");
-const CURSOR_PROJECTS_DIR = path.join(os.homedir(), ".cursor", "projects");
 
 const PREFIX_BYTES = 4096; // what the server expects prefixHash to cover
 const HEADER_BYTES = 64 * 1024; // how far in we scan for source metadata
@@ -34,6 +36,7 @@ const MAX_CHUNK_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODEX_ROLLOUT_RE =
   /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+const PI_SESSION_RE = /^.*_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
 interface SessionHeader {
   sessionId: string | null;
@@ -134,6 +137,7 @@ function sourceForPath(filePath: string): EventSource | null {
   if (filePath.startsWith(CLAUDE_PROJECTS_DIR + path.sep)) return "claude";
   if (filePath.startsWith(CODEX_SESSIONS_DIR + path.sep)) return "codex";
   if (filePath.startsWith(CURSOR_PROJECTS_DIR + path.sep)) return "cursor";
+  if (filePath.startsWith(PI_SESSIONS_DIR + path.sep)) return "pi";
   return null;
 }
 
@@ -155,11 +159,16 @@ function isCursorSessionJsonl(filePath: string): boolean {
   );
 }
 
+function isPiSessionJsonl(filePath: string): boolean {
+  return PI_SESSION_RE.test(path.basename(filePath));
+}
+
 function isSessionJsonl(filePath: string): boolean {
   const source = sourceForPath(filePath);
   if (source === "claude") return isClaudeSessionJsonl(filePath);
   if (source === "codex") return isCodexSessionJsonl(filePath);
   if (source === "cursor") return isCursorSessionJsonl(filePath);
+  if (source === "pi") return isPiSessionJsonl(filePath);
   return false;
 }
 
@@ -171,6 +180,10 @@ function sessionIdFromPath(filePath: string, source: EventSource): string | null
   if (source === "cursor") {
     const sessionId = path.basename(filePath, ".jsonl");
     return UUID_RE.test(sessionId) ? sessionId : null;
+  }
+  if (source === "pi") {
+    const match = path.basename(filePath).match(PI_SESSION_RE);
+    return match?.[1] ?? null;
   }
   const match = path.basename(filePath).match(CODEX_ROLLOUT_RE);
   return match?.[1] ?? null;
@@ -203,7 +216,9 @@ async function readHeader(
       ? await scanClaudeHeader(buf, filePath)
       : source === "codex"
         ? scanCodexHeader(buf, filePath)
-        : await scanCursorHeader(buf, filePath);
+        : source === "pi"
+          ? scanPiHeader(buf, filePath)
+          : await scanCursorHeader(buf, filePath);
   return { hash, header };
 }
 
@@ -292,6 +307,45 @@ function scanCodexHeader(buf: Buffer, filePath: string): SessionHeader {
   sessionId ??= matchQuoted(text, "id") ?? sessionIdFromPath(filePath, "codex");
   cwd ??= matchQuoted(text, "cwd");
   version ??= matchQuoted(text, "cli_version");
+  return {
+    sessionId,
+    cwd,
+    version,
+    project: cwd ? slugifyPath(cwd) : null,
+  };
+}
+
+function scanPiHeader(buf: Buffer, filePath: string): SessionHeader {
+  const text = buf.toString("utf8");
+  let sessionId: string | null = null;
+  let cwd: string | null = null;
+  let version: string | null = null;
+  let start = 0;
+  while (start < text.length) {
+    const nl = text.indexOf("\n", start);
+    if (nl === -1) break;
+    const line = text.slice(start, nl);
+    start = nl + 1;
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as {
+        type?: unknown;
+        id?: unknown;
+        cwd?: unknown;
+        version?: unknown;
+      };
+      if (parsed.type !== "session") continue;
+      if (typeof parsed.id === "string") sessionId = parsed.id;
+      if (typeof parsed.cwd === "string") cwd = parsed.cwd;
+      if (typeof parsed.version === "number") version = `pi-session-v${parsed.version}`;
+      break;
+    } catch {
+      // Partial header — regex fallback below can still recover fields.
+    }
+  }
+
+  sessionId ??= sessionIdFromPath(filePath, "pi") ?? matchQuoted(text, "id");
+  cwd ??= matchQuoted(text, "cwd");
   return {
     sessionId,
     cwd,
@@ -637,7 +691,15 @@ async function ingestTail(
     const body =
       entry.source === "cursor"
         ? synthesizeCursorChunk(tail.chunk, stat, entry.lineSeq, entry.cwd, entry.version)
-        : tail.chunk.toString("utf8");
+        : entry.source === "pi"
+          ? sanitizePiChunk(tail.chunk)
+          : tail.chunk.toString("utf8");
+
+    if (body.length === 0) {
+      entry.byteOffset += tail.consumed;
+      persistSoon();
+      continue;
+    }
 
     console.log(
       `[uploader] ingest ${sessionId} (${entry.source}) offset=${entry.byteOffset} ` +
@@ -708,12 +770,13 @@ async function walkSessionFiles(
 }
 
 async function enumerateAllJsonl(): Promise<string[]> {
-  const [claude, codex, cursor] = await Promise.all([
+  const [claude, codex, cursor, pi] = await Promise.all([
     walkSessionFiles(CLAUDE_PROJECTS_DIR, isClaudeSessionJsonl),
     walkSessionFiles(CODEX_SESSIONS_DIR, isCodexSessionJsonl),
     walkSessionFiles(CURSOR_PROJECTS_DIR, isCursorSessionJsonl),
+    walkSessionFiles(PI_SESSIONS_DIR, isPiSessionJsonl),
   ]);
-  return [...claude, ...codex, ...cursor];
+  return [...claude, ...codex, ...cursor, ...pi];
 }
 
 function schedule(filePath: string): void {
@@ -768,11 +831,16 @@ export async function start(): Promise<void> {
   loadState();
   const trackedRoots = localRepos.list().map((repo) => repo.localPath);
   console.log(
-    `[uploader] starting, watching ${CLAUDE_PROJECTS_DIR}, ${CODEX_SESSIONS_DIR}, and ${CURSOR_PROJECTS_DIR}, ` +
+    `[uploader] starting, watching ${CLAUDE_PROJECTS_DIR}, ${CODEX_SESSIONS_DIR}, ${CURSOR_PROJECTS_DIR}, and ${PI_SESSIONS_DIR}, ` +
       `tracked roots: ${trackedRoots.length ? trackedRoots.join(", ") : "(none)"}`,
   );
 
-  for (const root of [CLAUDE_PROJECTS_DIR, CODEX_SESSIONS_DIR, CURSOR_PROJECTS_DIR]) {
+  for (const root of [
+    CLAUDE_PROJECTS_DIR,
+    CODEX_SESSIONS_DIR,
+    CURSOR_PROJECTS_DIR,
+    PI_SESSIONS_DIR,
+  ]) {
     try {
       await fsp.mkdir(root, { recursive: true });
     } catch (err) {
@@ -789,6 +857,7 @@ export async function start(): Promise<void> {
   watchRoot(CLAUDE_PROJECTS_DIR);
   watchRoot(CODEX_SESSIONS_DIR);
   watchRoot(CURSOR_PROJECTS_DIR);
+  watchRoot(PI_SESSIONS_DIR);
   await rescanAll();
 }
 

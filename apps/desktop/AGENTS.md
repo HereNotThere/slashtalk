@@ -12,6 +12,7 @@ Electron app for slashtalk. Built with `electron-vite` (main + preload + multi-w
 - `src/renderer/shared/tailwind.css` — single Tailwind v4 entrypoint (theme + base resets) imported by every window's `styles.css`
 - `src/shared/` — types shared across processes
 - `docs/` — deep dives on subsystems whose data flow or platform quirks aren't obvious from the code. See [`docs/rail-pinning.md`](docs/rail-pinning.md) before touching the rail's `alwaysOnTop` / `focusable` / activation-policy behavior, and [`docs/info-card.md`](docs/info-card.md) before changing info-window layouts, the dashboard fetch, or the project-overview surface.
+- `test/` — Bun unit tests for pure desktop helpers that don't need an Electron app runtime
 - `out/` — build output (gitignored)
 - `dist/` — packaged installers from `electron-builder` (gitignored)
 - `resources/` — runtime assets (e.g. `trayTemplate.png`/`@2x` for the macOS menu-bar icon). Loaded relative to `__dirname` from main process. Template PNGs use grayscale + alpha so macOS auto-tints to match the menu bar. Inside a packaged build, these are included in `app.asar` at the same relative path (`../../resources/…` from `out/main/`).
@@ -46,6 +47,7 @@ bun run dist         # build + package via electron-builder → ./dist (host pla
 bun run dist:mac     # build + package macOS DMG/zip/update metadata → ./dist
 
 bun run lint         # eslint .
+bun run test         # bun test (pure helper tests)
 bun run typecheck    # tsc --noEmit for node + web projects
 bun run typecheck:node
 bun run typecheck:web
@@ -135,6 +137,7 @@ To build unsigned locally (skip the cert + notarize), unset `CSC_LINK` and pass 
 
 ```bash
 bun run lint
+bun run test
 bun run typecheck
 ```
 

@@ -1,25 +1,21 @@
-// Sends /v1/heartbeat for live Claude, Codex, and Cursor sessions that have
+// Sends /v1/heartbeat for live Claude, Codex, Cursor, and Pi sessions that have
 // already been ingested.
 
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import type { FSWatcher } from "node:fs";
 import * as backend from "./backend";
 import { CLAUDE_SESSIONS_DIR, listSessionMeta } from "./claudeSessionMeta";
 import * as localRepos from "./localRepos";
+import { CODEX_SESSIONS_DIR, CURSOR_PROJECTS_DIR, PI_SESSIONS_DIR } from "./sessionDirs";
 import * as uploader from "./uploader";
-
-const CODEX_SESSIONS_DIR = path.join(os.homedir(), ".codex", "sessions");
-const CURSOR_PROJECTS_DIR = path.join(os.homedir(), ".cursor", "projects");
 
 const FALLBACK_MS = 15_000;
 const CHANGE_DEBOUNCE_MS = 250;
 // File watchers fire on every JSONL append while a session is live, so without
 // a per-session floor the global 250ms debounce becomes the heartbeat cadence.
 const MIN_PER_SESSION_MS = 10_000;
-const CODEX_LIVE_WINDOW_MS = 10 * 60_000;
+const FILE_MTIME_LIVE_WINDOW_MS = 10 * 60_000;
 
 interface LiveSession {
   sessionId: string;
@@ -65,31 +61,18 @@ async function enumerateClaudeLive(): Promise<LiveSession[]> {
   return out;
 }
 
-function enumerateCodexLive(now: number): LiveSession[] {
+function enumerateFileMtimeLive(now: number, source: "codex" | "cursor" | "pi"): LiveSession[] {
   return uploader
     .listTrackedSessions()
     .filter(
       (session) =>
-        session.source === "codex" && session.cwd && now - session.mtimeMs <= CODEX_LIVE_WINDOW_MS,
+        session.source === source &&
+        session.cwd &&
+        now - session.mtimeMs <= FILE_MTIME_LIVE_WINDOW_MS,
     )
     .map((session) => ({
       sessionId: session.sessionId,
-      kind: "codex",
-      cwd: session.cwd ?? undefined,
-      version: session.version ?? undefined,
-    }));
-}
-
-function enumerateCursorLive(now: number): LiveSession[] {
-  return uploader
-    .listTrackedSessions()
-    .filter(
-      (session) =>
-        session.source === "cursor" && session.cwd && now - session.mtimeMs <= CODEX_LIVE_WINDOW_MS,
-    )
-    .map((session) => ({
-      sessionId: session.sessionId,
-      kind: "cursor",
+      kind: source,
       cwd: session.cwd ?? undefined,
       version: session.version ?? undefined,
     }));
@@ -97,12 +80,13 @@ function enumerateCursorLive(now: number): LiveSession[] {
 
 async function enumerateLive(): Promise<LiveSession[]> {
   const now = Date.now();
-  const [claude, codex, cursor] = await Promise.all([
+  const [claude, codex, cursor, pi] = await Promise.all([
     enumerateClaudeLive(),
-    Promise.resolve(enumerateCodexLive(now)),
-    Promise.resolve(enumerateCursorLive(now)),
+    Promise.resolve(enumerateFileMtimeLive(now, "codex")),
+    Promise.resolve(enumerateFileMtimeLive(now, "cursor")),
+    Promise.resolve(enumerateFileMtimeLive(now, "pi")),
   ]);
-  return [...claude, ...codex, ...cursor];
+  return [...claude, ...codex, ...cursor, ...pi];
 }
 
 async function pulse(): Promise<void> {
@@ -154,7 +138,12 @@ function watchRoot(root: string): void {
 export async function start(): Promise<void> {
   if (running) return;
   running = true;
-  for (const root of [CLAUDE_SESSIONS_DIR, CODEX_SESSIONS_DIR, CURSOR_PROJECTS_DIR]) {
+  for (const root of [
+    CLAUDE_SESSIONS_DIR,
+    CODEX_SESSIONS_DIR,
+    CURSOR_PROJECTS_DIR,
+    PI_SESSIONS_DIR,
+  ]) {
     try {
       await fsp.mkdir(root, { recursive: true });
     } catch (err) {
@@ -165,6 +154,7 @@ export async function start(): Promise<void> {
   watchRoot(CLAUDE_SESSIONS_DIR);
   watchRoot(CODEX_SESSIONS_DIR);
   watchRoot(CURSOR_PROJECTS_DIR);
+  watchRoot(PI_SESSIONS_DIR);
   timer = setInterval(() => void pulse(), FALLBACK_MS);
   await pulse();
 }

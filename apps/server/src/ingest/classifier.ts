@@ -22,6 +22,7 @@ export function classifyEvent(source: EventSource, event: unknown): NormalizedEv
   }
   if (source === "claude") return classifyClaude(event);
   if (source === "codex") return classifyCodex(event);
+  if (source === "pi") return classifyPi(event);
   return classifyCursor(event);
 }
 
@@ -144,6 +145,71 @@ function classifyCursor(ev: JsonObj): NormalizedEvent {
   });
 }
 
+// ── Pi ─────────────────────────────────────────────────────────
+// Pi session entries are tree-structured records. Conversation messages live
+// under `message.role`; session/model/compaction entries are metadata/system.
+
+const PI_MESSAGE_ROLE_KIND: Record<string, EventKind> = {
+  user: "user_msg",
+  assistant: "assistant_msg",
+  toolResult: "tool_result",
+  bashExecution: "tool_result",
+  custom: "system",
+  branchSummary: "system",
+  compactionSummary: "system",
+};
+
+const PI_ENTRY_KIND: Record<string, EventKind> = {
+  session: "meta",
+  model_change: "meta",
+  thinking_level_change: "meta",
+  session_info: "meta",
+  label: "meta",
+  custom: "meta",
+  custom_message: "system",
+  compaction: "system",
+  branch_summary: "system",
+};
+
+function classifyPi(ev: JsonObj): NormalizedEvent {
+  const topType = String(ev.type ?? "unknown");
+  const message = isObj(ev.message) ? ev.message : null;
+  const role = message ? asString(message.role) : null;
+  const rawType = role ? `${topType}.${role}` : topType;
+
+  return norm({
+    ts: parseTs(message?.timestamp ?? ev.timestamp),
+    rawType,
+    kind: piKind(topType, role, message),
+    eventId: asString(ev.id),
+    parentId: asString(ev.parentId),
+    callId: message ? (asString(message.toolCallId) ?? firstPiToolCallId(message)) : null,
+  });
+}
+
+function firstPiToolCallId(message: JsonObj): string | null {
+  const content = message.content;
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (isObj(block) && block.type === "toolCall") {
+      const id = asString(block.id);
+      if (id) return id;
+    }
+  }
+  return null;
+}
+
+function piKind(topType: string, role: string | null, message: JsonObj | null): EventKind {
+  if (topType !== "message") return PI_ENTRY_KIND[topType] ?? "unknown";
+  if (role === "assistant") {
+    const content = message?.content;
+    if (Array.isArray(content) && content.some((b) => isObj(b) && b.type === "toolCall")) {
+      return "tool_call";
+    }
+  }
+  return role ? (PI_MESSAGE_ROLE_KIND[role] ?? "unknown") : "unknown";
+}
+
 function codexKind(topType: string, payloadType: string | null, payload: JsonObj): EventKind {
   const topHit = CODEX_TOP_KIND[topType];
   if (topHit) return topHit;
@@ -177,6 +243,10 @@ function norm(
 }
 
 function parseTs(v: unknown): Date {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) return d;
+  }
   if (typeof v === "string") {
     const d = new Date(v);
     if (!isNaN(d.getTime())) return d;

@@ -337,14 +337,14 @@ function scanPiHeader(buf: Buffer, filePath: string): SessionHeader {
       if (parsed.type !== "session") continue;
       if (typeof parsed.id === "string") sessionId = parsed.id;
       if (typeof parsed.cwd === "string") cwd = parsed.cwd;
-      if (typeof parsed.version === "number") version = `session-v${parsed.version}`;
+      if (typeof parsed.version === "number") version = `pi-session-v${parsed.version}`;
       break;
     } catch {
       // Partial header — regex fallback below can still recover fields.
     }
   }
 
-  sessionId ??= matchQuoted(text, "id") ?? sessionIdFromPath(filePath, "pi");
+  sessionId ??= sessionIdFromPath(filePath, "pi") ?? matchQuoted(text, "id");
   cwd ??= matchQuoted(text, "cwd");
   return {
     sessionId,

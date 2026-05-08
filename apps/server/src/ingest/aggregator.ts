@@ -1050,8 +1050,6 @@ function processPiEvents(current: CurrentSession, newEvents: unknown[]): Session
     }
 
     if (msg.role === "bashExecution") {
-      state.toolCalls++;
-      incMap(state.toolUseNames, "bash");
       if ((typeof msg.exitCode === "number" && msg.exitCode !== 0) || msg.cancelled) {
         state.toolErrors++;
       }

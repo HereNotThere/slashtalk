@@ -278,4 +278,28 @@ describe("processEvents — pi sessions", () => {
     expect(updates.topFilesRead).toEqual({ "src/main/uploader.ts": 1 });
     expect(updates.lastUserPrompt).toBe("wire pi ingest");
   });
+
+  it("does not count Pi bashExecution messages as assistant tool calls", () => {
+    const updates = processEvents("pi", EMPTY_SESSION, [
+      {
+        type: "message",
+        id: "d4e5f6a7",
+        parentId: null,
+        timestamp: "2026-05-07T10:00:04.000Z",
+        message: {
+          role: "bashExecution",
+          command: "bun test",
+          output: "",
+          exitCode: 1,
+          cancelled: false,
+          truncated: false,
+          timestamp: 1778148004000,
+        },
+      },
+    ]);
+
+    expect(updates.toolCalls).toBe(0);
+    expect(updates.toolUseNames).toEqual({});
+    expect(updates.toolErrors).toBe(1);
+  });
 });

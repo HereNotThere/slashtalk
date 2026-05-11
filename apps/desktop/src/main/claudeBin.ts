@@ -5,17 +5,17 @@
 // the user's machine.
 //
 // Resolution order (cached after first hit):
-//   1. `command -v claude` inside the user's login shell — picks up
-//      nvm/Volta/Bun/Homebrew PATH mutations from .zshrc/.bashrc that
-//      GUI-launched Electron processes don't inherit on macOS.
-//   2. Hardcoded common install locations.
+//   1. Walk `process.env.PATH` — fixPath() at startup already enriched PATH
+//      with the user's shell PATH (Homebrew, version managers, etc.), so a
+//      simple sync directory scan finds `claude` without a second shell spawn.
+//   2. Hardcoded common install locations as paranoia for installers that
+//      drop into dirs not exported from any rc file (Bun, Volta, npm-global).
 //
 // In dev (unpackaged), returns undefined so the SDK uses its own require-
 // resolve against the locally-installed platform package — keeps dev fast and
 // independent of whether the developer has `claude` on PATH.
 
 import { app } from "electron";
-import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -31,17 +31,14 @@ function isExecutable(p: string): boolean {
   }
 }
 
-function viaLoginShell(): string | undefined {
-  const shell = process.env.SHELL || "/bin/bash";
-  try {
-    const out = execFileSync(shell, ["-ilc", "command -v claude"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 3000,
-    }).trim();
-    if (out && fs.existsSync(out) && isExecutable(out)) return out;
-  } catch {
-    // shell missing `claude`, or non-interactive shell rejected `-i` — fall through.
+function viaPath(): string | undefined {
+  const exe = process.platform === "win32" ? "claude.exe" : "claude";
+  const sep = process.platform === "win32" ? ";" : ":";
+  const entries = (process.env.PATH ?? "").split(sep);
+  for (const dir of entries) {
+    if (!dir) continue;
+    const candidate = path.join(dir, exe);
+    if (fs.existsSync(candidate) && isExecutable(candidate)) return candidate;
   }
   return undefined;
 }
@@ -64,7 +61,7 @@ function fromKnownLocations(): string | undefined {
 
 export function resolveSystemClaudeBin(): string | undefined {
   if (cached !== undefined) return cached ?? undefined;
-  const found = viaLoginShell() ?? fromKnownLocations();
+  const found = viaPath() ?? fromKnownLocations();
   cached = found ?? null;
   return found;
 }

@@ -10,8 +10,9 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { app } from "electron";
 import type { AgentStreamEvent } from "./anthropic";
-import { resolveBundledClaudeBin } from "./claudeBin";
+import { CLAUDE_NOT_FOUND_MESSAGE, resolveBundledClaudeBin } from "./claudeBin";
 import { normalizeSdkMessage } from "./sdkEvents";
 
 const execFileAsync = promisify(execFile);
@@ -25,7 +26,23 @@ function makeCliProbe(cmd: string, args: string[]): () => Promise<boolean> {
       .catch(() => false));
 }
 
-export const hasClaudeCli = makeCliProbe("claude", ["--version"]);
+// Probes the user's `claude` via the resolved absolute path rather than a bare
+// "claude" PATH lookup — packaged macOS GUI apps inherit a stripped PATH that
+// doesn't include `~/.local/bin`, `/opt/homebrew/bin`, etc., so a PATH-based
+// probe would falsely report "not installed" even when claude IS installed.
+let claudeCliCache: Promise<boolean> | null = null;
+export function hasClaudeCli(): Promise<boolean> {
+  return (claudeCliCache ??= (async () => {
+    const bin = resolveBundledClaudeBin();
+    if (app.isPackaged && !bin) return false;
+    try {
+      await execFileAsync(bin ?? "claude", ["--version"], { timeout: 5000 });
+      return true;
+    } catch {
+      return false;
+    }
+  })());
+}
 
 // `gh auth status` exits 0 only when gh is installed AND authenticated against
 // at least one host. Both states fail the same way at run time, so we collapse
@@ -150,23 +167,6 @@ export async function runDelegatedChat(
 
   const ghAvailable = await hasGhCliReady();
 
-  const bundledBin = resolveBundledClaudeBin();
-  const options: Options = {
-    cwd,
-    model: "claude-sonnet-4-6",
-    systemPrompt: buildSystemPrompt(ghAvailable),
-    permissionMode: "default",
-    allowedTools: [...(ghAvailable ? READ_ONLY_ALLOWLIST : BASE_ALLOWLIST)],
-    disallowedTools: [...DISALLOWED_TOOLS],
-    canUseTool: denyByDefault,
-    // Inherit the user's MCP servers + hooks from ~/.claude/settings.json.
-    // Project/local scopes are intentionally omitted: they'd vary by cwd.
-    settingSources: ["user"],
-    // In packaged builds the SDK's own resolver lands inside `app.asar`,
-    // which spawn() can't traverse. See claudeBin.ts.
-    ...(bundledBin ? { pathToClaudeCodeExecutable: bundledBin } : {}),
-  };
-
   let finalText = "";
   let hadError = false;
   let errorMessage: string | null = null;
@@ -174,6 +174,24 @@ export async function runDelegatedChat(
   onEvent({ kind: "phase", label: "Investigating…" });
 
   try {
+    const bundledBin = resolveBundledClaudeBin();
+    if (app.isPackaged && !bundledBin) throw new Error(CLAUDE_NOT_FOUND_MESSAGE);
+    const options: Options = {
+      cwd,
+      model: "claude-sonnet-4-6",
+      systemPrompt: buildSystemPrompt(ghAvailable),
+      permissionMode: "default",
+      allowedTools: [...(ghAvailable ? READ_ONLY_ALLOWLIST : BASE_ALLOWLIST)],
+      disallowedTools: [...DISALLOWED_TOOLS],
+      canUseTool: denyByDefault,
+      // Inherit the user's MCP servers + hooks from ~/.claude/settings.json.
+      // Project/local scopes are intentionally omitted: they'd vary by cwd.
+      settingSources: ["user"],
+      // In packaged builds the SDK's own resolver can't see the user's PATH;
+      // we feed it the resolved system `claude`. See claudeBin.ts.
+      ...(bundledBin ? { pathToClaudeCodeExecutable: bundledBin } : {}),
+    };
+
     const q = query({ prompt: task, options });
     for await (const msg of q) {
       // Replace, don't append — the SDK yields a separate assistant message

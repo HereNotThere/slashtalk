@@ -18,8 +18,9 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
+import { app } from "electron";
 import * as agentStore from "./agentStore";
-import { resolveBundledClaudeBin } from "./claudeBin";
+import { CLAUDE_NOT_FOUND_MESSAGE, resolveBundledClaudeBin } from "./claudeBin";
 import * as localTranscripts from "./localTranscripts";
 import type { AgentStreamEvent } from "./anthropic";
 import { normalizeSdkMessage } from "./sdkEvents";
@@ -132,25 +133,26 @@ export async function sendMessage(
 
   onEvent({ kind: "phase", label: "Working…" });
 
-  const bundledBin = resolveBundledClaudeBin();
-  const options: Options = {
-    cwd,
-    model: agent.model,
-    systemPrompt: agent.systemPrompt,
-    permissionMode: "default",
-    // Load the user's ~/.claude/settings.json so local agents inherit the same
-    // MCP servers (and hooks) the terminal `claude` uses. Project/local scopes
-    // are intentionally omitted: 'project' would pull CLAUDE.md and behave
-    // differently per cwd, and 'local' is per-checkout state we don't want
-    // leaking into agent runs.
-    settingSources: ["user"],
-    // In packaged builds the SDK's own resolver lands inside `app.asar`,
-    // which spawn() can't traverse. See claudeBin.ts.
-    ...(bundledBin ? { pathToClaudeCodeExecutable: bundledBin } : {}),
-    ...(resume ? { resume } : {}),
-  };
-
   try {
+    const bundledBin = resolveBundledClaudeBin();
+    if (app.isPackaged && !bundledBin) throw new Error(CLAUDE_NOT_FOUND_MESSAGE);
+    const options: Options = {
+      cwd,
+      model: agent.model,
+      systemPrompt: agent.systemPrompt,
+      permissionMode: "default",
+      // Load the user's ~/.claude/settings.json so local agents inherit the same
+      // MCP servers (and hooks) the terminal `claude` uses. Project/local scopes
+      // are intentionally omitted: 'project' would pull CLAUDE.md and behave
+      // differently per cwd, and 'local' is per-checkout state we don't want
+      // leaking into agent runs.
+      settingSources: ["user"],
+      // In packaged builds the SDK's own resolver can't see the user's PATH;
+      // we feed it the resolved system `claude`. See claudeBin.ts.
+      ...(bundledBin ? { pathToClaudeCodeExecutable: bundledBin } : {}),
+      ...(resume ? { resume } : {}),
+    };
+
     const q = query({ prompt: text, options });
 
     let captured = persistedSdkId;

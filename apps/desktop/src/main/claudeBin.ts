@@ -1,41 +1,84 @@
-// Resolves the bundled Claude Agent SDK CLI binary's real on-disk path so the
-// SDK's `query()` can spawn it. In dev, returning undefined lets the SDK do
-// its own require-resolve from on-disk node_modules. In a packaged .app the
-// SDK's resolver lands at `app.asar/...` and `child_process.spawn` then fails
-// with ENOTDIR (Electron does not rewrite spawn paths from asar to
-// asar.unpacked — only fs.* APIs are patched). The platform-specific package
-// is in our `asarUnpack` glob, so the real file lives at `app.asar.unpacked/`
-// — point the SDK there directly via `pathToClaudeCodeExecutable`.
+// Resolves the user's locally-installed `claude` CLI binary for the SDK's
+// `query()` to spawn. We no longer ship the ~200MB platform-specific binary
+// from `@anthropic-ai/claude-agent-sdk-${platform}-${arch}` inside the .app
+// (it more than doubled the DMG); instead we rely on the `claude` already on
+// the user's machine.
+//
+// Resolution order (cached after first hit):
+//   1. `command -v claude` inside the user's login shell — picks up
+//      nvm/Volta/Bun/Homebrew PATH mutations from .zshrc/.bashrc that
+//      GUI-launched Electron processes don't inherit on macOS.
+//   2. Hardcoded common install locations.
+//
+// In dev (unpackaged), returns undefined so the SDK uses its own require-
+// resolve against the locally-installed platform package — keeps dev fast and
+// independent of whether the developer has `claude` on PATH.
 
 import { app } from "electron";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
-/** Path to the unpacked `claude` binary, or undefined if it can't be located.
- *  Always undefined in dev: the SDK's own resolver works correctly there. */
-export function resolveBundledClaudeBin(): string | undefined {
-  if (!app.isPackaged) return undefined;
+let cached: string | null | undefined;
 
-  const ext = process.platform === "win32" ? ".exe" : "";
-  const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
-  const unpackedRoot = path.join(process.resourcesPath, "app.asar.unpacked", "node_modules");
+function isExecutable(p: string): boolean {
+  try {
+    fs.accessSync(p, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  // Bun hoists most workspace deps to the root node_modules, but the SDK's
-  // platform-specific binary often ends up nested under the SDK package's own
-  // node_modules in the packaged asar (verified: `npx asar list app.asar`).
-  // Try both layouts.
-  const candidates = [
-    path.join(
-      unpackedRoot,
-      "@anthropic-ai/claude-agent-sdk/node_modules",
-      platformPkg,
-      `claude${ext}`,
-    ),
-    path.join(unpackedRoot, platformPkg, `claude${ext}`),
-  ];
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
+function viaLoginShell(): string | undefined {
+  const shell = process.env.SHELL || "/bin/bash";
+  try {
+    const out = execFileSync(shell, ["-ilc", "command -v claude"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000,
+    }).trim();
+    if (out && fs.existsSync(out) && isExecutable(out)) return out;
+  } catch {
+    // shell missing `claude`, or non-interactive shell rejected `-i` — fall through.
   }
   return undefined;
 }
+
+function fromKnownLocations(): string | undefined {
+  const home = os.homedir();
+  const candidates = [
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    path.join(home, ".local/bin/claude"),
+    path.join(home, ".bun/bin/claude"),
+    path.join(home, ".npm-global/bin/claude"),
+    path.join(home, ".volta/bin/claude"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p) && isExecutable(p)) return p;
+  }
+  return undefined;
+}
+
+export function resolveSystemClaudeBin(): string | undefined {
+  if (cached !== undefined) return cached ?? undefined;
+  const found = viaLoginShell() ?? fromKnownLocations();
+  cached = found ?? null;
+  return found;
+}
+
+/** Path to a `claude` binary the SDK can spawn, or undefined.
+ *
+ *  In dev, returning undefined lets the SDK do its own require-resolve from
+ *  on-disk node_modules. In packaged builds we no longer ship the binary, so
+ *  we locate the user's system install instead. */
+export function resolveBundledClaudeBin(): string | undefined {
+  if (!app.isPackaged) return undefined;
+  return resolveSystemClaudeBin();
+}
+
+export const CLAUDE_NOT_FOUND_MESSAGE =
+  "Claude Code CLI not found on this machine. Install it from " +
+  "https://docs.claude.com/en/docs/claude-code/setup, then restart Slashtalk.";

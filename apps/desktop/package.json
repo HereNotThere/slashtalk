@@ -29,12 +29,10 @@
     "files": [
       "out/**/*",
       "resources/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "asar": true,
-    "asarUnpack": [
-      "node_modules/@anthropic-ai/claude-agent-sdk-*/**"
-    ],
     "npmRebuild": false,
     "electronUpdaterCompatibility": ">=2.16",
     "publish": [

@@ -84,10 +84,10 @@ jobs:
       - name: Verify desktop release artifacts
         run: |
           test -f apps/desktop/dist/latest-mac.yml
-          test -f apps/desktop/dist/Slashtalk-mac-universal.dmg
-          test -f apps/desktop/dist/Slashtalk-mac-universal.zip
-          test -f apps/desktop/dist/Slashtalk-mac-universal.dmg.blockmap
-          test -f apps/desktop/dist/Slashtalk-mac-universal.zip.blockmap
+          test -f apps/desktop/dist/Slashtalk-mac-arm64.dmg
+          test -f apps/desktop/dist/Slashtalk-mac-arm64.zip
+          test -f apps/desktop/dist/Slashtalk-mac-arm64.dmg.blockmap
+          test -f apps/desktop/dist/Slashtalk-mac-arm64.zip.blockmap
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -108,5 +108,5 @@ jobs:
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
-          DMG_PATH: apps/desktop/dist/Slashtalk-mac-universal.dmg
+          DMG_PATH: apps/desktop/dist/Slashtalk-mac-arm64.dmg
         run: ./apps/desktop/scripts/update-homebrew-cask.sh

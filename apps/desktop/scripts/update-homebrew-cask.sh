@@ -2,7 +2,7 @@
 set -euo pipefail
 
 : "${VERSION:?VERSION is required (e.g. 0.1.0)}"
-: "${DMG_PATH:?DMG_PATH is required (path to Slashtalk-mac-universal.dmg)}"
+: "${DMG_PATH:?DMG_PATH is required (path to Slashtalk-mac-arm64.dmg)}"
 
 if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
   echo "HOMEBREW_TAP_TOKEN not set — skipping Homebrew tap update."

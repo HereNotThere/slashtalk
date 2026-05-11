@@ -2,7 +2,7 @@
 <p align="center"><em>Coordination, without the meetings.</em></p>
 <p align="center">
   <code>brew install --cask herenotthere/tap/slashtalk</code><br/>
-  or download the <a href="https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg">latest Github release</a>
+  or download the <a href="https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-arm64.dmg">latest Github release</a>
 </p>
 
 <p align="center">

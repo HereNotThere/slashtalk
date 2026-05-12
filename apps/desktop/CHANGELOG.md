@@ -1,5 +1,16 @@
 # @slashtalk/electron
 
+## 0.4.0
+
+### Minor Changes
+
+- 124723a: Ship Apple Silicon (arm64) builds only. The universal target embedded both x64 and arm64 slices of the Electron framework into every download (~415MB raw); dropping x64 halves that, and Apple has not shipped Intel Macs since mid-2023. Intel Mac users on the existing universal build won't auto-update (electron-updater filters `latest-mac.yml` by `process.arch` and there'll be no x64 entry); they can keep using their installed version.
+- c3edcb3: Use the user's installed `claude` CLI instead of bundling the ~200MB platform-specific binary. The packaged DMG drops from ~250MB to ~190MB; on-disk app from ~677MB to ~487MB. Slashtalk now expects Claude Code to already be installed on the user's machine and resolves it via `command -v claude` in a login shell (picks up nvm/Volta/Bun/Homebrew PATH mutations that GUI-launched Electron doesn't inherit on macOS), falling back to common install locations (`/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, `~/.bun/bin`, `~/.npm-global/bin`, `~/.volta/bin`). When no `claude` is found, the chat surfaces a clear "install Claude Code" message instead of a cryptic spawn failure.
+
+### Patch Changes
+
+- 6fb10bc: drop bundled claude binary, use system install
+
 ## 0.3.0
 
 ### Minor Changes

@@ -7,10 +7,10 @@ Use this after changing desktop packaging, signing, release upload, or updater I
 - `HereNotThere/slashtalk` GitHub Releases are public.
 - The release build is signed and notarized with the Developer ID Application certificate.
 - The release assets include:
-  - `Slashtalk-mac-universal.dmg`
-  - `Slashtalk-mac-universal.zip`
-  - `Slashtalk-mac-universal.dmg.blockmap`
-  - `Slashtalk-mac-universal.zip.blockmap`
+  - `Slashtalk-mac-arm64.dmg`
+  - `Slashtalk-mac-arm64.zip`
+  - `Slashtalk-mac-arm64.dmg.blockmap`
+  - `Slashtalk-mac-arm64.zip.blockmap`
   - `latest-mac.yml`
 
 ## Happy Path

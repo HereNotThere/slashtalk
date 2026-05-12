@@ -27,8 +27,8 @@ The [`release` workflow](../.github/workflows/release.yml) runs on every push to
 The website (or anywhere else) should link to one of these:
 
 ```text
-https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.dmg
-https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-universal.zip
+https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-arm64.dmg
+https://github.com/HereNotThere/slashtalk/releases/latest/download/Slashtalk-mac-arm64.zip
 ```
 
 GitHub redirects these to the most recent release's assets, so the URLs never have to change.

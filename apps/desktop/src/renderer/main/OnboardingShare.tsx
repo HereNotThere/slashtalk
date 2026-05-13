@@ -57,6 +57,8 @@ export function OnboardingShare({ onDone }: { onDone: () => void }): JSX.Element
           Done
         </button>
 
+        <FeedbackLink />
+
         {copyError ? (
           <div className="text-sm text-danger leading-snug text-center">
             Couldn&rsquo;t copy — select the link and copy manually.
@@ -64,5 +66,19 @@ export function OnboardingShare({ onDone }: { onDone: () => void }): JSX.Element
         ) : null}
       </div>
     </div>
+  );
+}
+
+function FeedbackLink(): JSX.Element {
+  // mailto in Electron must go through openExternal — plain `<a href>` is
+  // either ignored or routed inside the BrowserWindow.
+  return (
+    <button
+      type="button"
+      onClick={() => void window.chatheads.openExternal("mailto:help@towns.com")}
+      className="text-xs text-subtle hover:text-fg transition-colors cursor-pointer bg-transparent border-none [font:inherit] text-center"
+    >
+      help@towns.com
+    </button>
   );
 }

@@ -54,6 +54,7 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
         >
           Skip for now
         </button>
+        <FeedbackLink />
       </div>
 
       {error ? (
@@ -70,9 +71,25 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
             </div>
           ) : null}
           <div>{error.message}</div>
-          {error.action === "no_access" ? <GrantOrgAccessButton size="sm" className="mt-1" /> : null}
+          {error.action === "no_access" ? (
+            <GrantOrgAccessButton size="sm" className="mt-1" />
+          ) : null}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function FeedbackLink(): JSX.Element {
+  // mailto in Electron must go through openExternal — plain `<a href>` is
+  // either ignored or routed inside the BrowserWindow.
+  return (
+    <button
+      type="button"
+      onClick={() => void window.chatheads.openExternal("mailto:help@towns.com")}
+      className="text-xs text-subtle hover:text-fg transition-colors cursor-pointer bg-transparent border-none [font:inherit]"
+    >
+      help@towns.com
+    </button>
   );
 }

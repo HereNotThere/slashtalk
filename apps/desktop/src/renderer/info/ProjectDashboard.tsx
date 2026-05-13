@@ -86,11 +86,11 @@ function FeedbackLink(): JSX.Element {
       type="button"
       onClick={(e) => {
         e.stopPropagation();
-        void window.chatheads.openExternal("mailto:info@hntlabs.com");
+        void window.chatheads.openExternal("mailto:help@towns.com");
       }}
       className="mt-2 block w-full text-center text-[11px] text-subtle hover:text-fg transition-colors cursor-pointer"
     >
-      Click here to send feedback
+      help@towns.com
     </button>
   );
 }

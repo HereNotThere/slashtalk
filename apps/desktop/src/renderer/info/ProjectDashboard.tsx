@@ -7,6 +7,7 @@ import {
   type ProjectOverviewResponse,
   type ProjectPr,
 } from "@slashtalk/shared";
+import { FeedbackLink } from "../shared/FeedbackLink";
 import { Markdown } from "../shared/Markdown";
 import { PersonAvatar } from "../shared/PersonAvatar";
 import { PrItem } from "../shared/PrItem";
@@ -72,26 +73,9 @@ export function ProjectDashboard({
             Ask about {shortRepoName(repoFullName)}…
           </button>
         )}
-        <FeedbackLink />
+        <FeedbackLink className="mt-2 block w-full text-center text-[11px] text-subtle hover:text-fg transition-colors cursor-pointer" />
       </div>
     </div>
-  );
-}
-
-function FeedbackLink(): JSX.Element {
-  // mailto in Electron must go through openExternal — plain `<a href>` is
-  // either ignored or routed inside the BrowserWindow.
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        void window.chatheads.openExternal("mailto:help@towns.com");
-      }}
-      className="mt-2 block w-full text-center text-[11px] text-subtle hover:text-fg transition-colors cursor-pointer"
-    >
-      help@towns.com
-    </button>
   );
 }
 

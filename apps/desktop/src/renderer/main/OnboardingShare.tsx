@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FeedbackLink } from "../shared/FeedbackLink";
 import { CheckIcon, CopyIcon, SlashtalkLogo } from "../shared/icons";
 import { StepLabel } from "./StepLabel";
 
@@ -57,7 +58,7 @@ export function OnboardingShare({ onDone }: { onDone: () => void }): JSX.Element
           Done
         </button>
 
-        <FeedbackLink />
+        <FeedbackLink className="text-xs text-subtle hover:text-fg transition-colors cursor-pointer bg-transparent border-none [font:inherit] text-center" />
 
         {copyError ? (
           <div className="text-sm text-danger leading-snug text-center">
@@ -66,19 +67,5 @@ export function OnboardingShare({ onDone }: { onDone: () => void }): JSX.Element
         ) : null}
       </div>
     </div>
-  );
-}
-
-function FeedbackLink(): JSX.Element {
-  // mailto in Electron must go through openExternal — plain `<a href>` is
-  // either ignored or routed inside the BrowserWindow.
-  return (
-    <button
-      type="button"
-      onClick={() => void window.chatheads.openExternal("mailto:help@towns.com")}
-      className="text-xs text-subtle hover:text-fg transition-colors cursor-pointer bg-transparent border-none [font:inherit] text-center"
-    >
-      help@towns.com
-    </button>
   );
 }

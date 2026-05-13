@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FeedbackLink } from "../shared/FeedbackLink";
 import { GrantOrgAccessButton } from "../shared/GrantOrgAccessButton";
 import { SlashtalkLogo } from "../shared/icons";
 import { parseIpcError, truncatePath, type ParsedIpcError } from "../shared/ipcError";
@@ -54,7 +55,7 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
         >
           Skip for now
         </button>
-        <FeedbackLink />
+        <FeedbackLink className="text-xs text-subtle hover:text-fg transition-colors cursor-pointer bg-transparent border-none [font:inherit]" />
       </div>
 
       {error ? (
@@ -77,19 +78,5 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
         </div>
       ) : null}
     </div>
-  );
-}
-
-function FeedbackLink(): JSX.Element {
-  // mailto in Electron must go through openExternal — plain `<a href>` is
-  // either ignored or routed inside the BrowserWindow.
-  return (
-    <button
-      type="button"
-      onClick={() => void window.chatheads.openExternal("mailto:help@towns.com")}
-      className="text-xs text-subtle hover:text-fg transition-colors cursor-pointer bg-transparent border-none [font:inherit]"
-    >
-      help@towns.com
-    </button>
   );
 }

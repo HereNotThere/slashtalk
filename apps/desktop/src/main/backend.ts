@@ -294,7 +294,7 @@ function signedInHtml(login: string): string {
     <h1>Signed in to Slashtalk</h1>
     <p>You can return to the desktop app.</p>
     <div class="account">@${escapedLogin}</div>
-    <div class="brand">This tab will close automatically.</div>
+    <div class="brand">Feel free to close this tab.</div>
   </main>
   <script>setTimeout(() => window.close(), 900);</script>
 </body>

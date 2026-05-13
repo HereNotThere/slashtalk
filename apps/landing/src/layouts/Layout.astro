@@ -59,6 +59,13 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
 			// would briefly flash visible while the page-bottom script boots.
 			document.documentElement.classList.add('fx-on');
 		</script>
+		<script is:inline async src="https://www.googletagmanager.com/gtag/js?id=G-7NEBY5CQBL"></script>
+		<script is:inline>
+			window.dataLayer = window.dataLayer || [];
+			function gtag(){dataLayer.push(arguments);}
+			gtag('js', new Date());
+			gtag('config', 'G-7NEBY5CQBL');
+		</script>
 	</head>
 	<body class="bg-white text-neutral-900 antialiased">
 		<slot />

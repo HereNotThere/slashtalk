@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FeedbackLink } from "../shared/FeedbackLink";
 import { GrantOrgAccessButton } from "../shared/GrantOrgAccessButton";
 import { SlashtalkLogo } from "../shared/icons";
 import { parseIpcError, truncatePath, type ParsedIpcError } from "../shared/ipcError";
@@ -54,6 +55,7 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
         >
           Skip for now
         </button>
+        <FeedbackLink className="text-xs text-subtle hover:text-fg transition-colors cursor-pointer bg-transparent border-none [font:inherit]" />
       </div>
 
       {error ? (
@@ -70,7 +72,9 @@ export function OnboardingAddRepo({ onSkip }: { onSkip: () => void }): JSX.Eleme
             </div>
           ) : null}
           <div>{error.message}</div>
-          {error.action === "no_access" ? <GrantOrgAccessButton size="sm" className="mt-1" /> : null}
+          {error.action === "no_access" ? (
+            <GrantOrgAccessButton size="sm" className="mt-1" />
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FeedbackLink } from "../shared/FeedbackLink";
 import { CheckIcon, CopyIcon, SlashtalkLogo } from "../shared/icons";
 import { StepLabel } from "./StepLabel";
 
@@ -56,6 +57,8 @@ export function OnboardingShare({ onDone }: { onDone: () => void }): JSX.Element
         >
           Done
         </button>
+
+        <FeedbackLink className="text-xs text-subtle hover:text-fg transition-colors cursor-pointer bg-transparent border-none [font:inherit] text-center" />
 
         {copyError ? (
           <div className="text-sm text-danger leading-snug text-center">
